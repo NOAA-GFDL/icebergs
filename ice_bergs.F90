@@ -7,7 +7,7 @@ use fms_mod, only: stdlog, stdout, stderr, error_mesg, FATAL, WARNING
 use fms_mod, only: write_version_number, read_data, write_data, file_exist
 use mosaic_mod, only: get_mosaic_ntiles, get_mosaic_ncontacts
 use mpp_mod, only: mpp_pe, mpp_root_pe, mpp_sum, NULL_PE
-use mpp_mod, only: mpp_send, mpp_recv
+use mpp_mod, only: mpp_send, mpp_recv, mpp_sync_self
 use mpp_mod, only: mpp_clock_begin, mpp_clock_end, mpp_clock_id, CLOCK_COMPONENT
 use fms_mod, only: clock_flag_default
 use mpp_domains_mod, only: domain2D, mpp_update_domains, mpp_define_domains
@@ -48,7 +48,7 @@ type :: icebergs_gridded
   real, dimension(:,:), pointer :: ssh=>NULL() ! Sea surface height (m)
   real, dimension(:,:), pointer :: sst=>NULL() ! Sea surface temperature (oC)
   real, dimension(:,:), pointer :: calving=>NULL() ! Calving mass rate [frozen runoff] (kg/s)
-  real, dimension(:,:), pointer :: melt=>NULL() ! Iceberg melting mass rate (kg/s)
+  real, dimension(:,:), pointer :: melt=>NULL() ! Iceberg melting mass rate (kg/s/m^2)
   real, dimension(:,:), pointer :: tmp=>NULL() ! Temporary work space
   real, dimension(:,:,:), pointer :: stored_ice=>NULL() ! Accumulated ice mass flux at calving locations (kg)
   ! Diagnostics handles
@@ -102,7 +102,7 @@ end type icebergs
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
 integer, parameter :: file_format_minor_version=1
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.1 2008/05/29 18:48:39 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.2 2008/05/29 19:00:32 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 real, parameter :: pi_180=pi/180. ! Converts degrees to radians
 real, parameter :: rho_ice=916.7 ! Density of fresh ice @ 0oC (kg/m^3)
@@ -492,7 +492,7 @@ real :: incoming_calving, unused_calving, stored_mass, total_iceberg_mass, meltm
   if (grd%id_accum>0) then
     grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec)=calving(:,:)
     grd%tmp(:,:)=grd%tmp(:,:)*grd%msk(:,:)*grd%area(:,:)-grd%calving(:,:)
-    lerr=send_data(grd%id_accum, grd%tmp(:,:), Time)
+    lerr=send_data(grd%id_accum, grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   endif
   if (grd%id_unused>0) &
     lerr=send_data(grd%id_unused, grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
@@ -1000,6 +1000,8 @@ type(icebergs_gridded), pointer :: grd
     endif
   endif
 
+  call mpp_sync_self()
+
 contains
 
   subroutine pack_berg_into_buffer2(berg, buff, n)
@@ -1339,7 +1341,7 @@ logical :: lerr
   grd%id_unused=register_diag_field('icebergs', 'unused_calving', axes, Time, &
      'Unused calving mass rate', 'kg/s')
   grd%id_melt=register_diag_field('icebergs', 'melt', axes, Time, &
-     'Iceberg melt mass rate', 'kg/s')
+     'Iceberg melt mass rate', 'kg/(m^2*s)')
   grd%id_stored_ice=register_diag_field('icebergs', 'stored_ice', axes3d, Time, &
      'Accumulated ice mass by class', 'kg')
   grd%id_uo=register_diag_field('icebergs', 'uo', axes, Time, &
@@ -1706,6 +1708,9 @@ type(iceberg), pointer :: berg
 ! Local variables
 type(xyt), pointer :: next, last
 type(xyt) :: vals
+
+  ! If the trajectory is empty, ignore it
+  if (.not.associated(berg%trajectory)) return
 
   ! Push identifying info into first posn (note reverse order due to stack)
   vals%lon=berg%start_lon
