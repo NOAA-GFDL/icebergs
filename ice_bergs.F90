@@ -1,4 +1,4 @@
-module DIAMOND
+module ice_bergs
 
 use constants_mod, only: radius, pi, omega
 use fms_mod, only: open_namelist_file, check_nml_error, close_file
@@ -102,7 +102,7 @@ end type icebergs
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
 integer, parameter :: file_format_minor_version=1
-character(len=*), parameter :: version = '$Id: DIAMOND.F90,v 1.1.4.1 2008/05/29 18:44:18 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.1 2008/05/29 18:48:39 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 real, parameter :: pi_180=pi/180. ! Converts degrees to radians
 real, parameter :: rho_ice=916.7 ! Density of fresh ice @ 0oC (kg/m^3)
