@@ -102,7 +102,7 @@ end type icebergs
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
 integer, parameter :: file_format_minor_version=1
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.2 2008/05/29 19:00:32 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.3 2008/05/30 02:03:06 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 real, parameter :: pi_180=pi/180. ! Converts degrees to radians
 real, parameter :: rho_ice=916.7 ! Density of fresh ice @ 0oC (kg/m^3)
@@ -294,9 +294,9 @@ type(iceberg), pointer :: this, next
   ! this%depth=D
 
     ! Convert melt rates from m/day to m
-    Ln=max(L-(Mv+Me)*(bergs%dt/86400),0.)
-    Wn=max(W-(Mv+Me)*(bergs%dt/86400),0.)
-    Dn=max(D-Mb*(bergs%dt/86400),0.)
+    Ln=max(L-(Mv+Me)*(bergs%dt/86400.),0.)
+    Wn=max(W-(Mv+Me)*(bergs%dt/86400.),0.)
+    Dn=max(D-Mb*(bergs%dt/86400.),0.)
     nVol=Dn*Wn*Ln
     Mnew=(nVol/Vol)*M
     dM=M-Mnew
