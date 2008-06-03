@@ -1,6 +1,6 @@
 module ice_bergs
 
-use constants_mod, only: radius, pi, omega
+use constants_mod, only: radius, pi, omega, HLF
 use fms_mod, only: open_namelist_file, check_nml_error, close_file
 use fms_mod, only: field_exist, read_data, get_global_att_value
 use fms_mod, only: stdlog, stdout, stderr, error_mesg, FATAL, WARNING
@@ -23,7 +23,7 @@ implicit none ; private
 
 include 'netcdf.inc'
 
-public icebergs_init, icebergs_end, icebergs_run
+public icebergs_init, icebergs_end, icebergs_run, icebergs_stock_pe
 
 type :: icebergs_gridded
   type(domain2D), pointer :: domain ! MPP domain
@@ -49,11 +49,12 @@ type :: icebergs_gridded
   real, dimension(:,:), pointer :: sst=>NULL() ! Sea surface temperature (oC)
   real, dimension(:,:), pointer :: calving=>NULL() ! Calving mass rate [frozen runoff] (kg/s)
   real, dimension(:,:), pointer :: melt=>NULL() ! Iceberg melting mass rate (kg/s/m^2)
+  real, dimension(:,:), pointer :: mass=>NULL() ! Mass distribution (kg/m^2)
   real, dimension(:,:), pointer :: tmp=>NULL() ! Temporary work space
   real, dimension(:,:,:), pointer :: stored_ice=>NULL() ! Accumulated ice mass flux at calving locations (kg)
   ! Diagnostics handles
   integer :: id_uo=-1, id_vo=-1, id_calving=-1, id_stored_ice=-1, id_accum=-1, id_unused=-1, id_melt=-1
-  integer :: id_ui=-1, id_vi=-1, id_ua=-1, id_va=-1, id_sst=-1
+  integer :: id_mass=-1, id_ui=-1, id_vi=-1, id_ua=-1, id_va=-1, id_sst=-1
 end type icebergs_gridded
 
 type :: xyt
@@ -102,7 +103,7 @@ end type icebergs
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
 integer, parameter :: file_format_minor_version=1
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.3 2008/05/30 02:03:06 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.4 2008/06/03 14:50:52 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 real, parameter :: pi_180=pi/180. ! Converts degrees to radians
 real, parameter :: rho_ice=916.7 ! Density of fresh ice @ 0oC (kg/m^3)
@@ -328,9 +329,11 @@ type(iceberg), pointer :: this, next
     next=>this%next
 
     ! Did berg completely melt?
-    if (Mnew<=0.) then
+    if (Mnew<=0.) then ! Delete the berg
       call move_trajectory(bergs, this)
       call delete_iceberg_from_list(bergs%first, this)
+    else ! Diagnose mass distribution on grid
+      if(grd%id_mass>0) grd%mass(i,j)=grd%mass(i,j)+Mnew/grd%area(i,j)
     endif
   
     this=>next
@@ -515,6 +518,7 @@ real :: incoming_calving, unused_calving, stored_mass, total_iceberg_mass, meltm
 
   ! Ice berg thermodynamics (melting) + rolling
   grd%melt(:,:)=0.
+  grd%mass(:,:)=0.
   if (associated(bergs%first)) call thermodynamics(bergs)
 
   ! For each berg, record
@@ -543,6 +547,8 @@ real :: incoming_calving, unused_calving, stored_mass, total_iceberg_mass, meltm
     lerr=send_data(grd%id_sst, grd%sst(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_melt>0) &
     lerr=send_data(grd%id_melt, grd%melt(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (grd%id_mass>0) &
+    lerr=send_data(grd%id_mass, grd%mass(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_stored_ice>0) &
     lerr=send_data(grd%id_stored_ice, grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:), Time)
 
@@ -1244,6 +1250,7 @@ logical :: lerr
   allocate( grd%sin(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%sin(:,:)=0.
   allocate( grd%calving(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%calving(:,:)=0.
   allocate( grd%melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%melt(:,:)=0.
+  allocate( grd%mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%mass(:,:)=0.
   allocate( grd%stored_ice(grd%isd:grd%ied, grd%jsd:grd%jed, nclasses) ); grd%stored_ice(:,:,:)=0.
   allocate( grd%uo(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%uo(:,:)=0.
   allocate( grd%vo(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%vo(:,:)=0.
@@ -1342,6 +1349,8 @@ logical :: lerr
      'Unused calving mass rate', 'kg/s')
   grd%id_melt=register_diag_field('icebergs', 'melt', axes, Time, &
      'Iceberg melt mass rate', 'kg/(m^2*s)')
+  grd%id_mass=register_diag_field('icebergs', 'mass', axes, Time, &
+     'Iceberg density field', 'kg/(m^2)')
   grd%id_stored_ice=register_diag_field('icebergs', 'stored_ice', axes3d, Time, &
      'Accumulated ice mass by class', 'kg')
   grd%id_uo=register_diag_field('icebergs', 'uo', axes, Time, &
@@ -1995,6 +2004,41 @@ end function sum_icebergs_mass
 
 ! ##############################################################################
 
+subroutine icebergs_stock_pe(bergs, index, value)
+! Modules
+use stock_constants_mod, only : ISTOCK_WATER, ISTOCK_HEAT
+! Arguments
+type(icebergs), pointer :: bergs
+integer, intent(in) :: index
+real, intent(out) :: value
+! Local variables
+type(icebergs_gridded), pointer :: grd
+real :: berg_mass, stored_mass
+
+! For convenience
+grd=>bergs%grd
+
+select case (index)
+
+  case (ISTOCK_WATER)
+    berg_mass=sum_icebergs_mass(bergs%first)
+    stored_mass=sum( grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:) )
+    value=stored_mass+berg_mass
+
+  case (ISTOCK_HEAT)
+    berg_mass=sum_icebergs_mass(bergs%first)
+    stored_mass=sum( grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:) )
+    value=(stored_mass+berg_mass)*HLF ! HLF is in (J/kg) from constants_mod
+
+  case default
+    value = 0.0
+
+end select
+
+end subroutine icebergs_stock_pe
+
+! ##############################################################################
+
 subroutine icebergs_end(bergs)
 ! Arguments
 type(icebergs), pointer :: bergs
@@ -2028,6 +2072,7 @@ type(iceberg), pointer :: this, next
   deallocate(bergs%grd%sin)
   deallocate(bergs%grd%calving)
   deallocate(bergs%grd%melt)
+  deallocate(bergs%grd%mass)
   deallocate(bergs%grd%tmp)
   deallocate(bergs%grd%stored_ice)
   deallocate(bergs%grd%uo)
