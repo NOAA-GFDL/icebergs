@@ -47,6 +47,8 @@ type :: icebergs_gridded
   real, dimension(:,:), pointer :: va=>NULL() ! Atmosphere meridional flow (m/s)
   real, dimension(:,:), pointer :: ssh=>NULL() ! Sea surface height (m)
   real, dimension(:,:), pointer :: sst=>NULL() ! Sea surface temperature (oC)
+  real, dimension(:,:), pointer :: cn=>NULL() ! Sea-ice concentration (0 to 1)
+  real, dimension(:,:), pointer :: hi=>NULL() ! Sea-ice thickness (m)
   real, dimension(:,:), pointer :: calving=>NULL() ! Calving mass rate [frozen runoff] (kg/s)
   real, dimension(:,:), pointer :: melt=>NULL() ! Iceberg melting mass rate (kg/s/m^2)
   real, dimension(:,:), pointer :: mass=>NULL() ! Mass distribution (kg/m^2)
@@ -103,7 +105,7 @@ end type icebergs
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
 integer, parameter :: file_format_minor_version=1
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.4 2008/06/03 14:50:52 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.5 2008/06/05 14:29:09 tom Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 real, parameter :: pi_180=pi/180. ! Converts degrees to radians
 real, parameter :: rho_ice=916.7 ! Density of fresh ice @ 0oC (kg/m^3)
@@ -116,7 +118,7 @@ real, parameter :: Cd_ah=0.0055 ! (Horizontal) Drag coefficient between bergs an
 real, parameter :: Cd_wv=0.9 ! (Vertical) Drag coefficient between bergs and ocean (?)
 real, parameter :: Cd_wh=0.0012 ! (Horizontal) Drag coefficient between bergs and ocean (?)
 real, parameter :: Cd_iv=0.9 ! (Vertical) Drag coefficient between bergs and sea-ice (?)
-real, parameter :: Cd_ih=0.0012 ! (Horizontal) Drag coefficient between bergs and sea-ice (?)
+!TOM> no horizontal drag for sea ice! real, parameter :: Cd_ih=0.0012 ! (Horizontal) Drag coefficient between bergs and sea-ice (?)
 
 ! Global data (minimal for debugging)
 logical :: verbose=.false. ! Be verbose to stderr
@@ -136,9 +138,9 @@ real, intent(in) :: xi, yj, lat, uvel, vvel
 real, intent(inout) :: ax, ay
 ! Local variables
 type(icebergs_gridded), pointer :: grd
-real :: uo, vo, ui, vi, ua, va, uw, vw, ssh_x, ssh_y, sst
+real :: uo, vo, ui, vi, ua, va, uw, vw, ssh_x, ssh_y, sst, hi
 real :: f_cori, D, W, L, M, F, drag_ocn, drag_atm, drag_ice, wave_rad
-real :: Ss, a2, dva, Cr, Lwavelength, Lcutoff, Ltop
+real :: a2, dva, Cr, Lwavelength, Lcutoff, Ltop
 real, parameter :: alpha=0.0, beta=1.0, accel_lim=1.e-3, Cr0=0.06, vel_lim=5.
 real :: lambda, detA, A11, A12, axe, aye
 logical :: dumpit
@@ -147,7 +149,7 @@ logical :: dumpit
   grd=>bergs%grd
 
   ! Interpolate gridded fields to berg 
-  call interp_flds(grd, i, j, xi, yj, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst)
+  call interp_flds(grd, i, j, xi, yj, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, hi)
 
   f_cori=(2.*omega)*sin(pi_180*lat)
 
@@ -157,14 +159,13 @@ logical :: dumpit
   L=berg%length
   F=D/5.
 
-  drag_ocn=rho_seawater/M*(0.5*Cd_wv*W*D+Cd_wh*W*L)*sqrt( (uvel-uo)**2+(vvel-vo)**2 )
-  drag_atm=rho_air/M*(0.5*Cd_av*W*F+Cd_ah*W*L)*sqrt( (uvel-ua)**2+(vvel-va)**2 )
-  drag_ice=rho_ice/M*(0.5*Cd_iv*W*D+Cd_ih*W*L)*sqrt( (uvel-ui)**2+(vvel-vi)**2 )
+  drag_ocn=rho_seawater/M*(0.5*Cd_wv*W*(D-hi)+Cd_wh*W*L)*sqrt( (uvel-uo)**2+(vvel-vo)**2 )
+  drag_atm=rho_air     /M*(0.5*Cd_av*W*F     +Cd_ah*W*L)*sqrt( (uvel-ua)**2+(vvel-va)**2 )
+  drag_ice=rho_ice     /M*(0.5*Cd_iv*W*hi              )*sqrt( (uvel-ui)**2+(vvel-vi)**2 )
   if (abs(ui)+abs(vi).eq.0.) drag_ice=0.
 
   uw=ua-uo; vw=va-vo  ! Use wind speed rel. to ocean for wave model (aja)?
   dva=sqrt(uw*uw+vw*vw)
-  Ss=1.5*(dva**0.5)+0.1*dva ! Sea state (proxy for wave height?)
   a2=(0.5*0.02025*(dva**2))**2
   Lwavelength=0.32*(dva**2) ! Surface wave length fitted to data in table at
   !      http://www4.ncsu.edu/eos/users/c/ceknowle/public/chapter10/part2.html
@@ -217,7 +218,6 @@ logical :: dumpit
     write(stderr(),'(a,i3,9(1xa,1pe12.3))') '          pe=',mpp_pe(), &
       'dva=',dva, &
       'wave=',wave_rad, &
-      'Ss=',Ss, &
       'xi=',xi, &
       'yj=',yj
     write(stderr(),'(a,i3,9(1xa,1pe12.3))') '          pe=',mpp_pe(), &
@@ -253,7 +253,7 @@ subroutine thermodynamics(bergs)
 type(icebergs), pointer :: bergs
 ! Local variables
 type(icebergs_gridded), pointer :: grd
-real :: M, D, W, L, SST, F, IC, Vol, Ln, Wn, Dn, nVol
+real :: M, D, W, L, SST, F, Vol, Ln, Wn, Dn, nVol, IC
 real :: Mv, Me, Mb, melt, Mnew, dvo, dva, dM, Ss
 integer :: i,j
 type(iceberg), pointer :: this, next
@@ -265,14 +265,13 @@ type(iceberg), pointer :: this, next
   do while(associated(this))
 
     call interp_flds(grd, this%ine, this%jne, this%xi, this%yj, this%uo, this%vo, &
-            this%ui, this%vi, this%ua, this%va, this%ssh_x, this%ssh_y, this%sst)
+            this%ui, this%vi, this%ua, this%va, this%ssh_x, this%ssh_y, this%sst, IC)
     SST=this%sst
     M=this%mass
     D=this%depth
     F=0.2*D
     W=this%width
     L=this%length
-    IC=0. ! Sea-ice concentration
     i=this%ine
     j=this%jne
     Vol=D*W*L
@@ -283,7 +282,7 @@ type(iceberg), pointer :: this, next
     Ss=1.5*(dva**0.5)+0.1*dva ! Sea state
     Mb=max( 0.58*(dvo**0.8)*(SST+4.0)/(L**0.2), 0.) ! Basal turbulent melting
     Mv=max( 7.62e-3*SST+1.29e-3*(SST**2), 0.) ! Buoyant convection at sides
-    Me=max( 1./12.*Ss*(1+cos(pi*(IC**3))) ,0.)  ! Wave erosion
+    Me=max( 1./12.*(SST+2.)*Ss*(1+cos(pi*(IC**3))) ,0.)  ! Wave erosion
 
     ! Sum and convert to kg/s
   ! melt=rho_ice/86400.*( (2.*(L+W)*D*Mv +F*(W+L)*Me) + W*L*Mb )
@@ -343,12 +342,13 @@ end subroutine thermodynamics
 
 ! ##############################################################################
 
-subroutine interp_flds(grd, i, j, xi, yj, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst)
+subroutine interp_flds(grd, i, j, xi, yj, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi)
 ! Arguments
 type(icebergs_gridded), pointer :: grd
 integer, intent(in) :: i, j
 real, intent(in) :: xi, yj
 real, intent(out) :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst
+real, intent(out), optional :: cn, hi
 ! Local variables
 real :: cos_rot, sin_rot
 real :: dxm, dx0, dxp, hxm, hxp
@@ -364,6 +364,12 @@ real, parameter :: ssh_coast=0.00
   ua=bilin(grd, grd%ua, i, j, xi, yj)
   va=bilin(grd, grd%va, i, j, xi, yj)
   sst=grd%sst(i,j) ! A-grid, instead of sst=bilin(grd, grd%sst, i, j, xi, yj)
+  if (present(cn)) then
+     cn=grd%cn(i,j) ! A-grid
+  endif
+  if (present(hi)) then
+     hi=grd%hi(i,j) ! A-grid
+  endif
 
   ! Estimate SSH gradient in X direction
   dxp=0.5*(grd%dx(i+1,j)+grd%dx(i+1,j-1))
@@ -428,12 +434,12 @@ end function bilin
 
 ! ##############################################################################
 
-subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh, sst)
+subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh, sst, cn, hi)
 ! Arguments
 type(icebergs), pointer :: bergs
 type(time_type), intent(in) :: time
 real, dimension(:,:), intent(inout) :: calving
-real, dimension(:,:), intent(in) :: uo, vo, ui, vi, tauxa, tauya, ssh, sst
+real, dimension(:,:), intent(in) :: uo, vo, ui, vi, tauxa, tauya, ssh, sst, cn, hi
 ! Local variables
 integer :: iyr, imon, iday, ihr, imin, isec, nbergs
 type(iceberg), pointer :: this
@@ -489,6 +495,11 @@ real :: incoming_calving, unused_calving, stored_mass, total_iceberg_mass, meltm
   call mpp_update_domains(grd%ssh, grd%domain)
   grd%sst(grd%isc:grd%iec,grd%jsc:grd%jec)=sst(:,:)-273.15 ! Note convert from Kelvin to Celsius
   call mpp_update_domains(grd%sst, grd%domain)
+  ! Copy sea-ice concentration and thickness (resides on A grid)
+  grd%cn(grd%isc:grd%iec,grd%jsc:grd%jec)=cn(:,:)
+  call mpp_update_domains(grd%cn, grd%domain)
+  grd%hi(grd%isc:grd%iec,grd%jsc:grd%jec)=hi(:,:)
+  call mpp_update_domains(grd%hi, grd%domain)
 
   ! Accumulate ice from calving
   call accumulate_calving(bergs)
