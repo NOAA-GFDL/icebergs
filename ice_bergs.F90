@@ -105,7 +105,7 @@ end type icebergs
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
 integer, parameter :: file_format_minor_version=1
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.5 2008/06/05 14:29:09 tom Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.6 2008/06/05 17:00:41 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 real, parameter :: pi_180=pi/180. ! Converts degrees to radians
 real, parameter :: rho_ice=916.7 ! Density of fresh ice @ 0oC (kg/m^3)
@@ -496,9 +496,9 @@ real :: incoming_calving, unused_calving, stored_mass, total_iceberg_mass, meltm
   grd%sst(grd%isc:grd%iec,grd%jsc:grd%jec)=sst(:,:)-273.15 ! Note convert from Kelvin to Celsius
   call mpp_update_domains(grd%sst, grd%domain)
   ! Copy sea-ice concentration and thickness (resides on A grid)
-  grd%cn(grd%isc:grd%iec,grd%jsc:grd%jec)=cn(:,:)
+  grd%cn(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=cn(:,:)
   call mpp_update_domains(grd%cn, grd%domain)
-  grd%hi(grd%isc:grd%iec,grd%jsc:grd%jec)=hi(:,:)
+  grd%hi(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=hi(:,:)
   call mpp_update_domains(grd%hi, grd%domain)
 
   ! Accumulate ice from calving
@@ -1271,6 +1271,9 @@ logical :: lerr
   allocate( grd%va(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%va(:,:)=0.
   allocate( grd%ssh(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%ssh(:,:)=0.
   allocate( grd%sst(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%sst(:,:)=0.
+  allocate( grd%sst(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%sst(:,:)=0.
+  allocate( grd%cn(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%cn(:,:)=0.
+  allocate( grd%hi(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%hi(:,:)=0.
   allocate( grd%tmp(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%tmp(:,:)=0.
 
  !write(stderr(),*) 'diamond: copying grid'
@@ -2094,6 +2097,8 @@ type(iceberg), pointer :: this, next
   deallocate(bergs%grd%va)
   deallocate(bergs%grd%ssh)
   deallocate(bergs%grd%sst)
+  deallocate(bergs%grd%cn)
+  deallocate(bergs%grd%hi)
   deallocate(bergs%grd%domain)
   deallocate(bergs%grd)
   deallocate(bergs%initial_mass)
