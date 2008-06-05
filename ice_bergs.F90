@@ -105,7 +105,7 @@ end type icebergs
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
 integer, parameter :: file_format_minor_version=1
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.8 2008/06/05 17:02:56 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.9 2008/06/05 19:19:00 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 real, parameter :: pi_180=pi/180. ! Converts degrees to radians
 real, parameter :: rho_ice=916.7 ! Density of fresh ice @ 0oC (kg/m^3)
@@ -605,7 +605,7 @@ subroutine accumulate_calving(bergs)
 type(icebergs), pointer :: bergs
 ! Local variables
 type(icebergs_gridded), pointer :: grd
-real :: remaining_dist
+real :: remaining_dist, stored_mass
 integer :: k
 logical, save :: first_call=.true.
 
@@ -618,6 +618,10 @@ logical, save :: first_call=.true.
     do k=1, nclasses
       where (grd%calving==0.) grd%stored_ice(:,:,k)=0.
     enddo
+    stored_mass=sum( grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:) )
+    call mpp_sum(stored_mass)
+    if (mpp_pe().eq.mpp_root_pe()) write(stderr(),'(a,1pe12.6,a)') &
+        'diamond, accumulate_calving: initial stored mass=',stored_mass,' kg'
   endif
 
   remaining_dist=1.
@@ -1502,12 +1506,15 @@ end subroutine read_restart_bergs
 ! ##############################################################################
 
 subroutine read_restart_calving(bergs)
+use random_numbers_mod, only: initializeRandomNumberStream, getRandomNumbers, randomNumberStream
 ! Arguments
 type(icebergs), pointer :: bergs
 ! Local variables
-integer :: k
+integer :: k,i
 character(len=30) :: filename
 type(icebergs_gridded), pointer :: grd
+real, allocatable, dimension(:,:) :: randnum
+type(randomNumberStream) :: rns
 
   ! For convenience
   grd=>bergs%grd
@@ -1515,16 +1522,24 @@ type(icebergs_gridded), pointer :: grd
   ! Read stored ice
   filename='INPUT/calving.res.nc'
   if (file_exist(filename)) then
-    if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stderr(),*) 'diamond, read_restart_calving: reading ',filename
-    call read_data(filename, 'stored_ice', bergs%grd%stored_ice, bergs%grd%domain)
+    if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stderr(),*) &
+     'diamond, read_restart_calving: reading ',filename
+    call read_data(filename, 'stored_ice', grd%stored_ice, grd%domain)
     bergs%restarted=.true.
   else
-    if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stderr(),*) 'diamond, read_restart_calving: initialization stored ice to random numbers '
-    call random_number(bergs%grd%stored_ice)
-    do k=1, nclasses
-      bergs%grd%stored_ice(:,:,k)=bergs%grd%stored_ice(:,:,k)*bergs%grd%msk(:,:) &
-                                 *bergs%initial_mass(k)*bergs%mass_scaling(k)
+    if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stderr(),*) &
+     'diamond, read_restart_calving: initializing stored ice to random numbers '
+    allocate(randnum(grd%jsc:grd%jec, nclasses))
+    do i=grd%isc, grd%iec
+      rns=initializeRandomNumberStream(i)
+      call getRandomNumbers(rns,randnum)
+      do k=1, nclasses
+        grd%stored_ice(i,grd%jsc:grd%jec,k)=randnum(:,k) &
+                                   *grd%msk(i,grd%jsc:grd%jec) &
+                                   *bergs%initial_mass(k)*bergs%mass_scaling(k)
+      enddo
     enddo
+    deallocate(randnum)
   endif
 
 end subroutine read_restart_calving
