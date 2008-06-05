@@ -105,7 +105,7 @@ end type icebergs
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
 integer, parameter :: file_format_minor_version=1
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.7 2008/06/05 17:01:56 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.8 2008/06/05 17:02:56 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 real, parameter :: pi_180=pi/180. ! Converts degrees to radians
 real, parameter :: rho_ice=916.7 ! Density of fresh ice @ 0oC (kg/m^3)
@@ -2041,7 +2041,7 @@ select case (index)
   case (ISTOCK_HEAT)
     berg_mass=sum_icebergs_mass(bergs%first)
     stored_mass=sum( grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:) )
-    value=(stored_mass+berg_mass)*HLF ! HLF is in (J/kg) from constants_mod
+    value=-(stored_mass+berg_mass)*HLF ! HLF is in (J/kg) from constants_mod
 
   case default
     value = 0.0
