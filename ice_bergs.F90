@@ -102,12 +102,12 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.11 2008/06/06 14:15:56 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.12 2008/06/06 14:24:47 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
 integer, parameter :: file_format_minor_version=1
-integer, parameter :: delta_buf=3 ! Size by which to increment buffers
+integer, parameter :: delta_buf=25 ! Size by which to increment buffers
 real, parameter :: pi_180=pi/180. ! Converts degrees to radians
 real, parameter :: rho_ice=916.7 ! Density of fresh ice @ 0oC (kg/m^3)
 real, parameter :: rho_water=999.8 ! Density of fresh water @ 0oC (kg/m^3)
@@ -1063,7 +1063,7 @@ contains
       deallocate(old)
     endif
     old=>new
-    write(stderr(),*) 'diamond, increase_buffer',mpp_pe(),' increased to',new_size
+   !write(stderr(),*) 'diamond, increase_buffer',mpp_pe(),' increased to',new_size
 
   end subroutine increase_buffer
 
@@ -1150,7 +1150,7 @@ contains
         deallocate(old)
       endif
       old=>new
-      write(stderr(),*) 'diamond, increase_ibuffer',mpp_pe(),' increased to',new_size
+     !write(stderr(),*) 'diamond, increase_ibuffer',mpp_pe(),' increased to',new_size
     endif
 
   end subroutine increase_ibuffer
