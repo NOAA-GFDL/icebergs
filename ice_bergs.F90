@@ -102,7 +102,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.14 2008/06/06 15:44:31 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.15 2008/06/06 17:07:05 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -659,8 +659,8 @@ real :: xi, yj
     do j=grd%jsc, grd%jec
       do i=grd%isc, grd%iec
         if (grd%stored_ice(i,j,k).ge.bergs%initial_mass(k)*bergs%mass_scaling(k)) then
-          newberg%lon=0.25*((grd%lon(i,j)+grd%lon(i-1,j-1))+(grd%lon(i-1,j)+grd%lon(i-1,j)))
-          newberg%lat=0.25*((grd%lat(i,j)+grd%lat(i-1,j-1))+(grd%lat(i-1,j)+grd%lat(i-1,j)))
+          newberg%lon=0.25*((grd%lon(i,j)+grd%lon(i-1,j-1))+(grd%lon(i-1,j)+grd%lon(i,j-1)))
+          newberg%lat=0.25*((grd%lat(i,j)+grd%lat(i-1,j-1))+(grd%lat(i-1,j)+grd%lat(i,j-1)))
          !write(stderr(),*) 'diamond, calve_icebergs: creating new iceberg at ',newberg%lon,newberg%lat
           lret=pos_within_cell(grd, newberg%lon, newberg%lat, i, j, xi, yj)
           if (.not.lret) then
@@ -1348,7 +1348,7 @@ logical :: lerr
  !if (verbose) call print_bergs(stderr(),bergs,'icebergs_init, initial status')
 
   ! Diagnostics
-  id_class = diag_axis_init('mass', initial_mass, 'kg','Z', 'iceberg mass')
+  id_class = diag_axis_init('mass_class', initial_mass, 'kg','Z', 'iceberg mass')
   axes3d(1:2)=axes
   axes3d(3)=id_class
   grd%id_calving=register_diag_field('icebergs', 'calving', axes, Time, &
