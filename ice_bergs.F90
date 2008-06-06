@@ -56,7 +56,7 @@ type :: icebergs_gridded
   real, dimension(:,:,:), pointer :: stored_ice=>NULL() ! Accumulated ice mass flux at calving locations (kg)
   ! Diagnostics handles
   integer :: id_uo=-1, id_vo=-1, id_calving=-1, id_stored_ice=-1, id_accum=-1, id_unused=-1, id_melt=-1
-  integer :: id_mass=-1, id_ui=-1, id_vi=-1, id_ua=-1, id_va=-1, id_sst=-1
+  integer :: id_mass=-1, id_ui=-1, id_vi=-1, id_ua=-1, id_va=-1, id_sst=-1, id_cn=-1, id_hi=-1
 end type icebergs_gridded
 
 type :: xyt
@@ -102,7 +102,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.12 2008/06/06 14:24:47 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.13 2008/06/06 15:26:12 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -557,6 +557,10 @@ real :: incoming_calving, unused_calving, stored_mass, total_iceberg_mass, meltm
     lerr=send_data(grd%id_va, grd%va(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_sst>0) &
     lerr=send_data(grd%id_sst, grd%sst(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (grd%id_cn>0) &
+    lerr=send_data(grd%id_cn, grd%cn(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (grd%id_hi>0) &
+    lerr=send_data(grd%id_hi, grd%hi(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_melt>0) &
     lerr=send_data(grd%id_melt, grd%melt(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_mass>0) &
@@ -1376,20 +1380,24 @@ logical :: lerr
      'Atmos meridional component of velocity', 'm s^-1')
   grd%id_sst=register_diag_field('icebergs', 'sst', axes, Time, &
      'Sea surface temperature', 'degrees_C')
+  grd%id_cn=register_diag_field('icebergs', 'cn', axes, Time, &
+     'Sea ice concentration', '(fraction)')
+  grd%id_hi=register_diag_field('icebergs', 'hi', axes, Time, &
+     'Sea ice thickness', 'm')
 
   ! Static fields
   id_class=register_static_field('icebergs', 'lon', axes, &
                'longitude (corners)', 'degrees_E',require=.false.)
-  if (id_class>0) lerr=send_data(id_class, grd%lon(grd%isc:grd%iec,grd%jsc:grd%jec), Time);
+  if (id_class>0) lerr=send_data(id_class, grd%lon(grd%isc:grd%iec,grd%jsc:grd%jec))
   id_class=register_static_field('icebergs', 'lat', axes, &
                'latitude (corners)', 'degrees_N',require=.false.)
-  if (id_class>0) lerr=send_data(id_class, grd%lat(grd%isc:grd%iec,grd%jsc:grd%jec), Time);
+  if (id_class>0) lerr=send_data(id_class, grd%lat(grd%isc:grd%iec,grd%jsc:grd%jec))
   id_class=register_static_field('icebergs', 'area', axes, &
                'cell area', 'm^2',require=.false.)
-  if (id_class>0) lerr=send_data(id_class, grd%area(grd%isc:grd%iec,grd%jsc:grd%jec), Time);
+  if (id_class>0) lerr=send_data(id_class, grd%area(grd%isc:grd%iec,grd%jsc:grd%jec))
   id_class=register_static_field('icebergs', 'mask', axes, &
                'wet point mask', 'none',require=.false.)
-  if (id_class>0) lerr=send_data(id_class, grd%msk(grd%isc:grd%iec,grd%jsc:grd%jec), Time);
+  if (id_class>0) lerr=send_data(id_class, grd%msk(grd%isc:grd%iec,grd%jsc:grd%jec))
 
  !write(stderr(),*) 'diamond: done'
   call mpp_clock_end(bergs%clock)
