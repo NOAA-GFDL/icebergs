@@ -62,7 +62,7 @@ end type icebergs_gridded
 type :: xyt
   real :: lon, lat, day
   real :: mass, depth, width, length, uvel, vvel
-  real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst
+  real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi
   integer :: year
   type(xyt), pointer :: next=>NULL()
 end type xyt
@@ -76,7 +76,7 @@ type :: iceberg
   integer :: ine,jne ! nearest index in NE direction (for convenience)
   real :: xi, yj ! Non-dimensional coords within current cell (0..1)
   ! Environment variables (as seen by the iceberg)
-  real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst
+  real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi
   type(xyt), pointer :: trajectory=>NULL()
 end type iceberg
 
@@ -102,7 +102,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.13 2008/06/06 15:26:12 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.14 2008/06/06 15:44:31 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -139,7 +139,7 @@ real, intent(in) :: xi, yj, lat, uvel, vvel
 real, intent(inout) :: ax, ay
 ! Local variables
 type(icebergs_gridded), pointer :: grd
-real :: uo, vo, ui, vi, ua, va, uw, vw, ssh_x, ssh_y, sst, hi
+real :: uo, vo, ui, vi, ua, va, uw, vw, ssh_x, ssh_y, sst, cn, hi
 real :: f_cori, D, W, L, M, F, drag_ocn, drag_atm, drag_ice, wave_rad
 real :: a2, dva, Cr, Lwavelength, Lcutoff, Ltop
 real, parameter :: alpha=0.0, beta=1.0, accel_lim=1.e-3, Cr0=0.06, vel_lim=5.
@@ -150,7 +150,7 @@ logical :: dumpit
   grd=>bergs%grd
 
   ! Interpolate gridded fields to berg 
-  call interp_flds(grd, i, j, xi, yj, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, hi)
+  call interp_flds(grd, i, j, xi, yj, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi)
 
   f_cori=(2.*omega)*sin(pi_180*lat)
 
@@ -266,8 +266,10 @@ type(iceberg), pointer :: this, next
   do while(associated(this))
 
     call interp_flds(grd, this%ine, this%jne, this%xi, this%yj, this%uo, this%vo, &
-            this%ui, this%vi, this%ua, this%va, this%ssh_x, this%ssh_y, this%sst, IC)
+            this%ui, this%vi, this%ua, this%va, this%ssh_x, this%ssh_y, this%sst, &
+            this%cn, this%hi)
     SST=this%sst
+    IC=this%cn
     M=this%mass
     D=this%depth
     F=0.2*D
@@ -348,8 +350,7 @@ subroutine interp_flds(grd, i, j, xi, yj, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, 
 type(icebergs_gridded), pointer :: grd
 integer, intent(in) :: i, j
 real, intent(in) :: xi, yj
-real, intent(out) :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst
-real, intent(out), optional :: cn, hi
+real, intent(out) :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi
 ! Local variables
 real :: cos_rot, sin_rot
 real :: dxm, dx0, dxp, hxm, hxp
@@ -365,12 +366,8 @@ real, parameter :: ssh_coast=0.00
   ua=bilin(grd, grd%ua, i, j, xi, yj)
   va=bilin(grd, grd%va, i, j, xi, yj)
   sst=grd%sst(i,j) ! A-grid, instead of sst=bilin(grd, grd%sst, i, j, xi, yj)
-  if (present(cn)) then
-     cn=grd%cn(i,j) ! A-grid
-  endif
-  if (present(hi)) then
-     hi=grd%hi(i,j) ! A-grid
-  endif
+  cn=grd%cn(i,j) ! A-grid
+  hi=grd%hi(i,j) ! A-grid
 
   ! Estimate SSH gradient in X direction
   dxp=0.5*(grd%dx(i+1,j)+grd%dx(i+1,j-1))
@@ -1715,6 +1712,8 @@ type(xyt) :: posn
   posn%ssh_x=berg%ssh_x
   posn%ssh_y=berg%ssh_y
   posn%sst=berg%sst
+  posn%cn=berg%cn
+  posn%hi=berg%hi
 
   call push_posn(berg%trajectory, posn)
 
@@ -2307,6 +2306,7 @@ type(xyt), pointer :: trajectory
 integer :: iret, ncid, i_dim, i
 integer :: lonid, latid, yearid, dayid, uvelid, vvelid
 integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid
+integer :: cnid, hiid
 integer :: mid, did, wid, lid
 character(len=30) :: filename
 type(xyt), pointer :: this, next
@@ -2341,6 +2341,8 @@ type(xyt), pointer :: this, next
   sshxid = def_var(ncid, 'ssh_x', NF_DOUBLE, i_dim)
   sshyid = def_var(ncid, 'ssh_y', NF_DOUBLE, i_dim)
   sstid = def_var(ncid, 'sst', NF_DOUBLE, i_dim)
+  cnid = def_var(ncid, 'cn', NF_DOUBLE, i_dim)
+  hiid = def_var(ncid, 'hi', NF_DOUBLE, i_dim)
 
   ! Attributes
   iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_major_version', NF_INT, 1, 0)
@@ -2383,6 +2385,10 @@ type(xyt), pointer :: this, next
   call put_att(ncid, sshyid, 'units', 'non-dim')
   call put_att(ncid, sstid, 'long_name', 'sea surface temperature')
   call put_att(ncid, sstid, 'units', 'degrees_C')
+  call put_att(ncid, cnid, 'long_name', 'sea ice concentration')
+  call put_att(ncid, cnid, 'units', 'none')
+  call put_att(ncid, hiid, 'long_name', 'sea ice thickness')
+  call put_att(ncid, hiid, 'units', 'm')
 
   ! End define mode
   iret = nf_enddef(ncid)
@@ -2410,6 +2416,8 @@ type(xyt), pointer :: this, next
     call put_double(ncid, sshxid, i, this%ssh_x)
     call put_double(ncid, sshyid, i, this%ssh_y)
     call put_double(ncid, sstid, i, this%sst)
+    call put_double(ncid, cnid, i, this%cn)
+    call put_double(ncid, hiid, i, this%hi)
     next=>this%next
     deallocate(this)
     this=>next
