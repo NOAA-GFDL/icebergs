@@ -95,6 +95,8 @@ type, public :: icebergs ; private
   integer :: traj_sample_hrs
   integer :: verbose_hrs
   integer :: clock ! id for fms timers
+  real :: rho_bergs ! Density of icebergs
+  real :: LoW_ratio ! Initial ratio L/W for newly calved icebergs
   real, dimension(:), pointer :: initial_mass, distribution, mass_scaling
   real, dimension(:), pointer :: initial_depth, initial_width, initial_length
   logical :: restarted=.false. ! Indicate whether we read state from a restart or not
@@ -102,7 +104,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.15 2008/06/06 17:07:05 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.16 2008/06/06 18:31:59 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -286,15 +288,6 @@ type(iceberg), pointer :: this, next
     Mb=max( 0.58*(dvo**0.8)*(SST+4.0)/(L**0.2), 0.) ! Basal turbulent melting
     Mv=max( 7.62e-3*SST+1.29e-3*(SST**2), 0.) ! Buoyant convection at sides
     Me=max( 1./12.*(SST+2.)*Ss*(1+cos(pi*(IC**3))) ,0.)  ! Wave erosion
-
-    ! Sum and convert to kg/s
-  ! melt=rho_ice/86400.*( (2.*(L+W)*D*Mv +F*(W+L)*Me) + W*L*Mb )
-  ! dM=bergs%dt*melt ! Change in mass per time-step (kg)
-  ! dM=min( dM, M ) ! Limit mass change by available mass
-  ! Mnew=M-dM ! New mass
-  ! melt=dM/bergs%dt ! kg/s
-  ! D=D*(Mnew/M) ! Modify volume in proportion to change in mass
-  ! this%depth=D
 
     ! Convert melt rates from m/day to m
     Ln=max(L-(Mv+Me)*(bergs%dt/86400.),0.)
@@ -669,16 +662,16 @@ real :: xi, yj
           endif
           newberg%ine=i
           newberg%jne=j
-          newberg%xi=xi
-          newberg%yj=yj
+          newberg%xi=0.5 ! xi
+          newberg%yj=0.5 ! yj
           newberg%uvel=0.
           newberg%vvel=0.
           newberg%mass=bergs%initial_mass(k)
           newberg%depth=bergs%initial_depth(k)
           newberg%width=bergs%initial_width(k)
           newberg%length=bergs%initial_length(k)
-          newberg%start_lon=grd%lon(i,j)
-          newberg%start_lat=grd%lat(i,j)
+          newberg%start_lon=newberg%lon
+          newberg%start_lat=newberg%lat
           newberg%start_year=bergs%current_year
           newberg%start_day=bergs%current_yearday
           newberg%start_mass=bergs%initial_mass(k)
@@ -1176,13 +1169,17 @@ real, dimension(:,:), intent(in) :: ice_dx, ice_dy, ice_area
 real, dimension(:,:), intent(in) :: cos_rot, sin_rot
 ! Namelist parameters (and defaults)
 integer :: halo=4 ! Width of halo region
-integer :: traj_sample_hrs=4 ! Period between sampling of position for trajectory storage
+integer :: traj_sample_hrs=12 ! Period between sampling of position for trajectory storage
 integer :: verbose_hrs=12 ! Period between verbose messages
+real :: rho_bergs=850. ! Density of icebergs
+real :: LoW_ratio=1.5 ! Initial ratio L/W for newly calved icebergs
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim)
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
 real, dimension(nclasses) :: initial_depth=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Depth of newly calved bergs (m)
-namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, distribution, mass_scaling, initial_depth, verbose_hrs
+namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
+         distribution, mass_scaling, initial_depth, verbose_hrs, &
+         rho_bergs, LoW_ratio
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je
 type(icebergs_gridded), pointer :: grd
@@ -1335,12 +1332,16 @@ logical :: lerr
   bergs%traj_sample_hrs=traj_sample_hrs
   bergs%verbose_hrs=verbose_hrs
   bergs%grd%halo=halo
+  bergs%rho_bergs=rho_bergs
+  bergs%LoW_ratio=LoW_ratio
   allocate( bergs%initial_mass(nclasses) ); bergs%initial_mass(:)=initial_mass(:)
   allocate( bergs%distribution(nclasses) ); bergs%distribution(:)=distribution(:)
   allocate( bergs%mass_scaling(nclasses) ); bergs%mass_scaling(:)=mass_scaling(:)
   allocate( bergs%initial_depth(nclasses) ); bergs%initial_depth(:)=initial_depth(:)
-  allocate( bergs%initial_width(nclasses) ); bergs%initial_width(:)=sqrt((2./3.)*initial_mass(:)/(rho_ice*initial_depth(:)))
-  allocate( bergs%initial_length(nclasses) ); bergs%initial_length(:)=1.5*bergs%initial_width(:)
+  allocate( bergs%initial_width(nclasses) )
+  allocate( bergs%initial_length(nclasses) )
+  bergs%initial_width(:)=sqrt(initial_mass(:)/(LoW_ratio*rho_bergs*initial_depth(:)))
+  bergs%initial_length(:)=LoW_ratio*bergs%initial_width(:)
 
   call read_restart_bergs(bergs)
   call read_restart_calving(bergs)
@@ -2312,14 +2313,14 @@ character(len=30) :: filename
 type(xyt), pointer :: this, next
 
   write(filename(1:30),'("iceberg_trajectories.nc.",I4.4)') mpp_pe()
-  if (verbose) write(stderr(),*) 'diamond, write_tracjectory: creating ',filename
+  if (verbose) write(stderr(),*) 'diamond, write_trajectory: creating ',filename
 
   iret = nf_create(filename, NF_CLOBBER, ncid)
-  if (iret .ne. NF_NOERR) write(stderr(),*) 'diamond, write_restart: nf_create failed'
+  if (iret .ne. NF_NOERR) write(stderr(),*) 'diamond, write_trajectory: nf_create failed'
 
   ! Dimensions
   iret = nf_def_dim(ncid, 'i', NF_UNLIMITED, i_dim)
-  if (iret .ne. NF_NOERR) write(stderr(),*) 'diamond, write_restart: nf_def_dim i failed'
+  if (iret .ne. NF_NOERR) write(stderr(),*) 'diamond, write_trajectory: nf_def_dim i failed'
 
   ! Variables
   lonid = def_var(ncid, 'lon', NF_DOUBLE, i_dim)
