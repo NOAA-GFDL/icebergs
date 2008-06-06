@@ -61,7 +61,7 @@ end type icebergs_gridded
 
 type :: xyt
   real :: lon, lat, day
-  real :: mass, depth, width, length, uvel, vvel
+  real :: mass, thickness, width, length, uvel, vvel
   real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi
   integer :: year
   type(xyt), pointer :: next=>NULL()
@@ -70,7 +70,7 @@ end type xyt
 type :: iceberg
   type(iceberg), pointer :: prev=>NULL(), next=>NULL()
   ! State variables (specific to the iceberg, needed for restarts)
-  real :: lon, lat, uvel, vvel, mass, depth, width, length
+  real :: lon, lat, uvel, vvel, mass, thickness, width, length
   real :: start_lon, start_lat, start_day, start_mass, mass_scaling
   integer :: start_year
   integer :: ine,jne ! nearest index in NE direction (for convenience)
@@ -98,13 +98,13 @@ type, public :: icebergs ; private
   real :: rho_bergs ! Density of icebergs
   real :: LoW_ratio ! Initial ratio L/W for newly calved icebergs
   real, dimension(:), pointer :: initial_mass, distribution, mass_scaling
-  real, dimension(:), pointer :: initial_depth, initial_width, initial_length
+  real, dimension(:), pointer :: initial_thickness, initial_width, initial_length
   logical :: restarted=.false. ! Indicate whether we read state from a restart or not
   type(buffer), pointer :: obuffer_e, ibuffer_e, obuffer_w, ibuffer_w
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.16 2008/06/06 18:31:59 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.17 2008/06/06 19:04:13 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -142,7 +142,7 @@ real, intent(inout) :: ax, ay
 ! Local variables
 type(icebergs_gridded), pointer :: grd
 real :: uo, vo, ui, vi, ua, va, uw, vw, ssh_x, ssh_y, sst, cn, hi
-real :: f_cori, D, W, L, M, F, drag_ocn, drag_atm, drag_ice, wave_rad
+real :: f_cori, T, D, W, L, M, F, drag_ocn, drag_atm, drag_ice, wave_rad
 real :: a2, dva, Cr, Lwavelength, Lcutoff, Ltop
 real, parameter :: alpha=0.0, beta=1.0, accel_lim=1.e-3, Cr0=0.06, vel_lim=5.
 real :: lambda, detA, A11, A12, axe, aye
@@ -157,10 +157,11 @@ logical :: dumpit
   f_cori=(2.*omega)*sin(pi_180*lat)
 
   M=berg%mass
-  D=berg%depth
+  T=berg%thickness ! total thickness
+  D=(bergs%rho_bergs/rho_seawater)*T ! draught (keel depth)
+  F=T-D ! freeboard
   W=berg%width
   L=berg%length
-  F=D/5.
 
   drag_ocn=rho_seawater/M*(0.5*Cd_wv*W*(D-hi)+Cd_wh*W*L)*sqrt( (uvel-uo)**2+(vvel-vo)**2 )
   drag_atm=rho_air     /M*(0.5*Cd_av*W*F     +Cd_ah*W*L)*sqrt( (uvel-ua)**2+(vvel-va)**2 )
@@ -229,7 +230,9 @@ logical :: dumpit
       'Cr=',Cr
     write(stderr(),'(a,i3,9(1xa,1pe12.3))') '          pe=',mpp_pe(), &
       'M=',M, &
+      'T=',T, &
       'D=',D, &
+      'F=',F, &
       'W=',W, &
       'L=',L
     write(stderr(),'(a,i3,9(1xa,1pe12.3))') '          pe=',mpp_pe(), &
@@ -245,8 +248,6 @@ logical :: dumpit
     call print_berg(stderr(),berg,'diamond, accel, large accel')
   endif
 
- !write(stderr(),'(i3,a,8(1pe10.2,1x,a))') mpp_pe(),'diamond, accel: drag_ocn=',drag_ocn,'dt*drag=',bergs%dt*drag_ocn,"rho/M=",rho_seawater/M*(0.5*Cd_wv*W*D+Cd_wh*W*L),"|u|=",sqrt( (uvel-uo)**2+(vvel-vo)**2 ),'f=',f_cori
- !write(stderr(),'(i3,a,8(1pe10.2,1x,a))') mpp_pe(),'diamond, accel: M=',M,'W=',W,"rho=",rho_seawater,"Cd_wv=",Cd_wv*W*D
 end subroutine accel
 
 ! ##############################################################################
@@ -256,7 +257,7 @@ subroutine thermodynamics(bergs)
 type(icebergs), pointer :: bergs
 ! Local variables
 type(icebergs_gridded), pointer :: grd
-real :: M, D, W, L, SST, F, Vol, Ln, Wn, Dn, nVol, IC
+real :: M, T, W, L, SST, Vol, Ln, Wn, Tn, nVol, IC, Dn
 real :: Mv, Me, Mb, melt, Mnew, dvo, dva, dM, Ss
 integer :: i,j
 type(iceberg), pointer :: this, next
@@ -273,13 +274,14 @@ type(iceberg), pointer :: this, next
     SST=this%sst
     IC=this%cn
     M=this%mass
-    D=this%depth
-    F=0.2*D
+    T=this%thickness ! total thickness
+  ! D=(bergs%rho_bergs/rho_seawater)*T ! draught (keel depth)
+  ! F=T-D ! freeboard
     W=this%width
     L=this%length
     i=this%ine
     j=this%jne
-    Vol=D*W*L
+    Vol=T*W*L
 
     ! Melt rates in m/day
     dvo=sqrt((this%uvel-this%uo)**2+(this%vvel-this%vo)**2)
@@ -292,20 +294,21 @@ type(iceberg), pointer :: this, next
     ! Convert melt rates from m/day to m
     Ln=max(L-(Mv+Me)*(bergs%dt/86400.),0.)
     Wn=max(W-(Mv+Me)*(bergs%dt/86400.),0.)
-    Dn=max(D-Mb*(bergs%dt/86400.),0.)
-    nVol=Dn*Wn*Ln
+    Tn=max(T-Mb*(bergs%dt/86400.),0.)
+    nVol=Tn*Wn*Ln
     Mnew=(nVol/Vol)*M
     dM=M-Mnew
 
     this%mass=Mnew
-    this%depth=Dn
-    this%width=Wn
-    this%length=Ln
+    this%thickness=Tn
+    this%width=min(Wn,Ln)
+    this%length=max(Wn,Ln)
 
     ! Rolling
-    if ( Dn>0. .and. max(Wn,Ln)<sqrt(0.92*(Dn**2)+58.32*Dn) ) then
-      this%depth=Wn
-      this%width=Dn
+    Dn=(bergs%rho_bergs/rho_seawater)*Tn ! draught (keel depth)
+    if ( Dn>0. .and. this%length<sqrt(0.92*(Dn**2)+58.32*Dn) ) then
+      this%thickness=this%width
+      this%width=Tn
     endif
 
     ! Add melting to the grid
@@ -667,7 +670,7 @@ real :: xi, yj
           newberg%uvel=0.
           newberg%vvel=0.
           newberg%mass=bergs%initial_mass(k)
-          newberg%depth=bergs%initial_depth(k)
+          newberg%thickness=bergs%initial_thickness(k)
           newberg%width=bergs%initial_width(k)
           newberg%length=bergs%initial_length(k)
           newberg%start_lon=newberg%lon
@@ -1028,7 +1031,7 @@ contains
     buff%data(10,n)=berg%start_day
     buff%data(11,n)=berg%start_mass
     buff%data(12,n)=berg%mass
-    buff%data(13,n)=berg%depth
+    buff%data(13,n)=berg%thickness
     buff%data(14,n)=berg%width
     buff%data(15,n)=berg%length
     buff%data(16,n)=berg%mass_scaling
@@ -1085,7 +1088,7 @@ contains
     localberg%start_day=buff%data(10,n)
     localberg%start_mass=buff%data(11,n)
     localberg%mass=buff%data(12,n)
-    localberg%depth=buff%data(13,n)
+    localberg%thickness=buff%data(13,n)
     localberg%width=buff%data(14,n)
     localberg%length=buff%data(15,n)
     localberg%mass_scaling=buff%data(16,n)
@@ -1176,9 +1179,9 @@ real :: LoW_ratio=1.5 ! Initial ratio L/W for newly calved icebergs
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim)
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
-real, dimension(nclasses) :: initial_depth=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Depth of newly calved bergs (m)
+real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
 namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
-         distribution, mass_scaling, initial_depth, verbose_hrs, &
+         distribution, mass_scaling, initial_thickness, verbose_hrs, &
          rho_bergs, LoW_ratio
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je
@@ -1337,10 +1340,10 @@ logical :: lerr
   allocate( bergs%initial_mass(nclasses) ); bergs%initial_mass(:)=initial_mass(:)
   allocate( bergs%distribution(nclasses) ); bergs%distribution(:)=distribution(:)
   allocate( bergs%mass_scaling(nclasses) ); bergs%mass_scaling(:)=mass_scaling(:)
-  allocate( bergs%initial_depth(nclasses) ); bergs%initial_depth(:)=initial_depth(:)
+  allocate( bergs%initial_thickness(nclasses) ); bergs%initial_thickness(:)=initial_thickness(:)
   allocate( bergs%initial_width(nclasses) )
   allocate( bergs%initial_length(nclasses) )
-  bergs%initial_width(:)=sqrt(initial_mass(:)/(LoW_ratio*rho_bergs*initial_depth(:)))
+  bergs%initial_width(:)=sqrt(initial_mass(:)/(LoW_ratio*rho_bergs*initial_thickness(:)))
   bergs%initial_length(:)=LoW_ratio*bergs%initial_width(:)
 
   call read_restart_bergs(bergs)
@@ -1409,7 +1412,7 @@ type(icebergs), pointer :: bergs
 ! Local variables
 integer :: k, ierr, ncid, dimid, nbergs_in_file
 integer :: lonid, latid, uvelid, vvelid
-integer :: massid, depthid, widthid, lengthid
+integer :: massid, thicknessid, widthid, lengthid
 integer :: start_lonid, start_latid, start_yearid, start_dayid, start_massid
 integer :: scaling_id
 logical :: lres, found_restart
@@ -1454,7 +1457,7 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
   uvelid=inq_var(ncid, 'uvel')
   vvelid=inq_var(ncid, 'vvel')
   massid=inq_var(ncid, 'mass')
-  depthid=inq_var(ncid, 'depth')
+  thicknessid=inq_var(ncid, 'thickness')
   widthid=inq_var(ncid, 'width')
   lengthid=inq_var(ncid, 'length')
   start_lonid=inq_var(ncid, 'start_lon')
@@ -1482,7 +1485,7 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
         localberg%uvel=get_double(ncid, uvelid, k)
         localberg%vvel=get_double(ncid, vvelid, k)
         localberg%mass=get_double(ncid, massid, k)
-        localberg%depth=get_double(ncid, depthid, k)
+        localberg%thickness=get_double(ncid, thicknessid, k)
         localberg%width=get_double(ncid, widthid, k)
         localberg%length=get_double(ncid, lengthid, k)
         localberg%start_lon=get_double(ncid, start_lonid, k)
@@ -1701,7 +1704,7 @@ type(xyt) :: posn
   posn%uvel=berg%uvel
   posn%vvel=berg%vvel
   posn%mass=berg%mass
-  posn%depth=berg%depth
+  posn%thickness=berg%thickness
   posn%width=berg%width
   posn%length=berg%length
   posn%uo=berg%uo
@@ -2117,7 +2120,7 @@ type(iceberg), pointer :: this, next
   deallocate(bergs%grd)
   deallocate(bergs%initial_mass)
   deallocate(bergs%distribution)
-  deallocate(bergs%initial_depth)
+  deallocate(bergs%initial_thickness)
   deallocate(bergs%initial_width)
   deallocate(bergs%initial_length)
   if (associated(bergs%obuffer_e)) then
@@ -2194,7 +2197,7 @@ type(icebergs), pointer :: bergs
 ! Local variables
 integer :: iret, ncid, i_dim, i
 integer :: lonid, latid, uvelid, vvelid
-integer :: massid, depthid, lengthid, widthid
+integer :: massid, thicknessid, lengthid, widthid
 integer :: start_lonid, start_latid, start_yearid, start_dayid, start_massid
 integer :: scaling_id
 character(len=30) :: filename
@@ -2219,7 +2222,7 @@ type(iceberg), pointer :: this
     uvelid = def_var(ncid, 'uvel', NF_DOUBLE, i_dim)
     vvelid = def_var(ncid, 'vvel', NF_DOUBLE, i_dim)
     massid = def_var(ncid, 'mass', NF_DOUBLE, i_dim)
-    depthid = def_var(ncid, 'depth', NF_DOUBLE, i_dim)
+    thicknessid = def_var(ncid, 'thickness', NF_DOUBLE, i_dim)
     widthid = def_var(ncid, 'width', NF_DOUBLE, i_dim)
     lengthid = def_var(ncid, 'length', NF_DOUBLE, i_dim)
     start_lonid = def_var(ncid, 'start_lon', NF_DOUBLE, i_dim)
@@ -2240,8 +2243,8 @@ type(iceberg), pointer :: this
     call put_att(ncid, vvelid, 'units', 'm/s')
     call put_att(ncid, massid, 'long_name', 'mass')
     call put_att(ncid, massid, 'units', 'kg')
-    call put_att(ncid, depthid, 'long_name', 'depth')
-    call put_att(ncid, depthid, 'units', 'm')
+    call put_att(ncid, thicknessid, 'long_name', 'thickness')
+    call put_att(ncid, thicknessid, 'units', 'm')
     call put_att(ncid, widthid, 'long_name', 'width')
     call put_att(ncid, widthid, 'units', 'm')
     call put_att(ncid, lengthid, 'long_name', 'length')
@@ -2273,7 +2276,7 @@ type(iceberg), pointer :: this
       call put_double(ncid, uvelid, i, this%uvel)
       call put_double(ncid, vvelid, i, this%vvel)
       call put_double(ncid, massid, i, this%mass)
-      call put_double(ncid, depthid, i, this%depth)
+      call put_double(ncid, thicknessid, i, this%thickness)
       call put_double(ncid, widthid, i, this%width)
       call put_double(ncid, lengthid, i, this%length)
       call put_double(ncid, start_lonid, i, this%start_lon)
@@ -2336,7 +2339,7 @@ type(xyt), pointer :: this, next
   uaid = def_var(ncid, 'ua', NF_DOUBLE, i_dim)
   vaid = def_var(ncid, 'va', NF_DOUBLE, i_dim)
   mid = def_var(ncid, 'mass', NF_DOUBLE, i_dim)
-  did = def_var(ncid, 'depth', NF_DOUBLE, i_dim)
+  did = def_var(ncid, 'thickness', NF_DOUBLE, i_dim)
   wid = def_var(ncid, 'width', NF_DOUBLE, i_dim)
   lid = def_var(ncid, 'length', NF_DOUBLE, i_dim)
   sshxid = def_var(ncid, 'ssh_x', NF_DOUBLE, i_dim)
@@ -2374,7 +2377,7 @@ type(xyt), pointer :: this, next
   call put_att(ncid, vaid, 'units', 'm/s')
   call put_att(ncid, mid, 'long_name', 'mass')
   call put_att(ncid, mid, 'units', 'kg')
-  call put_att(ncid, did, 'long_name', 'depth')
+  call put_att(ncid, did, 'long_name', 'thickness')
   call put_att(ncid, did, 'units', 'm')
   call put_att(ncid, wid, 'long_name', 'width')
   call put_att(ncid, wid, 'units', 'm')
@@ -2411,7 +2414,7 @@ type(xyt), pointer :: this, next
     call put_double(ncid, uaid, i, this%ua)
     call put_double(ncid, vaid, i, this%va)
     call put_double(ncid, mid, i, this%mass)
-    call put_double(ncid, did, i, this%depth)
+    call put_double(ncid, did, i, this%thickness)
     call put_double(ncid, wid, i, this%width)
     call put_double(ncid, lid, i, this%length)
     call put_double(ncid, sshxid, i, this%ssh_x)
