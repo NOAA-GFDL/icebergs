@@ -102,11 +102,12 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.11 2008/06/06 14:15:56 aja Exp $'
+character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
 integer, parameter :: file_format_minor_version=1
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.10 2008/06/05 19:26:25 aja Exp $'
-character(len=*), parameter :: tagname = '$Name:  $'
+integer, parameter :: delta_buf=3 ! Size by which to increment buffers
 real, parameter :: pi_180=pi/180. ! Converts degrees to radians
 real, parameter :: rho_ice=916.7 ! Density of fresh ice @ 0oC (kg/m^3)
 real, parameter :: rho_water=999.8 ! Density of fresh water @ 0oC (kg/m^3)
@@ -930,8 +931,8 @@ type(icebergs), pointer :: bergs
 type(iceberg), pointer :: kick_the_bucket, this
 integer :: nbergs_to_send_e, nbergs_to_send_w, nbergs_incoming, i
 integer, parameter :: max_bergs_in_buffer=50, buffer_width=16
-real, dimension(buffer_width,max_bergs_in_buffer) :: obuffer_e, ibuffer_e
-real, dimension(buffer_width,max_bergs_in_buffer) :: obuffer_w, ibuffer_w
+!real, dimension(buffer_width,max_bergs_in_buffer) :: obuffer_e, ibuffer_e
+!real, dimension(buffer_width,max_bergs_in_buffer) :: obuffer_w, ibuffer_w
 type(icebergs_gridded), pointer :: grd
 
   ! For convenience
@@ -947,20 +948,16 @@ type(icebergs_gridded), pointer :: grd
         kick_the_bucket=>this
         this=>this%next
         nbergs_to_send_e=nbergs_to_send_e+1
-        call pack_berg_into_buffer(kick_the_bucket, obuffer_e, nbergs_to_send_e)
-       !call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_e, nbergs_to_send_e)
+        call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_e, nbergs_to_send_e)
         call move_trajectory(bergs, kick_the_bucket)
         call delete_iceberg_from_list(bergs%first,kick_the_bucket)
-       !if (verbose) write(stderr(),*) 'diamond, send_bergs_to_other_pes: packing berg for E',mpp_pe(),associated(bergs%first)
       elseif (this%ine.lt.bergs%grd%isc) then
         kick_the_bucket=>this
         this=>this%next
         nbergs_to_send_w=nbergs_to_send_w+1
-        call pack_berg_into_buffer(kick_the_bucket, obuffer_w, nbergs_to_send_w)
-       !call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_w, nbergs_to_send_w)
+        call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_w, nbergs_to_send_w)
         call move_trajectory(bergs, kick_the_bucket)
         call delete_iceberg_from_list(bergs%first,kick_the_bucket)
-       !if (verbose) write(stderr(),*) 'diamond, send_bergs_to_other_pes: packing berg for W',mpp_pe(),associated(bergs%first)
       else
         this=>this%next
       endif
@@ -969,23 +966,15 @@ type(icebergs_gridded), pointer :: grd
 
   if (grd%pe_E.ne.NULL_PE) then
     call mpp_send(nbergs_to_send_e, plen=1, to_pe=grd%pe_E)
-   !if (nbergs_to_send_e.gt.0) then
-   !  write(stderr(),*) 'pe=',mpp_pe(),' sent the number',nbergs_to_send_e,' to',grd%pe_E,' (E)'
-   !endif
     if (nbergs_to_send_e.gt.0) then
-      call mpp_send(obuffer_e, nbergs_to_send_e*buffer_width, grd%pe_E)
-     !if (verbose) write(stderr(),'(a,i3,a,i3,a)') 'diamond, send_bergs_to_other_pes:',mpp_pe(),' sending',nbergs_to_send_e,' bergs E'
+      call mpp_send(bergs%obuffer_e%data, nbergs_to_send_e*buffer_width, grd%pe_E)
     endif
   endif
 
   if (grd%pe_W.ne.NULL_PE) then
     call mpp_send(nbergs_to_send_w, plen=1, to_pe=grd%pe_W)
-   !if (nbergs_to_send_w.gt.0) then
-   !  write(stderr(),*) 'pe=',mpp_pe(),' sent the number',nbergs_to_send_w,' to',grd%pe_W,' (W)'
-   !endif
     if (nbergs_to_send_w.gt.0) then
-      call mpp_send(obuffer_w, nbergs_to_send_w*buffer_width, grd%pe_W)
-     !if (verbose) write(stderr(),'(a,i3,a,i3,a)') 'diamond, send_bergs_to_other_pes:',mpp_pe(),' sending',nbergs_to_send_w,' bergs W'
+      call mpp_send(bergs%obuffer_w%data, nbergs_to_send_w*buffer_width, grd%pe_W)
     endif
   endif
 
@@ -996,12 +985,11 @@ type(icebergs_gridded), pointer :: grd
       write(stderr(),*) 'pe=',mpp_pe(),' received a bad number',nbergs_incoming,' from',grd%pe_W,' (W) !!!!!!!!!!!!!!!!!!!!!!'
     endif
     if (nbergs_incoming.gt.0) then
-     !write(stderr(),*) 'pe=',mpp_pe(),' received the number',nbergs_incoming,' from',grd%pe_W,' (W)'
-      call mpp_recv(ibuffer_w, nbergs_incoming*buffer_width, grd%pe_W)
+      call increase_ibuffer(bergs%ibuffer_w, nbergs_incoming)
+      call mpp_recv(bergs%ibuffer_w%data, nbergs_incoming*buffer_width, grd%pe_W)
       do i=1, nbergs_incoming
-        call unpack_berg_from_buffer(bergs%first, ibuffer_w, i)
+        call unpack_berg_from_buffer2(bergs%first, bergs%ibuffer_w, i)
       enddo
-     !if (verbose) write(stderr(),*) 'diamond, send_bergs_to_other_pes: receiving bergs from W',mpp_pe()
     endif
   endif
 
@@ -1012,12 +1000,11 @@ type(icebergs_gridded), pointer :: grd
       write(stderr(),*) 'pe=',mpp_pe(),' received a bad number',nbergs_incoming,' from',grd%pe_E,' (E) !!!!!!!!!!!!!!!!!!!!!!'
     endif
     if (nbergs_incoming.gt.0) then
-     !write(stderr(),*) 'pe=',mpp_pe(),' received the number',nbergs_incoming,' from',grd%pe_E,' (E)'
-      call mpp_recv(ibuffer_e, nbergs_incoming*buffer_width, grd%pe_E)
+      call increase_ibuffer(bergs%ibuffer_e, nbergs_incoming)
+      call mpp_recv(bergs%ibuffer_e%data, nbergs_incoming*buffer_width, grd%pe_E)
       do i=1, nbergs_incoming
-        call unpack_berg_from_buffer(bergs%first, ibuffer_e, i)
+        call unpack_berg_from_buffer2(bergs%first, bergs%ibuffer_e, i)
       enddo
-     !if (verbose) write(stderr(),*) 'diamond, send_bergs_to_other_pes: receiving bergs from E',mpp_pe()
     endif
   endif
 
@@ -1032,9 +1019,8 @@ contains
   integer, intent(in) :: n
   ! Local variables
 
-
-    if (.not.associated(buff)) call increase_buffer(buff)
-    if (n>buff%size) call increase_buffer(buff)
+    if (.not.associated(buff)) call increase_buffer(buff,delta_buf)
+    if (n>buff%size) call increase_buffer(buff,delta_buf)
 
     buff%data(1,n)=berg%lon
     buff%data(2,n)=berg%lat
@@ -1055,17 +1041,18 @@ contains
 
   end subroutine pack_berg_into_buffer2
 
-  subroutine increase_buffer(old)
+  subroutine increase_buffer(old,delta)
   ! Arguments
   type(buffer), pointer :: old
+  integer, intent(in) :: delta
   ! Local variables
   type(buffer), pointer :: new
   integer :: new_size
 
     if (.not.associated(old)) then
-      new_size=3
+      new_size=delta
     else
-      new_size=old%size+3
+      new_size=old%size+delta
     endif
     allocate(new)
     allocate(new%data(buffer_width,new_size))
@@ -1076,44 +1063,14 @@ contains
       deallocate(old)
     endif
     old=>new
+    write(stderr(),*) 'diamond, increase_buffer',mpp_pe(),' increased to',new_size
 
   end subroutine increase_buffer
 
-  subroutine pack_berg_into_buffer(berg, buffer, n)
-  ! Arguments
-  type(iceberg), pointer :: berg
-  real, dimension(buffer_width,max_bergs_in_buffer), intent(inout) :: buffer
-  integer, intent(in) :: n
-  ! Local variables
-
-    if (n.gt.max_bergs_in_buffer) then
-      write(stderr(),*) 'diamond, pack_berg_into_buffer: too many icebergs being packed. Use a bigger buffer!'
-      call error_mesg('diamond, pack_berg_into_buffer', 'communication buffer is too small!', FATAL)
-    endif
-
-    buffer(1,n)=berg%lon
-    buffer(2,n)=berg%lat
-    buffer(3,n)=berg%uvel
-    buffer(4,n)=berg%vvel
-    buffer(5,n)=berg%xi
-    buffer(6,n)=berg%yj
-    buffer(7,n)=berg%start_lon
-    buffer(8,n)=berg%start_lat
-    buffer(9,n)=float(berg%start_year)
-    buffer(10,n)=berg%start_day
-    buffer(11,n)=berg%start_mass
-    buffer(12,n)=berg%mass
-    buffer(13,n)=berg%depth
-    buffer(14,n)=berg%width
-    buffer(15,n)=berg%length
-    buffer(16,n)=berg%mass_scaling
-
-  end subroutine pack_berg_into_buffer
-
-  subroutine unpack_berg_from_buffer(first, buffer, n)
+  subroutine unpack_berg_from_buffer2(first, buff, n)
   ! Arguments
   type(iceberg), pointer :: first
-  real, dimension(buffer_width,max_bergs_in_buffer), intent(inout) :: buffer
+  type(buffer), pointer :: buff
   integer, intent(in) :: n
   ! Local variables
  !real :: lon, lat, uvel, vvel, xi, yj
@@ -1122,22 +1079,22 @@ contains
   logical :: lres
   type(iceberg) :: localberg
 
-    localberg%lon=buffer(1,n)
-    localberg%lat=buffer(2,n)
-    localberg%uvel=buffer(3,n)
-    localberg%vvel=buffer(4,n)
-    localberg%xi=buffer(5,n)
-    localberg%yj=buffer(6,n)
-    localberg%start_lon=buffer(7,n)
-    localberg%start_lat=buffer(8,n)
-    localberg%start_year=int(buffer(9,n)+0.5)
-    localberg%start_day=buffer(10,n)
-    localberg%start_mass=buffer(11,n)
-    localberg%mass=buffer(12,n)
-    localberg%depth=buffer(13,n)
-    localberg%width=buffer(14,n)
-    localberg%length=buffer(15,n)
-    localberg%mass_scaling=buffer(16,n)
+    localberg%lon=buff%data(1,n)
+    localberg%lat=buff%data(2,n)
+    localberg%uvel=buff%data(3,n)
+    localberg%vvel=buff%data(4,n)
+    localberg%xi=buff%data(5,n)
+    localberg%yj=buff%data(6,n)
+    localberg%start_lon=buff%data(7,n)
+    localberg%start_lat=buff%data(8,n)
+    localberg%start_year=int(buff%data(9,n)+0.5)
+    localberg%start_day=buff%data(10,n)
+    localberg%start_mass=buff%data(11,n)
+    localberg%mass=buff%data(12,n)
+    localberg%depth=buff%data(13,n)
+    localberg%width=buff%data(14,n)
+    localberg%length=buff%data(15,n)
+    localberg%mass_scaling=buff%data(16,n)
     lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
     if (lres) then
       call add_new_berg_to_list(first, localberg)
@@ -1161,7 +1118,42 @@ contains
       endif
     endif
 
-  end subroutine unpack_berg_from_buffer
+  end subroutine unpack_berg_from_buffer2
+
+  subroutine increase_ibuffer(old,delta)
+  ! Arguments
+  type(buffer), pointer :: old
+  integer, intent(in) :: delta
+  ! Local variables
+  type(buffer), pointer :: new
+  integer :: new_size, old_size
+
+    if (.not.associated(old)) then
+      new_size=delta+delta_buf
+      old_size=0
+    else
+      old_size=old%size
+      if (delta<old%size) then
+        new_size=old%size+delta
+      else
+        new_size=delta+delta_buf
+      endif
+    endif
+
+    if (old_size.ne.new_size) then
+      allocate(new)
+      allocate(new%data(buffer_width,new_size))
+      new%size=new_size
+      if (associated(old)) then
+        new%data(:,1:old%size)=old%data(:,1:old%size)
+        deallocate(old%data)
+        deallocate(old)
+      endif
+      old=>new
+      write(stderr(),*) 'diamond, increase_ibuffer',mpp_pe(),' increased to',new_size
+    endif
+
+  end subroutine increase_ibuffer
 
 end subroutine send_bergs_to_other_pes
 
@@ -2120,6 +2112,22 @@ type(iceberg), pointer :: this, next
   deallocate(bergs%initial_depth)
   deallocate(bergs%initial_width)
   deallocate(bergs%initial_length)
+  if (associated(bergs%obuffer_e)) then
+    if (associated(bergs%obuffer_e%data)) deallocate(bergs%obuffer_e%data)
+    deallocate(bergs%obuffer_e)
+  endif
+  if (associated(bergs%obuffer_w)) then
+    if (associated(bergs%obuffer_w%data)) deallocate(bergs%obuffer_w%data)
+    deallocate(bergs%obuffer_w)
+  endif
+  if (associated(bergs%ibuffer_e)) then
+    if (associated(bergs%ibuffer_e%data)) deallocate(bergs%ibuffer_e%data)
+    deallocate(bergs%ibuffer_e)
+  endif
+  if (associated(bergs%ibuffer_w)) then
+    if (associated(bergs%ibuffer_w%data)) deallocate(bergs%ibuffer_w%data)
+    deallocate(bergs%ibuffer_w)
+  endif
   deallocate(bergs)
 
  !if (verbose) write(stderr(),*) 'diamond: icebergs_end complete',mpp_pe()
