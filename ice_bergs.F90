@@ -104,7 +104,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.17 2008/06/06 19:04:13 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.18 2008/06/07 00:52:23 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -145,7 +145,7 @@ real :: uo, vo, ui, vi, ua, va, uw, vw, ssh_x, ssh_y, sst, cn, hi
 real :: f_cori, T, D, W, L, M, F, drag_ocn, drag_atm, drag_ice, wave_rad
 real :: a2, dva, Cr, Lwavelength, Lcutoff, Ltop
 real, parameter :: alpha=0.0, beta=1.0, accel_lim=1.e-3, Cr0=0.06, vel_lim=5.
-real :: lambda, detA, A11, A12, axe, aye
+real :: lambda, detA, A11, A12, axe, aye, D_hi
 logical :: dumpit
 
   ! For convenience
@@ -163,7 +163,9 @@ logical :: dumpit
   W=berg%width
   L=berg%length
 
-  drag_ocn=rho_seawater/M*(0.5*Cd_wv*W*(D-hi)+Cd_wh*W*L)*sqrt( (uvel-uo)**2+(vvel-vo)**2 )
+  hi=min(hi,D)
+  D_hi=max(0.,D-hi)
+  drag_ocn=rho_seawater/M*(0.5*Cd_wv*W*(D_hi)+Cd_wh*W*L)*sqrt( (uvel-uo)**2+(vvel-vo)**2 )
   drag_atm=rho_air     /M*(0.5*Cd_av*W*F     +Cd_ah*W*L)*sqrt( (uvel-ua)**2+(vvel-va)**2 )
   drag_ice=rho_ice     /M*(0.5*Cd_iv*W*hi              )*sqrt( (uvel-ui)**2+(vvel-vi)**2 )
   if (abs(ui)+abs(vi).eq.0.) drag_ice=0.
@@ -235,6 +237,11 @@ logical :: dumpit
       'F=',F, &
       'W=',W, &
       'L=',L
+    write(stderr(),'(a,i3,9(1xa,1pe12.3))') '          pe=',mpp_pe(), &
+      'hi=',hi, &
+      'do=',drag_ocn, &
+      'da=',drag_atm, &
+      'di=',drag_ice
     write(stderr(),'(a,i3,9(1xa,1pe12.3))') '          pe=',mpp_pe(), &
       'ax=',ax, &
       'ay=',ay, &
