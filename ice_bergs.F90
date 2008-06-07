@@ -104,7 +104,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.18 2008/06/07 00:52:23 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.19 2008/06/07 01:06:13 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -653,7 +653,7 @@ type(icebergs_gridded), pointer :: grd
 integer :: i,j,k
 type(iceberg) :: newberg
 logical :: lret
-real :: xi, yj
+real :: xi, yj, ddt
 
   ! For convenience
   grd=>bergs%grd
@@ -661,7 +661,8 @@ real :: xi, yj
   do k=1, nclasses
     do j=grd%jsc, grd%jec
       do i=grd%isc, grd%iec
-        if (grd%stored_ice(i,j,k).ge.bergs%initial_mass(k)*bergs%mass_scaling(k)) then
+        ddt=0.
+        do while (grd%stored_ice(i,j,k).ge.bergs%initial_mass(k)*bergs%mass_scaling(k))
           newberg%lon=0.25*((grd%lon(i,j)+grd%lon(i-1,j-1))+(grd%lon(i-1,j)+grd%lon(i,j-1)))
           newberg%lat=0.25*((grd%lat(i,j)+grd%lat(i-1,j-1))+(grd%lat(i-1,j)+grd%lat(i,j-1)))
          !write(stderr(),*) 'diamond, calve_icebergs: creating new iceberg at ',newberg%lon,newberg%lat
@@ -683,13 +684,14 @@ real :: xi, yj
           newberg%start_lon=newberg%lon
           newberg%start_lat=newberg%lat
           newberg%start_year=bergs%current_year
-          newberg%start_day=bergs%current_yearday
+          newberg%start_day=bergs%current_yearday+ddt/86400.
           newberg%start_mass=bergs%initial_mass(k)
           newberg%mass_scaling=bergs%mass_scaling(k)
           call add_new_berg_to_list(bergs%first, newberg)
          !if (verbose) call print_berg(stderr(), bergs%first, 'calve_icebergs, new berg created')
           grd%stored_ice(i,j,k)=grd%stored_ice(i,j,k)-bergs%initial_mass(k)*bergs%mass_scaling(k)
-        endif
+          ddt=ddt+bergs%dt/100. ! Minor offset to start day
+        enddo
       enddo
     enddo
   enddo
