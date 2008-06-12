@@ -104,7 +104,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.19 2008/06/07 01:06:13 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.20 2008/06/12 19:24:54 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -306,17 +306,19 @@ type(iceberg), pointer :: this, next
     Mnew=(nVol/Vol)*M
     dM=M-Mnew
 
+    ! Rolling
+    Dn=(bergs%rho_bergs/rho_seawater)*Tn ! draught (keel depth)
+    if ( Dn>0. .and. max(Wn,Ln)<sqrt(0.92*(Dn**2)+58.32*Dn) ) then
+      T=Tn
+      Tn=Wn
+      Wn=T
+    endif
+
+    ! Store the new state of iceberg (with L>W)
     this%mass=Mnew
     this%thickness=Tn
     this%width=min(Wn,Ln)
     this%length=max(Wn,Ln)
-
-    ! Rolling
-    Dn=(bergs%rho_bergs/rho_seawater)*Tn ! draught (keel depth)
-    if ( Dn>0. .and. this%length<sqrt(0.92*(Dn**2)+58.32*Dn) ) then
-      this%thickness=this%width
-      this%width=Tn
-    endif
 
     ! Add melting to the grid
     if (grd%area(i,j).ne.0.) then
