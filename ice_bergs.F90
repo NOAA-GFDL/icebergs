@@ -104,7 +104,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.20 2008/06/12 19:24:54 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.21 2008/06/13 20:31:38 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -143,10 +143,12 @@ real, intent(inout) :: ax, ay
 type(icebergs_gridded), pointer :: grd
 real :: uo, vo, ui, vi, ua, va, uw, vw, ssh_x, ssh_y, sst, cn, hi
 real :: f_cori, T, D, W, L, M, F, drag_ocn, drag_atm, drag_ice, wave_rad
-real :: a2, dva, Cr, Lwavelength, Lcutoff, Ltop
+real :: a2, wmod, Cr, Lwavelength, Lcutoff, Ltop
 real, parameter :: alpha=0.0, beta=1.0, accel_lim=1.e-3, Cr0=0.06, vel_lim=5.
 real :: lambda, detA, A11, A12, axe, aye, D_hi
+real :: uveln, vveln, us, vs
 logical :: dumpit
+integer :: itloop
 
   ! For convenience
   grd=>bergs%grd
@@ -165,37 +167,42 @@ logical :: dumpit
 
   hi=min(hi,D)
   D_hi=max(0.,D-hi)
-  drag_ocn=rho_seawater/M*(0.5*Cd_wv*W*(D_hi)+Cd_wh*W*L)*sqrt( (uvel-uo)**2+(vvel-vo)**2 )
-  drag_atm=rho_air     /M*(0.5*Cd_av*W*F     +Cd_ah*W*L)*sqrt( (uvel-ua)**2+(vvel-va)**2 )
-  drag_ice=rho_ice     /M*(0.5*Cd_iv*W*hi              )*sqrt( (uvel-ui)**2+(vvel-vi)**2 )
+
+  uveln=uvel; vveln=vvel
+  do itloop=1,3 ! Iterate on drag coefficients
+
+  us=0.5*(uveln+uvel); vs=0.5*(vveln+vvel)
+  drag_ocn=rho_seawater/M*(0.5*Cd_wv*W*(D_hi)+Cd_wh*W*L)*sqrt( (us-uo)**2+(vs-vo)**2 )
+  drag_atm=rho_air     /M*(0.5*Cd_av*W*F     +Cd_ah*W*L)*sqrt( (us-ua)**2+(vs-va)**2 )
+  drag_ice=rho_ice     /M*(0.5*Cd_iv*W*hi              )*sqrt( (us-ui)**2+(vs-vi)**2 )
   if (abs(ui)+abs(vi).eq.0.) drag_ice=0.
 
   uw=ua-uo; vw=va-vo  ! Use wind speed rel. to ocean for wave model (aja)?
-  dva=sqrt(uw*uw+vw*vw)
-  a2=(0.5*0.02025*(dva**2))**2
-  Lwavelength=0.32*(dva**2) ! Surface wave length fitted to data in table at
+  wmod=sqrt(uw*uw+vw*vw)
+  a2=(0.5*0.02025*(wmod**2)) ! This is "a", the wave amplitude
+  a2=a2*min(a2,F) ! This is "a^2" except when F<a.
+  Lwavelength=0.32*(wmod**2) ! Surface wave length fitted to data in table at
   !      http://www4.ncsu.edu/eos/users/c/ceknowle/public/chapter10/part2.html
   Lcutoff=0.125*Lwavelength
   Ltop=0.25*Lwavelength
   Cr=Cr0*min(max(0.,(L-Lcutoff)/(Ltop-Lcutoff)),1.) ! Wave radiation coefficient
   !     fitted to graph from Carrieres et al.,  POAC Drift Model.
-  wave_rad=0.5*rho_seawater/M*Cr*gravity*a2*sqrt(W*L)
+  wave_rad=0.5*rho_seawater/M*Cr*gravity*a2*(2.*W*L)/(W+L)
 
   ! Explicit accelerations
-  dva=sqrt((uw-uvel)**2+(vw-vvel)**2)
-  if (dva.ne.0.) then
-    wave_rad=wave_rad/dva
+  if (wmod.ne.0.) then
+    wave_rad=wave_rad/wmod
   else
     wave_rad=0.
   endif
-  axe= f_cori*vvel -gravity*ssh_x +wave_rad*(uw-uvel) &
+  axe= f_cori*vvel -gravity*ssh_x +wave_rad*uw &
       -drag_ocn*(uvel-uo) -drag_atm*(uvel-ua) -drag_ice*(uvel-ui)
-  aye=-f_cori*uvel -gravity*ssh_y +wave_rad*(vw-vvel) &
+  aye=-f_cori*uvel -gravity*ssh_y +wave_rad*vw &
       -drag_ocn*(vvel-vo) -drag_atm*(vvel-va) -drag_ice*(vvel-vi)
 
   ! Solve for implicit accelerations
   if (alpha+beta.gt.0.) then
-    lambda=drag_ocn+drag_atm+drag_ice  +wave_rad
+    lambda=drag_ocn+drag_atm+drag_ice ! +wave_rad
     A11=1.+beta*bergs%dt*lambda
     A12=alpha*bergs%dt*f_cori
     detA=1./(A11**2+A12**2)
@@ -204,54 +211,103 @@ logical :: dumpit
   else
     ax=axe; ay=aye
   endif
+
+  uveln=uvel+bergs%dt*ax
+  vveln=vvel+bergs%dt*ay
+
+  enddo ! itloop
   
-  dumpit=.false.; if (abs(uvel)>vel_lim.or.abs(vvel)>vel_lim) dumpit=.true.
-  if (dumpit.or.abs(ax)>accel_lim) write(stderr(),'(a,i3,9(1xa,1pe12.3))') 'Large ax: pe=',mpp_pe(), &
-      'f*v=',f_cori*vvel, &
-      'g*H_x=',gravity*ssh_x, &
-      'wave*ua=',wave_rad*(uw-uvel), &
-      'd*(u-uo)=',drag_ocn*(uvel-uo), &
-      'd*(u-ua)=',drag_atm*(uvel-ua), &
-      'd*(u-ui)=',drag_ice*(uvel-ui)
-  if (dumpit.or.abs(ay)>accel_lim) write(stderr(),'(a,i3,9(1xa,1pe12.3))') 'Large ay: pe=',mpp_pe(), &
-      'f*u=',f_cori*uvel, &
-      'g*H_y=',gravity*ssh_y, &
-      'wave*va=',wave_rad*(vw-vvel), &
-      'd*(v-vo)=',drag_ocn*(vvel-vo), &
-      'd*(v-va)=',drag_atm*(vvel-va), &
-      'd*(v-vi)=',drag_ice*(vvel-vi)
-  if (dumpit.or.abs(ax)>accel_lim.or.abs(ay)>accel_lim) then
-    write(stderr(),'(a,i3,9(1xa,1pe12.3))') '          pe=',mpp_pe(), &
-      'dva=',dva, &
-      'wave=',wave_rad, &
-      'xi=',xi, &
-      'yj=',yj
-    write(stderr(),'(a,i3,9(1xa,1pe12.3))') '          pe=',mpp_pe(), &
-      'a=',sqrt(a2), &
-      'Lo=',Lwavelength, &
-      'Cr=',Cr
-    write(stderr(),'(a,i3,9(1xa,1pe12.3))') '          pe=',mpp_pe(), &
+  dumpit=.false.
+  if (abs(uveln)>vel_lim.or.abs(vveln)>vel_lim) dumpit=.true.
+  if (abs(ax)>accel_lim.or.abs(ay)>accel_lim) dumpit=.true.
+  if (dumpit) then
+    write(stderr(),'(a,i3,9(1xa,1pe12.3))') 'Large acceleration detected pe=',mpp_pe(), &
+      'lon0=',berg%start_lon, &
+      'lat0=',berg%start_lat, &
+      'yr0=',float(berg%start_year), &
+      'day0=',berg%start_day, &
+      'mass0=',berg%start_mass, &
+      'scaling=',berg%mass_scaling
+    write(stderr(),'(a,i3,9(1xa,1pe12.3))') 'Geometry pe=',mpp_pe(), &
       'M=',M, &
       'T=',T, &
       'D=',D, &
       'F=',F, &
       'W=',W, &
       'L=',L
-    write(stderr(),'(a,i3,9(1xa,1pe12.3))') '          pe=',mpp_pe(), &
-      'hi=',hi, &
+    write(stderr(),'(a,i3,9(1xa,1pe12.3))') ' del U pe=',mpp_pe(), &
+      'u(n)=',uvel, &
+      'u(n+1)=',uvel+bergs%dt*ax, &
+      'v(n)=',vvel, &
+      'v(n+1)=',vvel+bergs%dt*ay
+    write(stderr(),'(a,i3,9(1xa,1pe12.3))') 'U accel. pe=',mpp_pe(), &
+      'f*v=',f_cori*vvel, &
+      'g*H_x=',-gravity*ssh_x, &
+      'wave*ua=',wave_rad*uw, &
+      'd*(u-uo)=',-drag_ocn*(uvel-uo), &
+      'd*(u-ua)=',-drag_atm*(uvel-ua), &
+      'd*(u-ui)=',-drag_ice*(uvel-ui)
+    write(stderr(),'(a,i3,9(1xa,1pe12.3))') '  accel. pe=',mpp_pe(), &
+      'axe=',axe, &
+      'ax=',ax, &
+      'ax(cori)=',detA*(A11*(f_cori*vvel)+A12*(-f_cori*uvel)), &
+      'ax(grav)=',detA*(A11*(-gravity*ssh_x)+A12*(-gravity*ssh_y)), &
+      'ax(wave)=',detA*(A11*(wave_rad*(uw-uvel))+A12*(wave_rad*(vw-vvel))), &
+      'ax(ocn)=',detA*(A11*(-drag_ocn*(uvel-uo))+A12*(-drag_ocn*(vvel-vo))), &
+      'ax(atm)=',detA*(A11*(-drag_atm*(uvel-ua))+A12*(-drag_atm*(vvel-va))), &
+      'ax(ice)=',detA*(A11*(-drag_ice*(uvel-ui))+A12*(-drag_ice*(vvel-vi)))
+    write(stderr(),'(a,i3,9(1xa,1pe12.3))') 'V accel. pe=',mpp_pe(), &
+      'f*u=',-f_cori*uvel, &
+      'g*H_y=',-gravity*ssh_y, &
+      'wave*va=',wave_rad*vw, &
+      'd*(v-vo)=',-drag_ocn*(vvel-vo), &
+      'd*(v-va)=',-drag_atm*(vvel-va), &
+      'd*(v-vi)=',-drag_ice*(vvel-vi)
+    write(stderr(),'(a,i3,9(1xa,1pe12.3))') '  accel. pe=',mpp_pe(), &
+      'aye=',aye, &
+      'ay=',ay, &
+      'ay(cori)=',detA*(-A12*(f_cori*vvel)+A11*(-f_cori*uvel)), &
+      'ay(grav)=',detA*(-A12*(-gravity*ssh_x)+A11*(-gravity*ssh_y)), &
+      'ay(wave)=',detA*(-A12*(wave_rad*(uw-uvel))+A11*(wave_rad*(vw-vvel))), &
+      'ay(ocn)=',detA*(-A12*(-drag_ocn*(uvel-uo))+A11*(-drag_ocn*(vvel-vo))), &
+      'ay(atm)=',detA*(-A12*(-drag_atm*(uvel-ua))+A11*(-drag_atm*(vvel-va))), &
+      'ay(ice)=',detA*(-A12*(-drag_ice*(uvel-ui))+A11*(-drag_ice*(vvel-vi)))
+    write(stderr(),'(a,i3,9(1xa,1pe12.3))') 'Vel scales pe=',mpp_pe(), &
+      '|va-vo|=',sqrt((ua-uo)**2+(va-vo)**2), &
+      '|vo-vb|=',sqrt((uvel-uo)**2+(vvel-vo)**2), &
+      '|va-vb|=',sqrt((uvel-ua)**2+(vvel-va)**2), &
+      '|vi-vb|=',sqrt((uvel-ui)**2+(vvel-vi)**2), &
+      '|vb|=',sqrt((uvel)**2+(vvel)**2), &
+      '|va|=',sqrt((ua)**2+(va)**2), &
+      '|vo|=',sqrt((uo)**2+(vo)**2), &
+      '|vi|=',sqrt((ui)**2+(vi)**2)
+    write(stderr(),'(a,i3,9(1xa,1pe12.3))') 'Time scales pe=',mpp_pe(), &
+      'f=',f_cori, &
+      'wave_rad=',wave_rad, &
       'do=',drag_ocn, &
       'da=',drag_atm, &
       'di=',drag_ice
+    write(stderr(),'(a,i3,9(1xa,1pe12.3))') ' u* pe=',mpp_pe(), &
+      'd*=',lambda, &
+      'u*=',(drag_ocn*uo+drag_atm*ua+drag_ice*ui)/lambda, &
+      'uo*=',(drag_ocn*uo)/lambda, &
+      'ua*=',(drag_atm*ua)/lambda, &
+      'ui*=',(drag_ice*ui)/lambda
+    write(stderr(),'(a,i3,9(1xa,1pe12.3))') ' v* pe=',mpp_pe(), &
+      'd*=',lambda, &
+      'v*=',(drag_ocn*vo+drag_atm*va+drag_ice*vi)/lambda, &
+      'vo*=',(drag_ocn*vo)/lambda, &
+      'va*=',(drag_atm*va)/lambda, &
+      'vi*=',(drag_ice*vi)/lambda
     write(stderr(),'(a,i3,9(1xa,1pe12.3))') '          pe=',mpp_pe(), &
-      'ax=',ax, &
-      'ay=',ay, &
-      'Dvo=',sqrt((uvel-uo)**2+(vvel-vo)**2), &
-      'Dva=',sqrt((uvel-ua)**2+(vvel-va)**2), &
-      'Dvi=',sqrt((uvel-ui)**2+(vvel-vi)**2), &
-      'U=',sqrt(uvel**2+vvel**2)
-    write(stderr(),'(a,i3,9(1xa,1pe12.3))') '          pe=',mpp_pe(), &
-      'axe=',axe, &
-      'aye=',aye
+      'xi=',xi, &
+      'yj=',yj, &
+      'a=',sqrt(a2), &
+      'Lwl=',Lwavelength, &
+      'Lcut=',Lcutoff, &
+      'Ltop=',Ltop, &
+      'hi=',hi, &
+      'Cr=',Cr
     call print_berg(stderr(),berg,'diamond, accel, large accel')
   endif
 
@@ -861,7 +917,7 @@ integer :: icount
 
   bounced=.false.
   lret=pos_within_cell(grd, lon, lat, i, j, xi, yj)
-  lret=is_point_in_cell(grd, lon, lat, i, j)
+ !lret=is_point_in_cell(grd, lon, lat, i, j)
   ! Sanity check lret, xi and yj
   if (lret.and. (abs(xi-0.5)-0.5>sanity_acc.or.abs(yj-0.5)-0.5>sanity_acc)) then
     write(stderr(),*) 'diamond, adjust: WARNING!!! lret=T but |xi,yj|>1',lret,xi,yj,lon,lat,i,j
