@@ -104,7 +104,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.22 2008/06/13 20:40:42 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.23 2008/06/13 20:49:52 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -641,7 +641,7 @@ real :: incoming_calving, unused_calving, stored_mass, total_iceberg_mass, meltm
     call mpp_sum(nbergs)
     meltmass=sum( grd%melt(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
     call mpp_sum(meltmass)
-    if (mpp_pe().eq.mpp_root_pe()) write(stderr(),'(a,5(1pe10.4,a),i6)') &
+    if (mpp_pe().eq.mpp_root_pe()) write(stderr(),'(a,5(1pe11.5,a),i6)') &
         'diamond, budget: incoming calving=',incoming_calving, &
         ' kg/s, unused calving=',unused_calving, &
         ' kg/s, melt=',meltmass, &
