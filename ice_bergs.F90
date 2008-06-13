@@ -104,7 +104,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.21 2008/06/13 20:31:38 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.22 2008/06/13 20:40:42 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -828,7 +828,7 @@ logical :: bounced
   vvel2=vvel1+dt_2*ay1
   bounced=.false.
   call adjust_index_and_ground(grd, lon2, lat2, uvel2, vvel2, i, j, xi, yj, bounced)
-  if (.not. is_point_in_cell(bergs%grd, lon2, lat2, i, j) ) then
+  if (debug .and. .not. is_point_in_cell(bergs%grd, lon2, lat2, i, j) ) then
     call print_berg(stderr(), berg, 'evolve_iceberg, out of position at 2')
     write(stderr(),'(a,i3,a,2i3,4f8.3)') 'pe=',mpp_pe(),'pos2 lon,lat,i,j,xi,yj=',i,j,lon2,lat2,xi,yj
     write(stderr(),'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'pos2 box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
@@ -844,7 +844,7 @@ logical :: bounced
   uvel3=uvel1+dt_2*ax2
   vvel3=vvel1+dt_2*ay2
   call adjust_index_and_ground(grd, lon3, lat3, uvel3, vvel3, i, j, xi, yj, bounced)
-  if (.not. is_point_in_cell(bergs%grd, lon3, lat3, i, j) ) then
+  if (debug .and. .not. is_point_in_cell(bergs%grd, lon3, lat3, i, j) ) then
     call print_berg(stderr(), berg, 'evolve_iceberg, out of position at 3')
     write(stderr(),'(a,i3,a,2i3,4f8.3)') 'pe=',mpp_pe(),'pos3 lon,lat,i,j,xi,yj=',i,j,lon3,lat3,xi,yj
     write(stderr(),'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'pos3 box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
@@ -860,7 +860,7 @@ logical :: bounced
   uvel4=uvel1+dt*ax3
   vvel4=vvel1+dt*ay3
   call adjust_index_and_ground(grd, lon4, lat4, uvel4, vvel4, i, j, xi, yj, bounced)
-  if (.not. is_point_in_cell(bergs%grd, lon4, lat4, i, j) ) then
+  if (debug .and. .not. is_point_in_cell(bergs%grd, lon4, lat4, i, j) ) then
     call print_berg(stderr(), berg, 'evolve_iceberg, out of position at 4')
     write(stderr(),'(a,i3,a,2i3,4f8.3)') 'pe=',mpp_pe(),'pos4 lon,lat,i,j,xi,yj=',i,j,lon4,lat4,xi,yj
     write(stderr(),'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'pos4 box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
@@ -919,10 +919,10 @@ integer :: icount
   lret=pos_within_cell(grd, lon, lat, i, j, xi, yj)
  !lret=is_point_in_cell(grd, lon, lat, i, j)
   ! Sanity check lret, xi and yj
-  if (lret.and. (abs(xi-0.5)-0.5>sanity_acc.or.abs(yj-0.5)-0.5>sanity_acc)) then
+  if (debug.and.lret.and. (abs(xi-0.5)-0.5>sanity_acc.or.abs(yj-0.5)-0.5>sanity_acc)) then
     write(stderr(),*) 'diamond, adjust: WARNING!!! lret=T but |xi,yj|>1',lret,xi,yj,lon,lat,i,j
 !   stop 'This should not ever happen!'
-  elseif ((.not.lret).and. (abs(xi-0.5)-0.5<sanity_acc.and.abs(yj-0.5)-0.5<sanity_acc)) then
+  elseif (debug.and.(.not.lret).and. (abs(xi-0.5)-0.5<sanity_acc.and.abs(yj-0.5)-0.5<sanity_acc)) then
     write(stderr(),*) 'diamond, adjust: WARNING!!! lret=F but |xi,yj|<1',lret,xi,yj,lon,lat,i,j
 !   stop 'This should not ever happen!'
   endif
