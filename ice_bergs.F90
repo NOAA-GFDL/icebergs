@@ -11,6 +11,7 @@ use mpp_mod, only: mpp_send, mpp_recv, mpp_sync_self
 use mpp_mod, only: mpp_clock_begin, mpp_clock_end, mpp_clock_id, CLOCK_COMPONENT
 use fms_mod, only: clock_flag_default
 use mpp_domains_mod, only: domain2D, mpp_update_domains, mpp_define_domains
+use mpp_domains_mod, only: SCALAR_PAIR, CGRID_NE, BGRID_NE, CORNER
 use mpp_domains_mod, only: mpp_get_compute_domain, mpp_get_data_domain
 use mpp_domains_mod, only: CYCLIC_GLOBAL_DOMAIN, FOLD_NORTH_EDGE
 use mpp_domains_mod, only: mpp_get_neighbor_pe, NORTH, SOUTH, EAST, WEST
@@ -104,7 +105,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.23 2008/06/13 20:49:52 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.24 2008/06/18 13:18:19 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -537,18 +538,18 @@ real :: incoming_calving, unused_calving, stored_mass, total_iceberg_mass, meltm
   ! Copy ocean flow (resides on B grid)
   grd%uo(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=uo(:,:)
   grd%vo(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=vo(:,:)
-  call mpp_update_domains(grd%uo, grd%vo, grd%domain)
+  call mpp_update_domains(grd%uo, grd%vo, grd%domain, gridtype=BGRID_NE)
   ! Copy ice flow (resides on B grid)
   grd%ui(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=ui(:,:)
   grd%vi(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=vi(:,:)
-  call mpp_update_domains(grd%ui, grd%vi, grd%domain)
+  call mpp_update_domains(grd%ui, grd%vi, grd%domain, gridtype=BGRID_NE)
   ! Copy atmospheric stress (resides on A grid)
   grd%ua(grd%isc:grd%iec,grd%jsc:grd%jec)=tauxa(:,:) ! Note rough conversion from stress to speed
   grd%va(grd%isc:grd%iec,grd%jsc:grd%jec)=tauya(:,:) ! Note rough conversion from stress to speed
   call invert_tau_for_du(grd%ua, grd%va) ! Note rough conversion from stress to speed
  !grd%ua(grd%isc:grd%iec,grd%jsc:grd%jec)=sign(sqrt(abs(tauxa(:,:))/0.01),tauxa(:,:))  ! Note rough conversion from stress to speed
  !grd%va(grd%isc:grd%iec,grd%jsc:grd%jec)=sign(sqrt(abs(tauya(:,:))/0.01),tauya(:,:))  ! Note rough conversion from stress to speed
-  call mpp_update_domains(grd%ua, grd%va, grd%domain)
+  call mpp_update_domains(grd%ua, grd%va, grd%domain, gridtype=BGRID_NE)
   ! Copy sea surface height and temperature(resides on A grid)
   grd%ssh(grd%isc:grd%iec,grd%jsc:grd%jec)=ssh(:,:)
   call mpp_update_domains(grd%ssh, grd%domain)
@@ -1353,13 +1354,13 @@ logical :: lerr
   grd%cos(is:ie,js:je)=cos_rot(:,:)
   grd%sin(is:ie,js:je)=sin_rot(:,:)
 
-  call mpp_update_domains(grd%lon, grd%domain)
-  call mpp_update_domains(grd%lat, grd%domain)
-  call mpp_update_domains(grd%dy, grd%dx, grd%domain)
+  call mpp_update_domains(grd%lon, grd%domain, position=CORNER)
+  call mpp_update_domains(grd%lat, grd%domain, position=CORNER)
+  call mpp_update_domains(grd%dy, grd%dx, grd%domain, gridtype=CGRID_NE, flags=SCALAR_PAIR)
   call mpp_update_domains(grd%area, grd%domain)
   call mpp_update_domains(grd%msk, grd%domain)
-  call mpp_update_domains(grd%cos, grd%domain)
-  call mpp_update_domains(grd%sin, grd%domain)
+  call mpp_update_domains(grd%cos, grd%domain, position=CORNER)
+  call mpp_update_domains(grd%sin, grd%domain, position=CORNER)
 
   ! Sanitize lon and lat at the SW edges
   do j=grd%jsc-1,grd%jsd,-1; do i=grd%isd,grd%ied
