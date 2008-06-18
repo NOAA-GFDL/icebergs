@@ -101,11 +101,14 @@ type, public :: icebergs ; private
   real, dimension(:), pointer :: initial_mass, distribution, mass_scaling
   real, dimension(:), pointer :: initial_thickness, initial_width, initial_length
   logical :: restarted=.false. ! Indicate whether we read state from a restart or not
-  type(buffer), pointer :: obuffer_e, ibuffer_e, obuffer_w, ibuffer_w
+  type(buffer), pointer :: obuffer_n=>NULL(), ibuffer_n=>NULL()
+  type(buffer), pointer :: obuffer_s=>NULL(), ibuffer_s=>NULL()
+  type(buffer), pointer :: obuffer_e=>NULL(), ibuffer_e=>NULL()
+  type(buffer), pointer :: obuffer_w=>NULL(), ibuffer_w=>NULL()
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.24 2008/06/18 13:18:19 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.25 2008/06/18 15:22:26 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -995,9 +998,8 @@ type(icebergs), pointer :: bergs
 ! Local variables
 type(iceberg), pointer :: kick_the_bucket, this
 integer :: nbergs_to_send_e, nbergs_to_send_w, nbergs_incoming, i
-integer, parameter :: max_bergs_in_buffer=50, buffer_width=16
-!real, dimension(buffer_width,max_bergs_in_buffer) :: obuffer_e, ibuffer_e
-!real, dimension(buffer_width,max_bergs_in_buffer) :: obuffer_w, ibuffer_w
+integer :: nbergs_to_send_n, nbergs_to_send_s
+integer, parameter :: buffer_width=16
 type(icebergs_gridded), pointer :: grd
 
   ! For convenience
@@ -1029,6 +1031,7 @@ type(icebergs_gridded), pointer :: grd
     enddo
   endif
 
+  ! Send bergs east
   if (grd%pe_E.ne.NULL_PE) then
     call mpp_send(nbergs_to_send_e, plen=1, to_pe=grd%pe_E)
     if (nbergs_to_send_e.gt.0) then
@@ -1036,6 +1039,7 @@ type(icebergs_gridded), pointer :: grd
     endif
   endif
 
+  ! Send bergs west
   if (grd%pe_W.ne.NULL_PE) then
     call mpp_send(nbergs_to_send_w, plen=1, to_pe=grd%pe_W)
     if (nbergs_to_send_w.gt.0) then
@@ -1043,6 +1047,7 @@ type(icebergs_gridded), pointer :: grd
     endif
   endif
 
+  ! Receive bergs from west
   if (grd%pe_W.ne.NULL_PE) then
     nbergs_incoming=-999
     call mpp_recv(nbergs_incoming, glen=1, from_pe=grd%pe_W)
@@ -1058,6 +1063,7 @@ type(icebergs_gridded), pointer :: grd
     endif
   endif
 
+  ! Receive bergs from east
   if (grd%pe_E.ne.NULL_PE) then
     nbergs_incoming=-999
     call mpp_recv(nbergs_incoming, glen=1, from_pe=grd%pe_E)
@@ -1069,6 +1075,83 @@ type(icebergs_gridded), pointer :: grd
       call mpp_recv(bergs%ibuffer_e%data, nbergs_incoming*buffer_width, grd%pe_E)
       do i=1, nbergs_incoming
         call unpack_berg_from_buffer2(bergs%first, bergs%ibuffer_e, i)
+      enddo
+    endif
+  endif
+
+  ! Find number of bergs that headed north/south
+  ! (note: this block should technically go ahead of the E/W recv block above
+  !  to handle arbitrary orientation of PEs. But for simplicity, it is
+  !  here to accomodate diagonal transfer of bergs between PEs -AJA)
+  nbergs_to_send_n=0
+  nbergs_to_send_s=0
+  if (associated(bergs%first)) then
+    this=>bergs%first
+    do while (associated(this))
+      if (this%jne.gt.bergs%grd%jec) then
+        kick_the_bucket=>this
+        this=>this%next
+        nbergs_to_send_n=nbergs_to_send_n+1
+        call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_n, nbergs_to_send_n)
+        call move_trajectory(bergs, kick_the_bucket)
+        call delete_iceberg_from_list(bergs%first,kick_the_bucket)
+      elseif (this%jne.lt.bergs%grd%jsc) then
+        kick_the_bucket=>this
+        this=>this%next
+        nbergs_to_send_s=nbergs_to_send_s+1
+        call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_s, nbergs_to_send_s)
+        call move_trajectory(bergs, kick_the_bucket)
+        call delete_iceberg_from_list(bergs%first,kick_the_bucket)
+      else
+        this=>this%next
+      endif
+    enddo
+  endif
+
+  ! Send bergs north
+  if (grd%pe_N.ne.NULL_PE) then
+    call mpp_send(nbergs_to_send_n, plen=1, to_pe=grd%pe_N)
+    if (nbergs_to_send_n.gt.0) then
+      call mpp_send(bergs%obuffer_n%data, nbergs_to_send_n*buffer_width, grd%pe_N)
+    endif
+  endif
+
+  ! Send bergs south
+  if (grd%pe_S.ne.NULL_PE) then
+    call mpp_send(nbergs_to_send_s, plen=1, to_pe=grd%pe_S)
+    if (nbergs_to_send_s.gt.0) then
+      call mpp_send(bergs%obuffer_s%data, nbergs_to_send_s*buffer_width, grd%pe_S)
+    endif
+  endif
+
+  ! Receive bergs from south
+  if (grd%pe_S.ne.NULL_PE) then
+    nbergs_incoming=-999
+    call mpp_recv(nbergs_incoming, glen=1, from_pe=grd%pe_S)
+    if (nbergs_incoming.lt.0) then
+      write(stderr(),*) 'pe=',mpp_pe(),' received a bad number',nbergs_incoming,' from',grd%pe_S,' (S) !!!!!!!!!!!!!!!!!!!!!!'
+    endif
+    if (nbergs_incoming.gt.0) then
+      call increase_ibuffer(bergs%ibuffer_s, nbergs_incoming)
+      call mpp_recv(bergs%ibuffer_s%data, nbergs_incoming*buffer_width, grd%pe_S)
+      do i=1, nbergs_incoming
+        call unpack_berg_from_buffer2(bergs%first, bergs%ibuffer_s, i)
+      enddo
+    endif
+  endif
+
+  ! Receive bergs from north
+  if (grd%pe_N.ne.NULL_PE) then
+    nbergs_incoming=-999
+    call mpp_recv(nbergs_incoming, glen=1, from_pe=grd%pe_N)
+    if (nbergs_incoming.lt.0) then
+      write(stderr(),*) 'pe=',mpp_pe(),' received a bad number',nbergs_incoming,' from',grd%pe_N,' (N) !!!!!!!!!!!!!!!!!!!!!!'
+    endif
+    if (nbergs_incoming.gt.0) then
+      call increase_ibuffer(bergs%ibuffer_n, nbergs_incoming)
+      call mpp_recv(bergs%ibuffer_n%data, nbergs_incoming*buffer_width, grd%pe_N)
+      do i=1, nbergs_incoming
+        call unpack_berg_from_buffer2(bergs%first, bergs%ibuffer_n, i)
       enddo
     endif
   endif
@@ -2191,25 +2274,29 @@ type(iceberg), pointer :: this, next
   deallocate(bergs%initial_thickness)
   deallocate(bergs%initial_width)
   deallocate(bergs%initial_length)
-  if (associated(bergs%obuffer_e)) then
-    if (associated(bergs%obuffer_e%data)) deallocate(bergs%obuffer_e%data)
-    deallocate(bergs%obuffer_e)
-  endif
-  if (associated(bergs%obuffer_w)) then
-    if (associated(bergs%obuffer_w%data)) deallocate(bergs%obuffer_w%data)
-    deallocate(bergs%obuffer_w)
-  endif
-  if (associated(bergs%ibuffer_e)) then
-    if (associated(bergs%ibuffer_e%data)) deallocate(bergs%ibuffer_e%data)
-    deallocate(bergs%ibuffer_e)
-  endif
-  if (associated(bergs%ibuffer_w)) then
-    if (associated(bergs%ibuffer_w%data)) deallocate(bergs%ibuffer_w%data)
-    deallocate(bergs%ibuffer_w)
-  endif
+  call dealloc_buffer(bergs%obuffer_n)
+  call dealloc_buffer(bergs%obuffer_s)
+  call dealloc_buffer(bergs%obuffer_e)
+  call dealloc_buffer(bergs%obuffer_w)
+  call dealloc_buffer(bergs%ibuffer_n)
+  call dealloc_buffer(bergs%ibuffer_s)
+  call dealloc_buffer(bergs%ibuffer_e)
+  call dealloc_buffer(bergs%ibuffer_w)
   deallocate(bergs)
 
- !if (verbose) write(stderr(),*) 'diamond: icebergs_end complete',mpp_pe()
+  if (verbose) write(stderr(),*) 'diamond: icebergs_end complete',mpp_pe()
+
+  contains
+
+  subroutine dealloc_buffer(buff)
+  ! Arguments
+  type(buffer), pointer :: buff
+  ! Local variables
+    if (associated(buff)) then
+      if (associated(buff%data)) deallocate(buff%data)
+      deallocate(buff)
+    endif
+  end subroutine dealloc_buffer
 
 end subroutine icebergs_end
 
