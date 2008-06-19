@@ -108,7 +108,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.25 2008/06/18 15:22:26 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.26 2008/06/19 18:17:10 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -145,8 +145,10 @@ real, intent(in) :: xi, yj, lat, uvel, vvel
 real, intent(inout) :: ax, ay
 ! Local variables
 type(icebergs_gridded), pointer :: grd
-real :: uo, vo, ui, vi, ua, va, uw, vw, ssh_x, ssh_y, sst, cn, hi
-real :: f_cori, T, D, W, L, M, F, drag_ocn, drag_atm, drag_ice, wave_rad
+real :: uo, vo, ui, vi, ua, va, uwave, vwave, ssh_x, ssh_y, sst, cn, hi
+real :: f_cori, T, D, W, L, M, F
+real :: drag_ocn, drag_atm, drag_ice, wave_rad
+real :: c_ocn, c_atm, c_ice
 real :: a2, wmod, Cr, Lwavelength, Lcutoff, Ltop
 real, parameter :: alpha=0.0, beta=1.0, accel_lim=1.e-3, Cr0=0.06, vel_lim=5.
 real :: lambda, detA, A11, A12, axe, aye, D_hi
@@ -172,17 +174,9 @@ integer :: itloop
   hi=min(hi,D)
   D_hi=max(0.,D-hi)
 
-  uveln=uvel; vveln=vvel
-  do itloop=1,3 ! Iterate on drag coefficients
-
-  us=0.5*(uveln+uvel); vs=0.5*(vveln+vvel)
-  drag_ocn=rho_seawater/M*(0.5*Cd_wv*W*(D_hi)+Cd_wh*W*L)*sqrt( (us-uo)**2+(vs-vo)**2 )
-  drag_atm=rho_air     /M*(0.5*Cd_av*W*F     +Cd_ah*W*L)*sqrt( (us-ua)**2+(vs-va)**2 )
-  drag_ice=rho_ice     /M*(0.5*Cd_iv*W*hi              )*sqrt( (us-ui)**2+(vs-vi)**2 )
-  if (abs(ui)+abs(vi).eq.0.) drag_ice=0.
-
-  uw=ua-uo; vw=va-vo  ! Use wind speed rel. to ocean for wave model (aja)?
-  wmod=sqrt(uw*uw+vw*vw)
+  ! Wave radiation
+  uwave=ua-uo; vwave=va-vo  ! Use wind speed rel. to ocean for wave model (aja)?
+  wmod=sqrt(uwave*uwave+vwave*vwave)
   a2=(0.5*0.02025*(wmod**2)) ! This is "a", the wave amplitude
   a2=a2*min(a2,F) ! This is "a^2" except when F<a.
   Lwavelength=0.32*(wmod**2) ! Surface wave length fitted to data in table at
@@ -192,32 +186,47 @@ integer :: itloop
   Cr=Cr0*min(max(0.,(L-Lcutoff)/(Ltop-Lcutoff)),1.) ! Wave radiation coefficient
   !     fitted to graph from Carrieres et al.,  POAC Drift Model.
   wave_rad=0.5*rho_seawater/M*Cr*gravity*a2*(2.*W*L)/(W+L)
-
-  ! Explicit accelerations
   if (wmod.ne.0.) then
-    wave_rad=wave_rad/wmod
+    uwave=uwave/wmod ! Convert uw,vw into wind directions
+    vwave=vwave/wmod ! (relative to ocean? Not sure about this...?)
   else
     wave_rad=0.
   endif
-  axe= f_cori*vvel -gravity*ssh_x +wave_rad*uw &
-      -drag_ocn*(uvel-uo) -drag_atm*(uvel-ua) -drag_ice*(uvel-ui)
-  aye=-f_cori*uvel -gravity*ssh_y +wave_rad*vw &
-      -drag_ocn*(vvel-vo) -drag_atm*(vvel-va) -drag_ice*(vvel-vi)
 
-  ! Solve for implicit accelerations
-  if (alpha+beta.gt.0.) then
-    lambda=drag_ocn+drag_atm+drag_ice ! +wave_rad
-    A11=1.+beta*bergs%dt*lambda
-    A12=alpha*bergs%dt*f_cori
-    detA=1./(A11**2+A12**2)
-    ax=detA*(A11*axe+A12*aye)
-    ay=detA*(A11*aye-A12*axe)
-  else
-    ax=axe; ay=aye
-  endif
+  ! Weighted drag coefficients
+  c_ocn=rho_seawater/M*(0.5*Cd_wv*W*(D_hi)+Cd_wh*W*L)
+  c_atm=rho_air     /M*(0.5*Cd_av*W*F     +Cd_ah*W*L)
+  c_ice=rho_ice     /M*(0.5*Cd_iv*W*hi              )
+  if (abs(ui)+abs(vi).eq.0.) c_ice=0.
 
-  uveln=uvel+bergs%dt*ax
-  vveln=vvel+bergs%dt*ay
+  uveln=uvel; vveln=vvel ! Copy starting uvel, vvel
+  do itloop=1,3 ! Iterate on drag coefficients
+
+    us=0.5*(uveln+uvel); vs=0.5*(vveln+vvel)
+    drag_ocn=c_ocn*sqrt( (us-uo)**2+(vs-vo)**2 )
+    drag_atm=c_atm*sqrt( (us-ua)**2+(vs-va)**2 )
+    drag_ice=c_ice*sqrt( (us-ui)**2+(vs-vi)**2 )
+
+    ! Explicit accelerations
+    axe= f_cori*vvel -gravity*ssh_x +wave_rad*uwave &
+        -drag_ocn*(uvel-uo) -drag_atm*(uvel-ua) -drag_ice*(uvel-ui)
+    aye=-f_cori*uvel -gravity*ssh_y +wave_rad*vwave &
+        -drag_ocn*(vvel-vo) -drag_atm*(vvel-va) -drag_ice*(vvel-vi)
+
+    ! Solve for implicit accelerations
+    if (alpha+beta.gt.0.) then
+      lambda=drag_ocn+drag_atm+drag_ice ! +wave_rad
+      A11=1.+beta*bergs%dt*lambda
+      A12=alpha*bergs%dt*f_cori
+      detA=1./(A11**2+A12**2)
+      ax=detA*(A11*axe+A12*aye)
+      ay=detA*(A11*aye-A12*axe)
+    else
+      ax=axe; ay=aye
+    endif
+
+    uveln=uvel+bergs%dt*ax
+    vveln=vvel+bergs%dt*ay
 
   enddo ! itloop
   
@@ -247,7 +256,7 @@ integer :: itloop
     write(stderr(),'(a,i3,9(1xa,1pe12.3))') 'U accel. pe=',mpp_pe(), &
       'f*v=',f_cori*vvel, &
       'g*H_x=',-gravity*ssh_x, &
-      'wave*ua=',wave_rad*uw, &
+      'wave*ua=',wave_rad*uwave, &
       'd*(u-uo)=',-drag_ocn*(uvel-uo), &
       'd*(u-ua)=',-drag_atm*(uvel-ua), &
       'd*(u-ui)=',-drag_ice*(uvel-ui)
@@ -256,14 +265,14 @@ integer :: itloop
       'ax=',ax, &
       'ax(cori)=',detA*(A11*(f_cori*vvel)+A12*(-f_cori*uvel)), &
       'ax(grav)=',detA*(A11*(-gravity*ssh_x)+A12*(-gravity*ssh_y)), &
-      'ax(wave)=',detA*(A11*(wave_rad*(uw-uvel))+A12*(wave_rad*(vw-vvel))), &
+      'ax(wave)=',detA*(A11*(wave_rad*uwave)+A12*(wave_rad*vwave)), &
       'ax(ocn)=',detA*(A11*(-drag_ocn*(uvel-uo))+A12*(-drag_ocn*(vvel-vo))), &
       'ax(atm)=',detA*(A11*(-drag_atm*(uvel-ua))+A12*(-drag_atm*(vvel-va))), &
       'ax(ice)=',detA*(A11*(-drag_ice*(uvel-ui))+A12*(-drag_ice*(vvel-vi)))
     write(stderr(),'(a,i3,9(1xa,1pe12.3))') 'V accel. pe=',mpp_pe(), &
       'f*u=',-f_cori*uvel, &
       'g*H_y=',-gravity*ssh_y, &
-      'wave*va=',wave_rad*vw, &
+      'wave*va=',wave_rad*vwave, &
       'd*(v-vo)=',-drag_ocn*(vvel-vo), &
       'd*(v-va)=',-drag_atm*(vvel-va), &
       'd*(v-vi)=',-drag_ice*(vvel-vi)
@@ -272,7 +281,7 @@ integer :: itloop
       'ay=',ay, &
       'ay(cori)=',detA*(-A12*(f_cori*vvel)+A11*(-f_cori*uvel)), &
       'ay(grav)=',detA*(-A12*(-gravity*ssh_x)+A11*(-gravity*ssh_y)), &
-      'ay(wave)=',detA*(-A12*(wave_rad*(uw-uvel))+A11*(wave_rad*(vw-vvel))), &
+      'ay(wave)=',detA*(-A12*(wave_rad*uwave)+A11*(wave_rad*vwave)), &
       'ay(ocn)=',detA*(-A12*(-drag_ocn*(uvel-uo))+A11*(-drag_ocn*(vvel-vo))), &
       'ay(atm)=',detA*(-A12*(-drag_atm*(uvel-ua))+A11*(-drag_atm*(vvel-va))), &
       'ay(ice)=',detA*(-A12*(-drag_ice*(uvel-ui))+A11*(-drag_ice*(vvel-vi)))
@@ -430,7 +439,9 @@ real, parameter :: ssh_coast=0.00
   vi=bilin(grd, grd%vi, i, j, xi, yj)
   ua=bilin(grd, grd%ua, i, j, xi, yj)
   va=bilin(grd, grd%va, i, j, xi, yj)
-  sst=grd%sst(i,j) ! A-grid, instead of sst=bilin(grd, grd%sst, i, j, xi, yj)
+  ! These fields are cell centered (A-grid) and would
+  ! best be interpolated using PLM. For now we use PCM!
+  sst=grd%sst(i,j) ! A-grid
   cn=grd%cn(i,j) ! A-grid
   hi=grd%hi(i,j) ! A-grid
 
@@ -442,6 +453,7 @@ real, parameter :: ssh_coast=0.00
         +(-ssh_coast)/(dx0+dxm)*(1.-grd%msk(i-1,j)) ! force to drive bergs away from coasts
   hxp=2.*(grd%ssh(i+1,j)-grd%ssh(i,j))/(dx0+dxp)*grd%msk(i+1,j) &
         +(+ssh_coast)/(dx0+dxp)*(1.-grd%msk(i+1,j)) ! force to drive bergs away from coasts
+  ! ssh_x is at the u-point on a C-grid
   ssh_x=xi*hxp+(1.-xi)*hxm
 
   ! Estimate SSH gradient in Y direction
@@ -452,23 +464,21 @@ real, parameter :: ssh_coast=0.00
         +(-ssh_coast)/(dx0+dxm)*(1.-grd%msk(i,j-1)) ! force to drive bergs away from coasts
   hxp=2.*(grd%ssh(i,j+1)-grd%ssh(i,j))/(dx0+dxp)*grd%msk(i,j+1) &
         +(+ssh_coast)/(dx0+dxp)*(1.-grd%msk(i,j+1)) ! force to drive bergs away from coasts
+  ! ssh_y is at the v-point on a C-grid
   ssh_y=yj*hxp+(1.-yj)*hxm
   
-  ! Rotate vectors from ocean/ice grid to lat/lon coordinates
-  call rotate(uo,vo)
-  call rotate(ui,vi)
-  call rotate(ua,va)
-  call rotate(ssh_x,ssh_y)
- !u=uo; uo=cos_rot*uo+sin_rot*vo; vo=-sin_rot*u+cos_rot*vo
- !u=ui; ui=cos_rot*ui+sin_rot*vi; vi=-sin_rot*u+cos_rot*vi
- !u=ua; ua=cos_rot*ua+sin_rot*va; va=-sin_rot*u+cos_rot*va
- !u=ssh_x; ua=cos_rot*ssh_x+sin_rot*ssh_y; ssh_y=-sin_rot*u+cos_rot*ssh_y
+  ! Rotate vectors from local grid to lat/lon coordinates
+  call rotate(uo, vo, cos_rot, sin_rot)
+  call rotate(ui, vi, cos_rot, sin_rot)
+  call rotate(ua, va, cos_rot, sin_rot)
+  call rotate(ssh_x, ssh_y, cos_rot, sin_rot)
 
   contains
 
-  subroutine rotate(u,v)
+  subroutine rotate(u, v, cos_rot, sin_rot)
   ! Arguments
-  real, intent(inout) :: u,v
+  real, intent(inout) :: u, v
+  real, intent(in) :: cos_rot, sin_rot
   ! Local variables
   real :: u_old, v_old
 
@@ -902,7 +912,7 @@ logical :: bounced
   berg%yj=yj
  !call interp_flds(grd, i, j, xi, yj, berg%uo, berg%vo, berg%ui, berg%vi, berg%ua, berg%va, berg%ssh_x, berg%ssh_y, berg%sst)
 
- !if (verbose) call print_berg(stderr(), berg, 'evolve_iceberg, final posn.')
+ if (debug) call print_berg(stderr(), berg, 'evolve_iceberg, final posn.')
 
  contains
 
@@ -921,7 +931,7 @@ integer :: icount
 
   bounced=.false.
   lret=pos_within_cell(grd, lon, lat, i, j, xi, yj)
- !lret=is_point_in_cell(grd, lon, lat, i, j)
+  if (debug) lret=is_point_in_cell(grd, lon, lat, i, j)
   ! Sanity check lret, xi and yj
   if (debug.and.lret.and. (abs(xi-0.5)-0.5>sanity_acc.or.abs(yj-0.5)-0.5>sanity_acc)) then
     write(stderr(),*) 'diamond, adjust: WARNING!!! lret=T but |xi,yj|>1',lret,xi,yj,lon,lat,i,j
@@ -1333,7 +1343,7 @@ real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1
 real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
 namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
          distribution, mass_scaling, initial_thickness, verbose_hrs, &
-         rho_bergs, LoW_ratio
+         rho_bergs, LoW_ratio, debug
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je
 type(icebergs_gridded), pointer :: grd
@@ -2014,11 +2024,11 @@ real :: xlo, xhi, ylo, yhi, xx
                                       grd%lon(i  ,j  ),grd%lat(i  ,j  ), &
                                       grd%lon(i-1,j  ),grd%lat(i-1,j  ), &
                                       x, y) 
-  if (debug) then
-    write(stderr(),*) 'diamond, is_point_in_cell: inside crude bounds but no in cell',mpp_pe()
-    write(stderr(),*) 'diamond, is_point_in_cell: ',xlo,xhi,x,xx
-    write(stderr(),*) 'diamond, is_point_in_cell: ',ylo,yhi,y
-  endif
+ !if (debug) then
+ !  write(stderr(),*) 'diamond, is_point_in_cell: inside crude bounds but no in cell',mpp_pe()
+ !  write(stderr(),*) 'diamond, is_point_in_cell: ',xlo,xhi,x,xx
+ !  write(stderr(),*) 'diamond, is_point_in_cell: ',ylo,yhi,y
+ !endif
 
 end function is_point_in_cell
 
@@ -2052,16 +2062,16 @@ real :: l0,l1,l2,l3
  !if (((x.ge.min(x0,x1,x2,x3)).and.(x.le.max(x0,x1,x2,x3)) &
  !.and.(y.ge.min(y0,y1,y2,y3)).and.(y.le.max(y0,y1,y2,y3))) .or. debug) &
  !then
-  if (debug) then
-   write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: x=',mpp_pe(),':', &
-                           x0,x1,x2,x3, x
-   write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: y=',mpp_pe(),':', &
-                           y0,y1,y2,y3, y
-   write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: l=',mpp_pe(),':', &
-                           l0,l1,l2,l3
-   write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: p=',mpp_pe(),':', &
-                           p0,p1,p2,p3, abs( (abs(p0)+abs(p2))+(abs(p1)+abs(p3)) - abs((p0+p2)+(p1+p3)) )
-  endif
+ !if (debug) then
+ ! write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: x=',mpp_pe(),':', &
+ !                         x0,x1,x2,x3, x
+ ! write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: y=',mpp_pe(),':', &
+ !                         y0,y1,y2,y3, y
+ ! write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: l=',mpp_pe(),':', &
+ !                         l0,l1,l2,l3
+ ! write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: p=',mpp_pe(),':', &
+ !                         p0,p1,p2,p3, abs( (abs(p0)+abs(p2))+(abs(p1)+abs(p3)) - abs((p0+p2)+(p1+p3)) )
+ !endif
 
 end function sum_sign_dot_prod4
 
