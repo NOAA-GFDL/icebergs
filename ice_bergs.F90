@@ -108,7 +108,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.27 2008/06/20 01:48:51 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.28 2008/06/20 01:50:11 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -212,8 +212,6 @@ integer :: itloop
         -drag_ocn*(uvel-uo) -drag_atm*(uvel-ua) -drag_ice*(uvel-ui)
     aye=-f_cori*uvel -gravity*ssh_y +wave_rad*vwave &
         -drag_ocn*(vvel-vo) -drag_atm*(vvel-va) -drag_ice*(vvel-vi)
-
-    axe=0.; aye=0. ! #######DEBUG########
 
     ! Solve for implicit accelerations
     if (alpha+beta.gt.0.) then
