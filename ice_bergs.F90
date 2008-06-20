@@ -108,7 +108,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.26 2008/06/19 18:17:10 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.27 2008/06/20 01:48:51 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -212,6 +212,8 @@ integer :: itloop
         -drag_ocn*(uvel-uo) -drag_atm*(uvel-ua) -drag_ice*(uvel-ui)
     aye=-f_cori*uvel -gravity*ssh_y +wave_rad*vwave &
         -drag_ocn*(vvel-vo) -drag_atm*(vvel-va) -drag_ice*(vvel-vi)
+
+    axe=0.; aye=0. ! #######DEBUG########
 
     ! Solve for implicit accelerations
     if (alpha+beta.gt.0.) then
@@ -1467,27 +1469,33 @@ logical :: lerr
   enddo; enddo
 
   ! Sanitize lon for the tile (need continuous longitudes within one tile)
-  do j=grd%jsc+1,grd%jed; i=grd%isc
+  j=grd%jsc; do i=grd%isc+1,grd%ied
+    minl=grd%lon(i-1,j)-180.
+    grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
+  enddo
+  j=grd%jsc; do i=grd%isc-1,grd%isd,-1
+    minl=grd%lon(i+1,j)-180.
+    grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
+  enddo
+  do j=grd%jsc+1,grd%jed; do i=grd%isd,grd%ied
       minl=grd%lon(i,j-1)-180.
       grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
-  enddo
-  do j=grd%jsc-1,grd%jed,-1; i=grd%isc
-      minl=grd%lon(i,j+1)-180.
-      grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
-  enddo
-  do j=grd%jsd,grd%jed; do i=grd%isc+1,grd%ied
-      minl=grd%lon(i-1,j)-180.
-      grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
   enddo; enddo
-  do j=grd%jsd,grd%jed; do i=grd%isc-1,grd%isd,-1
-      minl=grd%lon(i+1,j)-180.
+  do j=grd%jsc-1,grd%jsd,-1; do i=grd%isd,grd%ied
+      minl=grd%lon(i,j+1)-180.
       grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
   enddo; enddo
 
- !if (mpp_pe().eq.0) then
- !  write(stderr(),'(a3,16i7)') ' ',(i,i=grd%isd,grd%ied)
- !  do j=grd%jsd,grd%jed
- !    write(stderr(),'(i3,16f7.1)') j,(grd%lon(i,j),i=grd%isd,grd%ied)
+  if (debug) then
+    write(stderr(),'(a,i3,a,4i4,a,4f8.2)') 'diamond, icebergs_init: (',mpp_pe(),') [ij][se]c=', &
+         grd%isc,grd%iec,grd%jsc,grd%jec, &
+         ' [lon|lat][min|max]=', minval(grd%lon),maxval(grd%lon),minval(grd%lat),maxval(grd%lat)
+  endif
+
+ !if (mpp_pe().eq.22) then
+ !  write(stderr(),'(a3,32i7)') ' ',(i,i=grd%isd,grd%ied)
+ !  do j=grd%jed,grd%jsd,-1
+ !    write(stderr(),'(i3,32f7.1)') j,(grd%lon(i,j),i=grd%isd,grd%ied)
  !  enddo
  !endif
 
@@ -1640,8 +1648,13 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
     localberg%lat=get_double(ncid, latid, k)
     ! Test if this berg is within the maximum possible bounds of tile
     if ( sum_sign_dot_prod4(lon0,lat0,lon1,lat0,lon1,lat1,lon0,lat1,localberg%lon,localberg%lat) ) then
-     !write(stderr(),*) 'diamond, read_restart_bergs: berg ',k,' is at ',lon,lat
       lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+      if (debug) then
+        write(stderr(),*) 'diamond, read_restart_bergs: berg ',k,' is at ',localberg%lon,localberg%lat,' on PE ',mpp_pe()
+        write(stderr(),*) 'diamond, read_restart_bergs: lon range is ',lon0,lon1,' on PE ',mpp_pe()
+        write(stderr(),*) 'diamond, read_restart_bergs: lat range is ',lat0,lat1,' on PE ',mpp_pe()
+        write(stderr(),*) 'diamond, read_restart_bergs: lres = ',lres
+      endif
       if (lres) then
         localberg%uvel=get_double(ncid, uvelid, k)
         localberg%vvel=get_double(ncid, vvelid, k)
