@@ -108,7 +108,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.28 2008/06/20 01:50:11 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.29 2008/06/21 04:37:58 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -313,14 +313,16 @@ integer :: itloop
       'va*=',(drag_atm*va)/lambda, &
       'vi*=',(drag_ice*vi)/lambda
     write(stderr(),'(a,i3,9(1xa,1pe12.3))') '          pe=',mpp_pe(), &
-      'xi=',xi, &
-      'yj=',yj, &
       'a=',sqrt(a2), &
       'Lwl=',Lwavelength, &
       'Lcut=',Lcutoff, &
       'Ltop=',Ltop, &
       'hi=',hi, &
       'Cr=',Cr
+    write(stderr(),'(a,i3,9(1xa,1pe12.3))') '          pe=',mpp_pe(), &
+      'xi=',xi, &
+      'yj=',yj, &
+      'lat=',lat
     call print_berg(stderr(),berg,'diamond, accel, large accel')
   endif
 
@@ -783,10 +785,15 @@ real :: uvel2, vvel2, lon2, lat2, u2, v2, dxdl2, ax2, ay2
 real :: uvel3, vvel3, lon3, lat3, u3, v3, dxdl3, ax3, ay3
 real :: uvel4, vvel4, lon4, lat4, u4, v4, dxdl4, ax4, ay4
 real :: uveln, vveln, lonn, latn
+real :: x1, xdot1, xddot1, y1, ydot1, yddot1
+real :: x2, xdot2, xddot2, y2, ydot2, yddot2
+real :: x3, xdot3, xddot3, y3, ydot3, yddot3
+real :: x4, xdot4, xddot4, y4, ydot4, yddot4
+real :: xn, xdotn, yn, ydotn
 real :: r180_pi, dt, dt_2, dt_6, dydl, Rearth
-integer :: i, j, i0, j0
-real :: xi, yj, xi0, yj0
-logical :: bounced
+integer :: i, j
+real :: xi, yj
+logical :: bounced, on_tangential_plane
 
   ! 4th order Runge-Kutta to solve:
   !    d/dt X = V,  d/dt V = A
@@ -805,11 +812,19 @@ logical :: bounced
   grd=>bergs%grd
 
   if (.not. is_point_in_cell(bergs%grd, berg%lon, berg%lat, berg%ine, berg%jne) ) then
+    write(stderr(),'(i4,a4,32i7)') mpp_pe(),'Lon',(i,i=grd%isd,grd%ied)
+    do j=grd%jed,grd%jsd,-1
+      write(stderr(),'(2i4,32f7.1)') mpp_pe(),j,(grd%lon(i,j),i=grd%isd,grd%ied)
+    enddo
+    write(stderr(),'(i4,a4,32i7)') mpp_pe(),'Lat',(i,i=grd%isd,grd%ied)
+    do j=grd%jed,grd%jsd,-1
+      write(stderr(),'(2i4,32f7.1)') mpp_pe(),j,(grd%lat(i,j),i=grd%isd,grd%ied)
+    enddo
     call print_berg(stderr(), berg, 'evolve_iceberg, berg is not in proper starting cell')
-    write(stderr(),'(a,i3,2(i4,3f8.2))') 'evolve_iceberg: berg is not in proper starting cell!!!!!', &
-             mpp_pe(), &
+    write(stderr(),'(a,i3,2(i4,3f8.2))') 'evolve_iceberg: pe,lon/lat(i,j)=', mpp_pe(), &
              berg%ine,berg%lon,grd%lon(berg%ine-1,berg%jne-1),grd%lon(berg%ine,berg%jne), &
-             berg%jne,berg%lat,grd%lon(berg%ine-1,berg%jne-1),grd%lon(berg%ine,berg%jne)
+             berg%jne,berg%lat,grd%lat(berg%ine-1,berg%jne-1),grd%lat(berg%ine,berg%jne)
+    if (debug) call error_mesg('diamond, evolve_iceberg','berg is in wrong starting cell!',FATAL)
   endif
 
   r180_pi=1./pi_180
@@ -821,85 +836,123 @@ logical :: bounced
   j=berg%jne
   xi=berg%xi
   yj=berg%yj
+  bounced=.false.
+  on_tangential_plane=.false.
+  if (berg%lat>89.) on_tangential_plane=.true.
 
-  i0=i; j0=j; xi0=xi; yj0=yj;
-  
   ! A1 = A(X1)
-  lon1=berg%lon
-  lat1=berg%lat
+  lon1=berg%lon; lat1=berg%lat
+  if (on_tangential_plane) call rotpos_to_tang(lon1,lat1,x1,y1)
   dxdl1=r180_pi/(Rearth*cos(lat1*pi_180))
   dydl=r180_pi/Rearth
-  uvel1=berg%uvel
-  vvel1=berg%vvel
-  u1=uvel1*dxdl1
-  v1=vvel1*dydl
+  uvel1=berg%uvel; vvel1=berg%vvel
+  if (on_tangential_plane) call rotvec_to_tang(lon1,uvel1,vvel1,xdot1,ydot1)
+  u1=uvel1*dxdl1; v1=vvel1*dydl
   call accel(bergs, berg, i, j, xi, yj, lat1, uvel1, vvel1, ax1, ay1)
+  if (on_tangential_plane) call rotvec_to_tang(lon1,ax1,ay1,xddot1,yddot1)
   
   !  X2 = X1+dt/2*V1 ; V2 = V1+dt/2*A1; A2=A(X2)
-  lon2=lon1+dt_2*u1
-  lat2=lat1+dt_2*v1
-  uvel2=uvel1+dt_2*ax1
-  vvel2=vvel1+dt_2*ay1
-  bounced=.false.
+ !if (debug) write(stderr(),*) 'diamond, evolve: x2=...'
+  if (on_tangential_plane) then
+    x2=x1+dt_2*xdot1; y2=y1+dt_2*ydot1
+    xdot2=xdot1+dt_2*xddot1; ydot2=ydot1+dt_2*yddot1
+    call rotpos_from_tang(x2,y2,lon2,lat2)
+    call rotvec_from_tang(lon2,xdot2,ydot2,uvel2,vvel2)
+  else
+    lon2=lon1+dt_2*u1; lat2=lat1+dt_2*v1
+    uvel2=uvel1+dt_2*ax1; vvel2=vvel1+dt_2*ay1
+  endif
   call adjust_index_and_ground(grd, lon2, lat2, uvel2, vvel2, i, j, xi, yj, bounced)
+  ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon2,lat2,x2,y2)
   if (debug .and. .not. is_point_in_cell(bergs%grd, lon2, lat2, i, j) ) then
+   !write(stderr(),'(i4,a4,32i7)') mpp_pe(),'Lon',(i,i=grd%isd,grd%ied)
+   !do j=grd%jed,grd%jsd,-1
+   !  write(stderr(),'(2i4,32f7.1)') mpp_pe(),j,(grd%lon(i,j),i=grd%isd,grd%ied)
+   !enddo
+   !write(stderr(),'(i4,a4,32i7)') mpp_pe(),'Lat',(i,i=grd%isd,grd%ied)
+   !do j=grd%jed,grd%jsd,-1
+   !  write(stderr(),'(2i4,32f7.1)') mpp_pe(),j,(grd%lat(i,j),i=grd%isd,grd%ied)
+   !enddo
     call print_berg(stderr(), berg, 'evolve_iceberg, out of position at 2')
-    write(stderr(),'(a,i3,a,2i3,4f8.3)') 'pe=',mpp_pe(),'pos2 lon,lat,i,j,xi,yj=',i,j,lon2,lat2,xi,yj
+    write(stderr(),'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'pos2 i,j,lon,lat,xi,yj=',i,j,lon2,lat2,xi,yj
     write(stderr(),'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'pos2 box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
+    call error_mesg('diamond, evolve_iceberg','berg is out of posn at 2!',FATAL)
   endif
   dxdl2=r180_pi/(Rearth*cos(lat2*pi_180))
-  u2=uvel2*dxdl2
-  v2=vvel2*dydl
+  u2=uvel2*dxdl2; v2=vvel2*dydl
   call accel(bergs, berg, i, j, xi, yj, lat2, uvel2, vvel2, ax2, ay2)
+  if (on_tangential_plane) call rotvec_to_tang(lon2,ax2,ay2,xddot2,yddot2)
   
   !  X3 = X1+dt/2*V2 ; V3 = V1+dt/2*A2; A3=A(X3)
-  lon3=lon1+dt_2*u2
-  lat3=lat1+dt_2*v2
-  uvel3=uvel1+dt_2*ax2
-  vvel3=vvel1+dt_2*ay2
+ !if (debug) write(stderr(),*) 'diamond, evolve: x3=...'
+  if (on_tangential_plane) then
+    x3=x1+dt_2*xdot2; y3=y1+dt_2*ydot2
+    xdot3=xdot1+dt_2*xddot2; ydot3=ydot1+dt_2*yddot2
+    call rotpos_from_tang(x3,y3,lon3,lat3)
+    call rotvec_from_tang(lon3,xdot3,ydot3,uvel3,vvel3)
+  else
+    lon3=lon1+dt_2*u2; lat3=lat1+dt_2*v2
+    uvel3=uvel1+dt_2*ax2; vvel3=vvel1+dt_2*ay2
+  endif
   call adjust_index_and_ground(grd, lon3, lat3, uvel3, vvel3, i, j, xi, yj, bounced)
+  ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon3,lat3,x3,y3)
   if (debug .and. .not. is_point_in_cell(bergs%grd, lon3, lat3, i, j) ) then
     call print_berg(stderr(), berg, 'evolve_iceberg, out of position at 3')
-    write(stderr(),'(a,i3,a,2i3,4f8.3)') 'pe=',mpp_pe(),'pos3 lon,lat,i,j,xi,yj=',i,j,lon3,lat3,xi,yj
+    write(stderr(),'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'pos3 i,j,lon,lat,xi,yj=',i,j,lon3,lat3,xi,yj
     write(stderr(),'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'pos3 box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
+    call error_mesg('diamond, evolve_iceberg','berg is out of posn at 3!',FATAL)
   endif
   dxdl3=r180_pi/(Rearth*cos(lat3*pi_180))
-  u3=uvel3*dxdl3
-  v3=vvel3*dydl
+  u3=uvel3*dxdl3; v3=vvel3*dydl
   call accel(bergs, berg, i, j, xi, yj, lat3, uvel3, vvel3, ax3, ay3)
+  if (on_tangential_plane) call rotvec_to_tang(lon3,ax3,ay3,xddot3,yddot3)
   
   !  X4 = X1+dt*V3 ; V4 = V1+dt*A3; A4=A(X4)
-  lon4=lon1+dt*u3
-  lat4=lat1+dt*v3
-  uvel4=uvel1+dt*ax3
-  vvel4=vvel1+dt*ay3
+ !if (debug) write(stderr(),*) 'diamond, evolve: x4=...'
+  if (on_tangential_plane) then
+    x4=x1+dt*xdot3; y4=y1+dt*ydot3
+    xdot4=xdot1+dt*xddot3; ydot4=ydot1+dt*yddot3
+    call rotpos_from_tang(x4,y4,lon4,lat4)
+    call rotvec_from_tang(lon4,xdot4,ydot4,uvel4,vvel4)
+  else
+    lon4=lon1+dt*u3; lat4=lat1+dt*v3
+    uvel4=uvel1+dt*ax3; vvel4=vvel1+dt*ay3
+  endif
   call adjust_index_and_ground(grd, lon4, lat4, uvel4, vvel4, i, j, xi, yj, bounced)
+  ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon4,lat4,x4,y4)
   if (debug .and. .not. is_point_in_cell(bergs%grd, lon4, lat4, i, j) ) then
     call print_berg(stderr(), berg, 'evolve_iceberg, out of position at 4')
-    write(stderr(),'(a,i3,a,2i3,4f8.3)') 'pe=',mpp_pe(),'pos4 lon,lat,i,j,xi,yj=',i,j,lon4,lat4,xi,yj
+    write(stderr(),'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'pos4 i,j,lon,lat,xi,yj=',i,j,lon4,lat4,xi,yj
     write(stderr(),'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'pos4 box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
+    call error_mesg('diamond, evolve_iceberg','berg is out of posn at 4!',FATAL)
   endif
   dxdl4=r180_pi/(Rearth*cos(lat4*pi_180))
-  u4=uvel4*dxdl4
-  v4=vvel4*dydl
+  u4=uvel4*dxdl4; v4=vvel4*dydl
   call accel(bergs, berg, i, j, xi, yj, lat4, uvel4, vvel4, ax4, ay4)
+  if (on_tangential_plane) call rotvec_to_tang(lon4,ax4,ay4,xddot4,yddot4)
   
   !  Xn = X1+dt*(V1+2*V2+2*V3+V4)/6
   !  Vn = V1+dt*(A1+2*A2+2*A3+A4)/6
-  lonn=berg%lon+dt_6*( (u1+u4)+2.*(u2+u3) )
-  latn=berg%lat+dt_6*( (v1+v4)+2.*(v2+v3) )
-  uveln=berg%uvel+dt_6*( (ax1+ax4)+2.*(ax2+ax3) )
-  vveln=berg%vvel+dt_6*( (ay1+ay4)+2.*(ay2+ay3) )
-  
- !if (verbose) call print_berg(stderr(), berg, 'evolve_iceberg, initial pos')
-
-
+  if (on_tangential_plane) then
+    xn=x1+dt_6*( (xdot1+xdot4)+2.*(xdot2+xdot3) )
+    yn=y1+dt_6*( (ydot1+ydot4)+2.*(ydot2+ydot3) )
+    xdotn=xdot1+dt_6*( (xddot1+xddot4)+2.*(xddot2+xddot3) )
+    ydotn=ydot1+dt_6*( (yddot1+yddot4)+2.*(yddot2+yddot3) )
+    call rotpos_from_tang(xn,yn,lonn,latn)
+    call rotvec_from_tang(lonn,xdotn,ydotn,uveln,vveln)
+  else
+    lonn=berg%lon+dt_6*( (u1+u4)+2.*(u2+u3) )
+    latn=berg%lat+dt_6*( (v1+v4)+2.*(v2+v3) )
+    uveln=berg%uvel+dt_6*( (ax1+ax4)+2.*(ax2+ax3) )
+    vveln=berg%vvel+dt_6*( (ay1+ay4)+2.*(ay2+ay3) )
+  endif
   call adjust_index_and_ground(grd, lonn, latn, uveln, vveln, i, j, xi, yj, bounced)
 
   if (.not. is_point_in_cell(bergs%grd, lonn, latn, i, j) ) then
     call print_berg(stderr(), berg, 'evolve_iceberg, out of cell at end!')
-    write(stderr(),'(a,i3,a,2i3,4f8.3)') 'pe=',mpp_pe(),'posn lon,lat,i,j,xi,yj=',i,j,lonn,latn,xi,yj
+    write(stderr(),'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'posn i,j,lon,lat,xi,yj=',i,j,lonn,latn,xi,yj
     write(stderr(),'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'posn box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
+    if (debug) call error_mesg('diamond, evolve_iceberg','berg is out of posn at end!',FATAL)
   endif
 
   berg%lon=lonn
@@ -912,9 +965,75 @@ logical :: bounced
   berg%yj=yj
  !call interp_flds(grd, i, j, xi, yj, berg%uo, berg%vo, berg%ui, berg%vi, berg%ua, berg%va, berg%ssh_x, berg%ssh_y, berg%sst)
 
- if (debug) call print_berg(stderr(), berg, 'evolve_iceberg, final posn.')
+ !if (debug) call print_berg(stderr(), berg, 'evolve_iceberg, final posn.')
 
- contains
+  contains
+
+  subroutine rotpos_to_tang(lon, lat, x, y)
+  ! Arguments
+  real, intent(in) :: lon, lat
+  real, intent(out) :: x, y
+  ! Local variables
+  real :: r,colat,clon,slon
+
+    if (lat>90.) then
+      write(stderr(),*) 'diamond, rotpos_to_tang: lat>90 already!',lat
+      call error_mesg('diamond, rotpos_to_tang','Something went very wrong!',FATAL)
+    endif
+    if (lat==90.) then
+      write(stderr(),*) 'diamond, rotpos_to_tang: lat==90 already!',lat
+      call error_mesg('diamond, rotpos_to_tang','Something went wrong!',FATAL)
+    endif
+
+    colat=90.-lat
+    r=Rearth*(colat*pi_180)
+    clon=cos(lon*pi_180)
+    slon=sin(lon*pi_180)
+    x=r*clon
+    y=r*slon
+
+  end subroutine rotpos_to_tang
+
+  subroutine rotpos_from_tang(x, y, lon, lat)
+  ! Arguments
+  real, intent(in) :: x, y
+  real, intent(out) :: lon, lat
+  ! Local variables
+  real :: r
+
+    r=sqrt(x**2+y**2)
+    lat=90.-(r180_pi*r/Rearth)
+    lon=r180_pi*acos(x/r)*sign(1.,y)
+
+  end subroutine rotpos_from_tang
+
+  subroutine rotvec_to_tang(lon, uvel, vvel, xdot, ydot)
+  ! Arguments
+  real, intent(in) :: lon, uvel, vvel
+  real, intent(out) :: xdot, ydot
+  ! Local variables
+  real :: clon,slon
+
+    clon=cos(lon*pi_180)
+    slon=sin(lon*pi_180)
+    xdot=-slon*uvel-clon*vvel
+    ydot=clon*uvel-slon*vvel
+
+  end subroutine rotvec_to_tang
+
+  subroutine rotvec_from_tang(lon, xdot, ydot, uvel, vvel)
+  ! Arguments
+  real, intent(in) :: lon, xdot, ydot
+  real, intent(out) :: uvel, vvel
+  ! Local variables
+  real :: clon,slon
+
+    clon=cos(lon*pi_180)
+    slon=sin(lon*pi_180)
+    uvel=-slon*xdot+clon*ydot
+    vvel=-clon*xdot-slon*ydot
+
+  end subroutine rotvec_from_tang
 
 ! ##############################################################################
 
@@ -927,74 +1046,114 @@ logical, intent(out) :: bounced
 ! Local variables
 logical lret
 real, parameter :: posn_eps=1e-3, sanity_acc=1.e-11
-integer :: icount
+integer :: icount, i0, j0
 
+  i0=i; j0=j ! original i,j
   bounced=.false.
   lret=pos_within_cell(grd, lon, lat, i, j, xi, yj)
-  if (debug) lret=is_point_in_cell(grd, lon, lat, i, j)
-  ! Sanity check lret, xi and yj
-  if (debug.and.lret.and. (abs(xi-0.5)-0.5>sanity_acc.or.abs(yj-0.5)-0.5>sanity_acc)) then
-    write(stderr(),*) 'diamond, adjust: WARNING!!! lret=T but |xi,yj|>1',lret,xi,yj,lon,lat,i,j
-!   stop 'This should not ever happen!'
-  elseif (debug.and.(.not.lret).and. (abs(xi-0.5)-0.5<sanity_acc.and.abs(yj-0.5)-0.5<sanity_acc)) then
-    write(stderr(),*) 'diamond, adjust: WARNING!!! lret=F but |xi,yj|<1',lret,xi,yj,lon,lat,i,j
-!   stop 'This should not ever happen!'
+  if (debug) then
+    !Sanity check lret, xi and yj
+    lret=is_point_in_cell(grd, lon, lat, i, j)
+    if (xi<0. .or. xi>1. .or. yj<0. .or. yj>1.) then
+      if (lret) then
+        write(stderr(),*) 'diamond, adjust: WARNING!!! lret=T but |xi,yj|>1',mpp_pe()
+        write(stderr(),*) 'diamond, adjust: xi=',xi,' lon=',lon
+        write(stderr(),*) 'diamond, adjust: x3 x2=',grd%lon(i-1,j),grd%lon(i,j)
+        write(stderr(),*) 'diamond, adjust: x0 x1=',grd%lon(i-1,j-1),grd%lon(i,j-1)
+        write(stderr(),*) 'diamond, adjust: yi=',yj,' lat=',lat
+        write(stderr(),*) 'diamond, adjust: y3 y2=',grd%lat(i-1,j),grd%lat(i,j)
+        write(stderr(),*) 'diamond, adjust: y0 y1=',grd%lat(i-1,j-1),grd%lat(i,j-1)
+        lret=is_point_in_cell(grd, lon, lat, i, j, explain=.true.)
+        write(stderr(),*) 'diamond, adjust: fn is_point_in_cell=',lret
+        lret=pos_within_cell(grd, lon, lat, i, j, xi, yj, explain=.true.)
+        write(stderr(),*) 'diamond, adjust: fn pos_within_cell=',lret
+       !stop 'This should never happen!'
+     endif
+    else
+      if (.not.lret) then
+        write(stderr(),*) 'diamond, adjust: WARNING!!! lret=F but |xi,yj|<1',mpp_pe()
+        write(stderr(),*) 'diamond, adjust: xi=',xi,' lon=',lon
+        write(stderr(),*) 'diamond, adjust: x3 x2=',grd%lon(i-1,j),grd%lon(i,j)
+        write(stderr(),*) 'diamond, adjust: x0 x1=',grd%lon(i-1,j-1),grd%lon(i,j-1)
+        write(stderr(),*) 'diamond, adjust: yi=',yj,' lat=',lat
+        write(stderr(),*) 'diamond, adjust: y3 y2=',grd%lat(i-1,j),grd%lat(i,j)
+        write(stderr(),*) 'diamond, adjust: y0 y1=',grd%lat(i-1,j-1),grd%lat(i,j-1)
+        lret=is_point_in_cell(grd, lon, lat, i, j, explain=.true.)
+        write(stderr(),*) 'diamond, adjust: fn is_point_in_cell=',lret
+        lret=pos_within_cell(grd, lon, lat, i, j, xi, yj, explain=.true.)
+        write(stderr(),*) 'diamond, adjust: fn pos_within_cell=',lret
+       !stop 'This should never happen!'
+      endif
+    endif
+    lret=pos_within_cell(grd, lon, lat, i, j, xi, yj)
   endif
   icount=0
- !do while(.not.lret.and.icount<=grd%halo-1) ! Note -1 needed because using non-symmetric arrays
-  do while( .not.lret.and. icount<10 .and. &
-      (i.gt.grd%isd.and.i.lt.grd%ied.and. &
-       j.gt.grd%jsd.and.j.lt.grd%jed) )
-  icount=icount+1
-  if (xi.lt.0.) then
-    if (grd%msk(i-1,j)>0.) then
-      i=i-1
-    else
-     !write(stderr(),'(a,6f8.3,i)') 'diamond, adjust: bouncing berg from west',lon,lat,xi,yj,uvel,vvel,mpp_pe()
-      xi=posn_eps
-      lon=bilin(grd, grd%lon, i, j, xi, yj)
-      lat=bilin(grd, grd%lat, i, j, xi, yj)
-      bounced=.true.
+  do while ( .not.lret.and. icount<100 )
+    icount=icount+1
+    if (xi.lt.0.) then
+      if (grd%msk(i-1,j)>0.) then
+        if (i>grd%isd+1) i=i-1
+      else
+       !write(stderr(),'(a,6f8.3,i)') 'diamond, adjust: bouncing berg from west',lon,lat,xi,yj,uvel,vvel,mpp_pe()
+        xi=posn_eps
+        lon=bilin(grd, grd%lon, i, j, xi, yj)
+        lat=bilin(grd, grd%lat, i, j, xi, yj)
+        bounced=.true.
+      endif
+    elseif (xi.gt.1.) then
+      if (grd%msk(i+1,j)>0.) then
+        if (i<grd%ied) i=i+1
+      else
+       !write(stderr(),'(a,6f8.3,i)') 'diamond, adjust: bouncing berg from east',lon,lat,xi,yj,uvel,vvel,mpp_pe()
+        xi=1.-posn_eps
+        lon=bilin(grd, grd%lon, i, j, xi, yj)
+        lat=bilin(grd, grd%lat, i, j, xi, yj)
+        bounced=.true.
+      endif
     endif
-  elseif (xi.gt.1.) then
-    if (grd%msk(i+1,j)>0.) then
-      i=i+1
-    else
-     !write(stderr(),'(a,6f8.3,i)') 'diamond, adjust: bouncing berg from east',lon,lat,xi,yj,uvel,vvel,mpp_pe()
-      xi=1.-posn_eps
-      lon=bilin(grd, grd%lon, i, j, xi, yj)
-      lat=bilin(grd, grd%lat, i, j, xi, yj)
-      bounced=.true.
+    if (yj.lt.0.) then
+      if (grd%msk(i,j-1)>0.) then
+        if (j>grd%jsd+1) j=j-1
+      else
+       !write(stderr(),'(a,6f8.3,i)') 'diamond, adjust: bouncing berg from south',lon,lat,xi,yj,uvel,vvel,mpp_pe()
+        yj=posn_eps
+        lon=bilin(grd, grd%lon, i, j, xi, yj)
+        lat=bilin(grd, grd%lat, i, j, xi, yj)
+        bounced=.true.
+      endif
+    elseif (yj.gt.1.) then
+      if (grd%msk(i,j+1)>0.) then
+        if (j<grd%jed) j=j+1
+      else
+       !write(stderr(),'(a,6f8.3,i)') 'diamond, adjust: bouncing berg from north',lon,lat,xi,yj,uvel,vvel,mpp_pe()
+        yj=1.-posn_eps
+        lon=bilin(grd, grd%lon, i, j, xi, yj)
+        lat=bilin(grd, grd%lat, i, j, xi, yj)
+        bounced=.true.
+      endif
     endif
-  endif
-  if (yj.lt.0.) then
-    if (grd%msk(i,j-1)>0.) then
-      j=j-1
-    else
-     !write(stderr(),'(a,6f8.3,i)') 'diamond, adjust: bouncing berg from south',lon,lat,xi,yj,uvel,vvel,mpp_pe()
-      yj=posn_eps
-      lon=bilin(grd, grd%lon, i, j, xi, yj)
-      lat=bilin(grd, grd%lat, i, j, xi, yj)
-      bounced=.true.
-    endif
-  elseif (yj.gt.1.) then
-    if (grd%msk(i,j+1)>0.) then
-      j=j+1
-    else
-     !write(stderr(),'(a,6f8.3,i)') 'diamond, adjust: bouncing berg from north',lon,lat,xi,yj,uvel,vvel,mpp_pe()
-      yj=1.-posn_eps
-      lon=bilin(grd, grd%lon, i, j, xi, yj)
-      lat=bilin(grd, grd%lat, i, j, xi, yj)
-      bounced=.true.
-    endif
-  endif
-  lret=pos_within_cell(grd, lon, lat, i, j, xi, yj)
+    lret=pos_within_cell(grd, lon, lat, i, j, xi, yj)
   enddo
 
-  if (.not.lret) &
-     write(stderr(),'(a,2i4,6f8.3,2i3)') 'diamond, adjust: FAILED!!!',i,j,lon,lat,xi,yj,uvel,vvel,icount,mpp_pe()
-  if (icount>grd%halo) &
-     write(stderr(),'(a,2i4,6f8.3,2i3)') 'diamond, adjust: Large icount!!!',i,j,lon,lat,xi,yj,uvel,vvel,icount,mpp_pe()
+  if (.not.lret) then
+    write(stderr(),'(a,2f8.3,a,1i3)') 'diamond, adjust: initially failed for lon,lat=',lon,lat,' on PE',mpp_pe()
+    lret=find_cell_wide(grd, lon, lat, i, j)
+    write(stderr(),'(a,l3,a,i3)') 'diamond, adjust: lret=',lret,' on PE',mpp_pe()
+    if (lret) then
+      write(stderr(),'(a,i3,2f8.3)') 'diamond, adjust: calling pos_within_cell on PE',mpp_pe(),lon,lat
+      lret=pos_within_cell(grd, lon, lat, i, j, xi, yj)
+    endif
+    if (.not.lret) then
+      write(stderr(),'(a,2i4,4f8.3,2i3)') 'diamond, adjust: _wide FAILED!!!',i,j,lon,lat,uvel,vvel,mpp_pe()
+      call error_mesg('diamond, adjust', 'can not find a cell to place berg in!', FATAL)
+    endif
+  endif
+
+  if (debug.and.(abs(i-i0)>1 .or. abs(j-j0)>1)) &
+    write(stderr(),*) 'diamond, adjust: Large change in i,j!!! i0=',i0,' i=',i,' j0=',j0,' j=',j,' pe=',mpp_pe()
+
+  if (icount>3) &
+    write(stderr(),'(a,2i4,6f8.3,2i3)') 'diamond, adjust: Large icount!!!',i,j,lon,lat,xi,yj,uvel,vvel,icount,mpp_pe()
 
 end subroutine adjust_index_and_ground
 
@@ -1269,8 +1428,6 @@ contains
         write(stderr(),*) grd%lat(grd%isc-1,grd%jsc-1),grd%lat(grd%iec,grd%jec)
         write(stderr(),*) grd%lon(grd%isd,grd%jsd),grd%lon(grd%ied,grd%jsd)
         write(stderr(),*) grd%lat(grd%isd,grd%jsd),grd%lat(grd%ied,grd%jed)
-        debug=.true.
-        lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
         write(stderr(),*) lres
         call error_mesg('diamond, unpack_berg_from_buffer', 'can not find a cell to place berg in!', FATAL)
       endif
@@ -1491,9 +1648,13 @@ logical :: lerr
   endif
 
  !if (mpp_pe().eq.22) then
- !  write(stderr(),'(a3,32i7)') ' ',(i,i=grd%isd,grd%ied)
+ !  write(stderr(),'(a3,32i7)') 'Lon',(i,i=grd%isd,grd%ied)
  !  do j=grd%jed,grd%jsd,-1
  !    write(stderr(),'(i3,32f7.1)') j,(grd%lon(i,j),i=grd%isd,grd%ied)
+ !  enddo
+ !  write(stderr(),'(a3,32i7)') 'Lat',(i,i=grd%isd,grd%ied)
+ !  do j=grd%jed,grd%jsd,-1
+ !    write(stderr(),'(i3,32f7.1)') j,(grd%lat(i,j),i=grd%isd,grd%ied)
  !  enddo
  !endif
 
@@ -1647,12 +1808,12 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
     ! Test if this berg is within the maximum possible bounds of tile
     if ( sum_sign_dot_prod4(lon0,lat0,lon1,lat0,lon1,lat1,lon0,lat1,localberg%lon,localberg%lat) ) then
       lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
-      if (debug) then
-        write(stderr(),*) 'diamond, read_restart_bergs: berg ',k,' is at ',localberg%lon,localberg%lat,' on PE ',mpp_pe()
-        write(stderr(),*) 'diamond, read_restart_bergs: lon range is ',lon0,lon1,' on PE ',mpp_pe()
-        write(stderr(),*) 'diamond, read_restart_bergs: lat range is ',lat0,lat1,' on PE ',mpp_pe()
-        write(stderr(),*) 'diamond, read_restart_bergs: lres = ',lres
-      endif
+     !if (debug) then
+     !  write(stderr(),*) 'diamond, read_restart_bergs: berg ',k,' is at ',localberg%lon,localberg%lat,' on PE ',mpp_pe()
+     !  write(stderr(),*) 'diamond, read_restart_bergs: lon range is ',lon0,lon1,' on PE ',mpp_pe()
+     !  write(stderr(),*) 'diamond, read_restart_bergs: lat range is ',lat0,lat1,' on PE ',mpp_pe()
+     !  write(stderr(),*) 'diamond, read_restart_bergs: lres = ',lres
+     !endif
       if (lres) then
         localberg%uvel=get_double(ncid, uvelid, k)
         localberg%vvel=get_double(ncid, vvelid, k)
@@ -2003,11 +2164,12 @@ end function find_cell_wide
 
 ! ##############################################################################
 
-logical function is_point_in_cell(grd, x, y, i, j)
+logical function is_point_in_cell(grd, x, y, i, j, explain)
 ! Arguments
 type(icebergs_gridded), intent(in) :: grd
 real, intent(in) :: x, y
 integer, intent(in) :: i, j
+logical, intent(in), optional :: explain
 ! Local variables
 real :: xlo, xhi, ylo, yhi, xx
 
@@ -2016,7 +2178,7 @@ real :: xlo, xhi, ylo, yhi, xx
     write(stderr(),'(a,i3,(a,3i4))') &
                      'diamond, is_point_in_cell: pe=(',mpp_pe(),') i,s,e=', &
                      i,grd%isd,grd%ied,' j,s,e=', j,grd%jsd,grd%jed
-    call error_mesg('diamond, is_point_in_cell', 'berg is off the PE!', FATAL)
+    call error_mesg('diamond, is_point_in_cell', 'test is off the PE!', FATAL)
   endif
 
   is_point_in_cell=.false.
@@ -2034,71 +2196,124 @@ real :: xlo, xhi, ylo, yhi, xx
                                       grd%lon(i  ,j-1),grd%lat(i  ,j-1), &
                                       grd%lon(i  ,j  ),grd%lat(i  ,j  ), &
                                       grd%lon(i-1,j  ),grd%lat(i-1,j  ), &
-                                      x, y) 
- !if (debug) then
- !  write(stderr(),*) 'diamond, is_point_in_cell: inside crude bounds but no in cell',mpp_pe()
- !  write(stderr(),*) 'diamond, is_point_in_cell: ',xlo,xhi,x,xx
- !  write(stderr(),*) 'diamond, is_point_in_cell: ',ylo,yhi,y
+                                      x, y, explain=explain) 
+
+ !if (debug .and. .not. is_point_in_cell) then
+ !  write(stderr(),*) 'diamond, is_point_in_cell: inside crude bounds but not in cell',mpp_pe()
+ !  write(stderr(),*) 'diamond, is_point_in_cell: xlo,hi,x,xx=',xlo,xhi,x,xx
+ !  write(stderr(),*) 'diamond, is_point_in_cell: ylo,hi,y=',ylo,yhi,y
+ !  write(stderr(),*) 'diamond, is_point_in_cell: i,j=',i,j
  !endif
 
 end function is_point_in_cell
 
 ! ##############################################################################
 
-logical function sum_sign_dot_prod4(x0, y0, x1, y1, x2, y2, x3, y3, x, y)
+logical function sum_sign_dot_prod4(x0, y0, x1, y1, x2, y2, x3, y3, x, y, explain)
 ! Arguments
 real, intent(in) :: x0, y0, x1, y1, x2, y2, x3, y3, x, y
+logical, intent(in), optional :: explain
 ! Local variables
 real :: p0,p1,p2,p3,xx
 real :: l0,l1,l2,l3
+real :: xx0,xx1,xx2,xx3
 
   sum_sign_dot_prod4=.false.
-  xx=modulo(x-(x0-180.),360.)+(x0-180.)
+  xx=modulo(x-(x0-180.),360.)+(x0-180.) ! Reference x to within 180 of x0
+  xx0=modulo(x0-(xx-180.),360.)+(xx-180.) ! Reference x0 to within 180 of xx
+  xx1=modulo(x1-(xx-180.),360.)+(xx-180.) ! Reference x1 to within 180 of xx
+  xx2=modulo(x2-(xx-180.),360.)+(xx-180.) ! Reference x2 to within 180 of xx
+  xx3=modulo(x3-(xx-180.),360.)+(xx-180.) ! Reference x3 to within 180 of xx
 
   l0=(xx-x0)*(y1-y0)-(y-y0)*(x1-x0)
   l1=(xx-x1)*(y2-y1)-(y-y1)*(x2-x1)
   l2=(xx-x2)*(y3-y2)-(y-y2)*(x3-x2)
   l3=(xx-x3)*(y0-y3)-(y-y3)*(x0-x3)
 
-  p0=sign(1., l0);!if (l0.eq.0.) p0=0.
+  p0=sign(1., l0); if (l0.eq.0.) p0=0.
   p1=sign(1., l1); if (l1.eq.0.) p1=0.
   p2=sign(1., l2); if (l2.eq.0.) p2=0.
-  p3=sign(1., l3);!if (l3.eq.0.) p3=0.
+  p3=sign(1., l3); if (l3.eq.0.) p3=0.
 
  !if ( abs( (abs(p0)+abs(p2))+(abs(p1)+abs(p3)) - abs((p0+p2)+(p1+p3)) ).lt.0.5 ) then
   if ( (abs(p0)+abs(p2))+(abs(p1)+abs(p3)) .eq. abs((p0+p2)+(p1+p3)) ) then
     sum_sign_dot_prod4=.true.
   endif
 
- !if (((x.ge.min(x0,x1,x2,x3)).and.(x.le.max(x0,x1,x2,x3)) &
- !.and.(y.ge.min(y0,y1,y2,y3)).and.(y.le.max(y0,y1,y2,y3))) .or. debug) &
- !then
- !if (debug) then
- ! write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: x=',mpp_pe(),':', &
- !                         x0,x1,x2,x3, x
- ! write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: y=',mpp_pe(),':', &
- !                         y0,y1,y2,y3, y
- ! write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: l=',mpp_pe(),':', &
- !                         l0,l1,l2,l3
- ! write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: p=',mpp_pe(),':', &
- !                         p0,p1,p2,p3, abs( (abs(p0)+abs(p2))+(abs(p1)+abs(p3)) - abs((p0+p2)+(p1+p3)) )
- !endif
+  if (.not. sum_sign_dot_prod4 .and. max(y0,y1,y2,y3).ge.89.9999) &
+      sum_sign_dot_prod4=handle_npole(xx0,y0,xx1,y1,xx2,y2,xx3,y3,x,y)
+
+  if (present(explain).and.explain) then
+   write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: x=',mpp_pe(),':', &
+                           x0,x1,x2,x3, x
+   write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: X=',mpp_pe(),':', &
+                           xx0,xx1,xx2,xx3, xx
+   write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: y=',mpp_pe(),':', &
+                           y0,y1,y2,y3, y
+   write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: l=',mpp_pe(),':', &
+                           l0,l1,l2,l3
+   write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: p=',mpp_pe(),':', &
+                           p0,p1,p2,p3, abs( (abs(p0)+abs(p2))+(abs(p1)+abs(p3)) - abs((p0+p2)+(p1+p3)) )
+  endif
+
+  contains
+
+  logical function handle_npole(lon0, lat0, lon1, lat1, lon2, lat2, lon3, lat3, lon, lat)
+  ! Arguments
+  real, intent(in) :: lon0, lat0, lon1, lat1, lon2, lat2, lon3, lat3, lon, lat
+  ! Local variables
+  real :: x0,y0,x1,y1,x2,y2,x3,y3,x,y
+  real :: l0,l1,l2,l3,p0,p1,p2,p3
+
+    handle_npole=.false.
+    x=(90.-lat)*cos(lon*pi_180)
+    y=(90.-lat)*sin(lon*pi_180)
+    x0=(90.-lat0)*cos(lon0*pi_180)
+    y0=(90.-lat0)*sin(lon0*pi_180)
+    x1=(90.-lat1)*cos(lon1*pi_180)
+    y1=(90.-lat1)*sin(lon1*pi_180)
+    x2=(90.-lat2)*cos(lon2*pi_180)
+    y2=(90.-lat2)*sin(lon2*pi_180)
+    x3=(90.-lat3)*cos(lon3*pi_180)
+    y3=(90.-lat3)*sin(lon3*pi_180)
+
+    l0=(x-x0)*(y1-y0)-(y-y0)*(x1-x0)
+    l1=(x-x1)*(y2-y1)-(y-y1)*(x2-x1)
+    l2=(x-x2)*(y3-y2)-(y-y2)*(x3-x2)
+    l3=(x-x3)*(y0-y3)-(y-y3)*(x0-x3)
+
+    p0=sign(1., l0); if (l0.eq.0.) p0=0.
+    p1=sign(1., l1); if (l1.eq.0.) p1=0.
+    p2=sign(1., l2); if (l2.eq.0.) p2=0.
+    p3=sign(1., l3); if (l3.eq.0.) p3=0.
+
+    if ( (abs(p0)+abs(p2))+(abs(p1)+abs(p3)) .eq. abs((p0+p2)+(p1+p3)) ) then
+      handle_npole=.true.
+    endif
+
+   !if (debug) write(stderr(),*) 'diamond, handle_npole res=',handle_npole
+
+  end function handle_npole
 
 end function sum_sign_dot_prod4
 
 ! ##############################################################################
 
-logical function pos_within_cell(grd, x, y, i, j, xi, yj)
+logical function pos_within_cell(grd, x, y, i, j, xi, yj, explain)
 ! Arguments
 type(icebergs_gridded), intent(in) :: grd
 real, intent(in) :: x, y
 integer, intent(in) :: i, j
 real, intent(out) :: xi, yj
+logical, intent(in), optional :: explain
 ! Local variables
-real :: x1,y1,x2,y2,x3,y3,x4,y4,dx,dy
-real :: alpha, beta, gamma, delta, epsilon, kappa, a, b, c, d
+real :: x1,y1,x2,y2,x3,y3,x4,y4,xx,yy
 
-  pos_within_cell=.true.; xi=-999.; yj=-999.
+  pos_within_cell=.false.; xi=-999.; yj=-999.
+  if (i-1<grd%isd) return
+  if (j-1<grd%jsd) return
+  if (i>grd%ied) return
+  if (j>grd%jed) return
 
   x1=grd%lon(i-1,j-1)
   y1=grd%lat(i-1,j-1)
@@ -2108,43 +2323,91 @@ real :: alpha, beta, gamma, delta, epsilon, kappa, a, b, c, d
   y3=grd%lat(i  ,j  )
   x4=grd%lon(i-1,j  )
   y4=grd%lat(i-1,j  )
- !write(stderr(),'(a,i3,4f8.2)') 'pos_within_cell: x1..x4 ',mpp_pe(),x1,x2,x3,x4
- !write(stderr(),'(a,i3,3f8.2)') 'pos_within_cell: x2..x4 - x1',mpp_pe(),x2-x1,x3-x1,x4-x1
- !write(stderr(),'(a,i3,4f8.2)') 'pos_within_cell: y1..y4 ',mpp_pe(),y1,y2,y3,y4
- !write(stderr(),'(a,i3,3f8.2)') 'pos_within_cell: y2..y4 - x1',mpp_pe(),y2-y1,y3-y1,y4-y1
+
+  if (present(explain).and.explain) then
+    write(stderr(),'(a,4f8.2)') 'pos_within_cell: x1..x4 ',x1,x2,x3,x4
+    write(stderr(),'(a,2f8.2)') 'pos_within_cell: x',x
+    write(stderr(),'(a,4f8.2)') 'pos_within_cell: y1..y4 ',y1,y2,y3,y4
+    write(stderr(),'(a,2f8.2)') 'pos_within_cell: y',y
+  endif
+
+  if (max(y1,y2,y3,y4)<89.999) then
+    call calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, x, y, xi, yj, explain=explain)
+  else
+    if (debug) write(stderr(),*) 'diamond, pos_within_cell: working in tangential plane!'
+    xx=(90.-y)*cos(x*pi_180)
+    yy=(90.-y)*sin(x*pi_180)
+    x1=(90.-y1)*cos(grd%lon(i-1,j-1)*pi_180)
+    y1=(90.-y1)*sin(grd%lon(i-1,j-1)*pi_180)
+    x2=(90.-y2)*cos(grd%lon(i  ,j-1)*pi_180)
+    y2=(90.-y2)*sin(grd%lon(i  ,j-1)*pi_180)
+    x3=(90.-y3)*cos(grd%lon(i  ,j  )*pi_180)
+    y3=(90.-y3)*sin(grd%lon(i  ,j  )*pi_180)
+    x4=(90.-y4)*cos(grd%lon(i-1,j  )*pi_180)
+    y4=(90.-y4)*sin(grd%lon(i-1,j  )*pi_180)
+    if (present(explain).and.explain) then
+      write(stderr(),'(a,4f8.2)') 'pos_within_cell: x1..x4 ',x1,x2,x3,x4
+      write(stderr(),'(a,2f8.2)') 'pos_within_cell: x',x
+      write(stderr(),'(a,4f8.2)') 'pos_within_cell: y1..y4 ',y1,y2,y3,y4
+      write(stderr(),'(a,2f8.2)') 'pos_within_cell: y',y
+    endif
+    call calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, xx, yy, xi, yj)
+  endif
 
  !if (.not. is_point_in_cell(grd, x, y, i, j) ) then
  !   write(stderr(),'(a,i3,a,8f8.2,a)') 'diamond, pos_within_cell: (',mpp_pe(),') ', &
  !                   x1, y1, x2, y2, x3, y3, x4, y4, ' NOT IN CELL!'
  !endif
 
+  if (xi.ge.0. .and. xi.le.1. .and. yj.ge.0. .and. yj.le.1.) pos_within_cell=.true.
+
+  contains
+
+  subroutine calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, x, y, xi, yj, explain)
+  ! Arguments
+  real,  intent(in) :: x1, x2, x3, x4, y1, y2, y3, y4, x, y
+  real, intent(out) :: xi, yj
+  logical, intent(in), optional :: explain
+  ! Local variables
+  real :: alpha, beta, gamma, delta, epsilon, kappa, a, b, c, d, dx, dy, yy1, yy2
+  logical :: expl=.false.
+
+  expl=.false.
+  if (present(explain).and.explain) expl=.true.
   alpha=x2-x1
   delta=y2-y1
   beta=x4-x1
   epsilon=y4-y1
   gamma=(x3-x1)-(alpha+beta)
   kappa=(y3-y1)-(delta+epsilon)
- !write(stderr(),'(a,i3,1p6e12.4)') 'pos_within_cell: coeffs alpha..kappa',mpp_pe(),alpha,beta,gamma,delta,epsilon,kappa
+  if (expl) write(stderr(),'(a,1p6e12.4)') 'calc_xiyj: coeffs alpha,beta,gamma',alpha,beta,gamma,delta,epsilon,kappa
+  if (expl) write(stderr(),'(a,1p6e12.4)') 'calc_xiyj: coeffs delta,epsilon,kappa',alpha,beta,gamma,delta,epsilon,kappa
 
   a=(kappa*beta-gamma*epsilon)
   dx=modulo(x-(x1-180.),360.)+(x1-180.)-x1
   dy=y-y1
   b=(delta*beta-alpha*epsilon)-(kappa*dx-gamma*dy)
   c=(alpha*dy-delta*dx)
-  if (a.ne.0.) then
+  if (expl) write(stderr(),'(a,1p6e12.4)') 'calc_xiyj: coeffs dx,dy=',dx,dy
+  if (expl) write(stderr(),'(a,1p6e12.4)') 'calc_xiyj: coeffs A,B,C=',a,b,c
+  if (abs(a)>1.e-12) then
     d=0.25*(b**2)-a*c
-   !write(stderr(),'(a,i3,1p6e12.4)') 'pos_within_cell: coeffs a,b,c,d,dx,dy',mpp_pe(),a,b,c,dx,dy
+    if (expl) write(stderr(),'(a,1p6e12.4)') 'calc_xiyj: coeffs D=',d
     if (d.ge.0.) then
-      y1=-0.5*b/a-sqrt(d)/a
-      y2=-0.5*b/a+sqrt(d)/a
-      if (abs(y1-0.5).lt.abs(y2-0.5)) then; yj=y1; else; yj=y2; endif
-     !write(stderr(),'(a,i3,1p3e12.4)') 'Roots for y = ',mpp_pe(),y1,y2,yj
+      if (expl) write(stderr(),'(a,1p3e12.4)') 'Roots for b/2a, sqrt(d) = ',-0.5*b/a,sqrt(d)/a
+      yy1=-(0.5*b+sqrt(d))/a
+      yy2=-(0.5*b-sqrt(d))/a
+      if (abs(yy1-0.5).lt.abs(yy2-0.5)) then; yj=yy1; else; yj=yy2; endif
+      if (expl) write(stderr(),'(a,1p3e12.4)') 'Roots for y = ',yy1,yy2,yj
     else
-      call dump_pos
-      write(stderr(),'(a,i3)') 'pos_within_cell: b<0 in quadratic root solver!!!!',mpp_pe()
-     !write(stderr(),'(a,i3,1p6e12.4)') 'pos_within_cell: coeffs alpha..kappa',mpp_pe(),alpha,beta,gamma,delta,epsilon,kappa
-      write(stderr(),'(a,i3,1p6e12.4)') 'pos_within_cell: coeffs a,b,c,d,dx,dy',mpp_pe(),a,b,c,d,dx,dy
-      call error_mesg('diamond, pos_within_cell', 'We have complex roots. The grid must be very distorted!', FATAL)
+      write(stderr(),'(a,i3,4f8.2)') 'calc_xiyj: x1..x4 ',mpp_pe(),x1,x2,x3,x4
+      write(stderr(),'(a,i3,3f8.2)') 'calc_xiyj: x2..x4 - x1',mpp_pe(),x2-x1,x3-x1,x4-x1
+      write(stderr(),'(a,i3,4f8.2)') 'calc_xiyj: y1..y4 ',mpp_pe(),y1,y2,y3,y4
+      write(stderr(),'(a,i3,3f8.2)') 'calc_xiyj: y2..y4 - x1',mpp_pe(),y2-y1,y3-y1,y4-y1
+      write(stderr(),'(a,i3,1p6e12.4)') 'calc_xiyj: coeffs alpha..kappa',mpp_pe(),alpha,beta,gamma,delta,epsilon,kappa
+      write(stderr(),'(a,i3)') 'calc_xiyj: b<0 in quadratic root solver!!!!',mpp_pe()
+      write(stderr(),'(a,i3,1p6e12.4)') 'calc_xiyj: coeffs a,b,c,d,dx,dy',mpp_pe(),a,b,c,d,dx,dy
+      call error_mesg('diamond, calc_xiyj', 'We have complex roots. The grid must be very distorted!', FATAL)
     endif
   else
     if (b.ne.0.) then
@@ -2165,26 +2428,18 @@ real :: alpha, beta, gamma, delta, epsilon, kappa, a, b, c, d
     if (c.ne.0.) then
       xi=(epsilon*dx-beta*dy)/c
     else
-      call dump_pos
-     !write(stderr(),'(a,i3,1p6e12.4)') 'pos_within_cell: coeffs alpha..kappa',mpp_pe(),alpha,beta,gamma,delta,epsilon,kappa
-      write(stderr(),'(a,i3,1p2e12.4)') 'pos_within_cell: coeffs a,b',mpp_pe(),a,b
-      call error_mesg('diamond, pos_within_cell', 'Can not invert either linear equaton for xi! This should not happen!', FATAL)
+      write(stderr(),'(a,i3,4f8.2)') 'calc_xiyj: x1..x4 ',mpp_pe(),x1,x2,x3,x4
+      write(stderr(),'(a,i3,3f8.2)') 'calc_xiyj: x2..x4 - x1',mpp_pe(),x2-x1,x3-x1,x4-x1
+      write(stderr(),'(a,i3,4f8.2)') 'calc_xiyj: y1..y4 ',mpp_pe(),y1,y2,y3,y4
+      write(stderr(),'(a,i3,3f8.2)') 'calc_xiyj: y2..y4 - x1',mpp_pe(),y2-y1,y3-y1,y4-y1
+      write(stderr(),'(a,i3,1p6e12.4)') 'calc_xiyj: coeffs alpha..kappa',mpp_pe(),alpha,beta,gamma,delta,epsilon,kappa
+      write(stderr(),'(a,i3,1p2e12.4)') 'calc_xiyj: coeffs a,b',mpp_pe(),a,b
+      call error_mesg('diamond, calc_xiyj', 'Can not invert either linear equaton for xi! This should not happen!', FATAL)
     endif
   endif
- !write(stderr(),'(a,i3,2e12.4)') 'pos_within_cell: xi,yj=',mpp_pe(),xi,yj
+  if (expl) write(stderr(),'(a,2e12.4)') 'calc_xiyj: xi,yj=',xi,yj
 
-  if (abs(xi-0.5).gt.0.5) pos_within_cell=.false.
-  if (abs(yj-0.5).gt.0.5) pos_within_cell=.false.
-
-  contains
-
-  subroutine dump_pos
-    write(stderr(),'(a,i3,4f8.2)') 'pos_within_cell: x1..x4 ',mpp_pe(),x1,x2,x3,x4
-    write(stderr(),'(a,i3,3f8.2)') 'pos_within_cell: x2..x4 - x1',mpp_pe(),x2-x1,x3-x1,x4-x1
-    write(stderr(),'(a,i3,4f8.2)') 'pos_within_cell: y1..y4 ',mpp_pe(),y1,y2,y3,y4
-    write(stderr(),'(a,i3,3f8.2)') 'pos_within_cell: y2..y4 - x1',mpp_pe(),y2-y1,y3-y1,y4-y1
-    write(stderr(),'(a,i3,1p6e12.4)') 'pos_within_cell: coeffs alpha..kappa',mpp_pe(),alpha,beta,gamma,delta,epsilon,kappa
-  end subroutine dump_pos
+  end subroutine calc_xiyj
 
 end function pos_within_cell
 
