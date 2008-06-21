@@ -108,7 +108,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.29 2008/06/21 04:37:58 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.30 2008/06/21 04:58:08 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -1835,6 +1835,15 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
     endif
   enddo
 
+  ! Sanity check
+  k=count_bergs(bergs)
+  call mpp_sum(k)
+  if (mpp_pe().eq.mpp_root_pe()) then
+    write(stderr(),'(a,i,a,i,a)') 'diamond, read_restart_bergs: there were',nbergs_in_file,' bergs in the restart file and', &
+     k,' bergs have been read'
+  endif
+
+  
 end subroutine read_restart_bergs
 
 ! ##############################################################################
