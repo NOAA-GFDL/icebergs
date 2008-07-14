@@ -108,7 +108,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.33 2008/07/14 13:35:18 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.34 2008/07/14 15:54:09 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -176,10 +176,11 @@ integer :: itloop
 
   ! Wave radiation
   uwave=ua-uo; vwave=va-vo  ! Use wind speed rel. to ocean for wave model (aja)?
-  wmod=sqrt(uwave*uwave+vwave*vwave)
-  a2=(0.5*0.02025*(wmod**2)) ! This is "a", the wave amplitude
+  wmod=uwave*uwave+vwave*vwave ! The wave amplitude and length depend on the wind speed relative to the ocean current;
+                               !  actually wmod is wmod**2 here.
+  a2=0.5*0.02025*wmod ! This is "a", the wave amplitude
   a2=a2*min(a2,F) ! This is "a^2" except when F<a.
-  Lwavelength=0.32*(wmod**2) ! Surface wave length fitted to data in table at
+  Lwavelength=0.32*wmod ! Surface wave length fitted to data in table at
   !      http://www4.ncsu.edu/eos/users/c/ceknowle/public/chapter10/part2.html
   Lcutoff=0.125*Lwavelength
   Ltop=0.25*Lwavelength
