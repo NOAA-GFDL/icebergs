@@ -108,7 +108,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.34 2008/07/14 15:54:09 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.35 2008/07/14 16:02:07 tom Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -149,7 +149,7 @@ real :: uo, vo, ui, vi, ua, va, uwave, vwave, ssh_x, ssh_y, sst, cn, hi
 real :: f_cori, T, D, W, L, M, F
 real :: drag_ocn, drag_atm, drag_ice, wave_rad
 real :: c_ocn, c_atm, c_ice
-real :: a2, wmod, Cr, Lwavelength, Lcutoff, Ltop
+real :: ampl, wmod, Cr, Lwavelength, Lcutoff, Ltop
 real, parameter :: alpha=0.0, beta=1.0, accel_lim=1.e-3, Cr0=0.06, vel_lim=5.
 real :: lambda, detA, A11, A12, axe, aye, D_hi
 real :: uveln, vveln, us, vs
@@ -178,15 +178,14 @@ integer :: itloop
   uwave=ua-uo; vwave=va-vo  ! Use wind speed rel. to ocean for wave model (aja)?
   wmod=uwave*uwave+vwave*vwave ! The wave amplitude and length depend on the wind speed relative to the ocean current;
                                !  actually wmod is wmod**2 here.
-  a2=0.5*0.02025*wmod ! This is "a", the wave amplitude
-  a2=a2*min(a2,F) ! This is "a^2" except when F<a.
+  ampl=0.5*0.02025*wmod ! This is "a", the wave amplitude
   Lwavelength=0.32*wmod ! Surface wave length fitted to data in table at
   !      http://www4.ncsu.edu/eos/users/c/ceknowle/public/chapter10/part2.html
   Lcutoff=0.125*Lwavelength
   Ltop=0.25*Lwavelength
   Cr=Cr0*min(max(0.,(L-Lcutoff)/(Ltop-Lcutoff)),1.) ! Wave radiation coefficient
   !     fitted to graph from Carrieres et al.,  POAC Drift Model.
-  wave_rad=0.5*rho_seawater/M*Cr*gravity*a2*(2.*W*L)/(W+L)
+  wave_rad=0.5*rho_seawater/M*Cr*gravity*ampl*min(ampl,F)*(2.*W*L)/(W+L)
   wmod = sqrt(ua*ua+va*va) ! Wind speed
   if (wmod.ne.0.) then
     uwave=ua/wmod ! Wave radiation force acts in wind direction ...
@@ -315,7 +314,7 @@ integer :: itloop
       'va*=',(drag_atm*va)/lambda, &
       'vi*=',(drag_ice*vi)/lambda
     write(stderr(),'(a,i3,9(1xa,1pe12.3))') '          pe=',mpp_pe(), &
-      'a=',sqrt(a2), &
+      'a=',sqrt(ampl), &
       'Lwl=',Lwavelength, &
       'Lcut=',Lcutoff, &
       'Ltop=',Ltop, &
