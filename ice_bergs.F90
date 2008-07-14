@@ -108,7 +108,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.31 2008/07/10 16:00:31 tom Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.32 2008/07/14 13:30:03 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -2358,9 +2358,9 @@ real :: x1,y1,x2,y2,x3,y3,x4,y4,xx,yy
     y4=(90.-y4)*sin(grd%lon(i-1,j  )*pi_180)
     if (present(explain).and.explain) then
       write(stderr(),'(a,4f8.2)') 'pos_within_cell: x1..x4 ',x1,x2,x3,x4
-      write(stderr(),'(a,2f8.2)') 'pos_within_cell: x',x
+      write(stderr(),'(a,2f8.2)') 'pos_within_cell: x',xx
       write(stderr(),'(a,4f8.2)') 'pos_within_cell: y1..y4 ',y1,y2,y3,y4
-      write(stderr(),'(a,2f8.2)') 'pos_within_cell: y',y
+      write(stderr(),'(a,2f8.2)') 'pos_within_cell: y',yy
     endif
     call calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, xx, yy, xi, yj)
   endif
