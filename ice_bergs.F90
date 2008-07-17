@@ -52,11 +52,13 @@ type :: icebergs_gridded
   real, dimension(:,:), pointer :: hi=>NULL() ! Sea-ice thickness (m)
   real, dimension(:,:), pointer :: calving=>NULL() ! Calving mass rate [frozen runoff] (kg/s)
   real, dimension(:,:), pointer :: melt=>NULL() ! Iceberg melting mass rate (kg/s/m^2)
+  real, dimension(:,:), pointer :: virtual_area=>NULL() ! Virtual surface coverage by icebergs (m^2)
   real, dimension(:,:), pointer :: mass=>NULL() ! Mass distribution (kg/m^2)
   real, dimension(:,:), pointer :: tmp=>NULL() ! Temporary work space
   real, dimension(:,:,:), pointer :: stored_ice=>NULL() ! Accumulated ice mass flux at calving locations (kg)
   ! Diagnostics handles
   integer :: id_uo=-1, id_vo=-1, id_calving=-1, id_stored_ice=-1, id_accum=-1, id_unused=-1, id_melt=-1
+  integer :: id_virtual_area=-1
   integer :: id_mass=-1, id_ui=-1, id_vi=-1, id_ua=-1, id_va=-1, id_sst=-1, id_cn=-1, id_hi=-1
 end type icebergs_gridded
 
@@ -108,7 +110,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.37 2008/07/17 14:30:00 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.38 2008/07/17 19:01:03 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -396,6 +398,7 @@ type(iceberg), pointer :: this, next
     if (grd%area(i,j).ne.0.) then
       melt=dM/bergs%dt ! kg/s
       grd%melt(i,j)=grd%melt(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
+      grd%virtual_area(i,j)=grd%virtual_area(i,j)+this%width*this%length*this%mass_scaling
     else
       write(stderr(),*) 'diamond, thermodynamics: berg appears to have grounded!!!! PE=',mpp_pe(),i,j
       call print_berg(stderr(),this,'thermodynamics, grounded')
@@ -611,6 +614,7 @@ real :: incoming_calving, unused_calving, stored_mass, total_iceberg_mass, meltm
   ! Ice berg thermodynamics (melting) + rolling
   grd%melt(:,:)=0.
   grd%mass(:,:)=0.
+  grd%virtual_area(:,:)=0.
   if (associated(bergs%first)) call thermodynamics(bergs)
 
   ! For each berg, record
@@ -643,6 +647,8 @@ real :: incoming_calving, unused_calving, stored_mass, total_iceberg_mass, meltm
     lerr=send_data(grd%id_hi, grd%hi(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_melt>0) &
     lerr=send_data(grd%id_melt, grd%melt(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (grd%id_virtual_area>0) &
+    lerr=send_data(grd%id_virtual_area, grd%virtual_area(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_mass>0) &
     lerr=send_data(grd%id_mass, grd%mass(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_stored_ice>0) &
@@ -694,6 +700,7 @@ real :: incoming_calving, unused_calving, stored_mass, total_iceberg_mass, meltm
     call grd_chksum2(bergs%grd, bergs%grd%hi, 'run hi (bot)')
     call grd_chksum2(bergs%grd, bergs%grd%cn, 'run cn (bot)')
     call grd_chksum2(bergs%grd, bergs%grd%melt, 'run melt (bot)')
+    call grd_chksum2(bergs%grd, bergs%grd%virtual_area, 'run varea (bot)')
     call grd_chksum2(bergs%grd, bergs%grd%mass, 'run mass (bot)')
     call grd_chksum2(bergs%grd, bergs%grd%calving, 'run calving (bot)')
     call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'run stored_ice (bot)')
@@ -1601,6 +1608,7 @@ logical :: lerr
   allocate( grd%sin(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%sin(:,:)=0.
   allocate( grd%calving(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%calving(:,:)=0.
   allocate( grd%melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%melt(:,:)=0.
+  allocate( grd%virtual_area(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%virtual_area(:,:)=0.
   allocate( grd%mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%mass(:,:)=0.
   allocate( grd%stored_ice(grd%isd:grd%ied, grd%jsd:grd%jed, nclasses) ); grd%stored_ice(:,:,:)=0.
   allocate( grd%uo(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%uo(:,:)=0.
@@ -1717,6 +1725,8 @@ logical :: lerr
      'Unused calving mass rate', 'kg/s')
   grd%id_melt=register_diag_field('icebergs', 'melt', axes, Time, &
      'Iceberg melt mass rate', 'kg/(m^2*s)')
+  grd%id_virtual_area=register_diag_field('icebergs', 'virtual_area', axes, Time, &
+     'Virtual coverage by icebergs', 'm^2')
   grd%id_mass=register_diag_field('icebergs', 'mass', axes, Time, &
      'Iceberg density field', 'kg/(m^2)')
   grd%id_stored_ice=register_diag_field('icebergs', 'stored_ice', axes3d, Time, &
@@ -2573,6 +2583,7 @@ type(iceberg), pointer :: this, next
   deallocate(bergs%grd%sin)
   deallocate(bergs%grd%calving)
   deallocate(bergs%grd%melt)
+  deallocate(bergs%grd%virtual_area)
   deallocate(bergs%grd%mass)
   deallocate(bergs%grd%tmp)
   deallocate(bergs%grd%stored_ice)
