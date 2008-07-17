@@ -108,7 +108,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.36 2008/07/17 14:27:47 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.37 2008/07/17 14:30:00 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -2742,7 +2742,8 @@ type(iceberg), pointer :: this
     iret = nf_enddef(ncid)
          
     ! Write variables
-    this=>bergs%first; i=0
+   !this=>bergs%first; i=0
+    this=>last_berg(bergs%first); i=0
     do while (associated(this))
       i=i+1
       call put_double(ncid, lonid, i, this%lon)
@@ -2759,7 +2760,8 @@ type(iceberg), pointer :: this
       call put_double(ncid, start_dayid, i, this%start_day)
       call put_double(ncid, start_massid, i, this%start_mass)
       call put_double(ncid, scaling_id, i, this%mass_scaling)
-      this=>this%next
+     !this=>this%next
+      this=>this%prev
     enddo
          
     ! Finish up
@@ -2773,6 +2775,20 @@ type(iceberg), pointer :: this
   if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stderr(),*) 'diamond, write_restart: writing ',filename
   call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'write stored_ice')
   call write_data(filename, 'stored_ice', bergs%grd%stored_ice, bergs%grd%domain)
+
+  contains
+
+  function last_berg(berg)
+  ! Arguments
+  type(iceberg), pointer :: last_berg, berg
+  ! Local variables
+  
+    last_berg=>berg
+    do while (associated(last_berg%next))
+      last_berg=>last_berg%next
+    enddo
+  
+  end function last_berg
 
 end subroutine write_restart
 
