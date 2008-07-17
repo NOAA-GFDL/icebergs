@@ -6,8 +6,8 @@ use fms_mod, only: field_exist, read_data, get_global_att_value
 use fms_mod, only: stdlog, stdout, stderr, error_mesg, FATAL, WARNING
 use fms_mod, only: write_version_number, read_data, write_data, file_exist
 use mosaic_mod, only: get_mosaic_ntiles, get_mosaic_ncontacts
-use mpp_mod, only: mpp_pe, mpp_root_pe, mpp_sum, NULL_PE
-use mpp_mod, only: mpp_send, mpp_recv, mpp_sync_self
+use mpp_mod, only: mpp_pe, mpp_root_pe, mpp_sum, mpp_min, mpp_max, NULL_PE
+use mpp_mod, only: mpp_send, mpp_recv, mpp_sync_self, mpp_chksum
 use mpp_mod, only: mpp_clock_begin, mpp_clock_end, mpp_clock_id, CLOCK_COMPONENT
 use fms_mod, only: clock_flag_default
 use mpp_domains_mod, only: domain2D, mpp_update_domains, mpp_define_domains
@@ -108,7 +108,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.35 2008/07/14 16:02:07 tom Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.36 2008/07/17 14:27:47 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -550,6 +550,11 @@ real :: incoming_calving, unused_calving, stored_mass, total_iceberg_mass, meltm
   if (lbudget) incoming_calving=sum( grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec) )
   if (grd%id_calving>0) &
     lerr=send_data(grd%id_calving, grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (debug) then
+    call bergs_chksum(bergs, 'run bergs (top)')
+    call grd_chksum2(bergs%grd, bergs%grd%calving, 'run calving (top)')
+    call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'run stored_ice (top)')
+  endif
 
   ! Copy ocean flow (resides on B grid)
   grd%uo(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=uo(:,:)
@@ -674,6 +679,25 @@ real :: incoming_calving, unused_calving, stored_mass, total_iceberg_mass, meltm
   elsewhere
     calving(:,:)=0.
   end where
+
+  if (debug) then
+    call bergs_chksum(bergs, 'run bergs (bot)')
+    call grd_chksum2(bergs%grd, bergs%grd%calving, 'run calving (bot)')
+    call grd_chksum2(bergs%grd, bergs%grd%uo, 'run uo (bot)')
+    call grd_chksum2(bergs%grd, bergs%grd%vo, 'run vo (bot)')
+    call grd_chksum2(bergs%grd, bergs%grd%ua, 'run ua (bot)')
+    call grd_chksum2(bergs%grd, bergs%grd%va, 'run va (bot)')
+    call grd_chksum2(bergs%grd, bergs%grd%ui, 'run ui (bot)')
+    call grd_chksum2(bergs%grd, bergs%grd%vi, 'run vi (bot)')
+    call grd_chksum2(bergs%grd, bergs%grd%ssh, 'run ssh (bot)')
+    call grd_chksum2(bergs%grd, bergs%grd%sst, 'run sst (bot)')
+    call grd_chksum2(bergs%grd, bergs%grd%hi, 'run hi (bot)')
+    call grd_chksum2(bergs%grd, bergs%grd%cn, 'run cn (bot)')
+    call grd_chksum2(bergs%grd, bergs%grd%melt, 'run melt (bot)')
+    call grd_chksum2(bergs%grd, bergs%grd%mass, 'run mass (bot)')
+    call grd_chksum2(bergs%grd, bergs%grd%calving, 'run calving (bot)')
+    call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'run stored_ice (bot)')
+  endif
 
   call mpp_clock_end(bergs%clock)
 end subroutine icebergs_run
@@ -1676,6 +1700,7 @@ logical :: lerr
   bergs%initial_length(:)=LoW_ratio*bergs%initial_width(:)
 
   call read_restart_bergs(bergs)
+  call bergs_chksum(bergs, 'read_restart bergs')
   call read_restart_calving(bergs)
 
  !if (verbose) call print_bergs(stderr(),bergs,'icebergs_init, initial status')
@@ -1744,7 +1769,7 @@ integer :: lonid, latid, uvelid, vvelid
 integer :: massid, thicknessid, widthid, lengthid
 integer :: start_lonid, start_latid, start_yearid, start_dayid, start_massid
 integer :: scaling_id
-logical :: lres, found_restart
+logical :: lres, found_restart, multiPErestart=.FALSE.
 real :: lon0, lon1, lat0, lat1
 character(len=30) :: filename
 type(icebergs_gridded), pointer :: grd
@@ -1754,14 +1779,17 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
   grd=>bergs%grd
 
   ! Find a restart file
+  multiPErestart=.FALSE.
   do
     filename='INPUT/icebergs.res.nc'; inquire(file=filename,exist=found_restart)
     if (found_restart) exit
     write(filename(1:27),'("INPUT/icebergs.res.nc.",I4.4)') mpp_pe()
     inquire(file=filename,exist=found_restart)
+    if (found_restart) multiPErestart=.TRUE.
     if (found_restart) exit
     write(filename(1:21),'("icebergs.res.nc.",I4.4)') mpp_pe()
     inquire(file=filename,exist=found_restart)
+    if (found_restart) multiPErestart=.TRUE.
     if (found_restart) exit
     filename='icebergs.res.nc'; inquire(file=filename,exist=found_restart)
     if (found_restart) exit
@@ -1832,6 +1860,8 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
         lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
         call add_new_berg_to_list(bergs%first, localberg)
        !if (verbose) call print_berg(stderr(), bergs%first, 'read_restart_bergs, add_new_berg_to_list')
+      elseif (multiPErestart) then
+        write(stderr(),*) 'diamond, read_restart_bergs: WARNING berg not on PE!'
       endif
     endif
   enddo
@@ -1885,6 +1915,8 @@ type(randomNumberStream) :: rns
     enddo
     deallocate(randnum)
   endif
+
+  call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'read stored_ice')
 
 end subroutine read_restart_calving
 
@@ -2515,6 +2547,7 @@ type(iceberg), pointer :: this, next
 
   if (.not.associated(bergs)) return
 
+  call bergs_chksum(bergs, 'write_restart bergs')
   call write_restart(bergs)
 
   ! Delete bergs and structures
@@ -2738,6 +2771,7 @@ type(iceberg), pointer :: this
   ! Write stored ice
   filename='RESTART/calving.res.nc'
   if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stderr(),*) 'diamond, write_restart: writing ',filename
+  call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'write stored_ice')
   call write_data(filename, 'stored_ice', bergs%grd%stored_ice, bergs%grd%domain)
 
 end subroutine write_restart
@@ -2993,6 +3027,163 @@ integer :: iret
   endif
 
 end subroutine put_int
+
+! ##############################################################################
+
+subroutine grd_chksum3(grd, fld, txt)
+! Arguments
+type(icebergs_gridded), pointer :: grd
+real, dimension(:,:,:), intent(in) :: fld
+character(len=*), intent(in) :: txt
+! Local variables
+integer :: i, j, k, halo, icount
+real :: mean, rms, SD, minv, maxv
+
+  halo=grd%halo
+  mean=0.
+  rms=0.
+  sd=0.
+  icount=0
+  i=lbound(fld,1)+halo
+  j=lbound(fld,2)+halo
+  k=lbound(fld,3)
+  minv=fld(i,j,k)
+  maxv=fld(i,j,k)
+  do k=lbound(fld,3), ubound(fld,3)
+    do j=lbound(fld,2)+halo, ubound(fld,2)-halo
+      do i=lbound(fld,1)+halo, ubound(fld,1)-halo
+        icount=icount+1
+        mean=mean+fld(i,j,k)
+        rms=rms+fld(i,j,k)**2
+        minv=min(minv,fld(i,j,k))
+        maxv=max(maxv,fld(i,j,k))
+      enddo
+    enddo
+  enddo
+  call mpp_sum(icount)
+  call mpp_sum(mean)
+  call mpp_sum(rms)
+  call mpp_min(minv)
+  call mpp_max(maxv)
+  mean=mean/float(icount)
+  rms=sqrt(rms/float(icount))
+  do k=lbound(fld,3), ubound(fld,3)
+    do j=lbound(fld,2)+halo, ubound(fld,2)-halo
+      do i=lbound(fld,1)+halo, ubound(fld,1)-halo
+        sd=sd+(fld(i,j,k)-mean)**2
+      enddo
+    enddo
+  enddo
+  call mpp_sum(sd)
+  sd=sqrt(sd/float(icount))
+  i=mpp_chksum( fld(lbound(fld,1)+halo:ubound(fld,1)-halo, &
+                    lbound(fld,2)+halo:ubound(fld,2)-halo,:) )
+  if (mpp_pe().eq.mpp_root_pe()) &
+    write(stderr(),'("diamond, grd_chksum3: ",a18,x,a,"=",i,5(x,a,"=",1pe21.14),x,a,"=",i)') &
+     txt, 'chksum', i, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd!, '#', icount
+
+end subroutine grd_chksum3
+
+! ##############################################################################
+
+subroutine grd_chksum2(grd, fld, txt)
+! Arguments
+type(icebergs_gridded), pointer :: grd
+real, dimension(:,:), intent(in) :: fld
+character(len=*), intent(in) :: txt
+! Local variables
+integer :: i, j, halo, icount
+real :: mean, rms, SD, minv, maxv
+
+  halo=grd%halo
+  mean=0.
+  rms=0.
+  sd=0.
+  icount=0
+  i=lbound(fld,1)+halo
+  j=lbound(fld,2)+halo
+  minv=fld(i,j)
+  maxv=fld(i,j)
+  do j=lbound(fld,2)+halo, ubound(fld,2)-halo
+    do i=lbound(fld,1)+halo, ubound(fld,1)-halo
+      icount=icount+1
+      mean=mean+fld(i,j)
+      rms=rms+fld(i,j)**2
+      minv=min(minv,fld(i,j))
+      maxv=max(maxv,fld(i,j))
+    enddo
+  enddo
+  call mpp_sum(icount)
+  call mpp_sum(mean)
+  call mpp_sum(rms)
+  call mpp_min(minv)
+  call mpp_max(maxv)
+  mean=mean/float(icount)
+  rms=sqrt(rms/float(icount))
+  do j=lbound(fld,2)+halo, ubound(fld,2)-halo
+    do i=lbound(fld,1)+halo, ubound(fld,1)-halo
+      sd=sd+(fld(i,j)-mean)**2
+    enddo
+  enddo
+  call mpp_sum(sd)
+  sd=sqrt(sd/float(icount))
+  i=mpp_chksum( fld(lbound(fld,1)+halo:ubound(fld,1)-halo, &
+                    lbound(fld,2)+halo:ubound(fld,2)-halo) )
+  if (mpp_pe().eq.mpp_root_pe()) &
+    write(stderr(),'("diamond, grd_chksum2: ",a18,x,a,"=",i,5(x,a,"=",1pe21.14),x,a,"=",i)') &
+     txt, 'chksum', i, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd!, '#', icount
+
+end subroutine grd_chksum2
+
+! ##############################################################################
+
+subroutine bergs_chksum(bergs, txt)
+! Arguments
+type(icebergs), pointer :: bergs
+character(len=*), intent(in) :: txt
+! Local variables
+integer :: i, j, nbergs, maxbergs, ichk1, ichk2
+real :: mean, rms, SD, minv, maxv
+real, allocatable :: fld(:,:)
+type(iceberg), pointer :: this
+
+  nbergs=count_bergs(bergs)
+  call mpp_max(nbergs)
+  allocate( fld( nbergs, 8 ) )
+  fld(:,:)=0.
+
+  this=>bergs%first
+  i=0
+  do while(associated(this))
+    i=i+1
+    fld(i,1) = this%lon
+    fld(i,2) = this%lat
+    fld(i,3) = this%uvel
+    fld(i,4) = this%vvel
+    fld(i,5) = this%mass
+    fld(i,6) = this%thickness
+    fld(i,7) = this%width
+    fld(i,8) = this%length
+    this=>this%next
+  enddo
+
+  nbergs=count_bergs(bergs)
+  call mpp_sum(nbergs)
+  ichk1=mpp_chksum( fld )
+
+  nbergs=count_bergs(bergs)
+  do i=1,nbergs; do j=1,8
+    fld(i,j) = fld(i,j)*float(i)
+  enddo; enddo
+  ichk2=mpp_chksum( fld )
+
+  if (mpp_pe().eq.mpp_root_pe()) &
+    write(stderr(),'("diamond, bergs_chksum: ",a18,3(x,a,"=",i))') &
+      txt, 'chksum', ichk1, 'chksum2',ichk2, '#', nbergs
+
+  deallocate( fld )
+
+end subroutine bergs_chksum
 
 ! ##############################################################################
 
