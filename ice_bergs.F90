@@ -110,7 +110,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.38 2008/07/17 19:01:03 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.39 2008/07/24 14:42:15 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -1076,7 +1076,7 @@ real, intent(inout) :: lon, lat, uvel, vvel, xi, yj
 integer, intent(inout) :: i,j
 logical, intent(out) :: bounced
 ! Local variables
-logical lret
+logical lret, lpos
 real, parameter :: posn_eps=1e-3, sanity_acc=1.e-11
 integer :: icount, i0, j0
 
@@ -1173,7 +1173,11 @@ integer :: icount, i0, j0
     write(stderr(),'(a,l3,a,i3)') 'diamond, adjust: lret=',lret,' on PE',mpp_pe()
     if (lret) then
       write(stderr(),'(a,i3,2f8.3)') 'diamond, adjust: calling pos_within_cell on PE',mpp_pe(),lon,lat
-      lret=pos_within_cell(grd, lon, lat, i, j, xi, yj)
+      lpos=pos_within_cell(grd, lon, lat, i, j, xi, yj)
+      if (.not.lpos)  then
+        write(stderr(),'(a,2i4,4f8.3,2i3)') 'diamond, adjust: _wide worked but pos FAILED!!!',i,j,lon,lat,uvel,vvel,mpp_pe()
+        call error_mesg('diamond, adjust', 'Probable grid inconsistency!', WARNING)
+      endif
     endif
     if (.not.lret) then
       write(stderr(),'(a,2i4,4f8.3,2i3)') 'diamond, adjust: _wide FAILED!!!',i,j,lon,lat,uvel,vvel,mpp_pe()
