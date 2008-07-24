@@ -110,7 +110,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.39 2008/07/24 14:42:15 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.40 2008/07/24 19:35:15 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -2689,7 +2689,7 @@ integer :: lonid, latid, uvelid, vvelid
 integer :: massid, thicknessid, lengthid, widthid
 integer :: start_lonid, start_latid, start_yearid, start_dayid, start_massid
 integer :: scaling_id
-character(len=30) :: filename
+character(len=28) :: filename
 type(iceberg), pointer :: this
 
   ! Only create a restart file for this PE if we have anything to say
