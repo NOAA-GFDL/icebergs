@@ -110,7 +110,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.41 2008/08/29 19:25:31 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.42 2008/08/29 19:29:20 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -2286,11 +2286,41 @@ real :: xlo, xhi, ylo, yhi, xx
   yhi=max( grd%lat(i-1,j-1), grd%lat(i,j-1), grd%lat(i-1,j), grd%lat(i,j) )
   if (y.lt.ylo .or. y.gt.yhi) return
   
+  if (grd%lat(i,j).gt.89.999) then
+    is_point_in_cell=sum_sign_dot_prod5(grd%lon(i-1,j-1),grd%lat(i-1,j-1), &
+                                        grd%lon(i  ,j-1),grd%lat(i  ,j-1), &
+                                        grd%lon(i  ,j-1),grd%lat(i  ,j  ), &
+                                        grd%lon(i-1,j  ),grd%lat(i  ,j  ), &
+                                        grd%lon(i-1,j  ),grd%lat(i-1,j  ), &
+                                        x, y, explain=explain) 
+  elseif (grd%lat(i-1,j).gt.89.999) then
+    is_point_in_cell=sum_sign_dot_prod5(grd%lon(i-1,j-1),grd%lat(i-1,j-1), &
+                                        grd%lon(i  ,j-1),grd%lat(i  ,j-1), &
+                                        grd%lon(i  ,j  ),grd%lat(i  ,j  ), &
+                                        grd%lon(i  ,j  ),grd%lat(i-1,j  ), &
+                                        grd%lon(i-1,j-1),grd%lat(i-1,j  ), &
+                                        x, y, explain=explain) 
+  elseif (grd%lat(i-1,j-1).gt.89.999) then
+    is_point_in_cell=sum_sign_dot_prod5(grd%lon(i-1,j  ),grd%lat(i-1,j-1), &
+                                        grd%lon(i  ,j-1),grd%lat(i-1,j-1), &
+                                        grd%lon(i  ,j-1),grd%lat(i  ,j-1), &
+                                        grd%lon(i  ,j  ),grd%lat(i  ,j  ), &
+                                        grd%lon(i-1,j  ),grd%lat(i-1,j  ), &
+                                        x, y, explain=explain) 
+  elseif (grd%lat(i,j-1).gt.89.999) then
+    is_point_in_cell=sum_sign_dot_prod5(grd%lon(i-1,j-1),grd%lat(i-1,j-1), &
+                                        grd%lon(i-1,j-1),grd%lat(i  ,j-1), &
+                                        grd%lon(i  ,j  ),grd%lat(i  ,j-1), &
+                                        grd%lon(i  ,j  ),grd%lat(i  ,j  ), &
+                                        grd%lon(i-1,j  ),grd%lat(i-1,j  ), &
+                                        x, y, explain=explain) 
+  else
   is_point_in_cell=sum_sign_dot_prod4(grd%lon(i-1,j-1),grd%lat(i-1,j-1), &
                                       grd%lon(i  ,j-1),grd%lat(i  ,j-1), &
                                       grd%lon(i  ,j  ),grd%lat(i  ,j  ), &
                                       grd%lon(i-1,j  ),grd%lat(i-1,j  ), &
                                       x, y, explain=explain) 
+  endif
 
  !if (debug .and. .not. is_point_in_cell) then
  !  write(stderr(),*) 'diamond, is_point_in_cell: inside crude bounds but not in cell',mpp_pe()
@@ -2329,13 +2359,10 @@ real :: xx0,xx1,xx2,xx3
   p2=sign(1., l2); if (l2.eq.0.) p2=0.
   p3=sign(1., l3); if (l3.eq.0.) p3=0.
 
- !if ( abs( (abs(p0)+abs(p2))+(abs(p1)+abs(p3)) - abs((p0+p2)+(p1+p3)) ).lt.0.5 ) then
   if ( (abs(p0)+abs(p2))+(abs(p1)+abs(p3)) .eq. abs((p0+p2)+(p1+p3)) ) then
     sum_sign_dot_prod4=.true.
   endif
 
-  if (.not. sum_sign_dot_prod4 .and. max(y0,y1,y2,y3).ge.89.9999) &
-      sum_sign_dot_prod4=handle_npole(xx0,y0,xx1,y1,xx2,y2,xx3,y3,x,y)
 
   if (present(explain).and.explain) then
    write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: x=',mpp_pe(),':', &
@@ -2350,46 +2377,57 @@ real :: xx0,xx1,xx2,xx3
                            p0,p1,p2,p3, abs( (abs(p0)+abs(p2))+(abs(p1)+abs(p3)) - abs((p0+p2)+(p1+p3)) )
   endif
 
-  contains
-
-  logical function handle_npole(lon0, lat0, lon1, lat1, lon2, lat2, lon3, lat3, lon, lat)
-  ! Arguments
-  real, intent(in) :: lon0, lat0, lon1, lat1, lon2, lat2, lon3, lat3, lon, lat
-  ! Local variables
-  real :: x0,y0,x1,y1,x2,y2,x3,y3,x,y
-  real :: l0,l1,l2,l3,p0,p1,p2,p3
-
-    handle_npole=.false.
-    x=(90.-lat)*cos(lon*pi_180)
-    y=(90.-lat)*sin(lon*pi_180)
-    x0=(90.-lat0)*cos(lon0*pi_180)
-    y0=(90.-lat0)*sin(lon0*pi_180)
-    x1=(90.-lat1)*cos(lon1*pi_180)
-    y1=(90.-lat1)*sin(lon1*pi_180)
-    x2=(90.-lat2)*cos(lon2*pi_180)
-    y2=(90.-lat2)*sin(lon2*pi_180)
-    x3=(90.-lat3)*cos(lon3*pi_180)
-    y3=(90.-lat3)*sin(lon3*pi_180)
-
-    l0=(x-x0)*(y1-y0)-(y-y0)*(x1-x0)
-    l1=(x-x1)*(y2-y1)-(y-y1)*(x2-x1)
-    l2=(x-x2)*(y3-y2)-(y-y2)*(x3-x2)
-    l3=(x-x3)*(y0-y3)-(y-y3)*(x0-x3)
-
-    p0=sign(1., l0); if (l0.eq.0.) p0=0.
-    p1=sign(1., l1); if (l1.eq.0.) p1=0.
-    p2=sign(1., l2); if (l2.eq.0.) p2=0.
-    p3=sign(1., l3); if (l3.eq.0.) p3=0.
-
-    if ( (abs(p0)+abs(p2))+(abs(p1)+abs(p3)) .eq. abs((p0+p2)+(p1+p3)) ) then
-      handle_npole=.true.
-    endif
-
-   !if (debug) write(stderr(),*) 'diamond, handle_npole res=',handle_npole
-
-  end function handle_npole
-
 end function sum_sign_dot_prod4
+
+! ##############################################################################
+
+logical function sum_sign_dot_prod5(x0, y0, x1, y1, x2, y2, x3, y3, x4, y4, x, y, explain)
+! Arguments
+real, intent(in) :: x0, y0, x1, y1, x2, y2, x3, y3, x4, y4, x, y
+logical, intent(in), optional :: explain
+! Local variables
+real :: p0,p1,p2,p3,p4,xx
+real :: l0,l1,l2,l3,l4
+real :: xx0,xx1,xx2,xx3,xx4
+
+  sum_sign_dot_prod5=.false.
+  xx=modulo(x-(x0-180.),360.)+(x0-180.) ! Reference x to within 180 of x0
+  xx0=modulo(x0-(xx-180.),360.)+(xx-180.) ! Reference x0 to within 180 of xx
+  xx1=modulo(x1-(xx-180.),360.)+(xx-180.) ! Reference x1 to within 180 of xx
+  xx2=modulo(x2-(xx-180.),360.)+(xx-180.) ! Reference x2 to within 180 of xx
+  xx3=modulo(x3-(xx-180.),360.)+(xx-180.) ! Reference x3 to within 180 of xx
+  xx4=modulo(x4-(xx-180.),360.)+(xx-180.) ! Reference x4 to within 180 of xx
+
+  l0=(xx-xx0)*(y1-y0)-(y-y0)*(xx1-xx0)
+  l1=(xx-xx1)*(y2-y1)-(y-y1)*(xx2-xx1)
+  l2=(xx-xx2)*(y3-y2)-(y-y2)*(xx3-xx2)
+  l3=(xx-xx3)*(y4-y3)-(y-y3)*(xx4-xx3)
+  l4=(xx-xx4)*(y0-y4)-(y-y4)*(xx0-xx4)
+
+  p0=sign(1., l0); if (l0.eq.0.) p0=0.
+  p1=sign(1., l1); if (l1.eq.0.) p1=0.
+  p2=sign(1., l2); if (l2.eq.0.) p2=0.
+  p3=sign(1., l3); if (l3.eq.0.) p3=0.
+  p4=sign(1., l4); if (l4.eq.0.) p4=0.
+
+  if ( ((abs(p0)+abs(p2))+(abs(p1)+abs(p3)))+abs(p4) - abs(((p0+p2)+(p1+p3))+p4) .lt. 0.5 ) then
+    sum_sign_dot_prod5=.true.
+  endif
+
+  if (present(explain).and.explain) then
+   write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod5: x=',mpp_pe(),':', &
+                           x0,x1,x2,x3,x4, x
+   write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: X=',mpp_pe(),':', &
+                           xx0,xx1,xx2,xx3,xx4, xx
+   write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod5: y=',mpp_pe(),':', &
+                           y0,y1,y2,y3,y4, y
+   write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod5: l=',mpp_pe(),':', &
+                           l0,l1,l2,l3,l4
+   write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod5: p=',mpp_pe(),':', &
+                           p0,p1,p2,p3,p4
+  endif
+
+end function sum_sign_dot_prod5
 
 ! ##############################################################################
 
