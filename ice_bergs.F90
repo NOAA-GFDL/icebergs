@@ -110,7 +110,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.42 2008/08/29 19:29:20 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.43 2008/08/29 19:30:42 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -2349,10 +2349,10 @@ real :: xx0,xx1,xx2,xx3
   xx2=modulo(x2-(xx-180.),360.)+(xx-180.) ! Reference x2 to within 180 of xx
   xx3=modulo(x3-(xx-180.),360.)+(xx-180.) ! Reference x3 to within 180 of xx
 
-  l0=(xx-x0)*(y1-y0)-(y-y0)*(x1-x0)
-  l1=(xx-x1)*(y2-y1)-(y-y1)*(x2-x1)
-  l2=(xx-x2)*(y3-y2)-(y-y2)*(x3-x2)
-  l3=(xx-x3)*(y0-y3)-(y-y3)*(x0-x3)
+  l0=(xx-xx0)*(y1-y0)-(y-y0)*(xx1-xx0)
+  l1=(xx-xx1)*(y2-y1)-(y-y1)*(xx2-xx1)
+  l2=(xx-xx2)*(y3-y2)-(y-y2)*(xx3-xx2)
+  l3=(xx-xx3)*(y0-y3)-(y-y3)*(xx0-xx3)
 
   p0=sign(1., l0); if (l0.eq.0.) p0=0.
   p1=sign(1., l1); if (l1.eq.0.) p1=0.
@@ -3249,8 +3249,7 @@ subroutine bergs_chksum(bergs, txt)
 type(icebergs), pointer :: bergs
 character(len=*), intent(in) :: txt
 ! Local variables
-integer :: i, j, nbergs, maxbergs, ichk1, ichk2
-real :: mean, rms, SD, minv, maxv
+integer :: i, j, nbergs, ichk1, ichk2
 real, allocatable :: fld(:,:)
 type(iceberg), pointer :: this
 
