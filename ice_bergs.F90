@@ -110,7 +110,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.40 2008/07/24 19:35:15 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.41 2008/08/29 19:25:31 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -824,6 +824,7 @@ real :: x4, xdot4, xddot4, y4, ydot4, yddot4
 real :: xn, xdotn, yn, ydotn
 real :: r180_pi, dt, dt_2, dt_6, dydl, Rearth
 integer :: i, j
+integer :: i1,j1,i2,j2,i3,j3,i4,j4
 real :: xi, yj
 logical :: bounced, on_tangential_plane
 
@@ -871,6 +872,7 @@ logical :: bounced, on_tangential_plane
   bounced=.false.
   on_tangential_plane=.false.
   if (berg%lat>89.) on_tangential_plane=.true.
+  i1=i;j1=j
 
   ! A1 = A(X1)
   lon1=berg%lon; lat1=berg%lat
@@ -895,16 +897,15 @@ logical :: bounced, on_tangential_plane
     uvel2=uvel1+dt_2*ax1; vvel2=vvel1+dt_2*ay1
   endif
   call adjust_index_and_ground(grd, lon2, lat2, uvel2, vvel2, i, j, xi, yj, bounced)
+  i2=i; j2=j
   ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon2,lat2,x2,y2)
   if (debug .and. .not. is_point_in_cell(bergs%grd, lon2, lat2, i, j) ) then
-   !write(stderr(),'(i4,a4,32i7)') mpp_pe(),'Lon',(i,i=grd%isd,grd%ied)
-   !do j=grd%jed,grd%jsd,-1
-   !  write(stderr(),'(2i4,32f7.1)') mpp_pe(),j,(grd%lon(i,j),i=grd%isd,grd%ied)
-   !enddo
-   !write(stderr(),'(i4,a4,32i7)') mpp_pe(),'Lat',(i,i=grd%isd,grd%ied)
-   !do j=grd%jed,grd%jsd,-1
-   !  write(stderr(),'(2i4,32f7.1)') mpp_pe(),j,(grd%lat(i,j),i=grd%isd,grd%ied)
-   !enddo
+   write(stderr(),*) 'diamond, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
+   write(stderr(),*) 'diamond, evolve_iceberg: i1,i2=',i1,i2
+   write(stderr(),*) 'diamond, evolve_iceberg: lon1,lon2=',lon1,lon2
+   write(stderr(),*) 'diamond, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
+   write(stderr(),*) 'diamond, evolve_iceberg: j1,j2=',j1,j2
+   write(stderr(),*) 'diamond, evolve_iceberg: lat1,lat2=',lat1,lat2
     call print_berg(stderr(), berg, 'evolve_iceberg, out of position at 2')
     write(stderr(),'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'pos2 i,j,lon,lat,xi,yj=',i,j,lon2,lat2,xi,yj
     write(stderr(),'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'pos2 box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
@@ -927,8 +928,15 @@ logical :: bounced, on_tangential_plane
     uvel3=uvel1+dt_2*ax2; vvel3=vvel1+dt_2*ay2
   endif
   call adjust_index_and_ground(grd, lon3, lat3, uvel3, vvel3, i, j, xi, yj, bounced)
+  i3=i; j3=j
   ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon3,lat3,x3,y3)
   if (debug .and. .not. is_point_in_cell(bergs%grd, lon3, lat3, i, j) ) then
+   write(stderr(),*) 'diamond, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
+   write(stderr(),*) 'diamond, evolve_iceberg: i1,i2,i3=',i1,i2,i3
+   write(stderr(),*) 'diamond, evolve_iceberg: lon1,lon2,lon3=',lon1,lon2,lon3
+   write(stderr(),*) 'diamond, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
+   write(stderr(),*) 'diamond, evolve_iceberg: j1,j2,j3=',j1,j2,j3
+   write(stderr(),*) 'diamond, evolve_iceberg: lat1,lat2,lat3=',lat1,lat2,lat3
     call print_berg(stderr(), berg, 'evolve_iceberg, out of position at 3')
     write(stderr(),'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'pos3 i,j,lon,lat,xi,yj=',i,j,lon3,lat3,xi,yj
     write(stderr(),'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'pos3 box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
@@ -951,8 +959,15 @@ logical :: bounced, on_tangential_plane
     uvel4=uvel1+dt*ax3; vvel4=vvel1+dt*ay3
   endif
   call adjust_index_and_ground(grd, lon4, lat4, uvel4, vvel4, i, j, xi, yj, bounced)
+  i4=i; j4=j
   ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon4,lat4,x4,y4)
   if (debug .and. .not. is_point_in_cell(bergs%grd, lon4, lat4, i, j) ) then
+   write(stderr(),*) 'diamond, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
+   write(stderr(),*) 'diamond, evolve_iceberg: i1,i2,i3,i4=',i1,i2,i3,i4
+   write(stderr(),*) 'diamond, evolve_iceberg: lon1,lon2,lon3,lon4=',lon1,lon2,lon3,lon4
+   write(stderr(),*) 'diamond, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
+   write(stderr(),*) 'diamond, evolve_iceberg: j1,j2,j3,j4=',j1,j2,j3,j4
+   write(stderr(),*) 'diamond, evolve_iceberg: lat1,lat2,lat3,lat4=',lat1,lat2,lat3,lat4
     call print_berg(stderr(), berg, 'evolve_iceberg, out of position at 4')
     write(stderr(),'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'pos4 i,j,lon,lat,xi,yj=',i,j,lon4,lat4,xi,yj
     write(stderr(),'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'pos4 box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
@@ -981,10 +996,24 @@ logical :: bounced, on_tangential_plane
   call adjust_index_and_ground(grd, lonn, latn, uveln, vveln, i, j, xi, yj, bounced)
 
   if (.not. is_point_in_cell(bergs%grd, lonn, latn, i, j) ) then
+   write(stderr(),*) 'diamond, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
+   write(stderr(),*) 'diamond, evolve_iceberg: i1,i2,i3,i4,i=',i1,i2,i3,i4,i
+   write(stderr(),*) 'diamond, evolve_iceberg: lon1,lon2,lon3,lon4,lonn=',lon1,lon2,lon3,lon4,lonn
+   write(stderr(),*) 'diamond, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
+   write(stderr(),*) 'diamond, evolve_iceberg: j1,j2,j3,j4,j=',j1,j2,j3,j4,j
+   write(stderr(),*) 'diamond, evolve_iceberg: lat1,lat2,lat3,lat4,latn=',lat1,lat2,lat3,lat4,latn
     call print_berg(stderr(), berg, 'evolve_iceberg, out of cell at end!')
     write(stderr(),'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'posn i,j,lon,lat,xi,yj=',i,j,lonn,latn,xi,yj
     write(stderr(),'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'posn box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
     if (debug) call error_mesg('diamond, evolve_iceberg','berg is out of posn at end!',FATAL)
+    write(stderr(),'(i4,a4,32i7)') mpp_pe(),'Lon',(i,i=grd%isd,grd%ied)
+    do j=grd%jed,grd%jsd,-1
+      write(stderr(),'(2i4,32f7.1)') mpp_pe(),j,(grd%lon(i,j),i=grd%isd,grd%ied)
+    enddo
+    write(stderr(),'(i4,a4,32i7)') mpp_pe(),'Lat',(i,i=grd%isd,grd%ied)
+    do j=grd%jed,grd%jsd,-1
+      write(stderr(),'(2i4,32f7.1)') mpp_pe(),j,(grd%lat(i,j),i=grd%isd,grd%ied)
+    enddo
   endif
 
   berg%lon=lonn
@@ -1174,13 +1203,21 @@ integer :: icount, i0, j0
     if (lret) then
       write(stderr(),'(a,i3,2f8.3)') 'diamond, adjust: calling pos_within_cell on PE',mpp_pe(),lon,lat
       lpos=pos_within_cell(grd, lon, lat, i, j, xi, yj)
-      if (.not.lpos)  then
+      if (.not.lpos) then 
         write(stderr(),'(a,2i4,4f8.3,2i3)') 'diamond, adjust: _wide worked but pos FAILED!!!',i,j,lon,lat,uvel,vvel,mpp_pe()
         call error_mesg('diamond, adjust', 'Probable grid inconsistency!', WARNING)
       endif
     endif
     if (.not.lret) then
       write(stderr(),'(a,2i4,4f8.3,2i3)') 'diamond, adjust: _wide FAILED!!!',i,j,lon,lat,uvel,vvel,mpp_pe()
+    write(stderr(),'(i4,a4,32i7)') mpp_pe(),'Lon',(i,i=grd%isd,grd%ied)
+    do j=grd%jed,grd%jsd,-1
+      write(stderr(),'(2i4,32f7.1)') mpp_pe(),j,(grd%lon(i,j),i=grd%isd,grd%ied)
+    enddo
+    write(stderr(),'(i4,a4,32i7)') mpp_pe(),'Lat',(i,i=grd%isd,grd%ied)
+    do j=grd%jed,grd%jsd,-1
+      write(stderr(),'(2i4,32f7.1)') mpp_pe(),j,(grd%lat(i,j),i=grd%isd,grd%ied)
+    enddo
       call error_mesg('diamond, adjust', 'can not find a cell to place berg in!', FATAL)
     endif
   endif
@@ -1457,6 +1494,7 @@ contains
         call add_new_berg_to_list(first, localberg)
       else
         write(stderr(),'("diamond, unpack_berg_from_buffer pe=(",i3,a,2i4,a,2f8.2)') mpp_pe(),') Failed to find i,j=',localberg%ine,localberg%jne,' for lon,lat=',localberg%lon,localberg%lat
+        write(stderr(),*) localberg%lon,localberg%lat
         write(stderr(),*) localberg%uvel,localberg%vvel
         write(stderr(),*) grd%isc,grd%iec,grd%jsc,grd%jec
         write(stderr(),*) grd%isd,grd%ied,grd%jsd,grd%jed
