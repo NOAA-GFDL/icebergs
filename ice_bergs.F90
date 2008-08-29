@@ -110,7 +110,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.43 2008/08/29 19:30:42 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.44 2008/08/29 19:32:12 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -366,7 +366,7 @@ type(iceberg), pointer :: this, next
 
     ! Melt rates in m/day
     dvo=sqrt((this%uvel-this%uo)**2+(this%vvel-this%vo)**2)
-    dva=sqrt((this%uvel-this%ua)**2+(this%vvel-this%va)**2)
+    dva=sqrt((this%ua-this%uo)**2+(this%va-this%vo)**2)
     Ss=1.5*(dva**0.5)+0.1*dva ! Sea state
     Mb=max( 0.58*(dvo**0.8)*(SST+4.0)/(L**0.2), 0.) ! Basal turbulent melting
     Mv=max( 7.62e-3*SST+1.29e-3*(SST**2), 0.) ! Buoyant convection at sides
