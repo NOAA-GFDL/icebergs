@@ -110,7 +110,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.44 2008/08/29 19:32:12 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.45 2008/09/02 18:13:21 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -133,6 +133,7 @@ real, parameter :: Cd_iv=0.9 ! (Vertical) Drag coefficient between bergs and sea
 logical :: verbose=.false. ! Be verbose to stderr
 logical :: budget=.true. ! Calculate budgets
 logical :: debug=.false. ! Turn on debugging
+logical :: really_debug=.false. ! Turn on debugging
 
 contains
 
@@ -185,7 +186,7 @@ integer :: itloop
   !      http://www4.ncsu.edu/eos/users/c/ceknowle/public/chapter10/part2.html
   Lcutoff=0.125*Lwavelength
   Ltop=0.25*Lwavelength
-  Cr=Cr0*min(max(0.,(L-Lcutoff)/(Ltop-Lcutoff)),1.) ! Wave radiation coefficient
+  Cr=Cr0*min(max(0.,(L-Lcutoff)/((Ltop-Lcutoff)+1.e-30)),1.) ! Wave radiation coefficient
   !     fitted to graph from Carrieres et al.,  POAC Drift Model.
   wave_rad=0.5*rho_seawater/M*Cr*gravity*ampl*min(ampl,F)*(2.*W*L)/(W+L)
   wmod = sqrt(ua*ua+va*va) ! Wind speed
@@ -655,7 +656,7 @@ real :: incoming_calving, unused_calving, stored_mass, total_iceberg_mass, meltm
     lerr=send_data(grd%id_stored_ice, grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:), Time)
 
   ! Dump icebergs to screen
- !if (lverbose) call print_bergs(stderr(),bergs,'icebergs_run, status')
+  if (really_debug) call print_bergs(stderr(),bergs,'icebergs_run, status')
 
   ! Diagnose budgets
   if (lbudget) then
@@ -1574,7 +1575,7 @@ real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1
 real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
 namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
          distribution, mass_scaling, initial_thickness, verbose_hrs, &
-         rho_bergs, LoW_ratio, debug
+         rho_bergs, LoW_ratio, debug, really_debug
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je
 type(icebergs_gridded), pointer :: grd
@@ -1587,6 +1588,8 @@ logical :: lerr
   read  (iunit, icebergs_nml,iostat=ierr)
   ierr = check_nml_error(ierr, 'icebergs_nml')
   call close_file(iunit)
+
+  if (really_debug) debug=.true. ! One implies the other...
 
 ! Log version and parameters
   call write_version_number(version, tagname)
@@ -1753,7 +1756,7 @@ logical :: lerr
   call bergs_chksum(bergs, 'read_restart bergs')
   call read_restart_calving(bergs)
 
- !if (verbose) call print_bergs(stderr(),bergs,'icebergs_init, initial status')
+  if (really_debug) call print_bergs(stderr(),bergs,'icebergs_init, initial status')
 
   ! Diagnostics
   id_class = diag_axis_init('mass_class', initial_mass, 'kg','Z', 'iceberg mass')
