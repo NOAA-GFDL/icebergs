@@ -110,7 +110,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.45 2008/09/02 18:13:21 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.46 2008/09/04 15:28:40 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -910,6 +910,7 @@ logical :: bounced, on_tangential_plane
     call print_berg(stderr(), berg, 'evolve_iceberg, out of position at 2')
     write(stderr(),'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'pos2 i,j,lon,lat,xi,yj=',i,j,lon2,lat2,xi,yj
     write(stderr(),'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'pos2 box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
+    bounced=is_point_in_cell(bergs%grd, lon2, lat2, i, j, explain=.true.)
     call error_mesg('diamond, evolve_iceberg','berg is out of posn at 2!',FATAL)
   endif
   dxdl2=r180_pi/(Rearth*cos(lat2*pi_180))
@@ -941,6 +942,7 @@ logical :: bounced, on_tangential_plane
     call print_berg(stderr(), berg, 'evolve_iceberg, out of position at 3')
     write(stderr(),'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'pos3 i,j,lon,lat,xi,yj=',i,j,lon3,lat3,xi,yj
     write(stderr(),'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'pos3 box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
+    bounced=is_point_in_cell(bergs%grd, lon2, lat2, i, j, explain=.true.)
     call error_mesg('diamond, evolve_iceberg','berg is out of posn at 3!',FATAL)
   endif
   dxdl3=r180_pi/(Rearth*cos(lat3*pi_180))
@@ -972,6 +974,7 @@ logical :: bounced, on_tangential_plane
     call print_berg(stderr(), berg, 'evolve_iceberg, out of position at 4')
     write(stderr(),'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'pos4 i,j,lon,lat,xi,yj=',i,j,lon4,lat4,xi,yj
     write(stderr(),'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'pos4 box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
+    bounced=is_point_in_cell(bergs%grd, lon2, lat2, i, j, explain=.true.)
     call error_mesg('diamond, evolve_iceberg','berg is out of posn at 4!',FATAL)
   endif
   dxdl4=r180_pi/(Rearth*cos(lat4*pi_180))
@@ -1006,6 +1009,7 @@ logical :: bounced, on_tangential_plane
     call print_berg(stderr(), berg, 'evolve_iceberg, out of cell at end!')
     write(stderr(),'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'posn i,j,lon,lat,xi,yj=',i,j,lonn,latn,xi,yj
     write(stderr(),'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'posn box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
+    bounced=is_point_in_cell(bergs%grd, lon2, lat2, i, j, explain=.true.)
     if (debug) call error_mesg('diamond, evolve_iceberg','berg is out of posn at end!',FATAL)
     write(stderr(),'(i4,a4,32i7)') mpp_pe(),'Lon',(i,i=grd%isd,grd%ied)
     do j=grd%jed,grd%jsd,-1
@@ -1889,35 +1893,30 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
    !write(stderr(),*) 'diamond, read_restart_bergs: reading berg ',k
     localberg%lon=get_double(ncid, lonid, k)
     localberg%lat=get_double(ncid, latid, k)
-    ! Test if this berg is within the maximum possible bounds of tile
-    if ( sum_sign_dot_prod4(lon0,lat0,lon1,lat0,lon1,lat1,lon0,lat1,localberg%lon,localberg%lat) ) then
-      lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
-     !if (debug) then
-     !  write(stderr(),*) 'diamond, read_restart_bergs: berg ',k,' is at ',localberg%lon,localberg%lat,' on PE ',mpp_pe()
-     !  write(stderr(),*) 'diamond, read_restart_bergs: lon range is ',lon0,lon1,' on PE ',mpp_pe()
-     !  write(stderr(),*) 'diamond, read_restart_bergs: lat range is ',lat0,lat1,' on PE ',mpp_pe()
-     !  write(stderr(),*) 'diamond, read_restart_bergs: lres = ',lres
-     !endif
-      if (lres) then
-        localberg%uvel=get_double(ncid, uvelid, k)
-        localberg%vvel=get_double(ncid, vvelid, k)
-        localberg%mass=get_double(ncid, massid, k)
-        localberg%thickness=get_double(ncid, thicknessid, k)
-        localberg%width=get_double(ncid, widthid, k)
-        localberg%length=get_double(ncid, lengthid, k)
-        localberg%start_lon=get_double(ncid, start_lonid, k)
-        localberg%start_lat=get_double(ncid, start_latid, k)
-        localberg%start_year=get_int(ncid, start_yearid, k)
-        localberg%start_day=get_double(ncid, start_dayid, k)
-        localberg%start_mass=get_double(ncid, start_massid, k)
-        localberg%mass_scaling=get_double(ncid, scaling_id, k)
-       !write(stderr(),'(a,i3,a,2i4,2f8.2)') 'diamond, read_restart_bergs: found cell (',mpp_pe(),') ',i,j,grd%lon(i,j),grd%lat(i,j)
-        lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
-        call add_new_berg_to_list(bergs%first, localberg)
-       !if (verbose) call print_berg(stderr(), bergs%first, 'read_restart_bergs, add_new_berg_to_list')
-      elseif (multiPErestart) then
-        write(stderr(),*) 'diamond, read_restart_bergs: WARNING berg not on PE!'
-      endif
+    lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+    if (really_debug) then
+      write(stderr(),'(a,i,a,2f,a,i)') 'diamond, read_restart_bergs: berg ',k,' is at ',localberg%lon,localberg%lat,' on PE ',mpp_pe()
+      write(stderr(),*) 'diamond, read_restart_bergs: lres = ',lres
+    endif
+    if (lres) then
+      localberg%uvel=get_double(ncid, uvelid, k)
+      localberg%vvel=get_double(ncid, vvelid, k)
+      localberg%mass=get_double(ncid, massid, k)
+      localberg%thickness=get_double(ncid, thicknessid, k)
+      localberg%width=get_double(ncid, widthid, k)
+      localberg%length=get_double(ncid, lengthid, k)
+      localberg%start_lon=get_double(ncid, start_lonid, k)
+      localberg%start_lat=get_double(ncid, start_latid, k)
+      localberg%start_year=get_int(ncid, start_yearid, k)
+      localberg%start_day=get_double(ncid, start_dayid, k)
+      localberg%start_mass=get_double(ncid, start_massid, k)
+      localberg%mass_scaling=get_double(ncid, scaling_id, k)
+      if (really_debug) lres=is_point_in_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, explain=.true.)
+      lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
+      call add_new_berg_to_list(bergs%first, localberg)
+      if (really_debug) call print_berg(stderr(), bergs%first, 'read_restart_bergs, add_new_berg_to_list')
+    elseif (multiPErestart) then
+      write(stderr(),*) 'diamond, read_restart_bergs: WARNING berg not on PE!'
     endif
   enddo
 
@@ -1928,7 +1927,7 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
     write(stderr(),'(a,i,a,i,a)') 'diamond, read_restart_bergs: there were',nbergs_in_file,' bergs in the restart file and', &
      k,' bergs have been read'
   endif
-
+  if (debug.and.k.ne.nbergs_in_file) call error_mesg('diamond, read_restart_bergs', 'wrong number of bergs read!', FATAL)
   
 end subroutine read_restart_bergs
 
@@ -2268,7 +2267,7 @@ real, intent(in) :: x, y
 integer, intent(in) :: i, j
 logical, intent(in), optional :: explain
 ! Local variables
-real :: xlo, xhi, ylo, yhi, xx
+real :: xlo, xhi, ylo, yhi
 
   ! Safety check index bounds
   if (i-1.lt.grd%isd.or.i.gt.grd%ied.or.j-1.lt.grd%jsd.or.j.gt.grd%jed) then
@@ -2281,10 +2280,15 @@ real :: xlo, xhi, ylo, yhi, xx
   is_point_in_cell=.false.
 
   ! Test crude bounds
-  xlo=min( grd%lon(i-1,j-1), grd%lon(i,j-1), grd%lon(i-1,j), grd%lon(i,j) )
-  xhi=max( grd%lon(i-1,j-1), grd%lon(i,j-1), grd%lon(i-1,j), grd%lon(i,j) )
-  xx=modulo(x-(xlo-180.),360.)+(xlo-180.)
-  if (xx.lt.xlo .or. xx.gt.xhi) return
+  xlo=min( modulo(grd%lon(i-1,j-1)-(x-180.),360.)+(x-180.), &
+           modulo(grd%lon(i  ,j-1)-(x-180.),360.)+(x-180.), &
+           modulo(grd%lon(i-1,j  )-(x-180.),360.)+(x-180.), &
+           modulo(grd%lon(i  ,j  )-(x-180.),360.)+(x-180.) )
+  xhi=max( modulo(grd%lon(i-1,j-1)-(x-180.),360.)+(x-180.), &
+           modulo(grd%lon(i  ,j-1)-(x-180.),360.)+(x-180.), &
+           modulo(grd%lon(i-1,j  )-(x-180.),360.)+(x-180.), &
+           modulo(grd%lon(i  ,j  )-(x-180.),360.)+(x-180.) )
+  if (x.lt.xlo .or. x.gt.xhi) return
   ylo=min( grd%lat(i-1,j-1), grd%lat(i,j-1), grd%lat(i-1,j), grd%lat(i,j) )
   yhi=max( grd%lat(i-1,j-1), grd%lat(i,j-1), grd%lat(i-1,j), grd%lat(i,j) )
   if (y.lt.ylo .or. y.gt.yhi) return
@@ -2325,13 +2329,6 @@ real :: xlo, xhi, ylo, yhi, xx
                                       x, y, explain=explain) 
   endif
 
- !if (debug .and. .not. is_point_in_cell) then
- !  write(stderr(),*) 'diamond, is_point_in_cell: inside crude bounds but not in cell',mpp_pe()
- !  write(stderr(),*) 'diamond, is_point_in_cell: xlo,hi,x,xx=',xlo,xhi,x,xx
- !  write(stderr(),*) 'diamond, is_point_in_cell: ylo,hi,y=',ylo,yhi,y
- !  write(stderr(),*) 'diamond, is_point_in_cell: i,j=',i,j
- !endif
-
 end function is_point_in_cell
 
 ! ##############################################################################
@@ -2347,10 +2344,10 @@ real :: xx0,xx1,xx2,xx3
 
   sum_sign_dot_prod4=.false.
   xx=modulo(x-(x0-180.),360.)+(x0-180.) ! Reference x to within 180 of x0
-  xx0=modulo(x0-(xx-180.),360.)+(xx-180.) ! Reference x0 to within 180 of xx
-  xx1=modulo(x1-(xx-180.),360.)+(xx-180.) ! Reference x1 to within 180 of xx
-  xx2=modulo(x2-(xx-180.),360.)+(xx-180.) ! Reference x2 to within 180 of xx
-  xx3=modulo(x3-(xx-180.),360.)+(xx-180.) ! Reference x3 to within 180 of xx
+  xx0=modulo(x0-(x0-180.),360.)+(x0-180.) ! Reference x0 to within 180 of xx
+  xx1=modulo(x1-(x0-180.),360.)+(x0-180.) ! Reference x1 to within 180 of xx
+  xx2=modulo(x2-(x0-180.),360.)+(x0-180.) ! Reference x2 to within 180 of xx
+  xx3=modulo(x3-(x0-180.),360.)+(x0-180.) ! Reference x3 to within 180 of xx
 
   l0=(xx-xx0)*(y1-y0)-(y-y0)*(xx1-xx0)
   l1=(xx-xx1)*(y2-y1)-(y-y1)*(xx2-xx1)
@@ -2368,15 +2365,15 @@ real :: xx0,xx1,xx2,xx3
 
 
   if (present(explain).and.explain) then
-   write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: x=',mpp_pe(),':', &
+   write(stderr(),'(a,i3,a,10f12.4)') 'sum_sign_dot_prod4: x=',mpp_pe(),':', &
                            x0,x1,x2,x3, x
-   write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: X=',mpp_pe(),':', &
+   write(stderr(),'(a,i3,a,10f12.4)') 'sum_sign_dot_prod4: X=',mpp_pe(),':', &
                            xx0,xx1,xx2,xx3, xx
-   write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: y=',mpp_pe(),':', &
+   write(stderr(),'(a,i3,a,10f12.4)') 'sum_sign_dot_prod4: y=',mpp_pe(),':', &
                            y0,y1,y2,y3, y
    write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: l=',mpp_pe(),':', &
                            l0,l1,l2,l3
-   write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: p=',mpp_pe(),':', &
+   write(stderr(),'(a,i3,a,10f12.4)') 'sum_sign_dot_prod4: p=',mpp_pe(),':', &
                            p0,p1,p2,p3, abs( (abs(p0)+abs(p2))+(abs(p1)+abs(p3)) - abs((p0+p2)+(p1+p3)) )
   endif
 
@@ -2395,11 +2392,11 @@ real :: xx0,xx1,xx2,xx3,xx4
 
   sum_sign_dot_prod5=.false.
   xx=modulo(x-(x0-180.),360.)+(x0-180.) ! Reference x to within 180 of x0
-  xx0=modulo(x0-(xx-180.),360.)+(xx-180.) ! Reference x0 to within 180 of xx
-  xx1=modulo(x1-(xx-180.),360.)+(xx-180.) ! Reference x1 to within 180 of xx
-  xx2=modulo(x2-(xx-180.),360.)+(xx-180.) ! Reference x2 to within 180 of xx
-  xx3=modulo(x3-(xx-180.),360.)+(xx-180.) ! Reference x3 to within 180 of xx
-  xx4=modulo(x4-(xx-180.),360.)+(xx-180.) ! Reference x4 to within 180 of xx
+  xx0=modulo(x0-(x0-180.),360.)+(x0-180.) ! Reference x0 to within 180 of xx
+  xx1=modulo(x1-(x0-180.),360.)+(x0-180.) ! Reference x1 to within 180 of xx
+  xx2=modulo(x2-(x0-180.),360.)+(x0-180.) ! Reference x2 to within 180 of xx
+  xx3=modulo(x3-(x0-180.),360.)+(x0-180.) ! Reference x3 to within 180 of xx
+  xx4=modulo(x4-(x0-180.),360.)+(x0-180.) ! Reference x4 to within 180 of xx
 
   l0=(xx-xx0)*(y1-y0)-(y-y0)*(xx1-xx0)
   l1=(xx-xx1)*(y2-y1)-(y-y1)*(xx2-xx1)
@@ -2418,15 +2415,15 @@ real :: xx0,xx1,xx2,xx3,xx4
   endif
 
   if (present(explain).and.explain) then
-   write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod5: x=',mpp_pe(),':', &
+   write(stderr(),'(a,i3,a,10f12.4)') 'sum_sign_dot_prod5: x=',mpp_pe(),':', &
                            x0,x1,x2,x3,x4, x
-   write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: X=',mpp_pe(),':', &
+   write(stderr(),'(a,i3,a,10f12.4)') 'sum_sign_dot_prod5: X=',mpp_pe(),':', &
                            xx0,xx1,xx2,xx3,xx4, xx
-   write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod5: y=',mpp_pe(),':', &
+   write(stderr(),'(a,i3,a,10f12.4)') 'sum_sign_dot_prod5: y=',mpp_pe(),':', &
                            y0,y1,y2,y3,y4, y
    write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod5: l=',mpp_pe(),':', &
                            l0,l1,l2,l3,l4
-   write(stderr(),'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod5: p=',mpp_pe(),':', &
+   write(stderr(),'(a,i3,a,10f12.4)') 'sum_sign_dot_prod5: p=',mpp_pe(),':', &
                            p0,p1,p2,p3,p4
   endif
 
