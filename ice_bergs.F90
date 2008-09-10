@@ -110,7 +110,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.46 2008/09/04 15:28:40 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.47 2008/09/10 19:53:25 tom Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -416,7 +416,7 @@ type(iceberg), pointer :: this, next
       call move_trajectory(bergs, this)
       call delete_iceberg_from_list(bergs%first, this)
     else ! Diagnose mass distribution on grid
-      if(grd%id_mass>0) grd%mass(i,j)=grd%mass(i,j)+Mnew/grd%area(i,j)
+      if(grd%id_mass>0) grd%mass(i,j)=grd%mass(i,j)+Mnew/grd%area(i,j)*this%mass_scaling ! kg/m2/s
     endif
   
     this=>next
