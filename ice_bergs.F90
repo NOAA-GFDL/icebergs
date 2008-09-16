@@ -110,7 +110,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.47 2008/09/10 19:53:25 tom Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.48 2008/09/16 18:49:30 wfc Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -2629,6 +2629,20 @@ end subroutine icebergs_stock_pe
 
 ! ##############################################################################
 
+subroutine icebergs_save_restart(bergs)
+! Arguments
+type(icebergs), pointer :: bergs
+! Local variables
+
+  if (.not.associated(bergs)) return
+
+  call bergs_chksum(bergs, 'write_restart bergs')
+  call write_restart(bergs)
+
+end subroutine icebergs_save_restart
+
+! ##############################################################################
+
 subroutine icebergs_end(bergs)
 ! Arguments
 type(icebergs), pointer :: bergs
@@ -2637,8 +2651,7 @@ type(iceberg), pointer :: this, next
 
   if (.not.associated(bergs)) return
 
-  call bergs_chksum(bergs, 'write_restart bergs')
-  call write_restart(bergs)
+  call icebergs_save_restart(bergs)
 
   ! Delete bergs and structures
   this=>bergs%first
