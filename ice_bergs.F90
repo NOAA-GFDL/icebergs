@@ -50,15 +50,16 @@ type :: icebergs_gridded
   real, dimension(:,:), pointer :: sst=>NULL() ! Sea surface temperature (oC)
   real, dimension(:,:), pointer :: cn=>NULL() ! Sea-ice concentration (0 to 1)
   real, dimension(:,:), pointer :: hi=>NULL() ! Sea-ice thickness (m)
-  real, dimension(:,:), pointer :: calving=>NULL() ! Calving mass rate [frozen runoff] (kg/s)
+  real, dimension(:,:), pointer :: calving=>NULL() ! Calving mass rate [frozen runoff] (kg/s) (into stored ice)
   real, dimension(:,:), pointer :: melt=>NULL() ! Iceberg melting mass rate (kg/s/m^2)
   real, dimension(:,:), pointer :: virtual_area=>NULL() ! Virtual surface coverage by icebergs (m^2)
   real, dimension(:,:), pointer :: mass=>NULL() ! Mass distribution (kg/m^2)
   real, dimension(:,:), pointer :: tmp=>NULL() ! Temporary work space
   real, dimension(:,:,:), pointer :: stored_ice=>NULL() ! Accumulated ice mass flux at calving locations (kg)
+  real, dimension(:,:,:), pointer :: real_calving=>NULL() ! Calving rate into iceberg class at calving locations (kg/s)
   ! Diagnostics handles
   integer :: id_uo=-1, id_vo=-1, id_calving=-1, id_stored_ice=-1, id_accum=-1, id_unused=-1, id_melt=-1
-  integer :: id_virtual_area=-1
+  integer :: id_virtual_area=-1, id_real_calving=-1
   integer :: id_mass=-1, id_ui=-1, id_vi=-1, id_ua=-1, id_va=-1, id_sst=-1, id_cn=-1, id_hi=-1
 end type icebergs_gridded
 
@@ -107,10 +108,17 @@ type, public :: icebergs ; private
   type(buffer), pointer :: obuffer_s=>NULL(), ibuffer_s=>NULL()
   type(buffer), pointer :: obuffer_e=>NULL(), ibuffer_e=>NULL()
   type(buffer), pointer :: obuffer_w=>NULL(), ibuffer_w=>NULL()
+  ! Budgets
+  real :: net_calving_received=0., net_calving_returned=0.
+  real :: net_incoming_calving=0., net_outgoing_calving=0.
+  real :: stored_start, stored_end
+  real :: net_calving_used=0., net_calving_to_bergs=0.
+  real :: icebergs_mass_start, icebergs_mass_end
+  real :: net_melt=0.
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.48 2008/09/16 18:49:30 wfc Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.49 2008/09/28 16:43:28 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -238,33 +246,33 @@ integer :: itloop
   if (abs(uveln)>vel_lim.or.abs(vveln)>vel_lim) dumpit=.true.
   if (abs(ax)>accel_lim.or.abs(ay)>accel_lim) dumpit=.true.
   if (dumpit) then
-    write(stderr(),'(a,i3,9(1xa,1pe12.3))') 'Large acceleration detected pe=',mpp_pe(), &
+    write(stderr(),'(a,i3,9(1xa,es12.3))') 'Large acceleration detected pe=',mpp_pe(), &
       'lon0=',berg%start_lon, &
       'lat0=',berg%start_lat, &
       'yr0=',float(berg%start_year), &
       'day0=',berg%start_day, &
       'mass0=',berg%start_mass, &
       'scaling=',berg%mass_scaling
-    write(stderr(),'(a,i3,9(1xa,1pe12.3))') 'Geometry pe=',mpp_pe(), &
+    write(stderr(),'(a,i3,9(1xa,es12.3))') 'Geometry pe=',mpp_pe(), &
       'M=',M, &
       'T=',T, &
       'D=',D, &
       'F=',F, &
       'W=',W, &
       'L=',L
-    write(stderr(),'(a,i3,9(1xa,1pe12.3))') ' del U pe=',mpp_pe(), &
+    write(stderr(),'(a,i3,9(1xa,es12.3))') ' del U pe=',mpp_pe(), &
       'u(n)=',uvel, &
       'u(n+1)=',uvel+bergs%dt*ax, &
       'v(n)=',vvel, &
       'v(n+1)=',vvel+bergs%dt*ay
-    write(stderr(),'(a,i3,9(1xa,1pe12.3))') 'U accel. pe=',mpp_pe(), &
+    write(stderr(),'(a,i3,9(1xa,es12.3))') 'U accel. pe=',mpp_pe(), &
       'f*v=',f_cori*vvel, &
       'g*H_x=',-gravity*ssh_x, &
       'wave*ua=',wave_rad*uwave, &
       'd*(u-uo)=',-drag_ocn*(uvel-uo), &
       'd*(u-ua)=',-drag_atm*(uvel-ua), &
       'd*(u-ui)=',-drag_ice*(uvel-ui)
-    write(stderr(),'(a,i3,9(1xa,1pe12.3))') '  accel. pe=',mpp_pe(), &
+    write(stderr(),'(a,i3,9(1xa,es12.3))') '  accel. pe=',mpp_pe(), &
       'axe=',axe, &
       'ax=',ax, &
       'ax(cori)=',detA*(A11*(f_cori*vvel)+A12*(-f_cori*uvel)), &
@@ -273,14 +281,14 @@ integer :: itloop
       'ax(ocn)=',detA*(A11*(-drag_ocn*(uvel-uo))+A12*(-drag_ocn*(vvel-vo))), &
       'ax(atm)=',detA*(A11*(-drag_atm*(uvel-ua))+A12*(-drag_atm*(vvel-va))), &
       'ax(ice)=',detA*(A11*(-drag_ice*(uvel-ui))+A12*(-drag_ice*(vvel-vi)))
-    write(stderr(),'(a,i3,9(1xa,1pe12.3))') 'V accel. pe=',mpp_pe(), &
+    write(stderr(),'(a,i3,9(1xa,es12.3))') 'V accel. pe=',mpp_pe(), &
       'f*u=',-f_cori*uvel, &
       'g*H_y=',-gravity*ssh_y, &
       'wave*va=',wave_rad*vwave, &
       'd*(v-vo)=',-drag_ocn*(vvel-vo), &
       'd*(v-va)=',-drag_atm*(vvel-va), &
       'd*(v-vi)=',-drag_ice*(vvel-vi)
-    write(stderr(),'(a,i3,9(1xa,1pe12.3))') '  accel. pe=',mpp_pe(), &
+    write(stderr(),'(a,i3,9(1xa,es12.3))') '  accel. pe=',mpp_pe(), &
       'aye=',aye, &
       'ay=',ay, &
       'ay(cori)=',detA*(-A12*(f_cori*vvel)+A11*(-f_cori*uvel)), &
@@ -289,7 +297,7 @@ integer :: itloop
       'ay(ocn)=',detA*(-A12*(-drag_ocn*(uvel-uo))+A11*(-drag_ocn*(vvel-vo))), &
       'ay(atm)=',detA*(-A12*(-drag_atm*(uvel-ua))+A11*(-drag_atm*(vvel-va))), &
       'ay(ice)=',detA*(-A12*(-drag_ice*(uvel-ui))+A11*(-drag_ice*(vvel-vi)))
-    write(stderr(),'(a,i3,9(1xa,1pe12.3))') 'Vel scales pe=',mpp_pe(), &
+    write(stderr(),'(a,i3,9(1xa,es12.3))') 'Vel scales pe=',mpp_pe(), &
       '|va-vo|=',sqrt((ua-uo)**2+(va-vo)**2), &
       '|vo-vb|=',sqrt((uvel-uo)**2+(vvel-vo)**2), &
       '|va-vb|=',sqrt((uvel-ua)**2+(vvel-va)**2), &
@@ -298,32 +306,32 @@ integer :: itloop
       '|va|=',sqrt((ua)**2+(va)**2), &
       '|vo|=',sqrt((uo)**2+(vo)**2), &
       '|vi|=',sqrt((ui)**2+(vi)**2)
-    write(stderr(),'(a,i3,9(1xa,1pe12.3))') 'Time scales pe=',mpp_pe(), &
+    write(stderr(),'(a,i3,9(1xa,es12.3))') 'Time scales pe=',mpp_pe(), &
       'f=',f_cori, &
       'wave_rad=',wave_rad, &
       'do=',drag_ocn, &
       'da=',drag_atm, &
       'di=',drag_ice
-    write(stderr(),'(a,i3,9(1xa,1pe12.3))') ' u* pe=',mpp_pe(), &
+    write(stderr(),'(a,i3,9(1xa,es12.3))') ' u* pe=',mpp_pe(), &
       'd*=',lambda, &
       'u*=',(drag_ocn*uo+drag_atm*ua+drag_ice*ui)/lambda, &
       'uo*=',(drag_ocn*uo)/lambda, &
       'ua*=',(drag_atm*ua)/lambda, &
       'ui*=',(drag_ice*ui)/lambda
-    write(stderr(),'(a,i3,9(1xa,1pe12.3))') ' v* pe=',mpp_pe(), &
+    write(stderr(),'(a,i3,9(1xa,es12.3))') ' v* pe=',mpp_pe(), &
       'd*=',lambda, &
       'v*=',(drag_ocn*vo+drag_atm*va+drag_ice*vi)/lambda, &
       'vo*=',(drag_ocn*vo)/lambda, &
       'va*=',(drag_atm*va)/lambda, &
       'vi*=',(drag_ice*vi)/lambda
-    write(stderr(),'(a,i3,9(1xa,1pe12.3))') '          pe=',mpp_pe(), &
+    write(stderr(),'(a,i3,9(1xa,es12.3))') '          pe=',mpp_pe(), &
       'a=',sqrt(ampl), &
       'Lwl=',Lwavelength, &
       'Lcut=',Lcutoff, &
       'Ltop=',Ltop, &
       'hi=',hi, &
       'Cr=',Cr
-    write(stderr(),'(a,i3,9(1xa,1pe12.3))') '          pe=',mpp_pe(), &
+    write(stderr(),'(a,i3,9(1xa,es12.3))') '          pe=',mpp_pe(), &
       'xi=',xi, &
       'yj=',yj, &
       'lat=',lat
@@ -525,7 +533,8 @@ integer :: iyr, imon, iday, ihr, imin, isec, nbergs
 type(iceberg), pointer :: this
 type(icebergs_gridded), pointer :: grd
 logical :: lerr, sample_traj, lbudget, lverbose
-real :: incoming_calving, unused_calving, stored_mass, total_iceberg_mass, meltmass
+real :: passed_calving, incoming_calving, unused_calving, returned_calving
+real :: stored_mass, total_iceberg_mass, meltmass
 
   call mpp_clock_begin(bergs%clock)
 
@@ -548,10 +557,15 @@ real :: incoming_calving, unused_calving, stored_mass, total_iceberg_mass, meltm
        ' yr,yrdy=', bergs%current_year, bergs%current_yearday
 
   ! Adapt calving flux from coupler for use here
-  grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec)=calving(:,:)
  !call sanitize_field(grd%calving,1.e20)
+  passed_calving=sum( calving(:,:)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
+  call mpp_sum(passed_calving)
+  bergs%net_calving_received=bergs%net_calving_received+passed_calving*bergs%dt
+  grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec)=calving(:,:)
   grd%calving(:,:)=grd%calving(:,:)*grd%msk(:,:)*grd%area(:,:) ! Convert to kg/s from kg/m2/s
-  if (lbudget) incoming_calving=sum( grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec) )
+  incoming_calving=sum( grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec) )
+  call mpp_sum(incoming_calving)
+  bergs%net_incoming_calving=bergs%net_incoming_calving+incoming_calving*bergs%dt
   if (grd%id_calving>0) &
     lerr=send_data(grd%id_calving, grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (debug) then
@@ -595,7 +609,7 @@ real :: incoming_calving, unused_calving, stored_mass, total_iceberg_mass, meltm
   endif
   if (grd%id_unused>0) &
     lerr=send_data(grd%id_unused, grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (lbudget) unused_calving=sum( grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec) )
+  unused_calving=sum( grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec) )
 
   ! Calve excess stored ice into icebergs
   call calve_icebergs(bergs)
@@ -654,38 +668,102 @@ real :: incoming_calving, unused_calving, stored_mass, total_iceberg_mass, meltm
     lerr=send_data(grd%id_mass, grd%mass(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_stored_ice>0) &
     lerr=send_data(grd%id_stored_ice, grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:), Time)
+  if (grd%id_real_calving>0) &
+    lerr=send_data(grd%id_real_calving, grd%real_calving(grd%isc:grd%iec,grd%jsc:grd%jec,:), Time)
 
   ! Dump icebergs to screen
   if (really_debug) call print_bergs(stderr(),bergs,'icebergs_run, status')
 
-  ! Diagnose budgets
-  if (lbudget) then
-    call mpp_sum(incoming_calving)
-    call mpp_sum(unused_calving)
-    stored_mass=sum( grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:) )
-    call mpp_sum(stored_mass)
-    total_iceberg_mass=sum_icebergs_mass(bergs%first)
-    call mpp_sum(total_iceberg_mass)
-    nbergs=count_bergs(bergs)
-    call mpp_sum(nbergs)
-    meltmass=sum( grd%melt(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
-    call mpp_sum(meltmass)
-    if (mpp_pe().eq.mpp_root_pe()) write(stderr(),'(a,5(1pe11.5,a),i6)') &
-        'diamond, budget: incoming calving=',incoming_calving, &
-        ' kg/s, unused calving=',unused_calving, &
-        ' kg/s, melt=',meltmass, &
-        ' kg/s, stored mass=',stored_mass, &
-        ' kg, ice berg mass=',total_iceberg_mass, &
-        ' kg, # of bergs=',nbergs
-  endif
-
   ! Return what ever calving we did not use and additional icebergs melt
-  where (grd%area(:,:)>0.)
-    calving(:,:)=grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec)/grd%area(:,:) &
-                 +grd%melt(grd%isc:grd%iec,grd%jsc:grd%jec)
+  where (grd%area(grd%isc:grd%iec,grd%jsc:grd%jec)>0.)
+    calving(:,:)=grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec)/grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) &
+                +grd%melt(grd%isc:grd%iec,grd%jsc:grd%jec)
   elsewhere
     calving(:,:)=0.
   end where
+
+  ! Diagnose budgets
+  call mpp_sum(unused_calving)
+  stored_mass=sum( grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:) )
+  call mpp_sum(stored_mass)
+  total_iceberg_mass=sum_icebergs_mass(bergs%first)
+  call mpp_sum(total_iceberg_mass)
+  nbergs=count_bergs(bergs)
+  call mpp_sum(nbergs)
+  meltmass=sum( grd%melt(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
+  call mpp_sum(meltmass)
+  bergs%net_melt=bergs%net_melt+meltmass*bergs%dt
+  returned_calving=sum( calving(:,:)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
+  call mpp_sum(returned_calving)
+  bergs%net_calving_returned=bergs%net_calving_returned+returned_calving*bergs%dt
+  bergs%net_outgoing_calving=bergs%net_outgoing_calving+(unused_calving+meltmass)*bergs%dt
+  if (lbudget) then
+    bergs%stored_end=stored_mass
+    bergs%icebergs_mass_end=total_iceberg_mass
+    if (mpp_pe().eq.mpp_root_pe()) then
+      write(stderr(),'(a,7(es11.5,a),i6)') &
+        'diamond, budget: passed calving=',passed_calving, &
+        ' kg/s, incoming calving=',incoming_calving, &
+        ' kg/s, unused calving=',unused_calving, &
+        ' kg/s, melt=',meltmass, &
+        ' kg/s, returned=',returned_calving, &
+        ' kg/s, stored mass=',stored_mass, &
+        ' kg, ice berg mass=',total_iceberg_mass, &
+        ' kg, # of bergs=',nbergs
+      write(stderr(),'(a,10(es15.7,a))') &
+        'diamond, buffer budget1: net calving used=',bergs%net_calving_used, &
+        ' kg, net calving to bergs=',bergs%net_calving_to_bergs, &
+        ' kg, starting buffered ice=',bergs%stored_start, &
+        ' kg, ending buffered ice=',bergs%stored_end, &
+        ' kg'
+      write(stderr(),'(a,10(es15.7,a))') &
+        'diamond, buffer budget2: difference in calving=',bergs%net_calving_used-bergs%net_calving_to_bergs, &
+        ' kg, change in buffered ice=',bergs%stored_end-bergs%stored_start, &
+        ' kg, imbalance=',(bergs%net_calving_used-bergs%net_calving_to_bergs)-(bergs%stored_end-bergs%stored_start), &
+        ' kg'
+      write(stderr(),'(a,10(es15.7,a))') &
+        'diamond, berg budget1: net calving to bergs=',bergs%net_calving_to_bergs, &
+        ' kg, net melt=',bergs%net_melt, &
+        ' kg, starting berg mass=',bergs%icebergs_mass_start, &
+        ' kg, ending berg mass=',bergs%icebergs_mass_end, &
+        ' kg'
+      write(stderr(),'(a,10(es15.7,a))') &
+        'diamond, berg budget2: calving-melt=',bergs%net_calving_to_bergs-bergs%net_melt, &
+        ' kg, change in berg mass=',bergs%icebergs_mass_end-bergs%icebergs_mass_start, &
+        ' kg, imbalance=',(bergs%net_calving_to_bergs-bergs%net_melt)-(bergs%icebergs_mass_end-bergs%icebergs_mass_start), &
+        ' kg'
+      write(stderr(),'(a,10(es15.7,a))') &
+        'diamond, whole budget1: net received calving =',bergs%net_calving_received, &
+        ' kg, net returned calving=',bergs%net_calving_returned, &
+        ' kg, starting mass=',bergs%stored_start+bergs%icebergs_mass_start, &
+        ' kg, ending mass=',bergs%stored_end+bergs%icebergs_mass_end, &
+        ' kg'
+      write(stderr(),'(a,10(es15.7,a))') &
+        'diamond, whole budget2: in-out=',bergs%net_calving_received-bergs%net_calving_returned, &
+        ' kg, change in mass=',(bergs%icebergs_mass_end-bergs%icebergs_mass_start)+(bergs%stored_end-bergs%stored_start), &
+        ' kg, imbalance=',((bergs%icebergs_mass_end-bergs%icebergs_mass_start)+(bergs%stored_end-bergs%stored_start))-(bergs%net_calving_received-bergs%net_calving_returned), &
+        ' kg'
+      write(stderr(),'(a,10(es15.7,a))') &
+        'diamond, top budget in: net received calving =',bergs%net_calving_received, &
+        ' kg, net incoming calving=',bergs%net_incoming_calving, &
+        ' kg, difference=',bergs%net_calving_received-bergs%net_incoming_calving, &
+        ' kg'
+      write(stderr(),'(a,10(es15.7,a))') &
+        'diamond, bottom budget out: net returned calving =',bergs%net_calving_returned, &
+        ' kg, net outgoing calving=',bergs%net_outgoing_calving, &
+        ' kg, difference=',bergs%net_calving_returned-bergs%net_outgoing_calving, &
+        ' kg'
+    endif
+    bergs%stored_start=bergs%stored_end
+    bergs%icebergs_mass_start=bergs%icebergs_mass_end
+    bergs%net_calving_used=0.
+    bergs%net_calving_to_bergs=0.
+    bergs%net_calving_received=0.
+    bergs%net_calving_returned=0.
+    bergs%net_incoming_calving=0.
+    bergs%net_outgoing_calving=0.
+    bergs%net_melt=0.
+  endif
 
   if (debug) then
     call bergs_chksum(bergs, 'run bergs (bot)')
@@ -703,7 +781,6 @@ real :: incoming_calving, unused_calving, stored_mass, total_iceberg_mass, meltm
     call grd_chksum2(bergs%grd, bergs%grd%melt, 'run melt (bot)')
     call grd_chksum2(bergs%grd, bergs%grd%virtual_area, 'run varea (bot)')
     call grd_chksum2(bergs%grd, bergs%grd%mass, 'run mass (bot)')
-    call grd_chksum2(bergs%grd, bergs%grd%calving, 'run calving (bot)')
     call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'run stored_ice (bot)')
   endif
 
@@ -717,9 +794,9 @@ subroutine accumulate_calving(bergs)
 type(icebergs), pointer :: bergs
 ! Local variables
 type(icebergs_gridded), pointer :: grd
-real :: remaining_dist, stored_mass
+real :: remaining_dist, stored_mass, net_calving_used
 integer :: k
-logical, save :: first_call=.true.
+logical, save :: first_call=.false.
 
   ! For convenience
   grd=>bergs%grd
@@ -732,7 +809,7 @@ logical, save :: first_call=.true.
     enddo
     stored_mass=sum( grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:) )
     call mpp_sum(stored_mass)
-    if (mpp_pe().eq.mpp_root_pe()) write(stderr(),'(a,1pe12.6,a)') &
+    if (mpp_pe().eq.mpp_root_pe()) write(stderr(),'(a,es12.6,a)') &
         'diamond, accumulate_calving: initial stored mass=',stored_mass,' kg'
   endif
 
@@ -745,6 +822,9 @@ logical, save :: first_call=.true.
     write(stderr(),*) 'diamond, accumulate_calving: sum(distribution)>1!!!',remaining_dist
     call error_mesg('diamond, accumulate_calving', 'calving is OVER distributed!', WARNING)
   endif
+  net_calving_used=sum( grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec) )*(1.-remaining_dist)
+  call mpp_sum( net_calving_used )
+  bergs%net_calving_used=bergs%net_calving_used+net_calving_used*bergs%dt
   ! Remove the calving accounted for by accumulation
   grd%calving(:,:)=grd%calving(:,:)*remaining_dist
 
@@ -760,10 +840,13 @@ type(icebergs_gridded), pointer :: grd
 integer :: i,j,k
 type(iceberg) :: newberg
 logical :: lret
-real :: xi, yj, ddt
+real :: xi, yj, ddt, calving_to_bergs, calved_to_berg
 
   ! For convenience
   grd=>bergs%grd
+
+  grd%real_calving(:,:,:)=0.
+  calving_to_bergs=0.
 
   do k=1, nclasses
     do j=grd%jsc, grd%jec
@@ -796,12 +879,18 @@ real :: xi, yj, ddt
           newberg%mass_scaling=bergs%mass_scaling(k)
           call add_new_berg_to_list(bergs%first, newberg)
          !if (verbose) call print_berg(stderr(), bergs%first, 'calve_icebergs, new berg created')
-          grd%stored_ice(i,j,k)=grd%stored_ice(i,j,k)-bergs%initial_mass(k)*bergs%mass_scaling(k)
+          calved_to_berg=bergs%initial_mass(k)*bergs%mass_scaling(k)
+          grd%stored_ice(i,j,k)=grd%stored_ice(i,j,k)-calved_to_berg
+          calving_to_bergs=calving_to_bergs+calved_to_berg
+          grd%real_calving(i,j,k)=grd%real_calving(i,j,k)+calved_to_berg/bergs%dt
           ddt=ddt+bergs%dt/100. ! Minor offset to start day
         enddo
       enddo
     enddo
   enddo
+
+  call mpp_sum(calving_to_bergs)
+  bergs%net_calving_to_bergs=bergs%net_calving_to_bergs+calving_to_bergs
 
 end subroutine calve_icebergs
 
@@ -1660,6 +1749,7 @@ logical :: lerr
   allocate( grd%virtual_area(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%virtual_area(:,:)=0.
   allocate( grd%mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%mass(:,:)=0.
   allocate( grd%stored_ice(grd%isd:grd%ied, grd%jsd:grd%jed, nclasses) ); grd%stored_ice(:,:,:)=0.
+  allocate( grd%real_calving(grd%isd:grd%ied, grd%jsd:grd%jed, nclasses) ); grd%real_calving(:,:,:)=0.
   allocate( grd%uo(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%uo(:,:)=0.
   allocate( grd%vo(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%vo(:,:)=0.
   allocate( grd%ui(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%ui(:,:)=0.
@@ -1780,6 +1870,8 @@ logical :: lerr
      'Iceberg density field', 'kg/(m^2)')
   grd%id_stored_ice=register_diag_field('icebergs', 'stored_ice', axes3d, Time, &
      'Accumulated ice mass by class', 'kg')
+  grd%id_real_calving=register_diag_field('icebergs', 'real_calving', axes3d, Time, &
+     'Calving into iceberg class', 'kg/s')
   grd%id_uo=register_diag_field('icebergs', 'uo', axes, Time, &
      'Ocean zonal component of velocity', 'm s^-1')
   grd%id_vo=register_diag_field('icebergs', 'vo', axes, Time, &
@@ -1928,6 +2020,9 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
      k,' bergs have been read'
   endif
   if (debug.and.k.ne.nbergs_in_file) call error_mesg('diamond, read_restart_bergs', 'wrong number of bergs read!', FATAL)
+
+  bergs%icebergs_mass_start=sum_icebergs_mass(bergs%first)
+  call mpp_sum( bergs%icebergs_mass_start )
   
 end subroutine read_restart_bergs
 
@@ -1971,6 +2066,9 @@ type(randomNumberStream) :: rns
   endif
 
   call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'read stored_ice')
+
+  bergs%stored_start=sum( grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:) )
+  call mpp_sum( bergs%stored_start )
 
 end subroutine read_restart_calving
 
@@ -2070,7 +2168,7 @@ character(len=*) :: label
     ' lon,lat=', berg%lon, berg%lat, &
     ' u,v=', berg%uvel, berg%vvel, &
     ' p,n=', associated(berg%prev), associated(berg%next)
-  write(iochan,'("diamond, print_berg: ",a," pe=(",i3,") start lon,lat,yr,day,mass=",2f10.4,i5,f7.2,1pe12.4)') &
+  write(iochan,'("diamond, print_berg: ",a," pe=(",i3,") start lon,lat,yr,day,mass=",2f10.4,i5,f7.2,es12.4)') &
     label, mpp_pe(), berg%start_lon, berg%start_lat, &
     berg%start_year, berg%start_day, berg%start_mass
 
@@ -2680,6 +2778,7 @@ type(iceberg), pointer :: this, next
   deallocate(bergs%grd%mass)
   deallocate(bergs%grd%tmp)
   deallocate(bergs%grd%stored_ice)
+  deallocate(bergs%grd%real_calving)
   deallocate(bergs%grd%uo)
   deallocate(bergs%grd%vo)
   deallocate(bergs%grd%ui)
@@ -3199,7 +3298,7 @@ real :: mean, rms, SD, minv, maxv
   i=mpp_chksum( fld(lbound(fld,1)+halo:ubound(fld,1)-halo, &
                     lbound(fld,2)+halo:ubound(fld,2)-halo,:) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(stderr(),'("diamond, grd_chksum3: ",a18,x,a,"=",i,5(x,a,"=",1pe21.14),x,a,"=",i)') &
+    write(stderr(),'("diamond, grd_chksum3: ",a18,x,a,"=",i,5(x,a,"=",es21.14),x,a,"=",i)') &
      txt, 'chksum', i, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd!, '#', icount
 
 end subroutine grd_chksum3
@@ -3250,7 +3349,7 @@ real :: mean, rms, SD, minv, maxv
   i=mpp_chksum( fld(lbound(fld,1)+halo:ubound(fld,1)-halo, &
                     lbound(fld,2)+halo:ubound(fld,2)-halo) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(stderr(),'("diamond, grd_chksum2: ",a18,x,a,"=",i,5(x,a,"=",1pe21.14),x,a,"=",i)') &
+    write(stderr(),'("diamond, grd_chksum2: ",a18,x,a,"=",i,5(x,a,"=",es21.14),x,a,"=",i)') &
      txt, 'chksum', i, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd!, '#', icount
 
 end subroutine grd_chksum2
