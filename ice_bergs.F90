@@ -118,7 +118,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.49 2008/09/28 16:43:28 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.50 2008/10/24 19:25:13 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -559,12 +559,10 @@ real :: stored_mass, total_iceberg_mass, meltmass
   ! Adapt calving flux from coupler for use here
  !call sanitize_field(grd%calving,1.e20)
   passed_calving=sum( calving(:,:)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
-  call mpp_sum(passed_calving)
   bergs%net_calving_received=bergs%net_calving_received+passed_calving*bergs%dt
   grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec)=calving(:,:)
   grd%calving(:,:)=grd%calving(:,:)*grd%msk(:,:)*grd%area(:,:) ! Convert to kg/s from kg/m2/s
   incoming_calving=sum( grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec) )
-  call mpp_sum(incoming_calving)
   bergs%net_incoming_calving=bergs%net_incoming_calving+incoming_calving*bergs%dt
   if (grd%id_calving>0) &
     lerr=send_data(grd%id_calving, grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
@@ -683,21 +681,30 @@ real :: stored_mass, total_iceberg_mass, meltmass
   end where
 
   ! Diagnose budgets
-  call mpp_sum(unused_calving)
-  stored_mass=sum( grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:) )
-  call mpp_sum(stored_mass)
-  total_iceberg_mass=sum_icebergs_mass(bergs%first)
-  call mpp_sum(total_iceberg_mass)
-  nbergs=count_bergs(bergs)
-  call mpp_sum(nbergs)
   meltmass=sum( grd%melt(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
-  call mpp_sum(meltmass)
   bergs%net_melt=bergs%net_melt+meltmass*bergs%dt
   returned_calving=sum( calving(:,:)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
-  call mpp_sum(returned_calving)
   bergs%net_calving_returned=bergs%net_calving_returned+returned_calving*bergs%dt
   bergs%net_outgoing_calving=bergs%net_outgoing_calving+(unused_calving+meltmass)*bergs%dt
   if (lbudget) then
+    stored_mass=sum( grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:) )
+    total_iceberg_mass=sum_icebergs_mass(bergs%first)
+    nbergs=count_bergs(bergs)
+    call mpp_sum(passed_calving)
+    call mpp_sum(incoming_calving)
+    call mpp_sum(unused_calving)
+    call mpp_sum(stored_mass)
+    call mpp_sum(total_iceberg_mass)
+    call mpp_sum(nbergs)
+    call mpp_sum(meltmass)
+    call mpp_sum(returned_calving)
+    call mpp_sum(bergs%net_calving_returned)
+    call mpp_sum(bergs%net_outgoing_calving)
+    call mpp_sum(bergs%net_calving_received)
+    call mpp_sum(bergs%net_incoming_calving)
+    call mpp_sum(bergs%net_calving_used)
+    call mpp_sum(bergs%net_calving_to_bergs)
+    call mpp_sum(bergs%net_melt)
     bergs%stored_end=stored_mass
     bergs%icebergs_mass_end=total_iceberg_mass
     if (mpp_pe().eq.mpp_root_pe()) then
@@ -823,7 +830,6 @@ logical, save :: first_call=.false.
     call error_mesg('diamond, accumulate_calving', 'calving is OVER distributed!', WARNING)
   endif
   net_calving_used=sum( grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec) )*(1.-remaining_dist)
-  call mpp_sum( net_calving_used )
   bergs%net_calving_used=bergs%net_calving_used+net_calving_used*bergs%dt
   ! Remove the calving accounted for by accumulation
   grd%calving(:,:)=grd%calving(:,:)*remaining_dist
@@ -889,7 +895,6 @@ real :: xi, yj, ddt, calving_to_bergs, calved_to_berg
     enddo
   enddo
 
-  call mpp_sum(calving_to_bergs)
   bergs%net_calving_to_bergs=bergs%net_calving_to_bergs+calving_to_bergs
 
 end subroutine calve_icebergs
