@@ -51,7 +51,10 @@ type :: icebergs_gridded
   real, dimension(:,:), pointer :: cn=>NULL() ! Sea-ice concentration (0 to 1)
   real, dimension(:,:), pointer :: hi=>NULL() ! Sea-ice thickness (m)
   real, dimension(:,:), pointer :: calving=>NULL() ! Calving mass rate [frozen runoff] (kg/s) (into stored ice)
-  real, dimension(:,:), pointer :: melt=>NULL() ! Iceberg melting mass rate (kg/s/m^2)
+  real, dimension(:,:), pointer :: melt=>NULL() ! Iceberg melting rate (kg/s/m^2)
+  real, dimension(:,:), pointer :: melt_buoy=>NULL() ! Buoyancy componenet of melting rate (kg/s/m^2)
+  real, dimension(:,:), pointer :: melt_eros=>NULL() ! Erosion component of melting rate (kg/s/m^2)
+  real, dimension(:,:), pointer :: melt_conv=>NULL() ! Convective component of melting rate (kg/s/m^2)
   real, dimension(:,:), pointer :: virtual_area=>NULL() ! Virtual surface coverage by icebergs (m^2)
   real, dimension(:,:), pointer :: mass=>NULL() ! Mass distribution (kg/m^2)
   real, dimension(:,:), pointer :: tmp=>NULL() ! Temporary work space
@@ -59,7 +62,7 @@ type :: icebergs_gridded
   real, dimension(:,:,:), pointer :: real_calving=>NULL() ! Calving rate into iceberg class at calving locations (kg/s)
   ! Diagnostics handles
   integer :: id_uo=-1, id_vo=-1, id_calving=-1, id_stored_ice=-1, id_accum=-1, id_unused=-1, id_melt=-1
-  integer :: id_virtual_area=-1, id_real_calving=-1
+  integer :: id_melt_buoy=-1, id_melt_eros=-1, id_melt_conv=-1, id_virtual_area=-1, id_real_calving=-1
   integer :: id_mass=-1, id_ui=-1, id_vi=-1, id_ua=-1, id_va=-1, id_sst=-1, id_cn=-1, id_hi=-1
 end type icebergs_gridded
 
@@ -118,7 +121,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.50 2008/10/24 19:25:13 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.51 2008/10/27 13:56:18 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -389,6 +392,32 @@ type(iceberg), pointer :: this, next
     Mnew=(nVol/Vol)*M
     dM=M-Mnew
 
+    ! Add melting to the grid
+    if (grd%area(i,j).ne.0.) then
+      melt=dM/bergs%dt ! kg/s
+      grd%melt(i,j)=grd%melt(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
+      grd%virtual_area(i,j)=grd%virtual_area(i,j)+this%width*this%length*this%mass_scaling
+      if(grd%id_melt_buoy>0) then
+        melt=(W*L)*(Mb/86400.) ! approximate melt due to buoyancy term in kg/s
+        grd%melt_buoy(i,j)=grd%melt_buoy(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
+      endif
+      if(grd%id_melt_eros>0) then
+        melt=(T*(W+L))*(Me/86400.) ! approximate melt due to erosion term in kg/s
+        grd%melt_eros(i,j)=grd%melt_eros(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
+      endif
+      if(grd%id_melt_conv>0) then
+        melt=(T*(W+L))*(Mv/86400.) ! approximate melt due to convection term in kg/s
+        grd%melt_conv(i,j)=grd%melt_conv(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
+      endif
+    else
+      write(stderr(),*) 'diamond, thermodynamics: berg appears to have grounded!!!! PE=',mpp_pe(),i,j
+      call print_berg(stderr(),this,'thermodynamics, grounded')
+      if (associated(this%trajectory)) &
+        write(stderr(),*) 'traj=',this%trajectory%lon,this%trajectory%lat
+      write(stderr(),*) 'msk=',grd%msk(i,j),grd%area(i,j)
+      call error_mesg('diamond, thermodynamics', 'berg appears to have grounded!', FATAL)
+    endif
+
     ! Rolling
     Dn=(bergs%rho_bergs/rho_seawater)*Tn ! draught (keel depth)
     if ( Dn>0. .and. max(Wn,Ln)<sqrt(0.92*(Dn**2)+58.32*Dn) ) then
@@ -402,20 +431,6 @@ type(iceberg), pointer :: this, next
     this%thickness=Tn
     this%width=min(Wn,Ln)
     this%length=max(Wn,Ln)
-
-    ! Add melting to the grid
-    if (grd%area(i,j).ne.0.) then
-      melt=dM/bergs%dt ! kg/s
-      grd%melt(i,j)=grd%melt(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
-      grd%virtual_area(i,j)=grd%virtual_area(i,j)+this%width*this%length*this%mass_scaling
-    else
-      write(stderr(),*) 'diamond, thermodynamics: berg appears to have grounded!!!! PE=',mpp_pe(),i,j
-      call print_berg(stderr(),this,'thermodynamics, grounded')
-      if (associated(this%trajectory)) &
-        write(stderr(),*) 'traj=',this%trajectory%lon,this%trajectory%lat
-      write(stderr(),*) 'msk=',grd%msk(i,j),grd%area(i,j)
-      call error_mesg('diamond, thermodynamics', 'berg appears to have grounded!', FATAL)
-    endif
 
     next=>this%next
 
@@ -626,6 +641,9 @@ real :: stored_mass, total_iceberg_mass, meltmass
 
   ! Ice berg thermodynamics (melting) + rolling
   grd%melt(:,:)=0.
+  grd%melt_buoy(:,:)=0.
+  grd%melt_eros(:,:)=0.
+  grd%melt_conv(:,:)=0.
   grd%mass(:,:)=0.
   grd%virtual_area(:,:)=0.
   if (associated(bergs%first)) call thermodynamics(bergs)
@@ -660,6 +678,12 @@ real :: stored_mass, total_iceberg_mass, meltmass
     lerr=send_data(grd%id_hi, grd%hi(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_melt>0) &
     lerr=send_data(grd%id_melt, grd%melt(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (grd%id_melt_buoy>0) &
+    lerr=send_data(grd%id_melt_buoy, grd%melt_buoy(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (grd%id_melt_eros>0) &
+    lerr=send_data(grd%id_melt_eros, grd%melt_eros(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (grd%id_melt_conv>0) &
+    lerr=send_data(grd%id_melt_conv, grd%melt_conv(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_virtual_area>0) &
     lerr=send_data(grd%id_virtual_area, grd%virtual_area(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_mass>0) &
@@ -786,6 +810,9 @@ real :: stored_mass, total_iceberg_mass, meltmass
     call grd_chksum2(bergs%grd, bergs%grd%hi, 'run hi (bot)')
     call grd_chksum2(bergs%grd, bergs%grd%cn, 'run cn (bot)')
     call grd_chksum2(bergs%grd, bergs%grd%melt, 'run melt (bot)')
+    call grd_chksum2(bergs%grd, bergs%grd%melt_buoy, 'run melt_b (bot)')
+    call grd_chksum2(bergs%grd, bergs%grd%melt_eros, 'run melt_e (bot)')
+    call grd_chksum2(bergs%grd, bergs%grd%melt_conv, 'run melt_v (bot)')
     call grd_chksum2(bergs%grd, bergs%grd%virtual_area, 'run varea (bot)')
     call grd_chksum2(bergs%grd, bergs%grd%mass, 'run mass (bot)')
     call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'run stored_ice (bot)')
@@ -1751,6 +1778,9 @@ logical :: lerr
   allocate( grd%sin(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%sin(:,:)=0.
   allocate( grd%calving(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%calving(:,:)=0.
   allocate( grd%melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%melt(:,:)=0.
+  allocate( grd%melt_buoy(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%melt_buoy(:,:)=0.
+  allocate( grd%melt_eros(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%melt_eros(:,:)=0.
+  allocate( grd%melt_conv(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%melt_conv(:,:)=0.
   allocate( grd%virtual_area(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%virtual_area(:,:)=0.
   allocate( grd%mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%mass(:,:)=0.
   allocate( grd%stored_ice(grd%isd:grd%ied, grd%jsd:grd%jed, nclasses) ); grd%stored_ice(:,:,:)=0.
@@ -1869,6 +1899,12 @@ logical :: lerr
      'Unused calving mass rate', 'kg/s')
   grd%id_melt=register_diag_field('icebergs', 'melt', axes, Time, &
      'Iceberg melt mass rate', 'kg/(m^2*s)')
+  grd%id_melt_buoy=register_diag_field('icebergs', 'melt_buoy', axes, Time, &
+     'Buoyancy component of iceberg melt rate', 'kg/(m^2*s)')
+  grd%id_melt_eros=register_diag_field('icebergs', 'melt_eros', axes, Time, &
+     'Erosion component of iceberg melt rate', 'kg/(m^2*s)')
+  grd%id_melt_conv=register_diag_field('icebergs', 'melt_conv', axes, Time, &
+     'Convective component of iceberg melt rate', 'kg/(m^2*s)')
   grd%id_virtual_area=register_diag_field('icebergs', 'virtual_area', axes, Time, &
      'Virtual coverage by icebergs', 'm^2')
   grd%id_mass=register_diag_field('icebergs', 'mass', axes, Time, &
@@ -2779,6 +2815,9 @@ type(iceberg), pointer :: this, next
   deallocate(bergs%grd%sin)
   deallocate(bergs%grd%calving)
   deallocate(bergs%grd%melt)
+  deallocate(bergs%grd%melt_buoy)
+  deallocate(bergs%grd%melt_eros)
+  deallocate(bergs%grd%melt_conv)
   deallocate(bergs%grd%virtual_area)
   deallocate(bergs%grd%mass)
   deallocate(bergs%grd%tmp)
