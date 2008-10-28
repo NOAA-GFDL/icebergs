@@ -8,7 +8,8 @@ use fms_mod, only: write_version_number, read_data, write_data, file_exist
 use mosaic_mod, only: get_mosaic_ntiles, get_mosaic_ncontacts
 use mpp_mod, only: mpp_pe, mpp_root_pe, mpp_sum, mpp_min, mpp_max, NULL_PE
 use mpp_mod, only: mpp_send, mpp_recv, mpp_sync_self, mpp_chksum
-use mpp_mod, only: mpp_clock_begin, mpp_clock_end, mpp_clock_id, CLOCK_COMPONENT
+use mpp_mod, only: mpp_clock_begin, mpp_clock_end, mpp_clock_id
+use mpp_mod, only: CLOCK_COMPONENT, CLOCK_SUBCOMPONENT, CLOCK_LOOP
 use fms_mod, only: clock_flag_default
 use mpp_domains_mod, only: domain2D, mpp_update_domains, mpp_define_domains
 use mpp_domains_mod, only: SCALAR_PAIR, CGRID_NE, BGRID_NE, CORNER
@@ -101,7 +102,7 @@ type, public :: icebergs ; private
   real :: current_yearday ! 1.00-365.99
   integer :: traj_sample_hrs
   integer :: verbose_hrs
-  integer :: clock ! id for fms timers
+  integer :: clock, clock_mom, clock_the, clock_int, clock_cal, clock_com, clock_ini, clock_ior, clock_iow, clock_dia ! ids for fms timers
   real :: rho_bergs ! Density of icebergs
   real :: LoW_ratio ! Initial ratio L/W for newly calved icebergs
   real, dimension(:), pointer :: initial_mass, distribution, mass_scaling
@@ -121,7 +122,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.51 2008/10/27 13:56:18 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.52 2008/10/28 20:30:21 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -552,6 +553,7 @@ real :: passed_calving, incoming_calving, unused_calving, returned_calving
 real :: stored_mass, total_iceberg_mass, meltmass
 
   call mpp_clock_begin(bergs%clock)
+  call mpp_clock_begin(bergs%clock_int)
 
   ! For convenience
   grd=>bergs%grd
@@ -623,11 +625,15 @@ real :: stored_mass, total_iceberg_mass, meltmass
   if (grd%id_unused>0) &
     lerr=send_data(grd%id_unused, grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   unused_calving=sum( grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec) )
+  call mpp_clock_end(bergs%clock_int)
 
+  call mpp_clock_begin(bergs%clock_cal)
   ! Calve excess stored ice into icebergs
   call calve_icebergs(bergs)
+  call mpp_clock_end(bergs%clock_cal)
 
   ! For each berg, evolve
+  call mpp_clock_begin(bergs%clock_mom)
   if (associated(bergs%first)) then
     this=>bergs%first
     do while (associated(this))
@@ -635,11 +641,15 @@ real :: stored_mass, total_iceberg_mass, meltmass
       this=>this%next
     enddo
   endif
+  call mpp_clock_end(bergs%clock_mom)
 
   ! Send bergs to other PEs
+  call mpp_clock_begin(bergs%clock_com)
   call send_bergs_to_other_pes(bergs)
+  call mpp_clock_end(bergs%clock_com)
 
   ! Ice berg thermodynamics (melting) + rolling
+  call mpp_clock_begin(bergs%clock_the)
   grd%melt(:,:)=0.
   grd%melt_buoy(:,:)=0.
   grd%melt_eros(:,:)=0.
@@ -647,8 +657,10 @@ real :: stored_mass, total_iceberg_mass, meltmass
   grd%mass(:,:)=0.
   grd%virtual_area(:,:)=0.
   if (associated(bergs%first)) call thermodynamics(bergs)
+  call mpp_clock_end(bergs%clock_the)
 
   ! For each berg, record
+  call mpp_clock_begin(bergs%clock_dia)
   if (sample_traj.and.associated(bergs%first)) then
     this=>bergs%first
     do while (associated(this))
@@ -695,16 +707,20 @@ real :: stored_mass, total_iceberg_mass, meltmass
 
   ! Dump icebergs to screen
   if (really_debug) call print_bergs(stderr(),bergs,'icebergs_run, status')
+  call mpp_clock_end(bergs%clock_dia)
 
   ! Return what ever calving we did not use and additional icebergs melt
+  call mpp_clock_begin(bergs%clock_int)
   where (grd%area(grd%isc:grd%iec,grd%jsc:grd%jec)>0.)
     calving(:,:)=grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec)/grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) &
                 +grd%melt(grd%isc:grd%iec,grd%jsc:grd%jec)
   elsewhere
     calving(:,:)=0.
   end where
+  call mpp_clock_end(bergs%clock_int)
 
   ! Diagnose budgets
+  call mpp_clock_begin(bergs%clock_dia)
   meltmass=sum( grd%melt(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
   bergs%net_melt=bergs%net_melt+meltmass*bergs%dt
   returned_calving=sum( calving(:,:)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
@@ -817,6 +833,7 @@ real :: stored_mass, total_iceberg_mass, meltmass
     call grd_chksum2(bergs%grd, bergs%grd%mass, 'run mass (bot)')
     call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'run stored_ice (bot)')
   endif
+  call mpp_clock_end(bergs%clock_dia)
 
   call mpp_clock_end(bergs%clock)
 end subroutine icebergs_run
@@ -1730,7 +1747,17 @@ logical :: lerr
 
 ! Clocks
   bergs%clock=mpp_clock_id( 'Icebergs', flags=clock_flag_default, grain=CLOCK_COMPONENT )
+  bergs%clock_mom=mpp_clock_id( 'Icebergs-momentum', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+  bergs%clock_the=mpp_clock_id( 'Icebergs-thermodyn', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+  bergs%clock_int=mpp_clock_id( 'Icebergs-interface', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+  bergs%clock_cal=mpp_clock_id( 'Icebergs-calving', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+  bergs%clock_com=mpp_clock_id( 'Icebergs-communication', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+  bergs%clock_ini=mpp_clock_id( 'Icebergs-initialization', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+  bergs%clock_ior=mpp_clock_id( 'Icebergs-I/O read', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+  bergs%clock_iow=mpp_clock_id( 'Icebergs-I/O write', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+  bergs%clock_dia=mpp_clock_id( 'Icebergs-diagnostics', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
   call mpp_clock_begin(bergs%clock)
+  call mpp_clock_begin(bergs%clock_ini)
 
 ! Set up iceberg domain
  !write(stderr(),*) 'diamond: defining domain'
@@ -1881,9 +1908,13 @@ logical :: lerr
   bergs%initial_width(:)=sqrt(initial_mass(:)/(LoW_ratio*rho_bergs*initial_thickness(:)))
   bergs%initial_length(:)=LoW_ratio*bergs%initial_width(:)
 
+  call mpp_clock_end(bergs%clock_ini)
+  call mpp_clock_begin(bergs%clock_ior)
   call read_restart_bergs(bergs)
   call bergs_chksum(bergs, 'read_restart bergs')
   call read_restart_calving(bergs)
+  call mpp_clock_end(bergs%clock_ior)
+  call mpp_clock_begin(bergs%clock_ini)
 
   if (really_debug) call print_bergs(stderr(),bergs,'icebergs_init, initial status')
 
@@ -1947,6 +1978,7 @@ logical :: lerr
   if (id_class>0) lerr=send_data(id_class, grd%msk(grd%isc:grd%iec,grd%jsc:grd%jec))
 
  !write(stderr(),*) 'diamond: done'
+  call mpp_clock_end(bergs%clock_ini)
   call mpp_clock_end(bergs%clock)
 end subroutine icebergs_init
 
@@ -1966,6 +1998,13 @@ real :: lon0, lon1, lat0, lat1
 character(len=30) :: filename
 type(icebergs_gridded), pointer :: grd
 type(iceberg) :: localberg ! NOT a pointer but an actual local variable
+integer :: clock_1, clock_2, clock_3
+
+
+  clock_1=mpp_clock_id( 'Icebergs-read_restart_bergs 1', flags=clock_flag_default, grain=CLOCK_LOOP )
+  clock_2=mpp_clock_id( 'Icebergs-read_restart_bergs 2', flags=clock_flag_default, grain=CLOCK_LOOP )
+  clock_3=mpp_clock_id( 'Icebergs-read_restart_bergs 3', flags=clock_flag_default, grain=CLOCK_LOOP )
+  call mpp_clock_begin(clock_1)
 
   ! For convenience
   grd=>bergs%grd
@@ -2022,6 +2061,8 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
   lat0=minval( grd%lat(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
   lat1=maxval( grd%lat(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
  !write(stderr(),'(a,i3,a,4f10.3)') 'diamond, read_restart_bergs: (',mpp_pe(),') ',lon0,lon1,lat0,lat1
+  call mpp_clock_end(clock_1)
+  call mpp_clock_begin(clock_2)
   do k=1, nbergs_in_file
    !write(stderr(),*) 'diamond, read_restart_bergs: reading berg ',k
     localberg%lon=get_double(ncid, lonid, k)
@@ -2052,7 +2093,9 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
       write(stderr(),*) 'diamond, read_restart_bergs: WARNING berg not on PE!'
     endif
   enddo
+  call mpp_clock_end(clock_2)
 
+  call mpp_clock_begin(clock_3)
   ! Sanity check
   k=count_bergs(bergs)
   call mpp_sum(k)
@@ -2064,6 +2107,7 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
 
   bergs%icebergs_mass_start=sum_icebergs_mass(bergs%first)
   call mpp_sum( bergs%icebergs_mass_start )
+  call mpp_clock_end(clock_3)
   
 end subroutine read_restart_bergs
 
@@ -2775,8 +2819,10 @@ type(icebergs), pointer :: bergs
 
   if (.not.associated(bergs)) return
 
+  call mpp_clock_begin(bergs%clock_iow)
   call bergs_chksum(bergs, 'write_restart bergs')
   call write_restart(bergs)
+  call mpp_clock_end(bergs%clock_iow)
 
 end subroutine icebergs_save_restart
 
@@ -2792,6 +2838,7 @@ type(iceberg), pointer :: this, next
 
   call icebergs_save_restart(bergs)
 
+  call mpp_clock_begin(bergs%clock_ini)
   ! Delete bergs and structures
   this=>bergs%first
   do while (associated(this))
@@ -2848,6 +2895,7 @@ type(iceberg), pointer :: this, next
   call dealloc_buffer(bergs%ibuffer_s)
   call dealloc_buffer(bergs%ibuffer_e)
   call dealloc_buffer(bergs%ibuffer_w)
+  call mpp_clock_end(bergs%clock_ini)
   deallocate(bergs)
 
   if (verbose) write(stderr(),*) 'diamond: icebergs_end complete',mpp_pe()
