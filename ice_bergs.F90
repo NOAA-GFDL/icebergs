@@ -108,6 +108,7 @@ type, public :: icebergs ; private
   real, dimension(:), pointer :: initial_mass, distribution, mass_scaling
   real, dimension(:), pointer :: initial_thickness, initial_width, initial_length
   logical :: restarted=.false. ! Indicate whether we read state from a restart or not
+  logical :: use_operator_splitting=.true. ! Use first order operator splitting for thermodynamics
   type(buffer), pointer :: obuffer_n=>NULL(), ibuffer_n=>NULL()
   type(buffer), pointer :: obuffer_s=>NULL(), ibuffer_s=>NULL()
   type(buffer), pointer :: obuffer_e=>NULL(), ibuffer_e=>NULL()
@@ -122,7 +123,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.52 2008/10/28 20:30:21 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.53 2008/10/29 19:33:00 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -352,9 +353,11 @@ type(icebergs), pointer :: bergs
 ! Local variables
 type(icebergs_gridded), pointer :: grd
 real :: M, T, W, L, SST, Vol, Ln, Wn, Tn, nVol, IC, Dn
-real :: Mv, Me, Mb, melt, Mnew, dvo, dva, dM, Ss
+real :: Mv, Me, Mb, melt, dvo, dva, dM, Ss, dMe, dMb, dMv
+real :: Mnew, Mnew1, Mnew2
 integer :: i,j
 type(iceberg), pointer :: this, next
+real, parameter :: perday=1./86400.
 
   ! For convenience
   grd=>bergs%grd
@@ -377,37 +380,67 @@ type(iceberg), pointer :: this, next
     j=this%jne
     Vol=T*W*L
 
-    ! Melt rates in m/day
+    ! Environment
     dvo=sqrt((this%uvel-this%uo)**2+(this%vvel-this%vo)**2)
     dva=sqrt((this%ua-this%uo)**2+(this%va-this%vo)**2)
     Ss=1.5*(dva**0.5)+0.1*dva ! Sea state
-    Mb=max( 0.58*(dvo**0.8)*(SST+4.0)/(L**0.2), 0.) ! Basal turbulent melting
-    Mv=max( 7.62e-3*SST+1.29e-3*(SST**2), 0.) ! Buoyant convection at sides
-    Me=max( 1./12.*(SST+2.)*Ss*(1+cos(pi*(IC**3))) ,0.)  ! Wave erosion
 
-    ! Convert melt rates from m/day to m
-    Ln=max(L-(Mv+Me)*(bergs%dt/86400.),0.)
-    Wn=max(W-(Mv+Me)*(bergs%dt/86400.),0.)
-    Tn=max(T-Mb*(bergs%dt/86400.),0.)
-    nVol=Tn*Wn*Ln
-    Mnew=(nVol/Vol)*M
-    dM=M-Mnew
+    ! Melt rates in m/s
+    Mv=max( 7.62e-3*SST+1.29e-3*(SST**2), 0.) &! Buoyant convection at sides
+        *perday ! convert to m/s
+    Mb=max( 0.58*(dvo**0.8)*(SST+4.0)/(L**0.2), 0.) &! Basal turbulent melting
+        *perday ! convert to m/s
+    Me=max( 1./12.*(SST+2.)*Ss*(1+cos(pi*(IC**3))) ,0.) &! Wave erosion
+        *perday ! convert to m/s
 
-    ! Add melting to the grid
+    if (bergs%use_operator_splitting) then
+      ! Operator split update of volume/mass
+      Tn=max(T-Mb*bergs%dt,0.) ! new total thickness (m)
+      nVol=Tn*W*L ! new volume (m^3)
+      Mnew1=(nVol/Vol)*M ! new mass (kg)
+      dMb=M-Mnew1 ! mass lost to basal melting (>0) (kg)
+
+      Ln=max(L-Mv*bergs%dt,0.) ! new length (m)
+      Wn=max(W-Mv*bergs%dt,0.) ! new width (m)
+      nVol=Tn*Wn*Ln ! new volume (m^3)
+      Mnew2=(nVol/Vol)*M ! new mass (kg)
+      dMv=Mnew1-Mnew2 ! mass lost to buoyant convection (>0) (kg)
+
+      Ln=max(Ln-Me*bergs%dt,0.) ! new length (m)
+      Wn=max(Wn-Me*bergs%dt,0.) ! new width (m)
+      nVol=Tn*Wn*Ln ! new volume (m^3)
+      Mnew=(nVol/Vol)*M ! new mass (kg)
+      dMe=Mnew2-Mnew ! mass lost to erosion (>0) (kg)
+      dM=M-Mnew ! mass lost to all erosion and melting (>0) (kg)
+    else
+      ! Update dimensions of berg
+      Ln=max(L-(Mv+Me)*(bergs%dt),0.) ! (m)
+      Wn=max(W-(Mv+Me)*(bergs%dt),0.) ! (m)
+      Tn=max(T-Mb*(bergs%dt),0.) ! (m)
+      ! Update volume and mass of berg
+      nVol=Tn*Wn*Ln ! (m^3)
+      Mnew=(nVol/Vol)*M ! (kg)
+      dM=M-Mnew ! (kg)
+      dMb=(M/Vol)*(W*L)*Mb*bergs%dt ! approx. mass loss to basal melting (kg)
+      dMe=(M/Vol)*(T*(W+L))*Me*bergs%dt ! approx. mass lost to erosion (kg)
+      dMv=(M/Vol)*(T*(W+L))*Mv*bergs%dt ! approx. mass loss to buoyant convection (kg)
+    endif
+
+    ! Add melting to the grid and field diagnostics
     if (grd%area(i,j).ne.0.) then
       melt=dM/bergs%dt ! kg/s
       grd%melt(i,j)=grd%melt(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
-      grd%virtual_area(i,j)=grd%virtual_area(i,j)+this%width*this%length*this%mass_scaling
+      grd%virtual_area(i,j)=grd%virtual_area(i,j)+W*L*this%mass_scaling
       if(grd%id_melt_buoy>0) then
-        melt=(W*L)*(Mb/86400.) ! approximate melt due to buoyancy term in kg/s
+        melt=dMb/bergs%dt ! melt rate due to buoyancy term in kg/s
         grd%melt_buoy(i,j)=grd%melt_buoy(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
       endif
       if(grd%id_melt_eros>0) then
-        melt=(T*(W+L))*(Me/86400.) ! approximate melt due to erosion term in kg/s
+        melt=dMe/bergs%dt ! erosion rate in kg/s
         grd%melt_eros(i,j)=grd%melt_eros(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
       endif
       if(grd%id_melt_conv>0) then
-        melt=(T*(W+L))*(Mv/86400.) ! approximate melt due to convection term in kg/s
+        melt=dMv/bergs%dt ! melt rate due to convection term in kg/s
         grd%melt_conv(i,j)=grd%melt_conv(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
       endif
     else
@@ -1711,13 +1744,14 @@ integer :: traj_sample_hrs=12 ! Period between sampling of position for trajecto
 integer :: verbose_hrs=12 ! Period between verbose messages
 real :: rho_bergs=850. ! Density of icebergs
 real :: LoW_ratio=1.5 ! Initial ratio L/W for newly calved icebergs
+logical :: use_operator_splitting=.true. ! Use first order operator splitting for thermodynamics
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim)
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
 real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
 namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
          distribution, mass_scaling, initial_thickness, verbose_hrs, &
-         rho_bergs, LoW_ratio, debug, really_debug
+         rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je
 type(icebergs_gridded), pointer :: grd
@@ -1899,6 +1933,7 @@ logical :: lerr
   bergs%grd%halo=halo
   bergs%rho_bergs=rho_bergs
   bergs%LoW_ratio=LoW_ratio
+  bergs%use_operator_splitting=use_operator_splitting
   allocate( bergs%initial_mass(nclasses) ); bergs%initial_mass(:)=initial_mass(:)
   allocate( bergs%distribution(nclasses) ); bergs%distribution(:)=distribution(:)
   allocate( bergs%mass_scaling(nclasses) ); bergs%mass_scaling(:)=mass_scaling(:)
