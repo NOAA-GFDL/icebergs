@@ -56,6 +56,9 @@ type :: icebergs_gridded
   real, dimension(:,:), pointer :: melt_buoy=>NULL() ! Buoyancy componenet of melting rate (kg/s/m^2)
   real, dimension(:,:), pointer :: melt_eros=>NULL() ! Erosion component of melting rate (kg/s/m^2)
   real, dimension(:,:), pointer :: melt_conv=>NULL() ! Convective component of melting rate (kg/s/m^2)
+  real, dimension(:,:), pointer :: bergy_src=>NULL() ! Mass flux from berg erosion into bergy bits (kg/s/m^2)
+  real, dimension(:,:), pointer :: bergy_melt=>NULL() ! Melting rate of bergy bits (kg/s/m^2)
+  real, dimension(:,:), pointer :: bergy_mass=>NULL() ! Mass distribution of bergy bits (kg/s/m^2)
   real, dimension(:,:), pointer :: virtual_area=>NULL() ! Virtual surface coverage by icebergs (m^2)
   real, dimension(:,:), pointer :: mass=>NULL() ! Mass distribution (kg/m^2)
   real, dimension(:,:), pointer :: tmp=>NULL() ! Temporary work space
@@ -65,6 +68,7 @@ type :: icebergs_gridded
   integer :: id_uo=-1, id_vo=-1, id_calving=-1, id_stored_ice=-1, id_accum=-1, id_unused=-1, id_melt=-1
   integer :: id_melt_buoy=-1, id_melt_eros=-1, id_melt_conv=-1, id_virtual_area=-1, id_real_calving=-1
   integer :: id_mass=-1, id_ui=-1, id_vi=-1, id_ua=-1, id_va=-1, id_sst=-1, id_cn=-1, id_hi=-1
+  integer :: id_bergy_src=-1, id_bergy_melt=-1, id_bergy_mass=-1
 end type icebergs_gridded
 
 type :: xyt
@@ -80,6 +84,7 @@ type :: iceberg
   ! State variables (specific to the iceberg, needed for restarts)
   real :: lon, lat, uvel, vvel, mass, thickness, width, length
   real :: start_lon, start_lat, start_day, start_mass, mass_scaling
+  real :: mass_of_bits
   integer :: start_year
   integer :: ine,jne ! nearest index in NE direction (for convenience)
   real :: xi, yj ! Non-dimensional coords within current cell (0..1)
@@ -105,6 +110,7 @@ type, public :: icebergs ; private
   integer :: clock, clock_mom, clock_the, clock_int, clock_cal, clock_com, clock_ini, clock_ior, clock_iow, clock_dia ! ids for fms timers
   real :: rho_bergs ! Density of icebergs
   real :: LoW_ratio ! Initial ratio L/W for newly calved icebergs
+  real :: bergy_bit_erosion_fraction ! Fraction of erosion melt flux to divert to bergy bits
   real, dimension(:), pointer :: initial_mass, distribution, mass_scaling
   real, dimension(:), pointer :: initial_thickness, initial_width, initial_length
   logical :: restarted=.false. ! Indicate whether we read state from a restart or not
@@ -123,7 +129,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.53 2008/10/29 19:33:00 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.54 2008/11/04 19:59:25 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -355,6 +361,7 @@ type(icebergs_gridded), pointer :: grd
 real :: M, T, W, L, SST, Vol, Ln, Wn, Tn, nVol, IC, Dn
 real :: Mv, Me, Mb, melt, dvo, dva, dM, Ss, dMe, dMb, dMv
 real :: Mnew, Mnew1, Mnew2
+real :: Mbits, nMbits, dMbitsE, dMbitsM, Lbits, Abits, Mbb
 integer :: i,j
 type(iceberg), pointer :: this, next
 real, parameter :: perday=1./86400.
@@ -426,11 +433,32 @@ real, parameter :: perday=1./86400.
       dMv=(M/Vol)*(T*(W+L))*Mv*bergs%dt ! approx. mass loss to buoyant convection (kg)
     endif
 
+    ! Bergy bits
+    if (bergs%bergy_bit_erosion_fraction>0.) then
+      Mbits=this%mass_of_bits ! mass of bergy bits (kg)
+      dMbitsE=bergs%bergy_bit_erosion_fraction*dMe ! change in mass of bits (kg)
+      nMbits=Mbits+dMbitsE ! add new bergy bits to mass (kg)
+      Lbits=min(L,W,T,40.) ! assume bergy bits are smallest dimension or 40 meters
+      Abits=(Mbits/bergs%rho_bergs)/Lbits ! Effective bottom area (assuming T=Lbits)
+      Mbb=max( 0.58*(dvo**0.8)*(SST+2.0)/(Lbits**0.2), 0.) &! Basal turbulent melting (for bits)
+           *perday ! convert to m/s
+      Mbb=bergs%rho_bergs*Abits*Mbb ! in kg/s
+      dMbitsM=min(Mbb*bergs%dt,nMbits) ! bergy bits mass lost to melting (kg)
+      nMbits=nMbits-dMbitsM ! remove mass lost to bergy bits melt
+      if (Mnew==0.) then ! if parent berg has completely melted then 
+        dMbitsM=dMbitsM+nMbits ! instantly melt all the bergy bits
+        nMbits=0.
+      endif
+    else
+      dMbitsE=0.
+      dMbitsM=0.
+      nMbits=this%mass_of_bits ! retain previous value incase non-zero
+    endif
+
     ! Add melting to the grid and field diagnostics
     if (grd%area(i,j).ne.0.) then
-      melt=dM/bergs%dt ! kg/s
+      melt=(dM-(dMbitsE-dMbitsM))/bergs%dt ! kg/s
       grd%melt(i,j)=grd%melt(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
-      grd%virtual_area(i,j)=grd%virtual_area(i,j)+W*L*this%mass_scaling
       if(grd%id_melt_buoy>0) then
         melt=dMb/bergs%dt ! melt rate due to buoyancy term in kg/s
         grd%melt_buoy(i,j)=grd%melt_buoy(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
@@ -442,6 +470,14 @@ real, parameter :: perday=1./86400.
       if(grd%id_melt_conv>0) then
         melt=dMv/bergs%dt ! melt rate due to convection term in kg/s
         grd%melt_conv(i,j)=grd%melt_conv(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
+      endif
+      if(grd%id_bergy_src>0) then
+        melt=dMbitsE/bergs%dt ! mass flux into bergy bits in kg/s
+        grd%bergy_src(i,j)=grd%bergy_src(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
+      endif
+      if(grd%id_melt_conv>0) then
+        melt=dMbitsM/bergs%dt ! melt rate of bergy bits in kg/s
+        grd%bergy_melt(i,j)=grd%bergy_melt(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
       endif
     else
       write(stderr(),*) 'diamond, thermodynamics: berg appears to have grounded!!!! PE=',mpp_pe(),i,j
@@ -462,6 +498,7 @@ real, parameter :: perday=1./86400.
 
     ! Store the new state of iceberg (with L>W)
     this%mass=Mnew
+    this%mass_of_bits=nMbits
     this%thickness=Tn
     this%width=min(Wn,Ln)
     this%length=max(Wn,Ln)
@@ -473,7 +510,9 @@ real, parameter :: perday=1./86400.
       call move_trajectory(bergs, this)
       call delete_iceberg_from_list(bergs%first, this)
     else ! Diagnose mass distribution on grid
-      if(grd%id_mass>0) grd%mass(i,j)=grd%mass(i,j)+Mnew/grd%area(i,j)*this%mass_scaling ! kg/m2/s
+      if (grd%id_virtual_area>0) grd%virtual_area(i,j)=grd%virtual_area(i,j)+Wn*Ln*this%mass_scaling ! m^2
+      if (grd%id_mass>0) grd%mass(i,j)=grd%mass(i,j)+Mnew/grd%area(i,j)*this%mass_scaling ! kg/m2/s
+      if (grd%id_bergy_mass>0) grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+nMbits/grd%area(i,j)*this%mass_scaling ! kg/m2/s
     endif
   
     this=>next
@@ -687,6 +726,9 @@ real :: stored_mass, total_iceberg_mass, meltmass
   grd%melt_buoy(:,:)=0.
   grd%melt_eros(:,:)=0.
   grd%melt_conv(:,:)=0.
+  grd%bergy_src(:,:)=0.
+  grd%bergy_melt(:,:)=0.
+  grd%bergy_mass(:,:)=0.
   grd%mass(:,:)=0.
   grd%virtual_area(:,:)=0.
   if (associated(bergs%first)) call thermodynamics(bergs)
@@ -731,6 +773,12 @@ real :: stored_mass, total_iceberg_mass, meltmass
     lerr=send_data(grd%id_melt_conv, grd%melt_conv(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_virtual_area>0) &
     lerr=send_data(grd%id_virtual_area, grd%virtual_area(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (grd%id_bergy_src>0) &
+    lerr=send_data(grd%id_bergy_src, grd%bergy_src(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (grd%id_bergy_melt>0) &
+    lerr=send_data(grd%id_bergy_melt, grd%bergy_melt(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (grd%id_bergy_mass>0) &
+    lerr=send_data(grd%id_bergy_mass, grd%bergy_mass(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_mass>0) &
     lerr=send_data(grd%id_mass, grd%mass(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_stored_ice>0) &
@@ -862,6 +910,9 @@ real :: stored_mass, total_iceberg_mass, meltmass
     call grd_chksum2(bergs%grd, bergs%grd%melt_buoy, 'run melt_b (bot)')
     call grd_chksum2(bergs%grd, bergs%grd%melt_eros, 'run melt_e (bot)')
     call grd_chksum2(bergs%grd, bergs%grd%melt_conv, 'run melt_v (bot)')
+    call grd_chksum2(bergs%grd, bergs%grd%bergy_src, 'run bergy_src (bot)')
+    call grd_chksum2(bergs%grd, bergs%grd%bergy_melt, 'run bergy_melt (bot)')
+    call grd_chksum2(bergs%grd, bergs%grd%bergy_mass, 'run bergy_mass (bot)')
     call grd_chksum2(bergs%grd, bergs%grd%virtual_area, 'run varea (bot)')
     call grd_chksum2(bergs%grd, bergs%grd%mass, 'run mass (bot)')
     call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'run stored_ice (bot)')
@@ -960,6 +1011,7 @@ real :: xi, yj, ddt, calving_to_bergs, calved_to_berg
           newberg%start_day=bergs%current_yearday+ddt/86400.
           newberg%start_mass=bergs%initial_mass(k)
           newberg%mass_scaling=bergs%mass_scaling(k)
+          newberg%mass_of_bits=0.
           call add_new_berg_to_list(bergs%first, newberg)
          !if (verbose) call print_berg(stderr(), bergs%first, 'calve_icebergs, new berg created')
           calved_to_berg=bergs%initial_mass(k)*bergs%mass_scaling(k)
@@ -1417,7 +1469,7 @@ type(icebergs), pointer :: bergs
 type(iceberg), pointer :: kick_the_bucket, this
 integer :: nbergs_to_send_e, nbergs_to_send_w, nbergs_incoming, i
 integer :: nbergs_to_send_n, nbergs_to_send_s
-integer, parameter :: buffer_width=16
+integer, parameter :: buffer_width=17
 type(icebergs_gridded), pointer :: grd
 
   ! For convenience
@@ -1604,6 +1656,7 @@ contains
     buff%data(14,n)=berg%width
     buff%data(15,n)=berg%length
     buff%data(16,n)=berg%mass_scaling
+    buff%data(17,n)=berg%mass_of_bits
 
   end subroutine pack_berg_into_buffer2
 
@@ -1661,6 +1714,7 @@ contains
     localberg%width=buff%data(14,n)
     localberg%length=buff%data(15,n)
     localberg%mass_scaling=buff%data(16,n)
+    localberg%mass_of_bits=buff%data(17,n)
     lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
     if (lres) then
       call add_new_berg_to_list(first, localberg)
@@ -1744,6 +1798,7 @@ integer :: traj_sample_hrs=12 ! Period between sampling of position for trajecto
 integer :: verbose_hrs=12 ! Period between verbose messages
 real :: rho_bergs=850. ! Density of icebergs
 real :: LoW_ratio=1.5 ! Initial ratio L/W for newly calved icebergs
+real :: bergy_bit_erosion_fraction=0. ! Fraction of erosion melt flux to divert to bergy bits
 logical :: use_operator_splitting=.true. ! Use first order operator splitting for thermodynamics
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim)
@@ -1751,7 +1806,7 @@ real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1
 real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
 namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
          distribution, mass_scaling, initial_thickness, verbose_hrs, &
-         rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting
+         rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je
 type(icebergs_gridded), pointer :: grd
@@ -1842,6 +1897,9 @@ logical :: lerr
   allocate( grd%melt_buoy(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%melt_buoy(:,:)=0.
   allocate( grd%melt_eros(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%melt_eros(:,:)=0.
   allocate( grd%melt_conv(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%melt_conv(:,:)=0.
+  allocate( grd%bergy_src(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_src(:,:)=0.
+  allocate( grd%bergy_melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_melt(:,:)=0.
+  allocate( grd%bergy_mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_mass(:,:)=0.
   allocate( grd%virtual_area(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%virtual_area(:,:)=0.
   allocate( grd%mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%mass(:,:)=0.
   allocate( grd%stored_ice(grd%isd:grd%ied, grd%jsd:grd%jed, nclasses) ); grd%stored_ice(:,:,:)=0.
@@ -1934,6 +1992,7 @@ logical :: lerr
   bergs%rho_bergs=rho_bergs
   bergs%LoW_ratio=LoW_ratio
   bergs%use_operator_splitting=use_operator_splitting
+  bergs%bergy_bit_erosion_fraction=bergy_bit_erosion_fraction
   allocate( bergs%initial_mass(nclasses) ); bergs%initial_mass(:)=initial_mass(:)
   allocate( bergs%distribution(nclasses) ); bergs%distribution(:)=distribution(:)
   allocate( bergs%mass_scaling(nclasses) ); bergs%mass_scaling(:)=mass_scaling(:)
@@ -1971,6 +2030,12 @@ logical :: lerr
      'Erosion component of iceberg melt rate', 'kg/(m^2*s)')
   grd%id_melt_conv=register_diag_field('icebergs', 'melt_conv', axes, Time, &
      'Convective component of iceberg melt rate', 'kg/(m^2*s)')
+  grd%id_bergy_src=register_diag_field('icebergs', 'bergy_src', axes, Time, &
+     'Mass source of bergy bits', 'kg/(m^2*s)')
+  grd%id_bergy_melt=register_diag_field('icebergs', 'bergy_melt', axes, Time, &
+     'Melt rate of bergy bits', 'kg/(m^2*s)')
+  grd%id_bergy_mass=register_diag_field('icebergs', 'bergy_mass', axes, Time, &
+     'Bergy bit density field', 'kg/(m^2)')
   grd%id_virtual_area=register_diag_field('icebergs', 'virtual_area', axes, Time, &
      'Virtual coverage by icebergs', 'm^2')
   grd%id_mass=register_diag_field('icebergs', 'mass', axes, Time, &
@@ -2027,7 +2092,7 @@ integer :: k, ierr, ncid, dimid, nbergs_in_file
 integer :: lonid, latid, uvelid, vvelid
 integer :: massid, thicknessid, widthid, lengthid
 integer :: start_lonid, start_latid, start_yearid, start_dayid, start_massid
-integer :: scaling_id
+integer :: scaling_id, mass_of_bits_id
 logical :: lres, found_restart, multiPErestart=.FALSE.
 real :: lon0, lon1, lat0, lat1
 character(len=30) :: filename
@@ -2089,6 +2154,7 @@ integer :: clock_1, clock_2, clock_3
   start_dayid=inq_var(ncid, 'start_day')
   start_massid=inq_var(ncid, 'start_mass')
   scaling_id=inq_var(ncid, 'mass_scaling')
+  mass_of_bits_id=inq_var(ncid, 'mass_of_bits',unsafe=.true.)
 
   ! Find approx outer bounds for tile
   lon0=minval( grd%lon(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
@@ -2120,6 +2186,11 @@ integer :: clock_1, clock_2, clock_3
       localberg%start_day=get_double(ncid, start_dayid, k)
       localberg%start_mass=get_double(ncid, start_massid, k)
       localberg%mass_scaling=get_double(ncid, scaling_id, k)
+      if (mass_of_bits_id>0) then ! Allow reading of older restart with no bergy bits
+        localberg%mass_of_bits=get_double(ncid, mass_of_bits_id, k)
+      else
+        localberg%mass_of_bits=0.
+      endif
       if (really_debug) lres=is_point_in_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, explain=.true.)
       lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
       call add_new_berg_to_list(bergs%first, localberg)
@@ -2795,16 +2866,23 @@ end function pos_within_cell
 
 ! ##############################################################################
 
-real function sum_icebergs_mass(first)
+real function sum_icebergs_mass(first,justbits,justbergs)
 ! Arguments
 type(iceberg), pointer :: first
+logical, intent(in), optional :: justbits, justbergs
 ! Local variables
 type(iceberg), pointer :: this
 
   sum_icebergs_mass=0.
   this=>first
   do while(associated(this))
-    sum_icebergs_mass=sum_icebergs_mass+this%mass*this%mass_scaling
+    if (present(justbergs)) then
+      sum_icebergs_mass=sum_icebergs_mass+this%mass*this%mass_scaling
+    elseif (present(justbits)) then
+      sum_icebergs_mass=sum_icebergs_mass+this%mass_of_bits*this%mass_scaling
+    else
+      sum_icebergs_mass=sum_icebergs_mass+(this%mass+this%mass_of_bits)*this%mass_scaling
+    endif
     this=>this%next
   enddo
 
@@ -2900,6 +2978,9 @@ type(iceberg), pointer :: this, next
   deallocate(bergs%grd%melt_buoy)
   deallocate(bergs%grd%melt_eros)
   deallocate(bergs%grd%melt_conv)
+  deallocate(bergs%grd%bergy_src)
+  deallocate(bergs%grd%bergy_melt)
+  deallocate(bergs%grd%bergy_mass)
   deallocate(bergs%grd%virtual_area)
   deallocate(bergs%grd%mass)
   deallocate(bergs%grd%tmp)
@@ -3003,7 +3084,7 @@ integer :: iret, ncid, i_dim, i
 integer :: lonid, latid, uvelid, vvelid
 integer :: massid, thicknessid, lengthid, widthid
 integer :: start_lonid, start_latid, start_yearid, start_dayid, start_massid
-integer :: scaling_id
+integer :: scaling_id, mass_of_bits_id
 character(len=28) :: filename
 type(iceberg), pointer :: this
 
@@ -3035,6 +3116,7 @@ type(iceberg), pointer :: this
     start_dayid = def_var(ncid, 'start_day', NF_DOUBLE, i_dim)
     start_massid = def_var(ncid, 'start_mass', NF_DOUBLE, i_dim)
     scaling_id = def_var(ncid, 'mass_scaling', NF_DOUBLE, i_dim)
+    mass_of_bits_id = def_var(ncid, 'mass_of_bits', NF_DOUBLE, i_dim)
 
     ! Attributes
     call put_att(ncid, lonid, 'long_name', 'longitude')
@@ -3065,8 +3147,10 @@ type(iceberg), pointer :: this
     call put_att(ncid, start_massid, 'units', 'kg')
     call put_att(ncid, scaling_id, 'long_name', 'scaling factor for mass of calving berg')
     call put_att(ncid, scaling_id, 'units', 'none')
+    call put_att(ncid, mass_of_bits_id, 'long_name', 'mass of bergy bits')
+    call put_att(ncid, mass_of_bits_id, 'units', 'kg')
     iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_major_version', NF_INT, 1, file_format_major_version)
-    iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_minor_version', NF_INT, 1, file_format_minor_version)
+    iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_minor_version', NF_INT, 2, file_format_minor_version)
 
     ! End define mode
     iret = nf_enddef(ncid)
@@ -3090,6 +3174,7 @@ type(iceberg), pointer :: this
       call put_double(ncid, start_dayid, i, this%start_day)
       call put_double(ncid, start_massid, i, this%start_mass)
       call put_double(ncid, scaling_id, i, this%mass_scaling)
+      call put_double(ncid, mass_of_bits_id, i, this%mass_of_bits)
      !this=>this%next
       this=>this%prev
     enddo
@@ -3258,17 +3343,22 @@ end subroutine write_trajectory
 
 ! ##############################################################################
 
-integer function inq_var(ncid, var)
+integer function inq_var(ncid, var, unsafe)
 ! Arguments
 integer, intent(in) :: ncid
 character(len=*), intent(in) :: var
+logical, optional, intent(in) :: unsafe
 ! Local variables
 integer :: iret
 
   iret=nf_inq_varid(ncid, var, inq_var)
   if (iret .ne. NF_NOERR) then
-    write(stderr(),*) 'diamond, inq_var: nf_inq_varid ',var,' failed'
-    call error_mesg('diamond, inq_var', 'netcdf function returned a failure!', FATAL)
+    if (.not.present(unsafe) .or. (present(unsafe).and..not.unsafe)) then
+      write(stderr(),*) 'diamond, inq_var: nf_inq_varid ',var,' failed'
+      call error_mesg('diamond, inq_var', 'netcdf function returned a failure!', FATAL)
+    else
+      inq_var=-1
+    endif
   endif
 
 end function inq_var
