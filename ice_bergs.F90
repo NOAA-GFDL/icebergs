@@ -129,7 +129,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.54 2008/11/04 19:59:25 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.55 2008/11/05 20:18:02 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -153,6 +153,7 @@ logical :: verbose=.false. ! Be verbose to stderr
 logical :: budget=.true. ! Calculate budgets
 logical :: debug=.false. ! Turn on debugging
 logical :: really_debug=.false. ! Turn on debugging
+logical :: parallel_reprod=.true. ! Reproduce across different PE decompositions
 
 contains
 
@@ -1806,7 +1807,8 @@ real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1
 real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
 namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
          distribution, mass_scaling, initial_thickness, verbose_hrs, &
-         rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction
+         rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
+         parallel_reprod
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je
 type(icebergs_gridded), pointer :: grd
@@ -2275,21 +2277,89 @@ type(iceberg), pointer :: new=>NULL()
   new=>NULL()
   call create_iceberg(new, bergvals)
 
-  if (associated(first)) then
-   !write(stderr(),*) 'diamond, add_new_berg_to_list: moving old pointers',mpp_pe()
-    new%next=>first
-    first%prev=>new
-    first=>new
-  else
-   !write(stderr(),*) 'diamond, add_new_berg_to_list: setting new pointer',mpp_pe()
-    first=>new
-  endif
- !call print_berg(stderr(), first, 'add_new_berg_to_list')
+  call insert_berg_into_list(first, new)
 
   !Clear new
   new=>NULL()
 
 end subroutine add_new_berg_to_list
+
+! ##############################################################################
+
+subroutine insert_berg_into_list(first, berg)
+! Arguments
+type(iceberg), pointer :: first, berg
+! Local variables
+type(iceberg), pointer :: this, prev
+
+  if (associated(first)) then
+    if (.not. parallel_reprod) then
+      berg%next=>first
+      first%prev=>berg
+      first=>berg
+    else
+      this=>first
+      prev=>NULL()
+      do while( associated(this) )
+        if (inorder(berg,this)) then
+          if (associated(prev)) then
+            ! found a slot between bergs
+            prev%next=>berg
+            berg%prev=>this%prev
+          else
+            first=>berg ! At start of list
+          endif
+          berg%next=>this
+          this%prev=>berg
+          return
+        endif
+        prev=>this
+        this=>this%next
+      enddo
+      ! reached end of list
+      prev%next=>berg
+      berg%prev=>prev
+    endif
+  else
+    ! list is empty so create it
+    first=>berg
+  endif
+
+  contains
+
+  function inorder(berg1,berg2)
+  ! Arguments
+  type(iceberg), pointer :: berg1, berg2
+  logical :: inorder
+  ! Local variables
+  real :: hash1, hash2
+    inorder=.false. ! if "out of order", return false by returning from function
+    hash1=time_hash(berg1)
+    hash2=time_hash(berg1)
+    if (hash1>hash2) return ! want newer first
+    if (berg1%start_mass<berg2%start_mass) return ! want heavy first
+    hash1=pos_hash(berg1)
+    hash2=pos_hash(berg1)
+    if (hash1>hash2) return ! want south/east first
+    inorder=.true. ! passing the above tests mean the bergs 1 and 2 are in order
+  end function inorder
+
+  function time_hash(berg)
+  ! Arguments
+  type(iceberg), pointer :: berg
+  real :: time_hash
+    time_hash=berg%start_day+366.*float(berg%start_year)
+  end function time_hash
+
+  function pos_hash(berg)
+  ! Arguments
+  type(iceberg), pointer :: berg
+  real :: pos_hash
+    pos_hash=berg%start_lon+36000.*(berg%start_lat)
+  end function pos_hash
+
+
+end subroutine insert_berg_into_list
 
 ! ##############################################################################
 
@@ -2336,8 +2406,6 @@ subroutine destroy_iceberg(berg)
 ! Arguments
 type(iceberg), pointer :: berg
 ! Local variables
-
- !call print_berg(stderr(), berg, 'destroy_iceberg')
 
   ! Bye-bye berg
   deallocate(berg)
@@ -3197,12 +3265,12 @@ type(iceberg), pointer :: this
   ! Arguments
   type(iceberg), pointer :: last_berg, berg
   ! Local variables
-  
+
     last_berg=>berg
     do while (associated(last_berg%next))
       last_berg=>last_berg%next
     enddo
-  
+
   end function last_berg
 
 end subroutine write_restart
