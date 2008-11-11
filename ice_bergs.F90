@@ -35,6 +35,8 @@ type :: icebergs_gridded
   integer :: my_pe, pe_N, pe_S, pe_E, pe_W ! MPI PE identifiers
   real, dimension(:,:), pointer :: lon=>NULL() ! Longitude of cell corners
   real, dimension(:,:), pointer :: lat=>NULL() ! Latitude of cell corners
+  real, dimension(:,:), pointer :: lonc=>NULL() ! Longitude of cell centers
+  real, dimension(:,:), pointer :: latc=>NULL() ! Latitude of cell centers
   real, dimension(:,:), pointer :: dx=>NULL() ! Length of cell edge (m)
   real, dimension(:,:), pointer :: dy=>NULL() ! Length of cell edge (m)
   real, dimension(:,:), pointer :: area=>NULL() ! Area of cell (m^2)
@@ -129,7 +131,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.55 2008/11/05 20:18:02 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.56 2008/11/11 13:58:11 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -154,6 +156,7 @@ logical :: budget=.true. ! Calculate budgets
 logical :: debug=.false. ! Turn on debugging
 logical :: really_debug=.false. ! Turn on debugging
 logical :: parallel_reprod=.true. ! Reproduce across different PE decompositions
+logical :: use_slow_find=.false. ! Use really slow (but robust) find_cell
 
 contains
 
@@ -1808,7 +1811,7 @@ real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250
 namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
          distribution, mass_scaling, initial_thickness, verbose_hrs, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
-         parallel_reprod
+         parallel_reprod, use_slow_find
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je
 type(icebergs_gridded), pointer :: grd
@@ -1888,6 +1891,8 @@ logical :: lerr
  !write(stderr(),*) 'diamond: allocating grid'
   allocate( grd%lon(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%lon(:,:)=999.
   allocate( grd%lat(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%lat(:,:)=999.
+  allocate( grd%lonc(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%lon(:,:)=999.
+  allocate( grd%latc(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%lat(:,:)=999.
   allocate( grd%dx(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%dx(:,:)=0.
   allocate( grd%dy(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%dy(:,:)=0.
   allocate( grd%area(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%area(:,:)=0.
@@ -1967,6 +1972,14 @@ logical :: lerr
   do j=grd%jsc-1,grd%jsd,-1; do i=grd%isd,grd%ied
       minl=grd%lon(i,j+1)-180.
       grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
+  enddo; enddo
+
+  ! lonc, latc used for searches
+  do j=grd%jsd+1,grd%jed; do i=grd%isd+1,grd%ied
+    grd%lonc(i,j)=0.25*( (grd%lon(i,j)+grd%lon(i-1,j-1)) &
+                        +(grd%lon(i-1,j)+grd%lon(i,j-1)) )
+    grd%latc(i,j)=0.25*( (grd%lat(i,j)+grd%lat(i-1,j-1)) &
+                        +(grd%lat(i-1,j)+grd%lat(i,j-1)) )
   enddo; enddo
 
   if (debug) then
@@ -2100,12 +2113,12 @@ real :: lon0, lon1, lat0, lat1
 character(len=30) :: filename
 type(icebergs_gridded), pointer :: grd
 type(iceberg) :: localberg ! NOT a pointer but an actual local variable
-integer :: clock_1, clock_2, clock_3
-
-
+integer :: clock_1, clock_2, clock_3, clock_find, clock_insert
   clock_1=mpp_clock_id( 'Icebergs-read_restart_bergs 1', flags=clock_flag_default, grain=CLOCK_LOOP )
   clock_2=mpp_clock_id( 'Icebergs-read_restart_bergs 2', flags=clock_flag_default, grain=CLOCK_LOOP )
   clock_3=mpp_clock_id( 'Icebergs-read_restart_bergs 3', flags=clock_flag_default, grain=CLOCK_LOOP )
+  clock_find=mpp_clock_id( 'Icebergs-_restart_find', flags=clock_flag_default, grain=CLOCK_LOOP )
+  clock_insert=mpp_clock_id( 'Icebergs-_restart_insert', flags=clock_flag_default, grain=CLOCK_LOOP )
   call mpp_clock_begin(clock_1)
 
   ! For convenience
@@ -2170,11 +2183,18 @@ integer :: clock_1, clock_2, clock_3
    !write(stderr(),*) 'diamond, read_restart_bergs: reading berg ',k
     localberg%lon=get_double(ncid, lonid, k)
     localberg%lat=get_double(ncid, latid, k)
-    lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+    call mpp_clock_begin(clock_find)
+    if (use_slow_find) then
+      lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+    else
+      lres=find_cell_by_search(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+    endif
+    call mpp_clock_end(clock_find)
     if (really_debug) then
       write(stderr(),'(a,i,a,2f,a,i)') 'diamond, read_restart_bergs: berg ',k,' is at ',localberg%lon,localberg%lat,' on PE ',mpp_pe()
       write(stderr(),*) 'diamond, read_restart_bergs: lres = ',lres
     endif
+    call mpp_clock_begin(clock_insert)
     if (lres) then
       localberg%uvel=get_double(ncid, uvelid, k)
       localberg%vvel=get_double(ncid, vvelid, k)
@@ -2195,17 +2215,20 @@ integer :: clock_1, clock_2, clock_3
       endif
       if (really_debug) lres=is_point_in_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, explain=.true.)
       lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
+     !call add_new_berg_to_list(bergs%first, localberg, quick=.true.)
       call add_new_berg_to_list(bergs%first, localberg)
       if (really_debug) call print_berg(stderr(), bergs%first, 'read_restart_bergs, add_new_berg_to_list')
     elseif (multiPErestart) then
       write(stderr(),*) 'diamond, read_restart_bergs: WARNING berg not on PE!'
     endif
+    call mpp_clock_end(clock_insert)
   enddo
   call mpp_clock_end(clock_2)
 
   call mpp_clock_begin(clock_3)
   ! Sanity check
   k=count_bergs(bergs)
+  if (verbose) write(0,'(i4,a,i)') mpp_pe(),' diamond, read_restart_bergs: # bergs =',k
   call mpp_sum(k)
   if (mpp_pe().eq.mpp_root_pe()) then
     write(stderr(),'(a,i,a,i,a)') 'diamond, read_restart_bergs: there were',nbergs_in_file,' bergs in the restart file and', &
@@ -2215,6 +2238,7 @@ integer :: clock_1, clock_2, clock_3
 
   bergs%icebergs_mass_start=sum_icebergs_mass(bergs%first)
   call mpp_sum( bergs%icebergs_mass_start )
+  if (mpp_pe().eq.mpp_root_pe().and.verbose) write(stderr(),'(a)') 'diamond, read_restart_bergs: completed'
   call mpp_clock_end(clock_3)
   
 end subroutine read_restart_bergs
@@ -2267,17 +2291,22 @@ end subroutine read_restart_calving
 
 ! ##############################################################################
 
-subroutine add_new_berg_to_list(first, bergvals)
+subroutine add_new_berg_to_list(first, bergvals, quick)
 ! Arguments
 type(iceberg), pointer :: first
 type(iceberg), intent(in) :: bergvals
+logical, intent(in), optional :: quick
 ! Local variables
 type(iceberg), pointer :: new=>NULL()
 
   new=>NULL()
   call create_iceberg(new, bergvals)
 
-  call insert_berg_into_list(first, new)
+  if (present(quick).and. quick) then
+    call insert_berg_into_list(first, new, quick=.true.)
+  else
+    call insert_berg_into_list(first, new)
+  endif
 
   !Clear new
   new=>NULL()
@@ -2286,14 +2315,15 @@ end subroutine add_new_berg_to_list
 
 ! ##############################################################################
 
-subroutine insert_berg_into_list(first, berg)
+subroutine insert_berg_into_list(first, berg, quick)
 ! Arguments
 type(iceberg), pointer :: first, berg
+logical, intent(in), optional :: quick
 ! Local variables
 type(iceberg), pointer :: this, prev
 
   if (associated(first)) then
-    if (.not. parallel_reprod) then
+    if (.not. parallel_reprod .or. (present(quick).and.quick) ) then
       berg%next=>first
       first%prev=>berg
       first=>berg
@@ -2567,6 +2597,183 @@ end subroutine move_trajectory
 
 ! ##############################################################################
 
+logical function find_cell_by_search(grd, x, y, i, j)
+! Arguments
+type(icebergs_gridded), intent(in) :: grd
+real, intent(in) :: x, y
+integer, intent(inout) :: i, j
+! Local variables
+integer :: is,ie,js,je,di,dj,io,jo,icnt
+real :: d0,d1,d2,d3,d4,d5,d6,d7,d8,dmin
+  find_cell_by_search=.false.
+  is=grd%isc; ie=grd%iec; js=grd%jsc; je=grd%jec
+
+  ! Start at nearest corner
+  d1=dcost(x,y,grd%lonc(is+1,js+1),grd%latc(is+1,js+1))
+  d2=dcost(x,y,grd%lonc(ie-1,js+1),grd%latc(ie-1,js+1))
+  d3=dcost(x,y,grd%lonc(ie-1,je-1),grd%latc(ie-1,je-1))
+  d4=dcost(x,y,grd%lonc(is+1,je-1),grd%latc(is+1,je-1))
+  dmin=min(d1,d2,d3,d4)
+  if (d1==dmin) then; i=is+1; j=js+1
+  elseif (d2==dmin) then; i=ie-1; j=js+1
+  elseif (d3==dmin) then; i=ie-1; j=je-1
+  elseif (d4==dmin) then; i=is+1; j=je-1
+  else
+    call error_mesg('diamond, find_cell_by_search:', 'This should never EVER happen! (1)', FATAL)
+  endif
+
+  if (is_point_in_cell(grd, x, y, i, j)) then
+    find_cell_by_search=.true.
+    return
+  endif
+    
+  do icnt=1, 1*(ie-is+je-js)
+    io=i; jo=j
+
+    d0=dcost(x,y,grd%lonc(io,jo),grd%latc(io,jo))
+    d1=dcost(x,y,grd%lonc(io,jo+1),grd%latc(io,jo+1))
+    d2=dcost(x,y,grd%lonc(io-1,jo+1),grd%latc(io-1,jo+1))
+    d3=dcost(x,y,grd%lonc(io-1,jo),grd%latc(io-1,jo))
+    d4=dcost(x,y,grd%lonc(io-1,jo-1),grd%latc(io-1,jo-1))
+    d5=dcost(x,y,grd%lonc(io,jo-1),grd%latc(io,jo-1))
+    d6=dcost(x,y,grd%lonc(io+1,jo-1),grd%latc(io+1,jo-1))
+    d7=dcost(x,y,grd%lonc(io+1,jo),grd%latc(io+1,jo))
+    d8=dcost(x,y,grd%lonc(io+1,jo+1),grd%latc(io+1,jo+1))
+
+  ! dmin=min(d0,d1,d3,d5,d7)
+    dmin=min(d0,d1,d2,d3,d4,d5,d6,d7,d8)
+    if (d0==dmin) then; di=0; dj=0
+    elseif (d2==dmin) then; di=-1; dj=1
+    elseif (d4==dmin) then; di=-1; dj=-1
+    elseif (d6==dmin) then; di=1; dj=-1
+    elseif (d8==dmin) then; di=1; dj=1
+    elseif (d1==dmin) then; di=0; dj=1
+    elseif (d3==dmin) then; di=-1; dj=0
+    elseif (d5==dmin) then; di=0; dj=-1
+    elseif (d7==dmin) then; di=1; dj=0
+    else
+      call error_mesg('diamond, find_cell_by_search:', 'This should never EVER happen!', FATAL)
+    endif
+
+    i=min(ie, max(is, io+di))
+    j=min(je, max(js, jo+dj))
+
+    if (is_point_in_cell(grd, x, y, i, j)) then
+      find_cell_by_search=.true.
+      return
+    endif
+    
+    if ((i==io.and.j==jo) &
+        .and. .not.find_better_min(grd, x, y, 3, i, j) &
+       ) then
+      ! Stagnated
+      find_cell_by_search=find_cell_loc(grd, x, y, is, ie, js, je, 1, i, j)
+      if (.not. find_cell_by_search) find_cell_by_search=find_cell_loc(grd, x, y, is, ie, js, je, 3, i, j)
+      i=min(ie, max(is, i))
+      j=min(je, max(js, j))
+      if (is_point_in_cell(grd, x, y, i, j)) then
+        find_cell_by_search=.true.
+      else
+  !     find_cell_by_search=find_cell(grd, x, y, i, j)
+  !     if (find_cell_by_search) then
+  !       write(0,'(i3,a,2i5,a,2i3)') mpp_pe(),'diamonds, find_cell_by_search: false negative i,j=',i-is,j-js,' di,dj=',di,dj
+  !       write(0,'(i3,a,2i5,a,2f8.3)') mpp_pe(),'diamonds, find_cell_by_search: false negative io,jo=',io,jo
+  !       write(0,'(i3,a,2i5,a,2f8.3)') mpp_pe(),'diamonds, find_cell_by_search: false negative i,j=',i,j,' targ=',x,y
+  !     endif
+      endif
+      return
+    endif
+
+  enddo
+
+  find_cell_by_search=find_cell(grd, x, y, i, j)
+  if (find_cell_by_search) then
+    write(0,'(i3,a,3f)') mpp_pe(),'cost ',d2,d1,d8
+    write(0,'(i3,a,3f)') mpp_pe(),'cost ',d3,d0,d7
+    write(0,'(i3,a,3f)') mpp_pe(),'cost ',d4,d5,d6
+    write(0,'(i3,a,2f)') mpp_pe(),'x,y ',x,y
+    write(0,'(i3,a,4i5)') mpp_pe(),'io,jo ',io,jo,di,dj
+    write(0,'(i3,a,2i5,a,2i3)') mpp_pe(),'diamonds, find_cell_by_search: false negative 2 i,j=',i-is,j-js,' di,dj=',di,dj
+    write(0,'(i3,a,2i5,a,2f8.3)') mpp_pe(),'diamonds, find_cell_by_search: false negative 2 io,jo=',io,jo
+    write(0,'(i3,a,2i5,a,2f8.3)') mpp_pe(),'diamonds, find_cell_by_search: false negative 2 i,j=',i,j,' targ=',x,y
+  endif
+  find_cell_by_search=.false.
+
+  contains
+
+! # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+
+  real function dcost(x1, y1, x2, y2)
+  ! Arguments
+  real, intent(in) :: x1, x2, y1, y2
+  ! Local variables
+  real :: x1m
+
+    x1m=modulo(x1-(x2-180.),360.)+(x2-180.)
+  ! dcost=(x2-x1)**2+(y2-y1)**2
+    dcost=(x2-x1m)**2+(y2-y1)**2
+  end function dcost
+
+! # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+
+  logical function find_better_min(grd, x, y, w, oi, oj)
+  ! Arguments
+  type(icebergs_gridded), intent(in) :: grd
+  real, intent(in) :: x, y
+  integer, intent(in) :: w
+  integer, intent(inout) :: oi, oj
+  ! Local variables
+  integer :: i,j,xs,xe,ys,ye
+  real :: dmin, dcst
+
+  xs=max(grd%isc, oi-w)
+  xe=min(grd%iec, oi+w)
+  ys=max(grd%jsc, oj-w)
+  ye=min(grd%jec, oj+w)
+
+  find_better_min=.false.
+  dmin=dcost(x,y,grd%lonc(oi,oj),grd%latc(oi,oj))
+  do j=ys,ye; do i=xs,xe
+      dcst=dcost(x,y,grd%lonc(i,j),grd%latc(i,j))
+      if (dcst<dmin) then
+        find_better_min=.true.
+        dmin=dcst
+        oi=i;oj=j
+      endif
+  enddo; enddo
+
+  end function find_better_min
+
+! # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+
+  logical function find_cell_loc(grd, x, y, is, ie, js, je, w, oi, oj)
+  ! Arguments
+  type(icebergs_gridded), intent(in) :: grd
+  real, intent(in) :: x, y
+  integer, intent(in) :: is, ie, js, je, w
+  integer, intent(inout) :: oi, oj
+  ! Local variables
+  integer :: i,j,xs,xe,ys,ye
+
+    xs=max(is, oi-w)
+    xe=min(ie, oi+w)
+    ys=max(js, oj-w)
+    ye=min(je, oj+w)
+
+    find_cell_loc=.false.
+    do j=ys,ye; do i=xs,xe
+        if (is_point_in_cell(grd, x, y, i, j)) then
+          oi=i; oj=j; find_cell_loc=.true.
+          return
+        endif
+    enddo; enddo
+
+  end function find_cell_loc
+
+end function find_cell_by_search
+
+! ##############################################################################
+
 logical function find_cell(grd, x, y, oi, oj)
 ! Arguments
 type(icebergs_gridded), intent(in) :: grd
@@ -2577,16 +2784,9 @@ integer :: i,j
 
   find_cell=.false.; oi=-999; oj=-999
 
-  ! This should be a bisection search but ...
   do j=grd%jsc,grd%jec; do i=grd%isc,grd%iec
       if (is_point_in_cell(grd, x, y, i, j)) then
         oi=i; oj=j; find_cell=.true.
-       !write(stderr(),'(a,i3,a,10f7.1,2i4)') 'diamond, find_cell: (',mpp_pe(),') ', &
-       !                   grd%lon(i-1,j-1),grd%lat(i-1,j-1), &
-       !                   grd%lon(i  ,j-1),grd%lat(i  ,j-1), &
-       !                   grd%lon(i  ,j  ),grd%lat(i  ,j  ), &
-       !                   grd%lon(i-1,j  ),grd%lat(i-1,j  ), &
-       !                   x, y, i, j
         return
       endif
   enddo; enddo
@@ -2605,7 +2805,6 @@ integer :: i,j
 
   find_cell_wide=.false.; oi=-999; oj=-999
 
-  ! This should be a bisection search but ...
   do j=grd%jsd+1,grd%jed; do i=grd%isd+1,grd%ied
       if (is_point_in_cell(grd, x, y, i, j)) then
         oi=i; oj=j; find_cell_wide=.true.
@@ -3035,6 +3234,8 @@ type(iceberg), pointer :: this, next
 
   deallocate(bergs%grd%lon)
   deallocate(bergs%grd%lat)
+  deallocate(bergs%grd%lonc)
+  deallocate(bergs%grd%latc)
   deallocate(bergs%grd%dx)
   deallocate(bergs%grd%dy)
   deallocate(bergs%grd%area)
@@ -3082,7 +3283,7 @@ type(iceberg), pointer :: this, next
   call mpp_clock_end(bergs%clock_ini)
   deallocate(bergs)
 
-  if (verbose) write(stderr(),*) 'diamond: icebergs_end complete',mpp_pe()
+  if (mpp_pe()==mpp_root_pe()) write(stderr(),*) 'diamond: icebergs_end complete',mpp_pe()
 
   contains
 
@@ -3290,7 +3491,7 @@ character(len=30) :: filename
 type(xyt), pointer :: this, next
 
   write(filename(1:30),'("iceberg_trajectories.nc.",I4.4)') mpp_pe()
-  if (verbose) write(stderr(),*) 'diamond, write_trajectory: creating ',filename
+  if (debug) write(stderr(),*) 'diamond, write_trajectory: creating ',filename
 
   iret = nf_create(filename, NF_CLOBBER, ncid)
   if (iret .ne. NF_NOERR) write(stderr(),*) 'diamond, write_trajectory: nf_create failed'
@@ -3404,7 +3605,7 @@ type(xyt), pointer :: this, next
        
   ! Finish up
   iret = nf_close(ncid)
-  if (iret .ne. NF_NOERR) write(stderr(),*) 'diamond, write_trajectory: nf_close failed'
+  if (iret .ne. NF_NOERR) write(stderr(),*) 'diamond, write_trajectory: nf_close failed',mpp_pe(),filename
 
 end subroutine write_trajectory
 
@@ -3670,8 +3871,6 @@ type(iceberg), pointer :: this
     this=>this%next
   enddo
 
-  nbergs=count_bergs(bergs)
-  call mpp_sum(nbergs)
   ichk1=mpp_chksum( fld )
 
   nbergs=count_bergs(bergs)
@@ -3679,6 +3878,9 @@ type(iceberg), pointer :: this
     fld(i,j) = fld(i,j)*float(i)
   enddo; enddo
   ichk2=mpp_chksum( fld )
+
+  nbergs=count_bergs(bergs)
+  call mpp_sum(nbergs)
 
   if (mpp_pe().eq.mpp_root_pe()) &
     write(stderr(),'("diamond, bergs_chksum: ",a18,3(x,a,"=",i))') &
