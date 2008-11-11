@@ -131,7 +131,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.56 2008/11/11 13:58:11 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.57 2008/11/11 14:53:36 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -2113,13 +2113,6 @@ real :: lon0, lon1, lat0, lat1
 character(len=30) :: filename
 type(icebergs_gridded), pointer :: grd
 type(iceberg) :: localberg ! NOT a pointer but an actual local variable
-integer :: clock_1, clock_2, clock_3, clock_find, clock_insert
-  clock_1=mpp_clock_id( 'Icebergs-read_restart_bergs 1', flags=clock_flag_default, grain=CLOCK_LOOP )
-  clock_2=mpp_clock_id( 'Icebergs-read_restart_bergs 2', flags=clock_flag_default, grain=CLOCK_LOOP )
-  clock_3=mpp_clock_id( 'Icebergs-read_restart_bergs 3', flags=clock_flag_default, grain=CLOCK_LOOP )
-  clock_find=mpp_clock_id( 'Icebergs-_restart_find', flags=clock_flag_default, grain=CLOCK_LOOP )
-  clock_insert=mpp_clock_id( 'Icebergs-_restart_insert', flags=clock_flag_default, grain=CLOCK_LOOP )
-  call mpp_clock_begin(clock_1)
 
   ! For convenience
   grd=>bergs%grd
@@ -2177,24 +2170,19 @@ integer :: clock_1, clock_2, clock_3, clock_find, clock_insert
   lat0=minval( grd%lat(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
   lat1=maxval( grd%lat(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
  !write(stderr(),'(a,i3,a,4f10.3)') 'diamond, read_restart_bergs: (',mpp_pe(),') ',lon0,lon1,lat0,lat1
-  call mpp_clock_end(clock_1)
-  call mpp_clock_begin(clock_2)
   do k=1, nbergs_in_file
    !write(stderr(),*) 'diamond, read_restart_bergs: reading berg ',k
     localberg%lon=get_double(ncid, lonid, k)
     localberg%lat=get_double(ncid, latid, k)
-    call mpp_clock_begin(clock_find)
     if (use_slow_find) then
       lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
     else
       lres=find_cell_by_search(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
     endif
-    call mpp_clock_end(clock_find)
     if (really_debug) then
       write(stderr(),'(a,i,a,2f,a,i)') 'diamond, read_restart_bergs: berg ',k,' is at ',localberg%lon,localberg%lat,' on PE ',mpp_pe()
       write(stderr(),*) 'diamond, read_restart_bergs: lres = ',lres
     endif
-    call mpp_clock_begin(clock_insert)
     if (lres) then
       localberg%uvel=get_double(ncid, uvelid, k)
       localberg%vvel=get_double(ncid, vvelid, k)
@@ -2221,11 +2209,8 @@ integer :: clock_1, clock_2, clock_3, clock_find, clock_insert
     elseif (multiPErestart) then
       write(stderr(),*) 'diamond, read_restart_bergs: WARNING berg not on PE!'
     endif
-    call mpp_clock_end(clock_insert)
   enddo
-  call mpp_clock_end(clock_2)
 
-  call mpp_clock_begin(clock_3)
   ! Sanity check
   k=count_bergs(bergs)
   if (verbose) write(0,'(i4,a,i)') mpp_pe(),' diamond, read_restart_bergs: # bergs =',k
@@ -2239,7 +2224,6 @@ integer :: clock_1, clock_2, clock_3, clock_find, clock_insert
   bergs%icebergs_mass_start=sum_icebergs_mass(bergs%first)
   call mpp_sum( bergs%icebergs_mass_start )
   if (mpp_pe().eq.mpp_root_pe().and.verbose) write(stderr(),'(a)') 'diamond, read_restart_bergs: completed'
-  call mpp_clock_end(clock_3)
   
 end subroutine read_restart_bergs
 
