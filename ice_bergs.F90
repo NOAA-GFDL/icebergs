@@ -134,7 +134,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.59 2008/11/12 20:11:33 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.60 2008/11/13 21:20:27 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -179,7 +179,7 @@ real :: f_cori, T, D, W, L, M, F
 real :: drag_ocn, drag_atm, drag_ice, wave_rad
 real :: c_ocn, c_atm, c_ice
 real :: ampl, wmod, Cr, Lwavelength, Lcutoff, Ltop
-real, parameter :: alpha=0.0, beta=1.0, accel_lim=1.e-3, Cr0=0.06, vel_lim=5.
+real, parameter :: alpha=0.0, beta=1.0, accel_lim=1.e-2, Cr0=0.06, vel_lim=10.
 real :: lambda, detA, A11, A12, axe, aye, D_hi
 real :: uveln, vveln, us, vs
 logical :: dumpit
@@ -645,7 +645,7 @@ real :: unused_calving, tmpsum
   if (bergs%verbose_hrs>0 .and. mod(24*iday+ihr,bergs%verbose_hrs).eq.0) lverbose=verbose
   lbudget=.false.
   if (bergs%verbose_hrs>0 .and. mod(24*iday+ihr,bergs%verbose_hrs).eq.0) lbudget=budget
-  if (mpp_pe()==mpp_root_pe().and.lverbose) write(stderr(),'(a,3i5,a,3i5,a,i5,f8.3)') &
+  if (mpp_pe()==mpp_root_pe().and.lverbose) write(stdout(),'(a,3i5,a,3i5,a,i5,f8.3)') &
        'diamonds: y,m,d=',iyr, imon, iday,' h,m,s=', ihr, imin, isec, &
        ' yr,yrdy=', bergs%current_year, bergs%current_yearday
 
@@ -844,48 +844,48 @@ real :: unused_calving, tmpsum
     if (mpp_pe().eq.mpp_root_pe()) then
  100 format("diamonds: ",a19,3(a18,"=",es14.7,x,a2,:,","),a12,i8)
  200 format("diamonds: ",a19,10(a18,"=",es14.7,x,a2,:,","))
-      write(stderr(),200) 'stored-ice state:', &
+      write(stdout(),200) 'stored-ice state:', &
          'start stored mass',bergs%stored_start,'kg', &
          'end stored mass',bergs%stored_end,'kg', &
          'Delta stored mass',bergs%stored_end-bergs%stored_start,'kg'
-      write(stderr(),100) 'floating state:', &
+      write(stdout(),100) 'floating state:', &
          'start floating mass',bergs%floating_mass_start,'kg', &
          'end floating mass',bergs%floating_mass_end,'kg', &
          'Delta floating mass',bergs%floating_mass_end-bergs%floating_mass_start,'kg', &
          '# of bergs',nbergs
-      write(stderr(),200) 'icebergs state:', &
+      write(stdout(),200) 'icebergs state:', &
          'start icebergs mass',bergs%icebergs_mass_start,'kg', &
          'end icebergs mass',bergs%icebergs_mass_end,'kg', &
          'Delta berg mass',bergs%icebergs_mass_end-bergs%icebergs_mass_start,'kg'
-      write(stderr(),200) 'bergy state:', &
+      write(stdout(),200) 'bergy state:', &
          'start bergy mass',bergs%bergy_mass_start,'kg', &
          'end bergy mass',bergs%bergy_mass_end,'kg', &
          'Delta bergy mass',bergs%bergy_mass_end-bergs%bergy_mass_start,'kg'
-      write(stderr(),200) 'stored-ice budget:', &
+      write(stdout(),200) 'stored-ice budget:', &
          'ice input',bergs%net_calving_used,'kg', &
          'ice to bergs',bergs%net_calving_to_bergs,'kg', &
          'Delta stored mass',bergs%stored_end-bergs%stored_start,'kg', &
          'error',((bergs%net_calving_used-bergs%net_calving_to_bergs)-(bergs%stored_end-bergs%stored_start)) &
                 /((bergs%net_calving_used+bergs%net_calving_to_bergs)+1.e-30),'nd'
-      write(stderr(),200) 'floating budget:', &
+      write(stdout(),200) 'floating budget:', &
          'calved input',bergs%net_calving_to_bergs,'kg', &
          'melt+eros.',bergs%net_melt,'kg', &
          'Delta float mass',bergs%floating_mass_end-bergs%floating_mass_start,'kg', &
          'error',((bergs%net_calving_to_bergs-bergs%net_melt)-(bergs%floating_mass_end-bergs%floating_mass_start)) &
                 /((bergs%net_calving_to_bergs+bergs%net_melt)+1.e-30),'nd'
-      write(stderr(),200) 'icebergs budget:', &
+      write(stdout(),200) 'icebergs budget:', &
          'calved input',bergs%net_calving_to_bergs,'kg', &
          'melt+eros.',bergs%berg_melt,'kg', &
          'Delta berg mass',bergs%icebergs_mass_end-bergs%icebergs_mass_start,'kg', &
          'error',((bergs%net_calving_to_bergs-bergs%berg_melt)-(bergs%icebergs_mass_end-bergs%icebergs_mass_start)) &
                 /((bergs%net_calving_to_bergs+bergs%berg_melt)+1.e-30),'nd'
-      write(stderr(),200) 'bergy budget:', &
+      write(stdout(),200) 'bergy budget:', &
          'eros.',bergs%bergy_src,'kg', &
          'melt.',bergs%bergy_melt,'kg', &
          'Delta bergy mass',bergs%bergy_mass_end-bergs%bergy_mass_start,'kg', &
          'error',((bergs%bergy_src-bergs%bergy_melt)-(bergs%bergy_mass_end-bergs%bergy_mass_start)) &
                 /((bergs%net_calving_to_bergs+bergs%bergy_melt)+1.e-30),'nd'
-      write(stderr(),200) 'overall budget:', &
+      write(stdout(),200) 'overall budget:', &
          'input from SIS',bergs%net_calving_received,'kg', &
          'output to SIS',bergs%net_calving_returned,'kg', &
          'Delta model mass',(bergs%stored_end-bergs%stored_start)+(bergs%floating_mass_end-bergs%floating_mass_start),'kg', &
@@ -893,12 +893,12 @@ real :: unused_calving, tmpsum
                  ((bergs%stored_end-bergs%stored_start)+(bergs%floating_mass_end-bergs%floating_mass_start))) &
                 /((bergs%net_calving_received+bergs%net_calving_returned)+1.e-30),'nd'
       if (debug) then
-      write(stderr(),200) 'top interface:', &
+      write(stdout(),200) 'top interface:', &
          'input from SIS',bergs%net_incoming_calving,'kg', &
          'seen by diamonds',bergs%net_calving_received,'kg', &
          'error',(bergs%net_calving_received-bergs%net_incoming_calving) &
                 /(bergs%net_calving_received+bergs%net_incoming_calving)*2.,'nd'
-      write(stderr(),200) 'bot interface:', &
+      write(stdout(),200) 'bot interface:', &
          'output from diamonds',bergs%net_outgoing_calving,'kg', &
          'seen by SIS',bergs%net_calving_returned,'kg', &
          'error',(bergs%net_calving_returned-bergs%net_outgoing_calving) &
@@ -972,7 +972,7 @@ logical, save :: first_call=.false.
     enddo
     stored_mass=sum( grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:) )
     call mpp_sum(stored_mass)
-    if (mpp_pe().eq.mpp_root_pe()) write(stderr(),'(a,es12.6,a)') &
+    if (mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a,es12.6,a)') &
         'diamonds, accumulate_calving: initial stored mass=',stored_mass,' kg'
   endif
 
@@ -2240,10 +2240,10 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
 
   ! Sanity check
   k=count_bergs(bergs)
-  if (verbose) write(0,'(2(a,i))') 'diamonds, read_restart_bergs: # bergs =',k,' on PE',mpp_pe()
+  if (verbose) write(stdout(),'(2(a,i))') 'diamonds, read_restart_bergs: # bergs =',k,' on PE',mpp_pe()
   call mpp_sum(k)
   if (mpp_pe().eq.mpp_root_pe()) then
-    write(stderr(),'(a,i,a,i,a)') 'diamonds, read_restart_bergs: there were',nbergs_in_file,' bergs in the restart file and', &
+    write(stdout(),'(a,i,a,i,a)') 'diamonds, read_restart_bergs: there were',nbergs_in_file,' bergs in the restart file and', &
      k,' bergs have been read'
   endif
   if (debug.and.k.ne.nbergs_in_file) call error_mesg('diamonds, read_restart_bergs', 'wrong number of bergs read!', FATAL)
@@ -2254,7 +2254,7 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
   call mpp_sum( bergs%icebergs_mass_start )
   bergs%bergy_mass_start=sum_mass(bergs%first,justbits=.true.)
   call mpp_sum( bergs%bergy_mass_start )
-  if (mpp_pe().eq.mpp_root_pe().and.verbose) write(stderr(),'(a)') 'diamonds, read_restart_bergs: completed'
+  if (mpp_pe().eq.mpp_root_pe().and.verbose) write(stdout(),'(a)') 'diamonds, read_restart_bergs: completed'
   
 end subroutine read_restart_bergs
 
@@ -2282,7 +2282,7 @@ type(randomNumberStream) :: rns
     call read_data(filename, 'stored_ice', grd%stored_ice, grd%domain)
     bergs%restarted=.true.
   else
-    if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stderr(),'(a)') &
+    if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a)') &
      'diamonds, read_restart_calving: initializing stored ice to random numbers'
     allocate(randnum(grd%jsc:grd%jec, nclasses))
     do i=grd%isc, grd%iec
@@ -3800,7 +3800,7 @@ real :: mean, rms, SD, minv, maxv
   i=mpp_chksum( fld(lbound(fld,1)+halo:ubound(fld,1)-halo, &
                     lbound(fld,2)+halo:ubound(fld,2)-halo,:) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(stderr(),'("diamonds, grd_chksum3: ",a18,x,a,"=",i,5(x,a,"=",es21.14),x,a,"=",i)') &
+    write(stdout(),'("diamonds, grd_chksum3: ",a18,x,a,"=",i,5(x,a,"=",es21.14),x,a,"=",i)') &
      txt, 'chksum', i, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd!, '#', icount
 
 end subroutine grd_chksum3
@@ -3851,7 +3851,7 @@ real :: mean, rms, SD, minv, maxv
   i=mpp_chksum( fld(lbound(fld,1)+halo:ubound(fld,1)-halo, &
                     lbound(fld,2)+halo:ubound(fld,2)-halo) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(stderr(),'("diamonds, grd_chksum2: ",a18,x,a,"=",i,5(x,a,"=",es21.14),x,a,"=",i)') &
+    write(stdout(),'("diamonds, grd_chksum2: ",a18,x,a,"=",i,5(x,a,"=",es21.14),x,a,"=",i)') &
      txt, 'chksum', i, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd!, '#', icount
 
 end subroutine grd_chksum2
@@ -3899,7 +3899,7 @@ type(iceberg), pointer :: this
   call mpp_sum(nbergs)
 
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(stderr(),'("diamonds, bergs_chksum: ",a18,3(x,a,"=",i))') &
+    write(stdout(),'("diamonds, bergs_chksum: ",a18,3(x,a,"=",i))') &
       txt, 'chksum', ichk1, 'chksum2',ichk2, '#', nbergs
 
   deallocate( fld )
