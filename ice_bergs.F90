@@ -134,7 +134,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.60 2008/11/13 21:20:27 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.61 2008/11/13 21:46:14 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -554,6 +554,7 @@ real, parameter :: ssh_coast=0.00
   hi=grd%hi(i,j) ! A-grid
 
   ! Estimate SSH gradient in X direction
+#ifdef USE_OLD_SSH_GRADIENT
   dxp=0.5*(grd%dx(i+1,j)+grd%dx(i+1,j-1))
   dx0=0.5*(grd%dx(i,j)+grd%dx(i,j-1))
   dxm=0.5*(grd%dx(i-1,j)+grd%dx(i-1,j-1))
@@ -561,10 +562,20 @@ real, parameter :: ssh_coast=0.00
         +(-ssh_coast)/(dx0+dxm)*(1.-grd%msk(i-1,j)) ! force to drive bergs away from coasts
   hxp=2.*(grd%ssh(i+1,j)-grd%ssh(i,j))/(dx0+dxp)*grd%msk(i+1,j) &
         +(+ssh_coast)/(dx0+dxp)*(1.-grd%msk(i+1,j)) ! force to drive bergs away from coasts
+#else
+  if (yj>=0.5) then
+    hxp=(yj-0.5)*ddx_ssh(grd,i  ,j+1)+(1.5-yj)*ddx_ssh(grd,i  ,j  )
+    hxm=(yj-0.5)*ddx_ssh(grd,i-1,j+1)+(1.5-yj)*ddx_ssh(grd,i-1,j  )
+  else
+    hxp=(yj+0.5)*ddx_ssh(grd,i  ,j  )+(0.5-yj)*ddx_ssh(grd,i  ,j-1)
+    hxm=(yj+0.5)*ddx_ssh(grd,i-1,j  )+(0.5-yj)*ddx_ssh(grd,i-1,j-1)
+  endif
+#endif
   ! ssh_x is at the u-point on a C-grid
   ssh_x=xi*hxp+(1.-xi)*hxm
 
   ! Estimate SSH gradient in Y direction
+#ifdef USE_OLD_SSH_GRADIENT
   dxp=0.5*(grd%dy(i,j+1)+grd%dy(i-1,j+1))
   dx0=0.5*(grd%dy(i,j)+grd%dy(i-1,j))
   dxm=0.5*(grd%dy(i,j-1)+grd%dy(i-1,j-1))
@@ -572,6 +583,15 @@ real, parameter :: ssh_coast=0.00
         +(-ssh_coast)/(dx0+dxm)*(1.-grd%msk(i,j-1)) ! force to drive bergs away from coasts
   hxp=2.*(grd%ssh(i,j+1)-grd%ssh(i,j))/(dx0+dxp)*grd%msk(i,j+1) &
         +(+ssh_coast)/(dx0+dxp)*(1.-grd%msk(i,j+1)) ! force to drive bergs away from coasts
+#else
+  if (xi>=0.5) then
+    hxp=(xi-0.5)*ddy_ssh(grd,i+1,j  )+(1.5-xi)*ddy_ssh(grd,i  ,j  )
+    hxm=(xi-0.5)*ddy_ssh(grd,i+1,j-1)+(1.5-xi)*ddy_ssh(grd,i  ,j-1)
+  else
+    hxp=(xi+0.5)*ddy_ssh(grd,i  ,j  )+(0.5-xi)*ddy_ssh(grd,i-1,j  )
+    hxm=(xi+0.5)*ddy_ssh(grd,i  ,j-1)+(0.5-xi)*ddy_ssh(grd,i-1,j-1)
+  endif
+#endif
   ! ssh_y is at the v-point on a C-grid
   ssh_y=yj*hxp+(1.-yj)*hxm
   
@@ -582,6 +602,28 @@ real, parameter :: ssh_coast=0.00
   call rotate(ssh_x, ssh_y, cos_rot, sin_rot)
 
   contains
+
+  real function ddx_ssh(grd,i,j)
+  ! Arguments
+  type(icebergs_gridded), pointer :: grd
+  integer, intent(in) :: i, j
+  ! Local variables
+  real :: dxp,dx0
+    dxp=0.5*(grd%dx(i+1,j)+grd%dx(i+1,j-1))
+    dx0=0.5*(grd%dx(i,j)+grd%dx(i,j-1))
+    ddx_ssh=2.*(grd%ssh(i+1,j)-grd%ssh(i,j))/(dx0+dxp)*grd%msk(i+1,j)*grd%msk(i,j)
+  end function ddx_ssh
+
+  real function ddy_ssh(grd,i,j)
+  ! Arguments
+  type(icebergs_gridded), pointer :: grd
+  integer, intent(in) :: i, j
+  ! Local variables
+  real :: dyp,dy0
+    dyp=0.5*(grd%dy(i,j+1)+grd%dy(i-1,j+1))
+    dy0=0.5*(grd%dy(i,j)+grd%dy(i-1,j))
+    ddy_ssh=2.*(grd%ssh(i,j+1)-grd%ssh(i,j))/(dy0+dyp)*grd%msk(i,j+1)*grd%msk(i,j)
+  end function ddy_ssh
 
   subroutine rotate(u, v, cos_rot, sin_rot)
   ! Arguments
