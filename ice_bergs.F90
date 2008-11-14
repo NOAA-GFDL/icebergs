@@ -115,6 +115,7 @@ type, public :: icebergs ; private
   real :: rho_bergs ! Density of icebergs
   real :: LoW_ratio ! Initial ratio L/W for newly calved icebergs
   real :: bergy_bit_erosion_fraction ! Fraction of erosion melt flux to divert to bergy bits
+  real :: sicn_shift ! Shift of sea-ice concentration in erosion flux modulation (0<sicn_shift<1)
   real, dimension(:), pointer :: initial_mass, distribution, mass_scaling
   real, dimension(:), pointer :: initial_thickness, initial_width, initial_length
   logical :: restarted=.false. ! Indicate whether we read state from a restart or not
@@ -135,7 +136,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.62 2008/11/14 17:02:56 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.63 2008/11/14 17:04:07 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -384,7 +385,7 @@ real, parameter :: perday=1./86400.
             this%ui, this%vi, this%ua, this%va, this%ssh_x, this%ssh_y, this%sst, &
             this%cn, this%hi)
     SST=this%sst
-    IC=this%cn
+    IC=min(1.,this%cn+bergs%sicn_shift) ! Shift sea-ice concentration 
     M=this%mass
     T=this%thickness ! total thickness
   ! D=(bergs%rho_bergs/rho_seawater)*T ! draught (keel depth)
@@ -1896,6 +1897,7 @@ integer :: verbose_hrs=24 ! Period between verbose messages
 real :: rho_bergs=850. ! Density of icebergs
 real :: LoW_ratio=1.5 ! Initial ratio L/W for newly calved icebergs
 real :: bergy_bit_erosion_fraction=1. ! Fraction of erosion melt flux to divert to bergy bits
+real :: sicn_shift=0. ! Shift of sea-ice concentration in erosion flux modulation (0<sicn_shift<1)
 logical :: use_operator_splitting=.true. ! Use first order operator splitting for thermodynamics
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim)
@@ -1904,7 +1906,7 @@ real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250
 namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
          distribution, mass_scaling, initial_thickness, verbose_hrs, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
-         parallel_reprod, use_slow_find
+         parallel_reprod, use_slow_find, sicn_shift
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je
 type(icebergs_gridded), pointer :: grd
@@ -2102,6 +2104,7 @@ logical :: lerr
   bergs%LoW_ratio=LoW_ratio
   bergs%use_operator_splitting=use_operator_splitting
   bergs%bergy_bit_erosion_fraction=bergy_bit_erosion_fraction
+  bergs%sicn_shift=sicn_shift
   allocate( bergs%initial_mass(nclasses) ); bergs%initial_mass(:)=initial_mass(:)
   allocate( bergs%distribution(nclasses) ); bergs%distribution(:)=distribution(:)
   allocate( bergs%mass_scaling(nclasses) ); bergs%mass_scaling(:)=mass_scaling(:)
