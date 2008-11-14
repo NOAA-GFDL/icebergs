@@ -26,6 +26,7 @@ implicit none ; private
 include 'netcdf.inc'
 
 public icebergs_init, icebergs_end, icebergs_run, icebergs_stock_pe
+public icebergs_incr_mass
 
 type :: icebergs_gridded
   type(domain2D), pointer :: domain ! MPP domain
@@ -134,7 +135,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.61 2008/11/13 21:46:14 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.62 2008/11/14 17:02:56 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -457,6 +458,7 @@ real, parameter :: perday=1./86400.
         nMbits=0.
       endif
     else
+      Abits=0.
       dMbitsE=0.
       dMbitsM=0.
       nMbits=this%mass_of_bits ! retain previous value incase non-zero
@@ -515,7 +517,7 @@ real, parameter :: perday=1./86400.
       call move_trajectory(bergs, this)
       call delete_iceberg_from_list(bergs%first, this)
     else ! Diagnose mass distribution on grid
-      if (grd%id_virtual_area>0) grd%virtual_area(i,j)=grd%virtual_area(i,j)+Wn*Ln*this%mass_scaling ! m^2
+      if (grd%id_virtual_area>0) grd%virtual_area(i,j)=grd%virtual_area(i,j)+(Wn*Ln+Abits)*this%mass_scaling ! m^2
       if (grd%id_mass>0) grd%mass(i,j)=grd%mass(i,j)+Mnew/grd%area(i,j)*this%mass_scaling ! kg/m2
       if (grd%id_bergy_mass>0) grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+nMbits/grd%area(i,j)*this%mass_scaling ! kg/m2
     endif
@@ -991,6 +993,31 @@ real :: unused_calving, tmpsum
 
   call mpp_clock_end(bergs%clock)
 end subroutine icebergs_run
+
+! ##############################################################################
+
+subroutine icebergs_incr_mass(bergs, mass)
+! Arguments
+type(icebergs), pointer :: bergs
+real, dimension(:,:), intent(inout) :: mass
+! Local variables
+type(icebergs_gridded), pointer :: grd
+
+  if (.not. associated(bergs)) return
+
+  call mpp_clock_begin(bergs%clock)
+  call mpp_clock_begin(bergs%clock_int)
+
+  ! For convenience
+  grd=>bergs%grd
+
+  ! Add iceberg+bits mass field to non-haloed SIS field (kg/m^2)
+  mass(:,:)=mass(:,:)+( grd%mass(grd%isc:grd%iec,grd%jsc:grd%jec) &
+                      + grd%bergy_mass(grd%isc:grd%iec,grd%jsc:grd%jec) )
+
+  call mpp_clock_end(bergs%clock_int)
+  call mpp_clock_end(bergs%clock)
+end subroutine icebergs_incr_mass
 
 ! ##############################################################################
 
@@ -3419,7 +3446,7 @@ type(iceberg), pointer :: this
   if (associated(bergs%first)) then
 
     write(filename(1:28),'("RESTART/icebergs.res.nc.",I4.4)') mpp_pe()
-    if (verbose) write(stderr(),'(2a)') 'diamonds, write_restart: creating ',filename
+    if (verbose) write(stdout(),'(2a)') 'diamonds, write_restart: creating ',filename
 
     iret = nf_create(filename, NF_CLOBBER, ncid)
     if (iret .ne. NF_NOERR) write(stderr(),*) 'diamonds, write_restart: nf_create failed'
