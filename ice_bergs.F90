@@ -137,7 +137,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.64 2008/11/18 15:18:03 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.65 2008/11/19 18:56:40 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -520,8 +520,8 @@ real, parameter :: perday=1./86400.
       call delete_iceberg_from_list(bergs%first, this)
     else ! Diagnose mass distribution on grid
       if (grd%id_virtual_area>0) grd%virtual_area(i,j)=grd%virtual_area(i,j)+(Wn*Ln+Abits)*this%mass_scaling ! m^2
-      if (grd%id_mass>0) grd%mass(i,j)=grd%mass(i,j)+Mnew/grd%area(i,j)*this%mass_scaling ! kg/m2
-      if (grd%id_bergy_mass>0) grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+nMbits/grd%area(i,j)*this%mass_scaling ! kg/m2
+      if (grd%id_mass>0 .or. bergs%add_weight_to_ocean) grd%mass(i,j)=grd%mass(i,j)+Mnew/grd%area(i,j)*this%mass_scaling ! kg/m2
+      if (grd%id_bergy_mass>0 .or. bergs%add_weight_to_ocean) grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+nMbits/grd%area(i,j)*this%mass_scaling ! kg/m2
     endif
   
     this=>next
@@ -672,7 +672,7 @@ integer :: iyr, imon, iday, ihr, imin, isec, nbergs
 type(iceberg), pointer :: this
 type(icebergs_gridded), pointer :: grd
 logical :: lerr, sample_traj, lbudget, lverbose
-real :: unused_calving, tmpsum
+real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
 
   call mpp_clock_begin(bergs%clock)
   call mpp_clock_begin(bergs%clock_int)
@@ -887,6 +887,8 @@ real :: unused_calving, tmpsum
     call mpp_sum(bergs%berg_melt)
     call mpp_sum(bergs%bergy_src)
     call mpp_sum(bergs%bergy_melt)
+    grdd_berg_mass=sum( grd%mass(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) ); call mpp_sum(grdd_berg_mass)
+    grdd_bergy_mass=sum( grd%bergy_mass(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) ); call mpp_sum(grdd_bergy_mass)
     if (mpp_pe().eq.mpp_root_pe()) then
  100 format("diamonds: ",a19,3(a18,"=",es14.7,x,a2,:,","),a12,i8)
  200 format("diamonds: ",a19,10(a18,"=",es14.7,x,a2,:,","))
@@ -938,6 +940,14 @@ real :: unused_calving, tmpsum
          'error',((bergs%net_calving_received-bergs%net_calving_returned)- &
                  ((bergs%stored_end-bergs%stored_start)+(bergs%floating_mass_end-bergs%floating_mass_start))) &
                 /((bergs%net_calving_received+bergs%net_calving_returned)+1.e-30),'nd'
+      write(stdout(),200) 'gridded berg mass:', &
+         'gridded mass',grdd_berg_mass,'kg', &
+         'end berg mass',bergs%icebergs_mass_end,'kg', &
+         'error ',(grdd_berg_mass-bergs%icebergs_mass_end)/((grdd_berg_mass+bergs%icebergs_mass_end)+1.e-30),'nd'
+      write(stdout(),200) 'gridded bergy mass:', &
+         'gridded mass',grdd_bergy_mass,'kg', &
+         'end berg mass',bergs%bergy_mass_end,'kg', &
+         'error ',(grdd_bergy_mass-bergs%bergy_mass_end)/((grdd_bergy_mass+bergs%bergy_mass_end)+1.e-30),'nd'
       if (debug) then
       write(stdout(),200) 'top interface:', &
          'input from SIS',bergs%net_incoming_calving,'kg', &
