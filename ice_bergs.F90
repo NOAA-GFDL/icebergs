@@ -26,7 +26,7 @@ implicit none ; private
 include 'netcdf.inc'
 
 public icebergs_init, icebergs_end, icebergs_run, icebergs_stock_pe
-public icebergs_incr_mass
+public icebergs_incr_mass, icebergs_save_restart
 
 type :: icebergs_gridded
   type(domain2D), pointer :: domain ! MPP domain
@@ -137,7 +137,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.65 2008/11/19 18:56:40 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.66 2009/01/20 21:19:17 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
