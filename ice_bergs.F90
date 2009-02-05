@@ -79,6 +79,7 @@ type :: xyt
   real :: lon, lat, day
   real :: mass, thickness, width, length, uvel, vvel
   real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi
+  real :: mass_of_bits
   integer :: year
   type(xyt), pointer :: next=>NULL()
 end type xyt
@@ -137,7 +138,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.68 2009/02/05 19:41:10 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.69 2009/02/05 20:33:27 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -1491,7 +1492,7 @@ integer :: icount, i0, j0
     lret=pos_within_cell(grd, lon, lat, i, j, xi, yj)
   endif
   icount=0
-  do while ( .not.lret.and. icount<100 )
+  do while ( .not.lret.and. icount<20 )
     icount=icount+1
     if (xi.lt.0.) then
       if (grd%msk(i-1,j)>0.) then
@@ -2627,6 +2628,7 @@ type(xyt) :: posn
   posn%uvel=berg%uvel
   posn%vvel=berg%vvel
   posn%mass=berg%mass
+  posn%mass_of_bits=berg%mass_of_bits
   posn%thickness=berg%thickness
   posn%width=berg%width
   posn%length=berg%length
@@ -3600,7 +3602,7 @@ integer :: iret, ncid, i_dim, i
 integer :: lonid, latid, yearid, dayid, uvelid, vvelid
 integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid
 integer :: cnid, hiid
-integer :: mid, did, wid, lid
+integer :: mid, did, wid, lid, mbid
 character(len=30) :: filename
 type(xyt), pointer :: this, next
 
@@ -3628,6 +3630,7 @@ type(xyt), pointer :: this, next
   uaid = def_var(ncid, 'ua', NF_DOUBLE, i_dim)
   vaid = def_var(ncid, 'va', NF_DOUBLE, i_dim)
   mid = def_var(ncid, 'mass', NF_DOUBLE, i_dim)
+  mbid = def_var(ncid, 'mass_of_bits', NF_DOUBLE, i_dim)
   did = def_var(ncid, 'thickness', NF_DOUBLE, i_dim)
   wid = def_var(ncid, 'width', NF_DOUBLE, i_dim)
   lid = def_var(ncid, 'length', NF_DOUBLE, i_dim)
@@ -3666,6 +3669,8 @@ type(xyt), pointer :: this, next
   call put_att(ncid, vaid, 'units', 'm/s')
   call put_att(ncid, mid, 'long_name', 'mass')
   call put_att(ncid, mid, 'units', 'kg')
+  call put_att(ncid, mbid, 'long_name', 'mass_of_bits')
+  call put_att(ncid, mbid, 'units', 'kg')
   call put_att(ncid, did, 'long_name', 'thickness')
   call put_att(ncid, did, 'units', 'm')
   call put_att(ncid, wid, 'long_name', 'width')
@@ -3703,6 +3708,7 @@ type(xyt), pointer :: this, next
     call put_double(ncid, uaid, i, this%ua)
     call put_double(ncid, vaid, i, this%va)
     call put_double(ncid, mid, i, this%mass)
+    call put_double(ncid, mbid, i, this%mass_of_bits)
     call put_double(ncid, did, i, this%thickness)
     call put_double(ncid, wid, i, this%width)
     call put_double(ncid, lid, i, this%length)
