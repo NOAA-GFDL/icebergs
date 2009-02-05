@@ -137,7 +137,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.67 2009/02/05 19:02:42 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.68 2009/02/05 19:41:10 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -3154,7 +3154,13 @@ real :: x1,y1,x2,y2,x3,y3,x4,y4,xx,yy
  !                   x1, y1, x2, y2, x3, y3, x4, y4, ' NOT IN CELL!'
  !endif
 
-  if (xi.ge.0. .and. xi.le.1. .and. yj.ge.0. .and. yj.le.1.) pos_within_cell=.true.
+  if (xi.ge.0. .and. xi.le.1. .and. yj.ge.0. .and. yj.le.1.) then
+    pos_within_cell=is_point_in_cell(grd, x, y, i, j)
+    if (.not. pos_within_cell .and. verbose) then
+      call error_mesg('diamonds, pos_within_cell', 'pos_within_cell is in cell BUT is_point_in_cell disagrees!', WARNING)
+    endif
+   !pos_within_cell=.true. ! commenting this out makes pos_within_cell agree with is_point_in_cell
+  endif
 
   contains
 
