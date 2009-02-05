@@ -90,7 +90,7 @@ type :: iceberg
   real :: start_lon, start_lat, start_day, start_mass, mass_scaling
   real :: mass_of_bits
   integer :: start_year
-  integer :: ine,jne ! nearest index in NE direction (for convenience)
+  integer :: ine, jne ! nearest index in NE direction (for convenience)
   real :: xi, yj ! Non-dimensional coords within current cell (0..1)
   ! Environment variables (as seen by the iceberg)
   real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi
@@ -137,7 +137,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.66 2009/01/20 21:19:17 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.67 2009/02/05 19:02:42 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -539,7 +539,10 @@ real, intent(in) :: xi, yj
 real, intent(out) :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi
 ! Local variables
 real :: cos_rot, sin_rot
-real :: dxm, dx0, dxp, hxm, hxp
+#ifdef USE_OLD_SSH_GRADIENT
+real :: dxm, dx0, dxp
+#endif
+real :: hxm, hxp
 real, parameter :: ssh_coast=0.00
 
   cos_rot=bilin(grd, grd%cos, i, j, xi, yj)
@@ -953,12 +956,12 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
          'input from SIS',bergs%net_incoming_calving,'kg', &
          'seen by diamonds',bergs%net_calving_received,'kg', &
          'error',(bergs%net_calving_received-bergs%net_incoming_calving) &
-                /(bergs%net_calving_received+bergs%net_incoming_calving)*2.,'nd'
+                /(bergs%net_calving_received+bergs%net_incoming_calving+1.e-30)*2.,'nd'
       write(stdout(),200) 'bot interface:', &
          'output from diamonds',bergs%net_outgoing_calving,'kg', &
          'seen by SIS',bergs%net_calving_returned,'kg', &
          'error',(bergs%net_calving_returned-bergs%net_outgoing_calving) &
-                /(bergs%net_calving_returned+bergs%net_outgoing_calving)*2.,'nd'
+                /(bergs%net_calving_returned+bergs%net_outgoing_calving+1.e-30)*2.,'nd'
       endif
     endif
     bergs%stored_start=bergs%stored_end
@@ -1535,6 +1538,9 @@ integer :: icount, i0, j0
     lret=pos_within_cell(grd, lon, lat, i, j, xi, yj)
   enddo
 
+  if (verbose .and. icount>3) &
+    write(stderr(),'(a,2i4,6f8.3,2i3)') 'diamonds, adjust: Large icount!!!',i,j,lon,lat,xi,yj,uvel,vvel,icount,mpp_pe()
+
   if (.not.lret) then
     write(stderr(),'(a,2f8.3,a,1i3)') 'diamonds, adjust: initially failed for lon,lat=',lon,lat,' on PE',mpp_pe()
     lret=find_cell_wide(grd, lon, lat, i, j)
@@ -1563,9 +1569,6 @@ integer :: icount, i0, j0
 
   if (debug.and.(abs(i-i0)>1 .or. abs(j-j0)>1)) &
     write(stderr(),*) 'diamonds, adjust: Large change in i,j!!! i0=',i0,' i=',i,' j0=',j0,' j=',j,' pe=',mpp_pe()
-
-  if (icount>3) &
-    write(stderr(),'(a,2i4,6f8.3,2i3)') 'diamonds, adjust: Large icount!!!',i,j,lon,lat,xi,yj,uvel,vvel,icount,mpp_pe()
 
 end subroutine adjust_index_and_ground
 
@@ -2562,6 +2565,8 @@ character(len=*) :: label
   write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,") start lon,lat,yr,day,mass=",2f10.4,i5,f7.2,es12.4)') &
     label, mpp_pe(), berg%start_lon, berg%start_lat, &
     berg%start_year, berg%start_day, berg%start_mass
+  write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,6(a,2f10.4))') &
+    label, mpp_pe(), 'uo,vo=', berg%uo, berg%vo, 'ua,va=', berg%ua, berg%va, 'ui,vi=', berg%ui, berg%vi
 
 end subroutine print_berg
 
