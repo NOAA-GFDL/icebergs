@@ -65,7 +65,9 @@ type :: icebergs_gridded
   real, dimension(:,:), pointer :: bergy_mass=>NULL() ! Mass distribution of bergy bits (kg/s/m^2)
   real, dimension(:,:), pointer :: virtual_area=>NULL() ! Virtual surface coverage by icebergs (m^2)
   real, dimension(:,:), pointer :: mass=>NULL() ! Mass distribution (kg/m^2)
+  real, dimension(:,:,:), pointer :: mass_on_ocean=>NULL() ! Mass distribution partitioned by neighbor (kg/m^2)
   real, dimension(:,:), pointer :: tmp=>NULL() ! Temporary work space
+  real, dimension(:,:), pointer :: tmpc=>NULL() ! Temporary work space
   real, dimension(:,:,:), pointer :: stored_ice=>NULL() ! Accumulated ice mass flux at calving locations (kg)
   real, dimension(:,:,:), pointer :: real_calving=>NULL() ! Calving rate into iceberg class at calving locations (kg/s)
   ! Diagnostics handles
@@ -134,11 +136,12 @@ type, public :: icebergs ; private
   real :: floating_mass_start=0., floating_mass_end=0.
   real :: icebergs_mass_start=0., icebergs_mass_end=0.
   real :: bergy_mass_start=0., bergy_mass_end=0.
+  real :: returned_mass_on_ocean=0.
   real :: net_melt=0., berg_melt=0., bergy_src=0., bergy_melt=0.
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.69 2009/02/05 20:33:27 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.70 2009/02/05 20:35:25 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -523,10 +526,50 @@ real, parameter :: perday=1./86400.
       if (grd%id_virtual_area>0) grd%virtual_area(i,j)=grd%virtual_area(i,j)+(Wn*Ln+Abits)*this%mass_scaling ! m^2
       if (grd%id_mass>0 .or. bergs%add_weight_to_ocean) grd%mass(i,j)=grd%mass(i,j)+Mnew/grd%area(i,j)*this%mass_scaling ! kg/m2
       if (grd%id_bergy_mass>0 .or. bergs%add_weight_to_ocean) grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+nMbits/grd%area(i,j)*this%mass_scaling ! kg/m2
+      if (bergs%add_weight_to_ocean) call spread_mass_across_ocean_cells(grd, i, j, this%xi, this%yj, Mnew, nMbits, this%mass_scaling)
     endif
   
     this=>next
   enddo
+
+  contains
+
+  subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling)
+  ! Arguments
+  type(icebergs_gridded), pointer :: grd
+  integer, intent(in) :: i, j
+  real, intent(in) :: x, y, Mberg, Mbits, scaling
+  ! Local variables
+  real xL, xC, xR, yD, yC, yU, Mass
+  
+  Mass=(Mberg+Mbits)*scaling
+  xL=min(0.5, max(0., 0.5-x))
+  xR=min(0.5, max(0., x-0.5))
+  xC=max(0., 1.-(xL+xR))
+  yD=min(0.5, max(0., 0.5-x))
+  yU=min(0.5, max(0., x-0.5))
+  yC=max(0., 1.-(yD+yU))
+
+  !grd%mass_on_ocean(i-1,j-1)+=yD*xL*Mass
+  !grd%mass_on_ocean(i  ,j-1)+=yD*xC*Mass
+  !grd%mass_on_ocean(i+1,j-1)+=yD*xR*Mass
+  grd%mass_on_ocean(i,j,1)=grd%mass_on_ocean(i,j,1)+yD*xL*Mass
+  grd%mass_on_ocean(i,j,2)=grd%mass_on_ocean(i,j,2)+yD*xC*Mass
+  grd%mass_on_ocean(i,j,3)=grd%mass_on_ocean(i,j,3)+yD*xR*Mass
+  !grd%mass_on_ocean(i-1,j  )+=yC*xL*Mass
+  !grd%mass_on_ocean(i  ,j  )+=yC*xC*Mass
+  !grd%mass_on_ocean(i+1,j  )+=yC*xR*Mass
+  grd%mass_on_ocean(i,j,4)=grd%mass_on_ocean(i,j,4)+yC*xL*Mass
+  grd%mass_on_ocean(i,j,5)=grd%mass_on_ocean(i,j,5)+yC*xC*Mass
+  grd%mass_on_ocean(i,j,6)=grd%mass_on_ocean(i,j,6)+yC*xR*Mass
+  !grd%mass_on_ocean(i-1,j+1)+=yU*xL*Mass
+  !grd%mass_on_ocean(i  ,j+1)+=yU*xC*Mass
+  !grd%mass_on_ocean(i+1,j+1)+=yU*xR*Mass
+  grd%mass_on_ocean(i,j,7)=grd%mass_on_ocean(i,j,7)+yU*xL*Mass
+  grd%mass_on_ocean(i,j,8)=grd%mass_on_ocean(i,j,8)+yU*xC*Mass
+  grd%mass_on_ocean(i,j,9)=grd%mass_on_ocean(i,j,9)+yU*xR*Mass
+
+  end subroutine spread_mass_across_ocean_cells
 
 end subroutine thermodynamics
 
@@ -785,6 +828,7 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
   grd%bergy_melt(:,:)=0.
   grd%bergy_mass(:,:)=0.
   grd%mass(:,:)=0.
+  if (bergs%add_weight_to_ocean) grd%mass_on_ocean(:,:,:)=0.
   grd%virtual_area(:,:)=0.
   if (associated(bergs%first)) call thermodynamics(bergs)
   call mpp_clock_end(bergs%clock_the)
@@ -875,11 +919,17 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
     bergs%floating_mass_end=sum_mass(bergs%first)
     bergs%icebergs_mass_end=sum_mass(bergs%first,justbergs=.true.)
     bergs%bergy_mass_end=sum_mass(bergs%first,justbits=.true.)
+    grd%tmpc(:,:)=0.;
+    call mpp_clock_end(bergs%clock); call mpp_clock_end(bergs%clock_dia) ! To enable calling of public s/r
+    call icebergs_incr_mass(bergs, grd%tmpc)
+    call mpp_clock_begin(bergs%clock_dia); call mpp_clock_begin(bergs%clock) ! To enable calling of public s/r
+    bergs%returned_mass_on_ocean=sum( grd%tmpc*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
     nbergs=count_bergs(bergs)
     call mpp_sum(bergs%stored_end)
     call mpp_sum(bergs%floating_mass_end)
     call mpp_sum(bergs%icebergs_mass_end)
     call mpp_sum(bergs%bergy_mass_end)
+    call mpp_sum(bergs%returned_mass_on_ocean)
     call mpp_sum(nbergs)
     call mpp_sum(bergs%net_calving_returned)
     call mpp_sum(bergs%net_outgoing_calving)
@@ -952,6 +1002,10 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
          'gridded mass',grdd_bergy_mass,'kg', &
          'end berg mass',bergs%bergy_mass_end,'kg', &
          'error ',(grdd_bergy_mass-bergs%bergy_mass_end)/((grdd_bergy_mass+bergs%bergy_mass_end)+1.e-30),'nd'
+      write(stdout(),200) 'gridded mass on ocean:', &
+         'mass on ocean',bergs%returned_mass_on_ocean,'kg', &
+         'end floating mass',bergs%floating_mass_end,'kg', &
+         'error ',(bergs%returned_mass_on_ocean-bergs%floating_mass_end)/((bergs%returned_mass_on_ocean+bergs%floating_mass_end)+1.e-30),'nd'
       if (debug) then
       write(stdout(),200) 'top interface:', &
          'input from SIS',bergs%net_incoming_calving,'kg', &
@@ -1015,9 +1069,11 @@ end subroutine icebergs_run
 subroutine icebergs_incr_mass(bergs, mass)
 ! Arguments
 type(icebergs), pointer :: bergs
-real, dimension(:,:), intent(inout) :: mass
+real, dimension(bergs%grd%isc:bergs%grd%iec,bergs%grd%jsc:bergs%grd%jec), intent(inout) :: mass
 ! Local variables
+integer :: i, j
 type(icebergs_gridded), pointer :: grd
+real :: dmda
 
   if (.not. associated(bergs)) return
 
@@ -1030,8 +1086,29 @@ type(icebergs_gridded), pointer :: grd
   grd=>bergs%grd
 
   ! Add iceberg+bits mass field to non-haloed SIS field (kg/m^2)
-  mass(:,:)=mass(:,:)+( grd%mass(grd%isc:grd%iec,grd%jsc:grd%jec) &
-                      + grd%bergy_mass(grd%isc:grd%iec,grd%jsc:grd%jec) )
+ !mass(:,:)=mass(:,:)+( grd%mass(grd%isc:grd%iec,grd%jsc:grd%jec) &
+ !                    + grd%bergy_mass(grd%isc:grd%iec,grd%jsc:grd%jec) )
+
+  call mpp_update_domains(grd%mass_on_ocean, grd%domain)
+  do j=grd%jsc, grd%jec; do i=grd%isc, grd%iec
+    dmda=grd%mass_on_ocean(i,j,5) &
+         + ( ( (grd%mass_on_ocean(i-1,j-1,9)+grd%mass_on_ocean(i+1,j+1,1))   &
+         +     (grd%mass_on_ocean(i+1,j-1,7)+grd%mass_on_ocean(i-1,j+1,3)) ) &
+         +   ( (grd%mass_on_ocean(i-1,j  ,6)+grd%mass_on_ocean(i+1,j  ,4))   &
+         +     (grd%mass_on_ocean(i  ,j-1,8)+grd%mass_on_ocean(i  ,j+1,2)) ) )
+    if (grd%area(i,j)>0) dmda=dmda/grd%area(i,j)
+    mass(i,j)=mass(i,j)+dmda
+  enddo; enddo
+ !mass(:,:)=mass(:,:)+grd%mass_on_ocean(grd%isc+1:grd%iec+1,grd%jsc+1:grd%jec+1,1)
+ !mass(:,:)=mass(:,:)+grd%mass_on_ocean(grd%isc  :grd%iec  ,grd%jsc+1:grd%jec+1,2)
+ !mass(:,:)=mass(:,:)+grd%mass_on_ocean(grd%isc-1:grd%iec-1,grd%jsc+1:grd%jec+1,3)
+ !mass(:,:)=mass(:,:)+grd%mass_on_ocean(grd%isc+1:grd%iec+1,grd%jsc  :grd%jec  ,4)
+ !mass(:,:)=mass(:,:)+grd%mass_on_ocean(grd%isc  :grd%iec  ,grd%jsc  :grd%jec  ,5)
+ !mass(:,:)=mass(:,:)+grd%mass_on_ocean(grd%isc-1:grd%iec-1,grd%jsc  :grd%jec  ,6)
+ !mass(:,:)=mass(:,:)+grd%mass_on_ocean(grd%isc+1:grd%iec+1,grd%jsc-1:grd%jec-1,7)
+ !mass(:,:)=mass(:,:)+grd%mass_on_ocean(grd%isc  :grd%iec  ,grd%jsc-1:grd%jec-1,8)
+ !mass(:,:)=mass(:,:)+grd%mass_on_ocean(grd%isc-1:grd%iec-1,grd%jsc-1:grd%jec-1,9)
+ !mass(:,:)=mass(:,:)/max(grd%area(grd%isc:grd%iec,grd%jsc:grd%jec),1.e-12)
 
   call mpp_clock_end(bergs%clock_int)
   call mpp_clock_end(bergs%clock)
@@ -2023,6 +2100,7 @@ logical :: lerr
   allocate( grd%bergy_mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_mass(:,:)=0.
   allocate( grd%virtual_area(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%virtual_area(:,:)=0.
   allocate( grd%mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%mass(:,:)=0.
+  allocate( grd%mass_on_ocean(grd%isd:grd%ied, grd%jsd:grd%jed, 9) ); grd%mass_on_ocean(:,:,:)=0.
   allocate( grd%stored_ice(grd%isd:grd%ied, grd%jsd:grd%jed, nclasses) ); grd%stored_ice(:,:,:)=0.
   allocate( grd%real_calving(grd%isd:grd%ied, grd%jsd:grd%jed, nclasses) ); grd%real_calving(:,:,:)=0.
   allocate( grd%uo(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%uo(:,:)=0.
@@ -2036,6 +2114,7 @@ logical :: lerr
   allocate( grd%cn(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%cn(:,:)=0.
   allocate( grd%hi(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%hi(:,:)=0.
   allocate( grd%tmp(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%tmp(:,:)=0.
+  allocate( grd%tmpc(grd%isc:grd%iec, grd%jsc:grd%jec) ); grd%tmpc(:,:)=0.
 
  !write(stderr(),*) 'diamonds: copying grid'
   ! Copy data declared on ice model computational domain
@@ -3368,7 +3447,9 @@ type(iceberg), pointer :: this, next
   deallocate(bergs%grd%bergy_mass)
   deallocate(bergs%grd%virtual_area)
   deallocate(bergs%grd%mass)
+  deallocate(bergs%grd%mass_on_ocean)
   deallocate(bergs%grd%tmp)
+  deallocate(bergs%grd%tmpc)
   deallocate(bergs%grd%stored_ice)
   deallocate(bergs%grd%real_calving)
   deallocate(bergs%grd%uo)
