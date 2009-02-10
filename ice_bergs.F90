@@ -141,7 +141,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.70 2009/02/05 20:35:25 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.71 2009/02/10 15:16:38 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -540,34 +540,36 @@ real, parameter :: perday=1./86400.
   integer, intent(in) :: i, j
   real, intent(in) :: x, y, Mberg, Mbits, scaling
   ! Local variables
-  real xL, xC, xR, yD, yC, yU, Mass
+  real :: xL, xC, xR, yD, yC, yU, Mass
+  real :: yDxL, yDxC, yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR
   
   Mass=(Mberg+Mbits)*scaling
   xL=min(0.5, max(0., 0.5-x))
   xR=min(0.5, max(0., x-0.5))
   xC=max(0., 1.-(xL+xR))
-  yD=min(0.5, max(0., 0.5-x))
-  yU=min(0.5, max(0., x-0.5))
+  yD=min(0.5, max(0., 0.5-y))
+  yU=min(0.5, max(0., y-0.5))
   yC=max(0., 1.-(yD+yU))
 
-  !grd%mass_on_ocean(i-1,j-1)+=yD*xL*Mass
-  !grd%mass_on_ocean(i  ,j-1)+=yD*xC*Mass
-  !grd%mass_on_ocean(i+1,j-1)+=yD*xR*Mass
-  grd%mass_on_ocean(i,j,1)=grd%mass_on_ocean(i,j,1)+yD*xL*Mass
-  grd%mass_on_ocean(i,j,2)=grd%mass_on_ocean(i,j,2)+yD*xC*Mass
-  grd%mass_on_ocean(i,j,3)=grd%mass_on_ocean(i,j,3)+yD*xR*Mass
-  !grd%mass_on_ocean(i-1,j  )+=yC*xL*Mass
-  !grd%mass_on_ocean(i  ,j  )+=yC*xC*Mass
-  !grd%mass_on_ocean(i+1,j  )+=yC*xR*Mass
-  grd%mass_on_ocean(i,j,4)=grd%mass_on_ocean(i,j,4)+yC*xL*Mass
-  grd%mass_on_ocean(i,j,5)=grd%mass_on_ocean(i,j,5)+yC*xC*Mass
-  grd%mass_on_ocean(i,j,6)=grd%mass_on_ocean(i,j,6)+yC*xR*Mass
-  !grd%mass_on_ocean(i-1,j+1)+=yU*xL*Mass
-  !grd%mass_on_ocean(i  ,j+1)+=yU*xC*Mass
-  !grd%mass_on_ocean(i+1,j+1)+=yU*xR*Mass
-  grd%mass_on_ocean(i,j,7)=grd%mass_on_ocean(i,j,7)+yU*xL*Mass
-  grd%mass_on_ocean(i,j,8)=grd%mass_on_ocean(i,j,8)+yU*xC*Mass
-  grd%mass_on_ocean(i,j,9)=grd%mass_on_ocean(i,j,9)+yU*xR*Mass
+  yDxL=yD*xL*grd%msk(i-1,j-1)
+  yDxC=yD*xC*grd%msk(i  ,j-1)
+  yDxR=yD*xR*grd%msk(i+1,j-1)
+  yCxL=yC*xL*grd%msk(i-1,j  )
+  yCxR=yC*xR*grd%msk(i+1,j  )
+  yUxL=yU*xL*grd%msk(i-1,j+1)
+  yUxC=yU*xC*grd%msk(i  ,j+1)
+  yUxR=yU*xR*grd%msk(i+1,j+1)
+  yCxC=1.-( ((yDxL+yUxR)+(yDxR+yUxL)) + ((yCxL+yCxR)+(yDxC+yUxC)) )
+
+  grd%mass_on_ocean(i,j,1)=grd%mass_on_ocean(i,j,1)+yDxL*Mass
+  grd%mass_on_ocean(i,j,2)=grd%mass_on_ocean(i,j,2)+yDxC*Mass
+  grd%mass_on_ocean(i,j,3)=grd%mass_on_ocean(i,j,3)+yDxR*Mass
+  grd%mass_on_ocean(i,j,4)=grd%mass_on_ocean(i,j,4)+yCxL*Mass
+  grd%mass_on_ocean(i,j,5)=grd%mass_on_ocean(i,j,5)+yCxC*Mass
+  grd%mass_on_ocean(i,j,6)=grd%mass_on_ocean(i,j,6)+yCxR*Mass
+  grd%mass_on_ocean(i,j,7)=grd%mass_on_ocean(i,j,7)+yUxL*Mass
+  grd%mass_on_ocean(i,j,8)=grd%mass_on_ocean(i,j,8)+yUxC*Mass
+  grd%mass_on_ocean(i,j,9)=grd%mass_on_ocean(i,j,9)+yUxR*Mass
 
   end subroutine spread_mass_across_ocean_cells
 
@@ -923,7 +925,7 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
     call mpp_clock_end(bergs%clock); call mpp_clock_end(bergs%clock_dia) ! To enable calling of public s/r
     call icebergs_incr_mass(bergs, grd%tmpc)
     call mpp_clock_begin(bergs%clock_dia); call mpp_clock_begin(bergs%clock) ! To enable calling of public s/r
-    bergs%returned_mass_on_ocean=sum( grd%tmpc*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
+    bergs%returned_mass_on_ocean=sum( grd%tmpc(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
     nbergs=count_bergs(bergs)
     call mpp_sum(bergs%stored_end)
     call mpp_sum(bergs%floating_mass_end)
@@ -1096,19 +1098,9 @@ real :: dmda
          +     (grd%mass_on_ocean(i+1,j-1,7)+grd%mass_on_ocean(i-1,j+1,3)) ) &
          +   ( (grd%mass_on_ocean(i-1,j  ,6)+grd%mass_on_ocean(i+1,j  ,4))   &
          +     (grd%mass_on_ocean(i  ,j-1,8)+grd%mass_on_ocean(i  ,j+1,2)) ) )
-    if (grd%area(i,j)>0) dmda=dmda/grd%area(i,j)
+    if (grd%area(i,j)>0) dmda=dmda/grd%area(i,j)*grd%msk(i,j)
     mass(i,j)=mass(i,j)+dmda
   enddo; enddo
- !mass(:,:)=mass(:,:)+grd%mass_on_ocean(grd%isc+1:grd%iec+1,grd%jsc+1:grd%jec+1,1)
- !mass(:,:)=mass(:,:)+grd%mass_on_ocean(grd%isc  :grd%iec  ,grd%jsc+1:grd%jec+1,2)
- !mass(:,:)=mass(:,:)+grd%mass_on_ocean(grd%isc-1:grd%iec-1,grd%jsc+1:grd%jec+1,3)
- !mass(:,:)=mass(:,:)+grd%mass_on_ocean(grd%isc+1:grd%iec+1,grd%jsc  :grd%jec  ,4)
- !mass(:,:)=mass(:,:)+grd%mass_on_ocean(grd%isc  :grd%iec  ,grd%jsc  :grd%jec  ,5)
- !mass(:,:)=mass(:,:)+grd%mass_on_ocean(grd%isc-1:grd%iec-1,grd%jsc  :grd%jec  ,6)
- !mass(:,:)=mass(:,:)+grd%mass_on_ocean(grd%isc+1:grd%iec+1,grd%jsc-1:grd%jec-1,7)
- !mass(:,:)=mass(:,:)+grd%mass_on_ocean(grd%isc  :grd%iec  ,grd%jsc-1:grd%jec-1,8)
- !mass(:,:)=mass(:,:)+grd%mass_on_ocean(grd%isc-1:grd%iec-1,grd%jsc-1:grd%jec-1,9)
- !mass(:,:)=mass(:,:)/max(grd%area(grd%isc:grd%iec,grd%jsc:grd%jec),1.e-12)
 
   call mpp_clock_end(bergs%clock_int)
   call mpp_clock_end(bergs%clock)
