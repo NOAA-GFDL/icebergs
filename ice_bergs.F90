@@ -141,7 +141,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.71 2009/02/10 15:16:38 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.72 2009/02/11 15:04:27 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -186,7 +186,7 @@ real :: f_cori, T, D, W, L, M, F
 real :: drag_ocn, drag_atm, drag_ice, wave_rad
 real :: c_ocn, c_atm, c_ice
 real :: ampl, wmod, Cr, Lwavelength, Lcutoff, Ltop
-real, parameter :: alpha=0.0, beta=1.0, accel_lim=1.e-2, Cr0=0.06, vel_lim=10.
+real, parameter :: alpha=0.5, beta=1.0, accel_lim=1.e-2, Cr0=0.06, vel_lim=10.
 real :: lambda, detA, A11, A12, axe, aye, D_hi
 real :: uveln, vveln, us, vs
 logical :: dumpit
@@ -237,7 +237,7 @@ integer :: itloop
   if (abs(ui)+abs(vi).eq.0.) c_ice=0.
 
   uveln=uvel; vveln=vvel ! Copy starting uvel, vvel
-  do itloop=1,3 ! Iterate on drag coefficients
+  do itloop=1,1 ! Iterate on drag coefficients
 
     us=0.5*(uveln+uvel); vs=0.5*(vveln+vvel)
     drag_ocn=c_ocn*sqrt( (us-uo)**2+(vs-vo)**2 )
@@ -252,7 +252,7 @@ integer :: itloop
 
     ! Solve for implicit accelerations
     if (alpha+beta.gt.0.) then
-      lambda=drag_ocn+drag_atm+drag_ice ! +wave_rad
+      lambda=drag_ocn+drag_atm+drag_ice !+0.5*wave_rad
       A11=1.+beta*bergs%dt*lambda
       A12=alpha*bergs%dt*f_cori
       detA=1./(A11**2+A12**2)
