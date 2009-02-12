@@ -141,7 +141,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.72 2009/02/11 15:04:27 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.73 2009/02/12 18:41:52 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -1982,7 +1982,7 @@ integer :: traj_sample_hrs=24 ! Period between sampling of position for trajecto
 integer :: verbose_hrs=24 ! Period between verbose messages
 real :: rho_bergs=850. ! Density of icebergs
 real :: LoW_ratio=1.5 ! Initial ratio L/W for newly calved icebergs
-real :: bergy_bit_erosion_fraction=1. ! Fraction of erosion melt flux to divert to bergy bits
+real :: bergy_bit_erosion_fraction=0. ! Fraction of erosion melt flux to divert to bergy bits
 real :: sicn_shift=0. ! Shift of sea-ice concentration in erosion flux modulation (0<sicn_shift<1)
 logical :: use_operator_splitting=.true. ! Use first order operator splitting for thermodynamics
 logical :: add_weight_to_ocean=.true. ! Add weight of icebergs + bits to ocean
