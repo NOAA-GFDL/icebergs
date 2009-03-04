@@ -55,6 +55,7 @@ type :: icebergs_gridded
   real, dimension(:,:), pointer :: cn=>NULL() ! Sea-ice concentration (0 to 1)
   real, dimension(:,:), pointer :: hi=>NULL() ! Sea-ice thickness (m)
   real, dimension(:,:), pointer :: calving=>NULL() ! Calving mass rate [frozen runoff] (kg/s) (into stored ice)
+  real, dimension(:,:), pointer :: calving_hflx=>NULL() ! Calving heat flux [heat content of calving] (W/m2) (into stored ice)
   real, dimension(:,:), pointer :: floating_melt=>NULL() ! Net melting rate to icebergs + bits (kg/s/m^2)
   real, dimension(:,:), pointer :: berg_melt=>NULL() ! Melting+erosion rate of icebergs (kg/s/m^2)
   real, dimension(:,:), pointer :: melt_buoy=>NULL() ! Buoyancy componenet of melting rate (kg/s/m^2)
@@ -69,10 +70,13 @@ type :: icebergs_gridded
   real, dimension(:,:), pointer :: tmp=>NULL() ! Temporary work space
   real, dimension(:,:), pointer :: tmpc=>NULL() ! Temporary work space
   real, dimension(:,:,:), pointer :: stored_ice=>NULL() ! Accumulated ice mass flux at calving locations (kg)
+  real, dimension(:,:), pointer :: stored_heat=>NULL() ! Heat content of stored ice (J)
   real, dimension(:,:,:), pointer :: real_calving=>NULL() ! Calving rate into iceberg class at calving locations (kg/s)
+  real, dimension(:,:), pointer :: iceberg_heat_content=>NULL() ! Distributed heat content of bergs (J/m^2)
   ! Diagnostics handles
   integer :: id_uo=-1, id_vo=-1, id_calving=-1, id_stored_ice=-1, id_accum=-1, id_unused=-1, id_floating_melt=-1
   integer :: id_melt_buoy=-1, id_melt_eros=-1, id_melt_conv=-1, id_virtual_area=-1, id_real_calving=-1
+  integer :: id_calving_hflx_in=-1, id_stored_heat=-1, id_melt_hflx=-1, id_heat_content=-1
   integer :: id_mass=-1, id_ui=-1, id_vi=-1, id_ua=-1, id_va=-1, id_sst=-1, id_cn=-1, id_hi=-1
   integer :: id_bergy_src=-1, id_bergy_melt=-1, id_bergy_mass=-1, id_berg_melt=-1
 end type icebergs_gridded
@@ -81,7 +85,7 @@ type :: xyt
   real :: lon, lat, day
   real :: mass, thickness, width, length, uvel, vvel
   real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi
-  real :: mass_of_bits
+  real :: mass_of_bits, heat_density
   integer :: year
   type(xyt), pointer :: next=>NULL()
 end type xyt
@@ -91,7 +95,7 @@ type :: iceberg
   ! State variables (specific to the iceberg, needed for restarts)
   real :: lon, lat, uvel, vvel, mass, thickness, width, length
   real :: start_lon, start_lat, start_day, start_mass, mass_scaling
-  real :: mass_of_bits
+  real :: mass_of_bits, heat_density
   integer :: start_year
   integer :: ine, jne ! nearest index in NE direction (for convenience)
   real :: xi, yj ! Non-dimensional coords within current cell (0..1)
@@ -131,9 +135,13 @@ type, public :: icebergs ; private
   ! Budgets
   real :: net_calving_received=0., net_calving_returned=0.
   real :: net_incoming_calving=0., net_outgoing_calving=0.
+  real :: net_incoming_calving_heat=0., net_outgoing_calving_heat=0.
+  real :: net_incoming_calving_heat_used=0., net_heat_to_bergs=0.
   real :: stored_start=0., stored_end=0.
+  real :: stored_heat_start=0., stored_heat_end=0., net_heat_to_ocean=0.
   real :: net_calving_used=0., net_calving_to_bergs=0.
   real :: floating_mass_start=0., floating_mass_end=0.
+  real :: floating_heat_start=0., floating_heat_end=0.
   real :: icebergs_mass_start=0., icebergs_mass_end=0.
   real :: bergy_mass_start=0., bergy_mass_end=0.
   real :: returned_mass_on_ocean=0.
@@ -141,7 +149,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.73 2009/02/12 18:41:52 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.74 2009/03/04 19:17:29 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -474,6 +482,9 @@ real, parameter :: perday=1./86400.
     if (grd%area(i,j).ne.0.) then
       melt=(dM-(dMbitsE-dMbitsM))/bergs%dt ! kg/s
       grd%floating_melt(i,j)=grd%floating_melt(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
+      melt=melt*this%heat_density ! kg/s x J/kg = J/s
+      grd%calving_hflx(i,j)=grd%calving_hflx(i,j)+melt/grd%area(i,j)*this%mass_scaling ! W/m2
+      bergs%net_heat_to_ocean=bergs%net_heat_to_ocean+melt*this%mass_scaling*bergs%dt ! J
       melt=dM/bergs%dt ! kg/s
       grd%berg_melt(i,j)=grd%berg_melt(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
       melt=dMbitsE/bergs%dt ! mass flux into bergy bits in kg/s
@@ -710,11 +721,11 @@ end function bilin
 
 ! ##############################################################################
 
-subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh, sst, cn, hi)
+subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh, sst, calving_hflx, cn, hi)
 ! Arguments
 type(icebergs), pointer :: bergs
 type(time_type), intent(in) :: time
-real, dimension(:,:), intent(inout) :: calving
+real, dimension(:,:), intent(inout) :: calving, calving_hflx
 real, dimension(:,:), intent(in) :: uo, vo, ui, vi, tauxa, tauya, ssh, sst, cn, hi
 ! Local variables
 integer :: iyr, imon, iday, ihr, imin, isec, nbergs
@@ -748,8 +759,8 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
  !call sanitize_field(grd%calving,1.e20)
   tmpsum=sum( calving(:,:)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
   bergs%net_calving_received=bergs%net_calving_received+tmpsum*bergs%dt
-  grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec)=calving(:,:)
-  grd%calving(:,:)=grd%calving(:,:)*grd%msk(:,:)*grd%area(:,:) ! Convert to kg/s from kg/m2/s
+  grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec)=calving(:,:) ! Units of kg/m2/s
+  grd%calving(:,:)=grd%calving(:,:)*grd%msk(:,:)*grd%area(:,:) ! Convert to kg/s
   tmpsum=sum( grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec) )
   bergs%net_incoming_calving=bergs%net_incoming_calving+tmpsum*bergs%dt
   if (grd%id_calving>0) &
@@ -759,6 +770,14 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
     call grd_chksum2(bergs%grd, bergs%grd%calving, 'run calving (top)')
     call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'run stored_ice (top)')
   endif
+
+  ! Adapt calving heat flux from coupler
+  grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)=calving_hflx(:,:) ! Units of W/m2
+  grd%calving_hflx(:,:)=grd%calving_hflx(:,:)*grd%msk(:,:) ! Mask (just in case)
+  if (grd%id_calving_hflx_in>0) &
+    lerr=send_data(grd%id_calving_hflx_in, grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  tmpsum=sum( grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
+  bergs%net_incoming_calving_heat=bergs%net_incoming_calving_heat+tmpsum*bergs%dt ! Units of J
 
   ! Copy ocean flow (resides on B grid)
   grd%uo(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=uo(:,:)
@@ -901,6 +920,7 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
   elsewhere
     calving(:,:)=0.
   end where
+  calving_hflx(:,:)=grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)
   call mpp_clock_end(bergs%clock_int)
 
   ! Diagnose budgets
@@ -916,11 +936,15 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
   bergs%bergy_melt=bergs%bergy_melt+tmpsum*bergs%dt
   tmpsum=sum( calving(:,:)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
   bergs%net_calving_returned=bergs%net_calving_returned+tmpsum*bergs%dt
+  tmpsum=sum( grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
+  bergs%net_outgoing_calving_heat=bergs%net_outgoing_calving_heat+tmpsum*bergs%dt ! Units of J
   if (lbudget) then
     bergs%stored_end=sum( grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:) )
+    bergs%stored_heat_end=sum( grd%stored_heat(grd%isc:grd%iec,grd%jsc:grd%jec) )
     bergs%floating_mass_end=sum_mass(bergs%first)
     bergs%icebergs_mass_end=sum_mass(bergs%first,justbergs=.true.)
     bergs%bergy_mass_end=sum_mass(bergs%first,justbits=.true.)
+    bergs%floating_heat_end=sum_heat(bergs%first)
     grd%tmpc(:,:)=0.;
     call mpp_clock_end(bergs%clock); call mpp_clock_end(bergs%clock_dia) ! To enable calling of public s/r
     call icebergs_incr_mass(bergs, grd%tmpc)
@@ -928,17 +952,24 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
     bergs%returned_mass_on_ocean=sum( grd%tmpc(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
     nbergs=count_bergs(bergs)
     call mpp_sum(bergs%stored_end)
+    call mpp_sum(bergs%stored_heat_end)
     call mpp_sum(bergs%floating_mass_end)
     call mpp_sum(bergs%icebergs_mass_end)
     call mpp_sum(bergs%bergy_mass_end)
+    call mpp_sum(bergs%floating_heat_end)
     call mpp_sum(bergs%returned_mass_on_ocean)
     call mpp_sum(nbergs)
     call mpp_sum(bergs%net_calving_returned)
     call mpp_sum(bergs%net_outgoing_calving)
     call mpp_sum(bergs%net_calving_received)
     call mpp_sum(bergs%net_incoming_calving)
+    call mpp_sum(bergs%net_incoming_calving_heat)
+    call mpp_sum(bergs%net_incoming_calving_heat_used)
+    call mpp_sum(bergs%net_outgoing_calving_heat)
     call mpp_sum(bergs%net_calving_used)
     call mpp_sum(bergs%net_calving_to_bergs)
+    call mpp_sum(bergs%net_heat_to_bergs)
+    call mpp_sum(bergs%net_heat_to_ocean)
     call mpp_sum(bergs%net_melt)
     call mpp_sum(bergs%berg_melt)
     call mpp_sum(bergs%bergy_src)
@@ -948,89 +979,64 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
     if (mpp_pe().eq.mpp_root_pe()) then
  100 format("diamonds: ",a19,3(a18,"=",es14.7,x,a2,:,","),a12,i8)
  200 format("diamonds: ",a19,10(a18,"=",es14.7,x,a2,:,","))
-      write(stdout(),200) 'stored-ice state:', &
-         'start stored mass',bergs%stored_start,'kg', &
-         'end stored mass',bergs%stored_end,'kg', &
-         'Delta stored mass',bergs%stored_end-bergs%stored_start,'kg'
-      write(stdout(),100) 'floating state:', &
-         'start floating mass',bergs%floating_mass_start,'kg', &
-         'end floating mass',bergs%floating_mass_end,'kg', &
-         'Delta floating mass',bergs%floating_mass_end-bergs%floating_mass_start,'kg', &
-         '# of bergs',nbergs
-      write(stdout(),200) 'icebergs state:', &
-         'start icebergs mass',bergs%icebergs_mass_start,'kg', &
-         'end icebergs mass',bergs%icebergs_mass_end,'kg', &
-         'Delta berg mass',bergs%icebergs_mass_end-bergs%icebergs_mass_start,'kg'
-      write(stdout(),200) 'bergy state:', &
-         'start bergy mass',bergs%bergy_mass_start,'kg', &
-         'end bergy mass',bergs%bergy_mass_end,'kg', &
-         'Delta bergy mass',bergs%bergy_mass_end-bergs%bergy_mass_start,'kg'
-      write(stdout(),200) 'stored-ice budget:', &
-         'ice input',bergs%net_calving_used,'kg', &
-         'ice to bergs',bergs%net_calving_to_bergs,'kg', &
-         'Delta stored mass',bergs%stored_end-bergs%stored_start,'kg', &
-         'error',((bergs%net_calving_used-bergs%net_calving_to_bergs)-(bergs%stored_end-bergs%stored_start)) &
-                /((bergs%net_calving_used+bergs%net_calving_to_bergs)+1.e-30),'nd'
-      write(stdout(),200) 'floating budget:', &
-         'calved input',bergs%net_calving_to_bergs,'kg', &
-         'melt+eros.',bergs%net_melt,'kg', &
-         'Delta float mass',bergs%floating_mass_end-bergs%floating_mass_start,'kg', &
-         'error',((bergs%net_calving_to_bergs-bergs%net_melt)-(bergs%floating_mass_end-bergs%floating_mass_start)) &
-                /((bergs%net_calving_to_bergs+bergs%net_melt)+1.e-30),'nd'
-      write(stdout(),200) 'icebergs budget:', &
-         'calved input',bergs%net_calving_to_bergs,'kg', &
-         'melt+eros.',bergs%berg_melt,'kg', &
-         'Delta berg mass',bergs%icebergs_mass_end-bergs%icebergs_mass_start,'kg', &
-         'error',((bergs%net_calving_to_bergs-bergs%berg_melt)-(bergs%icebergs_mass_end-bergs%icebergs_mass_start)) &
-                /((bergs%net_calving_to_bergs+bergs%berg_melt)+1.e-30),'nd'
-      write(stdout(),200) 'bergy budget:', &
-         'eros.',bergs%bergy_src,'kg', &
-         'melt.',bergs%bergy_melt,'kg', &
-         'Delta bergy mass',bergs%bergy_mass_end-bergs%bergy_mass_start,'kg', &
-         'error',((bergs%bergy_src-bergs%bergy_melt)-(bergs%bergy_mass_end-bergs%bergy_mass_start)) &
-                /((bergs%net_calving_to_bergs+bergs%bergy_melt)+1.e-30),'nd'
-      write(stdout(),200) 'overall budget:', &
-         'input from SIS',bergs%net_calving_received,'kg', &
-         'output to SIS',bergs%net_calving_returned,'kg', &
-         'Delta model mass',(bergs%stored_end-bergs%stored_start)+(bergs%floating_mass_end-bergs%floating_mass_start),'kg', &
-         'error',((bergs%net_calving_received-bergs%net_calving_returned)- &
-                 ((bergs%stored_end-bergs%stored_start)+(bergs%floating_mass_end-bergs%floating_mass_start))) &
-                /((bergs%net_calving_received+bergs%net_calving_returned)+1.e-30),'nd'
-      write(stdout(),200) 'gridded berg mass:', &
-         'gridded mass',grdd_berg_mass,'kg', &
-         'end berg mass',bergs%icebergs_mass_end,'kg', &
-         'error ',(grdd_berg_mass-bergs%icebergs_mass_end)/((grdd_berg_mass+bergs%icebergs_mass_end)+1.e-30),'nd'
-      write(stdout(),200) 'gridded bergy mass:', &
-         'gridded mass',grdd_bergy_mass,'kg', &
-         'end berg mass',bergs%bergy_mass_end,'kg', &
-         'error ',(grdd_bergy_mass-bergs%bergy_mass_end)/((grdd_bergy_mass+bergs%bergy_mass_end)+1.e-30),'nd'
-      write(stdout(),200) 'gridded mass on ocean:', &
-         'mass on ocean',bergs%returned_mass_on_ocean,'kg', &
-         'end floating mass',bergs%floating_mass_end,'kg', &
-         'error ',(bergs%returned_mass_on_ocean-bergs%floating_mass_end)/((bergs%returned_mass_on_ocean+bergs%floating_mass_end)+1.e-30),'nd'
+      call report_state('stored ice','kg','',bergs%stored_start,'',bergs%stored_end,'')
+      call report_state('floating','kg','',bergs%floating_mass_start,'',bergs%floating_mass_end,'',nbergs)
+      call report_state('icebergs','kg','',bergs%icebergs_mass_start,'',bergs%icebergs_mass_end,'')
+      call report_state('bits','kg','',bergs%bergy_mass_start,'',bergs%bergy_mass_end,'')
+      call report_budget('stored mass','kg','calving used',bergs%net_calving_used, &
+                                            'bergs',bergs%net_calving_to_bergs, &
+                                            'stored mass',bergs%stored_start,bergs%stored_end)
+      call report_budget('floating mass','kg','calving used',bergs%net_calving_to_bergs, &
+                                              'bergs',bergs%net_melt, &
+                                              'stored mass',bergs%floating_mass_start,bergs%floating_mass_end)
+      call report_budget('berg mass','kg','calving',bergs%net_calving_to_bergs, &
+                                          'melt+eros',bergs%berg_melt, &
+                                          'berg mass',bergs%icebergs_mass_start,bergs%icebergs_mass_end)
+      call report_budget('bits mass','kg','eros used',bergs%bergy_src, &
+                                          'bergs',bergs%bergy_melt, &
+                                          'stored mass',bergs%bergy_mass_start,bergs%bergy_mass_end)
+      call report_budget('net mass','kg','recvd',bergs%net_calving_received, &
+                                         'rtrnd',bergs%net_calving_returned, &
+                                         'net mass',bergs%stored_start+bergs%floating_mass_start, &
+                                                    bergs%stored_end+bergs%floating_mass_end)
+      call report_consistant('iceberg mass','kg','gridded',grdd_berg_mass,'bergs',bergs%icebergs_mass_end)
+      call report_consistant('bits mass','kg','gridded',grdd_bergy_mass,'bits',bergs%bergy_mass_end)
+      call report_consistant('wieght','kg','returned',bergs%returned_mass_on_ocean,'floating',bergs%floating_mass_end)
+      call report_state('net heat','J','',bergs%stored_heat_start+bergs%floating_heat_start,'',bergs%stored_heat_end+bergs%floating_heat_end,'')
+      call report_state('stored heat','J','',bergs%stored_heat_start,'',bergs%stored_heat_end,'')
+      call report_state('floating heat','J','',bergs%floating_heat_start,'',bergs%floating_heat_end,'')
+      call report_budget('net heat','J','net heat',bergs%net_incoming_calving_heat, &
+                                        'net heat',bergs%net_outgoing_calving_heat, &
+                                        'net heat',bergs%stored_heat_start+bergs%floating_heat_start, &
+                                                   bergs%stored_heat_end+bergs%floating_heat_end)
+      call report_budget('stored heat','J','calving used',bergs%net_incoming_calving_heat_used, &
+                                           'bergs',bergs%net_heat_to_bergs, &
+                                           'net heat',bergs%stored_heat_start,bergs%stored_heat_end)
+      call report_budget('flting heat','J','calved',bergs%net_heat_to_bergs, &
+                                           'melt',bergs%net_heat_to_ocean, &
+                                           'net heat',bergs%floating_heat_start,bergs%floating_heat_end)
       if (debug) then
-      write(stdout(),200) 'top interface:', &
-         'input from SIS',bergs%net_incoming_calving,'kg', &
-         'seen by diamonds',bergs%net_calving_received,'kg', &
-         'error',(bergs%net_calving_received-bergs%net_incoming_calving) &
-                /(bergs%net_calving_received+bergs%net_incoming_calving+1.e-30)*2.,'nd'
-      write(stdout(),200) 'bot interface:', &
-         'output from diamonds',bergs%net_outgoing_calving,'kg', &
-         'seen by SIS',bergs%net_calving_returned,'kg', &
-         'error',(bergs%net_calving_returned-bergs%net_outgoing_calving) &
-                /(bergs%net_calving_returned+bergs%net_outgoing_calving+1.e-30)*2.,'nd'
+        call report_consistant('top interface','kg','from SIS',bergs%net_incoming_calving,'seen by diamonds',bergs%net_calving_received)
+        call report_consistant('bot interface','kg','sent',bergs%net_outgoing_calving,'seen by SIS',bergs%net_calving_returned)
       endif
     endif
     bergs%stored_start=bergs%stored_end
+    bergs%stored_heat_start=bergs%stored_heat_end
+    bergs%floating_heat_start=bergs%floating_heat_end
     bergs%floating_mass_start=bergs%floating_mass_end
     bergs%icebergs_mass_start=bergs%icebergs_mass_end
     bergs%bergy_mass_start=bergs%bergy_mass_end
     bergs%net_calving_used=0.
     bergs%net_calving_to_bergs=0.
+    bergs%net_heat_to_bergs=0.
+    bergs%net_heat_to_ocean=0.
     bergs%net_calving_received=0.
     bergs%net_calving_returned=0.
     bergs%net_incoming_calving=0.
     bergs%net_outgoing_calving=0.
+    bergs%net_incoming_calving_heat=0.
+    bergs%net_incoming_calving_heat_used=0.
+    bergs%net_outgoing_calving_heat=0.
     bergs%net_melt=0.
     bergs%berg_melt=0.
     bergs%bergy_melt=0.
@@ -1064,6 +1070,55 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
   call mpp_clock_end(bergs%clock_dia)
 
   call mpp_clock_end(bergs%clock)
+
+  contains
+
+  subroutine report_state(budgetstr,budgetunits,startstr,startval,endstr,endval,delstr,nbergs)
+  ! Arguments
+  character*(*), intent(in) :: budgetstr, budgetunits, startstr, endstr, delstr
+  real, intent(in) :: startval, endval
+  integer, intent(in), optional :: nbergs
+  ! Local variables
+  if (present(nbergs)) then
+    write(stdout(),100) budgetstr//' state:', &
+                        startstr//' start',startval,budgetunits, &
+                        endstr//' end',endval,budgetunits, &
+                        'Delta '//delstr,endval-startval,budgetunits, &
+                        '# of bergs',nbergs
+  else
+    write(stdout(),100) budgetstr//' state:', &
+                        startstr//' start',startval,budgetunits, &
+                        endstr//' end',endval,budgetunits, &
+                        delstr//'Delta',endval-startval,budgetunits
+  endif
+  100 format("diamonds: ",a19,3(a18,"=",es14.7,x,a2,:,","),a12,i8)
+  end subroutine report_state
+
+  subroutine report_consistant(budgetstr,budgetunits,startstr,startval,endstr,endval)
+  ! Arguments
+  character*(*), intent(in) :: budgetstr, budgetunits, startstr, endstr
+  real, intent(in) :: startval, endval
+  ! Local variables
+  write(stdout(),200) budgetstr//' check:', &
+                      startstr,startval,budgetunits, &
+                      endstr,endval,budgetunits, &
+                      'error',(endval-startval)/((endval+startval)+1e-30),'nd'
+  200 format("diamonds: ",a19,10(a18,"=",es14.7,x,a2,:,","))
+  end subroutine report_consistant
+
+  subroutine report_budget(budgetstr,budgetunits,instr,inval,outstr,outval,delstr,startval,endval)
+  ! Arguments
+  character*(*), intent(in) :: budgetstr, budgetunits, instr, outstr, delstr
+  real, intent(in) :: inval, outval, startval, endval
+  ! Local variables
+  write(stdout(),200) budgetstr//' budget:', &
+                      instr//' in',inval,budgetunits, &
+                      outstr//' out',outval,budgetunits, &
+                      'Delta '//delstr,inval-outval,budgetunits, &
+                      'error',((endval-startval)-(inval-outval))/max(1.e-30,max(abs(endval-startval),abs(inval-outval))),'nd'
+  200 format("diamonds: ",a19,10(a18,"=",es14.7,x,a2,:,","))
+  end subroutine report_budget
+
 end subroutine icebergs_run
 
 ! ##############################################################################
@@ -1114,8 +1169,8 @@ type(icebergs), pointer :: bergs
 ! Local variables
 type(icebergs_gridded), pointer :: grd
 real :: remaining_dist, stored_mass, net_calving_used
-integer :: k
-logical, save :: first_call=.false.
+integer :: k, i, j
+logical, save :: first_call=.true.
 
   ! For convenience
   grd=>bergs%grd
@@ -1123,13 +1178,23 @@ logical, save :: first_call=.false.
   ! This is a hack to simplify initialization
   if (first_call.and..not.bergs%restarted) then
     first_call=.false.
-    do k=1, nclasses
-      where (grd%calving==0.) grd%stored_ice(:,:,k)=0.
-    enddo
-    stored_mass=sum( grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:) )
-    call mpp_sum(stored_mass)
+   !do k=1, nclasses
+   !  where (grd%calving==0.) grd%stored_ice(:,:,k)=0.
+   !enddo
+    bergs%stored_start=sum( grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:) )
+    call mpp_sum( bergs%stored_start )
     if (mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a,es12.6,a)') &
-        'diamonds, accumulate_calving: initial stored mass=',stored_mass,' kg'
+        'diamonds, accumulate_calving: initial stored mass=',bergs%stored_start,' kg'
+    do j=grd%jsc,grd%jec; do i=grd%isc,grd%iec
+      if (grd%calving(i,j).ne.0.) grd%stored_heat(i,j)= & ! Need units of J
+            sum(grd%stored_ice(i,j,:)) & ! initial stored ice in kg
+           *grd%calving_hflx(i,j)*grd%area(i,j) & ! J/s/m2 x m^2 = J/s
+           /grd%calving(i,j) ! /calving in kg/s
+    enddo; enddo
+    bergs%stored_heat_start=sum( grd%stored_heat(grd%isc:grd%iec,grd%jsc:grd%jec) )
+    call mpp_sum( bergs%stored_heat_start )
+    if (mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a,es12.6,a)') &
+        'diamonds, accumulate_calving: initial stored heat=',bergs%stored_heat_start,' J'
   endif
 
   remaining_dist=1.
@@ -1146,6 +1211,12 @@ logical, save :: first_call=.false.
   ! Remove the calving accounted for by accumulation
   grd%calving(:,:)=grd%calving(:,:)*remaining_dist
 
+  ! Do the same for heat (no separate classes needed)
+  grd%tmp(:,:)=bergs%dt*grd%calving_hflx(:,:)*grd%area(:,:)*(1.-remaining_dist)
+  bergs%net_incoming_calving_heat_used=bergs%net_incoming_calving_heat_used+sum( grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec) )
+  grd%stored_heat(:,:)=grd%stored_heat(:,:)+grd%tmp(:,:) ! +=bergs%dt*grd%calving_hflx(:,:)*grd%area(:,:)*(1.-remaining_dist)
+  grd%calving_hflx(:,:)=grd%calving_hflx(:,:)*remaining_dist
+
 end subroutine accumulate_calving
 
 ! ##############################################################################
@@ -1158,13 +1229,14 @@ type(icebergs_gridded), pointer :: grd
 integer :: i,j,k
 type(iceberg) :: newberg
 logical :: lret
-real :: xi, yj, ddt, calving_to_bergs, calved_to_berg
+real :: xi, yj, ddt, calving_to_bergs, calved_to_berg, heat_to_bergs, heat_to_berg
 
   ! For convenience
   grd=>bergs%grd
 
   grd%real_calving(:,:,:)=0.
   calving_to_bergs=0.
+  heat_to_bergs=0.
 
   do k=1, nclasses
     do j=grd%jsc, grd%jec
@@ -1196,9 +1268,15 @@ real :: xi, yj, ddt, calving_to_bergs, calved_to_berg
           newberg%start_mass=bergs%initial_mass(k)
           newberg%mass_scaling=bergs%mass_scaling(k)
           newberg%mass_of_bits=0.
+          newberg%heat_density=grd%stored_heat(i,j)/grd%stored_ice(i,j,k) ! This is in J/kg
           call add_new_berg_to_list(bergs%first, newberg)
          !if (verbose) call print_berg(stderr(), bergs%first, 'calve_icebergs, new berg created')
-          calved_to_berg=bergs%initial_mass(k)*bergs%mass_scaling(k)
+          calved_to_berg=bergs%initial_mass(k)*bergs%mass_scaling(k) ! Units of kg
+          ! Heat content
+          heat_to_berg=calved_to_berg*newberg%heat_density ! Units of J
+          grd%stored_heat(i,j)=grd%stored_heat(i,j)-heat_to_berg
+          heat_to_bergs=heat_to_bergs+heat_to_berg
+          ! Stored mass
           grd%stored_ice(i,j,k)=grd%stored_ice(i,j,k)-calved_to_berg
           calving_to_bergs=calving_to_bergs+calved_to_berg
           grd%real_calving(i,j,k)=grd%real_calving(i,j,k)+calved_to_berg/bergs%dt
@@ -1209,6 +1287,7 @@ real :: xi, yj, ddt, calving_to_bergs, calved_to_berg
   enddo
 
   bergs%net_calving_to_bergs=bergs%net_calving_to_bergs+calving_to_bergs
+  bergs%net_heat_to_bergs=bergs%net_heat_to_bergs+heat_to_bergs
 
 end subroutine calve_icebergs
 
@@ -1653,7 +1732,7 @@ type(icebergs), pointer :: bergs
 type(iceberg), pointer :: kick_the_bucket, this
 integer :: nbergs_to_send_e, nbergs_to_send_w, nbergs_incoming, i
 integer :: nbergs_to_send_n, nbergs_to_send_s
-integer, parameter :: buffer_width=17
+integer, parameter :: buffer_width=18
 type(icebergs_gridded), pointer :: grd
 
   ! For convenience
@@ -1812,7 +1891,7 @@ type(icebergs_gridded), pointer :: grd
 
   call mpp_sync_self()
 
-contains
+  contains
 
   subroutine pack_berg_into_buffer2(berg, buff, n)
   ! Arguments
@@ -1841,6 +1920,7 @@ contains
     buff%data(15,n)=berg%length
     buff%data(16,n)=berg%mass_scaling
     buff%data(17,n)=berg%mass_of_bits
+    buff%data(18,n)=berg%heat_density
 
   end subroutine pack_berg_into_buffer2
 
@@ -1899,6 +1979,7 @@ contains
     localberg%length=buff%data(15,n)
     localberg%mass_scaling=buff%data(16,n)
     localberg%mass_of_bits=buff%data(17,n)
+    localberg%heat_density=buff%data(18,n)
     lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
     if (lres) then
       call add_new_berg_to_list(first, localberg)
@@ -2082,6 +2163,8 @@ logical :: lerr
   allocate( grd%cos(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%cos(:,:)=1.
   allocate( grd%sin(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%sin(:,:)=0.
   allocate( grd%calving(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%calving(:,:)=0.
+  allocate( grd%calving_hflx(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%calving_hflx(:,:)=0.
+  allocate( grd%stored_heat(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%stored_heat(:,:)=0.
   allocate( grd%floating_melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%floating_melt(:,:)=0.
   allocate( grd%berg_melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%berg_melt(:,:)=0.
   allocate( grd%melt_buoy(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%melt_buoy(:,:)=0.
@@ -2220,6 +2303,8 @@ logical :: lerr
   axes3d(3)=id_class
   grd%id_calving=register_diag_field('icebergs', 'calving', axes, Time, &
      'Incoming Calving mass rate', 'kg/s')
+  grd%id_calving_hflx_in=register_diag_field('icebergs', 'calving_hflx_in', axes, Time, &
+     'Incoming Calving heat flux', 'J/s')
   grd%id_accum=register_diag_field('icebergs', 'accum_calving', axes, Time, &
      'Accumulated calving mass rate', 'kg/s')
   grd%id_unused=register_diag_field('icebergs', 'unused_calving', axes, Time, &
@@ -2296,7 +2381,7 @@ integer :: k, ierr, ncid, dimid, nbergs_in_file
 integer :: lonid, latid, uvelid, vvelid
 integer :: massid, thicknessid, widthid, lengthid
 integer :: start_lonid, start_latid, start_yearid, start_dayid, start_massid
-integer :: scaling_id, mass_of_bits_id
+integer :: scaling_id, mass_of_bits_id, heat_density_id
 logical :: lres, found_restart, multiPErestart=.FALSE.
 real :: lon0, lon1, lat0, lat1
 character(len=30) :: filename
@@ -2352,6 +2437,7 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
   start_massid=inq_var(ncid, 'start_mass')
   scaling_id=inq_var(ncid, 'mass_scaling')
   mass_of_bits_id=inq_var(ncid, 'mass_of_bits',unsafe=.true.)
+  heat_density_id=inq_var(ncid, 'heat_density',unsafe=.true.)
 
   ! Find approx outer bounds for tile
   lon0=minval( grd%lon(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
@@ -2389,6 +2475,11 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
         localberg%mass_of_bits=get_double(ncid, mass_of_bits_id, k)
       else
         localberg%mass_of_bits=0.
+      endif
+      if (heat_density_id>0) then ! Allow reading of older restart with no bergy bits
+        localberg%heat_density=get_double(ncid, heat_density_id, k)
+      else
+        localberg%heat_density=0.
       endif
       if (really_debug) lres=is_point_in_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, explain=.true.)
       lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
@@ -2439,12 +2530,12 @@ type(randomNumberStream) :: rns
   ! Read stored ice
   filename='INPUT/calving.res.nc'
   if (file_exist(filename)) then
-    if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stdout(),'(2a)') &
+    if (mpp_pe().eq.mpp_root_pe()) write(stdout(),'(2a)') &
      'diamonds, read_restart_calving: reading ',filename
     call read_data(filename, 'stored_ice', grd%stored_ice, grd%domain)
     bergs%restarted=.true.
   else
-    if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a)') &
+    if (mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a)') &
      'diamonds, read_restart_calving: initializing stored ice to random numbers'
     allocate(randnum(grd%jsc:grd%jec, nclasses))
     do i=grd%isc, grd%iec
@@ -2700,6 +2791,7 @@ type(xyt) :: posn
   posn%vvel=berg%vvel
   posn%mass=berg%mass
   posn%mass_of_bits=berg%mass_of_bits
+  posn%heat_density=berg%heat_density
   posn%thickness=berg%thickness
   posn%width=berg%width
   posn%length=berg%length
@@ -3343,6 +3435,33 @@ end function sum_mass
 
 ! ##############################################################################
 
+real function sum_heat(first,justbits,justbergs)
+! Arguments
+type(iceberg), pointer :: first
+logical, intent(in), optional :: justbits, justbergs
+! Local variables
+type(iceberg), pointer :: this
+real :: dm
+
+  sum_heat=0.
+  this=>first
+  do while(associated(this))
+    dm=0.
+    if (present(justbergs)) then
+      dm=this%mass*this%mass_scaling
+    elseif (present(justbits)) then
+      dm=this%mass_of_bits*this%mass_scaling
+    else
+      dm=(this%mass+this%mass_of_bits)*this%mass_scaling
+    endif
+    sum_heat=sum_heat+dm*this%heat_density
+    this=>this%next
+  enddo
+
+end function sum_heat
+
+! ##############################################################################
+
 subroutine icebergs_stock_pe(bergs, index, value)
 ! Modules
 use stock_constants_mod, only : ISTOCK_WATER, ISTOCK_HEAT
@@ -3429,6 +3548,8 @@ type(iceberg), pointer :: this, next
   deallocate(bergs%grd%cos)
   deallocate(bergs%grd%sin)
   deallocate(bergs%grd%calving)
+  deallocate(bergs%grd%calving_hflx)
+  deallocate(bergs%grd%stored_heat)
   deallocate(bergs%grd%floating_melt)
   deallocate(bergs%grd%berg_melt)
   deallocate(bergs%grd%melt_buoy)
@@ -3542,7 +3663,7 @@ integer :: iret, ncid, i_dim, i
 integer :: lonid, latid, uvelid, vvelid
 integer :: massid, thicknessid, lengthid, widthid
 integer :: start_lonid, start_latid, start_yearid, start_dayid, start_massid
-integer :: scaling_id, mass_of_bits_id
+integer :: scaling_id, mass_of_bits_id, heat_density_id
 character(len=28) :: filename
 type(iceberg), pointer :: this
 
@@ -3575,6 +3696,7 @@ type(iceberg), pointer :: this
     start_massid = def_var(ncid, 'start_mass', NF_DOUBLE, i_dim)
     scaling_id = def_var(ncid, 'mass_scaling', NF_DOUBLE, i_dim)
     mass_of_bits_id = def_var(ncid, 'mass_of_bits', NF_DOUBLE, i_dim)
+    heat_density_id = def_var(ncid, 'heat_density', NF_DOUBLE, i_dim)
 
     ! Attributes
     call put_att(ncid, lonid, 'long_name', 'longitude')
@@ -3607,6 +3729,8 @@ type(iceberg), pointer :: this
     call put_att(ncid, scaling_id, 'units', 'none')
     call put_att(ncid, mass_of_bits_id, 'long_name', 'mass of bergy bits')
     call put_att(ncid, mass_of_bits_id, 'units', 'kg')
+    call put_att(ncid, heat_density_id, 'long_name', 'heat density')
+    call put_att(ncid, heat_density_id, 'units', 'J/kg')
     iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_major_version', NF_INT, 1, file_format_major_version)
     iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_minor_version', NF_INT, 2, file_format_minor_version)
 
@@ -3633,6 +3757,7 @@ type(iceberg), pointer :: this
       call put_double(ncid, start_massid, i, this%start_mass)
       call put_double(ncid, scaling_id, i, this%mass_scaling)
       call put_double(ncid, mass_of_bits_id, i, this%mass_of_bits)
+      call put_double(ncid, heat_density_id, i, this%heat_density)
      !this=>this%next
       this=>this%prev
     enddo
@@ -3675,7 +3800,7 @@ integer :: iret, ncid, i_dim, i
 integer :: lonid, latid, yearid, dayid, uvelid, vvelid
 integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid
 integer :: cnid, hiid
-integer :: mid, did, wid, lid, mbid
+integer :: mid, did, wid, lid, mbid, hdid
 character(len=30) :: filename
 type(xyt), pointer :: this, next
 
@@ -3704,6 +3829,7 @@ type(xyt), pointer :: this, next
   vaid = def_var(ncid, 'va', NF_DOUBLE, i_dim)
   mid = def_var(ncid, 'mass', NF_DOUBLE, i_dim)
   mbid = def_var(ncid, 'mass_of_bits', NF_DOUBLE, i_dim)
+  hdid = def_var(ncid, 'heat_density', NF_DOUBLE, i_dim)
   did = def_var(ncid, 'thickness', NF_DOUBLE, i_dim)
   wid = def_var(ncid, 'width', NF_DOUBLE, i_dim)
   lid = def_var(ncid, 'length', NF_DOUBLE, i_dim)
@@ -3744,6 +3870,8 @@ type(xyt), pointer :: this, next
   call put_att(ncid, mid, 'units', 'kg')
   call put_att(ncid, mbid, 'long_name', 'mass_of_bits')
   call put_att(ncid, mbid, 'units', 'kg')
+  call put_att(ncid, hdid, 'long_name', 'heat_density')
+  call put_att(ncid, hdid, 'units', 'J/kg')
   call put_att(ncid, did, 'long_name', 'thickness')
   call put_att(ncid, did, 'units', 'm')
   call put_att(ncid, wid, 'long_name', 'width')
@@ -3781,7 +3909,7 @@ type(xyt), pointer :: this, next
     call put_double(ncid, uaid, i, this%ua)
     call put_double(ncid, vaid, i, this%va)
     call put_double(ncid, mid, i, this%mass)
-    call put_double(ncid, mbid, i, this%mass_of_bits)
+    call put_double(ncid, hdid, i, this%heat_density)
     call put_double(ncid, did, i, this%thickness)
     call put_double(ncid, wid, i, this%width)
     call put_double(ncid, lid, i, this%length)
