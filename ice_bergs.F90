@@ -2,9 +2,9 @@ module ice_bergs
 
 use constants_mod, only: radius, pi, omega, HLF
 use fms_mod, only: open_namelist_file, check_nml_error, close_file
-use fms_mod, only: field_exist, read_data, get_global_att_value
+use fms_mod, only: field_exist, get_global_att_value
 use fms_mod, only: stdlog, stdout, stderr, error_mesg, FATAL, WARNING
-use fms_mod, only: write_version_number, read_data, write_data, file_exist
+use fms_mod, only: write_version_number, read_data, write_data, file_exist, field_size
 use mosaic_mod, only: get_mosaic_ntiles, get_mosaic_ncontacts
 use mpp_mod, only: mpp_pe, mpp_root_pe, mpp_sum, mpp_min, mpp_max, NULL_PE
 use mpp_mod, only: mpp_send, mpp_recv, mpp_sync_self, mpp_chksum
@@ -149,7 +149,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.74 2009/03/04 19:17:29 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.75 2009/03/05 20:19:27 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -2518,11 +2518,12 @@ use random_numbers_mod, only: initializeRandomNumberStream, getRandomNumbers, ra
 ! Arguments
 type(icebergs), pointer :: bergs
 ! Local variables
-integer :: k,i
+integer :: k,i,siz(4)
 character(len=30) :: filename
 type(icebergs_gridded), pointer :: grd
 real, allocatable, dimension(:,:) :: randnum
 type(randomNumberStream) :: rns
+logical :: field_found
 
   ! For convenience
   grd=>bergs%grd
@@ -2533,6 +2534,12 @@ type(randomNumberStream) :: rns
     if (mpp_pe().eq.mpp_root_pe()) write(stdout(),'(2a)') &
      'diamonds, read_restart_calving: reading ',filename
     call read_data(filename, 'stored_ice', grd%stored_ice, grd%domain)
+    call field_size(filename, 'stored_heat', siz, field_found)
+    if (field_found) then
+      call read_data(filename, 'stored_heat', grd%stored_heat, grd%domain)
+    else
+      grd%stored_heat(:,:)=0.
+    endif
     bergs%restarted=.true.
   else
     if (mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a)') &
@@ -3773,6 +3780,8 @@ type(iceberg), pointer :: this
   if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stderr(),'(2a)') 'diamonds, write_restart: writing ',filename
   call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'write stored_ice')
   call write_data(filename, 'stored_ice', bergs%grd%stored_ice, bergs%grd%domain)
+  call grd_chksum2(bergs%grd, bergs%grd%stored_heat, 'write stored_ice')
+  call write_data(filename, 'stored_heat', bergs%grd%stored_heat, bergs%grd%domain)
 
   contains
 
