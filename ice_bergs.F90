@@ -149,7 +149,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.75 2009/03/05 20:19:27 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.76 2009/03/06 17:35:42 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -245,7 +245,7 @@ integer :: itloop
   if (abs(ui)+abs(vi).eq.0.) c_ice=0.
 
   uveln=uvel; vveln=vvel ! Copy starting uvel, vvel
-  do itloop=1,1 ! Iterate on drag coefficients
+  do itloop=1,2 ! Iterate on drag coefficients
 
     us=0.5*(uveln+uvel); vs=0.5*(vveln+vvel)
     drag_ocn=c_ocn*sqrt( (us-uo)**2+(vs-vo)**2 )
