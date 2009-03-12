@@ -4,7 +4,7 @@ use constants_mod, only: radius, pi, omega, HLF
 use fms_mod, only: open_namelist_file, check_nml_error, close_file
 use fms_mod, only: field_exist, get_global_att_value
 use fms_mod, only: stdlog, stdout, stderr, error_mesg, FATAL, WARNING
-use fms_mod, only: write_version_number, read_data, write_data, file_exist, field_size
+use fms_mod, only: write_version_number, read_data, write_data, file_exist
 use mosaic_mod, only: get_mosaic_ntiles, get_mosaic_ncontacts
 use mpp_mod, only: mpp_pe, mpp_root_pe, mpp_sum, mpp_min, mpp_max, NULL_PE
 use mpp_mod, only: mpp_send, mpp_recv, mpp_sync_self, mpp_chksum
@@ -149,7 +149,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.76 2009/03/06 17:35:42 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.77 2009/03/12 20:13:50 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -769,10 +769,12 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
     call bergs_chksum(bergs, 'run bergs (top)')
     call grd_chksum2(bergs%grd, bergs%grd%calving, 'run calving (top)')
     call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'run stored_ice (top)')
+    call grd_chksum2(bergs%grd, bergs%grd%stored_heat, 'run stored_heat (top)')
   endif
 
   ! Adapt calving heat flux from coupler
   grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)=calving_hflx(:,:) ! Units of W/m2
+  grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)=calving(:,:) * (-1.*1000.)! PRETEND MAKE UP NUMBERS
   grd%calving_hflx(:,:)=grd%calving_hflx(:,:)*grd%msk(:,:) ! Mask (just in case)
   if (grd%id_calving_hflx_in>0) &
     lerr=send_data(grd%id_calving_hflx_in, grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
@@ -1066,6 +1068,7 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
     call grd_chksum2(bergs%grd, bergs%grd%virtual_area, 'run varea (bot)')
     call grd_chksum2(bergs%grd, bergs%grd%mass, 'run mass (bot)')
     call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'run stored_ice (bot)')
+    call grd_chksum2(bergs%grd, bergs%grd%stored_heat, 'run stored_heat (bot)')
   endif
   call mpp_clock_end(bergs%clock_dia)
 
@@ -1183,7 +1186,7 @@ logical, save :: first_call=.true.
    !enddo
     bergs%stored_start=sum( grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:) )
     call mpp_sum( bergs%stored_start )
-    if (mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a,es12.6,a)') &
+    if (mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a,es13.6,a)') &
         'diamonds, accumulate_calving: initial stored mass=',bergs%stored_start,' kg'
     do j=grd%jsc,grd%jec; do i=grd%isc,grd%iec
       if (grd%calving(i,j).ne.0.) grd%stored_heat(i,j)= & ! Need units of J
@@ -1193,7 +1196,7 @@ logical, save :: first_call=.true.
     enddo; enddo
     bergs%stored_heat_start=sum( grd%stored_heat(grd%isc:grd%iec,grd%jsc:grd%jec) )
     call mpp_sum( bergs%stored_heat_start )
-    if (mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a,es12.6,a)') &
+    if (mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a,es13.6,a)') &
         'diamonds, accumulate_calving: initial stored heat=',bergs%stored_heat_start,' J'
   endif
 
@@ -2523,7 +2526,6 @@ character(len=30) :: filename
 type(icebergs_gridded), pointer :: grd
 real, allocatable, dimension(:,:) :: randnum
 type(randomNumberStream) :: rns
-logical :: field_found
 
   ! For convenience
   grd=>bergs%grd
@@ -2534,10 +2536,13 @@ logical :: field_found
     if (mpp_pe().eq.mpp_root_pe()) write(stdout(),'(2a)') &
      'diamonds, read_restart_calving: reading ',filename
     call read_data(filename, 'stored_ice', grd%stored_ice, grd%domain)
-    call field_size(filename, 'stored_heat', siz, field_found)
-    if (field_found) then
+    if (field_exist(filename, 'stored_heat')) then
+      if (mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a)') &
+     'diamonds, read_restart_calving: reading stored_heat from restart file.'
       call read_data(filename, 'stored_heat', grd%stored_heat, grd%domain)
     else
+      if (mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a)') &
+     'diamonds, read_restart_calving: stored_heat WAS NOT FOUND in the file. Setting to 0.'
       grd%stored_heat(:,:)=0.
     endif
     bergs%restarted=.true.
@@ -2558,6 +2563,7 @@ logical :: field_found
   endif
 
   call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'read stored_ice')
+  call grd_chksum2(bergs%grd, bergs%grd%stored_heat, 'read stored_heat')
 
   bergs%stored_start=sum( grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:) )
   call mpp_sum( bergs%stored_start )
@@ -3780,7 +3786,7 @@ type(iceberg), pointer :: this
   if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stderr(),'(2a)') 'diamonds, write_restart: writing ',filename
   call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'write stored_ice')
   call write_data(filename, 'stored_ice', bergs%grd%stored_ice, bergs%grd%domain)
-  call grd_chksum2(bergs%grd, bergs%grd%stored_heat, 'write stored_ice')
+  call grd_chksum2(bergs%grd, bergs%grd%stored_heat, 'write stored_heat')
   call write_data(filename, 'stored_heat', bergs%grd%stored_heat, bergs%grd%domain)
 
   contains
