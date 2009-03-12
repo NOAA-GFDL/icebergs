@@ -149,7 +149,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.77 2009/03/12 20:13:50 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.78 2009/03/12 20:14:36 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -774,7 +774,6 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
 
   ! Adapt calving heat flux from coupler
   grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)=calving_hflx(:,:) ! Units of W/m2
-  grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)=calving(:,:) * (-1.*1000.)! PRETEND MAKE UP NUMBERS
   grd%calving_hflx(:,:)=grd%calving_hflx(:,:)*grd%msk(:,:) ! Mask (just in case)
   if (grd%id_calving_hflx_in>0) &
     lerr=send_data(grd%id_calving_hflx_in, grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
