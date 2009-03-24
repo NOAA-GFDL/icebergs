@@ -151,7 +151,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.81 2009/03/24 20:15:19 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.82 2009/03/24 20:22:10 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -767,12 +767,6 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
   bergs%net_incoming_calving=bergs%net_incoming_calving+tmpsum*bergs%dt
   if (grd%id_calving>0) &
     lerr=send_data(grd%id_calving, grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  if (debug) then
-    call bergs_chksum(bergs, 'run bergs (top)')
-    call grd_chksum2(bergs%grd, bergs%grd%calving, 'run calving (top)')
-    call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'run stored_ice (top)')
-    call grd_chksum2(bergs%grd, bergs%grd%stored_heat, 'run stored_heat (top)')
-  endif
 
   ! Adapt calving heat flux from coupler
   grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)=calving_hflx(:,:) ! Units of W/m2
@@ -807,6 +801,25 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
   call mpp_update_domains(grd%cn, grd%domain)
   grd%hi(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=hi(:,:)
   call mpp_update_domains(grd%hi, grd%domain)
+
+  if (debug) then
+    call bergs_chksum(bergs, 'run bergs (top)')
+    call count_out_of_order(bergs,'top')
+    call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'run stored_ice (top)')
+    call grd_chksum2(bergs%grd, bergs%grd%stored_heat, 'run stored_heat (top)')
+    call grd_chksum2(bergs%grd, bergs%grd%calving, 'run calving (top)')
+    call grd_chksum2(bergs%grd, bergs%grd%calving_hflx, 'run calving_hflx (top)')
+    call grd_chksum2(bergs%grd, bergs%grd%ssh, 'run ssh (top)')
+    call grd_chksum2(bergs%grd, bergs%grd%sst, 'run sst (top)')
+    call grd_chksum2(bergs%grd, bergs%grd%cn, 'run cn (top)')
+    call grd_chksum2(bergs%grd, bergs%grd%hi, 'run hi (top)')
+    call grd_chksum2(bergs%grd, bergs%grd%ua, 'run ua (top)')
+    call grd_chksum2(bergs%grd, bergs%grd%va, 'run va (top)')
+    call grd_chksum2(bergs%grd, bergs%grd%uo, 'run uo (top)')
+    call grd_chksum2(bergs%grd, bergs%grd%vo, 'run vo (top)')
+    call grd_chksum2(bergs%grd, bergs%grd%ui, 'run ui (top)')
+    call grd_chksum2(bergs%grd, bergs%grd%vi, 'run vi (top)')
+  endif
 
   ! Accumulate ice from calving
   call accumulate_calving(bergs)
@@ -2401,6 +2414,13 @@ logical :: lerr
   id_class=register_static_field('icebergs', 'mask', axes, &
                'wet point mask', 'none',require=.false.)
   if (id_class>0) lerr=send_data(id_class, grd%msk(grd%isc:grd%iec,grd%jsc:grd%jec))
+
+  if (debug) then
+    call grd_chksum2(grd, grd%lon, 'init lon')
+    call grd_chksum2(grd, grd%lat, 'init lat')
+    call grd_chksum2(grd, grd%area, 'init area')
+    call grd_chksum2(grd, grd%msk, 'init msk')
+  endif
 
  !write(stderr(),*) 'diamonds: done'
   call mpp_clock_end(bergs%clock_ini)
@@ -4158,8 +4178,9 @@ real :: mean, rms, SD, minv, maxv
   i=mpp_chksum( fld(lbound(fld,1)+halo:ubound(fld,1)-halo, &
                     lbound(fld,2)+halo:ubound(fld,2)-halo,:) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(stdout(),'("diamonds, grd_chksum3: ",a18,x,a,"=",i,5(x,a,"=",es21.14),x,a,"=",i)') &
+    write(stdout(),'("diamonds, grd_chksum3: ",a18,x,a,"=",i,5(x,a,"=",es16.9),x,a,"=",i)') &
      txt, 'chksum', i, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd!, '#', icount
+   !write(stdout(),'("diamonds, grd_chksum3: ",a18,x,a,"=",i,5(x,a,"=",es21.14),x,a,"=",i)') &
 
 end subroutine grd_chksum3
 
@@ -4168,28 +4189,28 @@ end subroutine grd_chksum3
 subroutine grd_chksum2(grd, fld, txt)
 ! Arguments
 type(icebergs_gridded), pointer :: grd
-real, dimension(:,:), intent(in) :: fld
+real, dimension(grd%isd:grd%ied,grd%jsd:grd%jed), intent(in) :: fld
 character(len=*), intent(in) :: txt
 ! Local variables
-integer :: i, j, halo, icount
+integer :: i, j, icount
 real :: mean, rms, SD, minv, maxv
 
-  halo=grd%halo
+  grd%tmp(:,:)=0.
+
   mean=0.
   rms=0.
   sd=0.
   icount=0
-  i=lbound(fld,1)+halo
-  j=lbound(fld,2)+halo
-  minv=fld(i,j)
-  maxv=fld(i,j)
-  do j=lbound(fld,2)+halo, ubound(fld,2)-halo
-    do i=lbound(fld,1)+halo, ubound(fld,1)-halo
+  minv=fld(grd%isc,grd%jsc)
+  maxv=fld(grd%isc,grd%jsc)
+  do j=grd%jsc, grd%jec
+    do i=grd%isc, grd%iec
       icount=icount+1
       mean=mean+fld(i,j)
       rms=rms+fld(i,j)**2
       minv=min(minv,fld(i,j))
       maxv=max(maxv,fld(i,j))
+      grd%tmp(i,j)=fld(i,j)*float(i+2*j)
     enddo
   enddo
   call mpp_sum(icount)
@@ -4199,18 +4220,19 @@ real :: mean, rms, SD, minv, maxv
   call mpp_max(maxv)
   mean=mean/float(icount)
   rms=sqrt(rms/float(icount))
-  do j=lbound(fld,2)+halo, ubound(fld,2)-halo
-    do i=lbound(fld,1)+halo, ubound(fld,1)-halo
+  do j=grd%jsc, grd%jec
+    do i=grd%isc, grd%iec
       sd=sd+(fld(i,j)-mean)**2
     enddo
   enddo
   call mpp_sum(sd)
   sd=sqrt(sd/float(icount))
-  i=mpp_chksum( fld(lbound(fld,1)+halo:ubound(fld,1)-halo, &
-                    lbound(fld,2)+halo:ubound(fld,2)-halo) )
+  i=mpp_chksum( fld(grd%isc:grd%iec,grd%jsc:grd%jec) )
+  j=mpp_chksum( grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(stdout(),'("diamonds, grd_chksum2: ",a18,x,a,"=",i,5(x,a,"=",es21.14),x,a,"=",i)') &
-     txt, 'chksum', i, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd!, '#', icount
+    write(stdout(),'("diamonds, grd_chksum2: ",a18,2(x,a,"=",i),5(x,a,"=",es16.9),x,a,"=",i)') &
+     txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd!, '#', icount
+   !write(stdout(),'("diamonds, grd_chksum2: ",a18,2(x,a,"=",i),5(x,a,"=",es21.14),x,a,"=",i)') &
 
 end subroutine grd_chksum2
 
