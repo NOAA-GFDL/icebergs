@@ -151,7 +151,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.86 2009/03/24 20:49:19 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.87 2009/03/24 20:56:10 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -1551,7 +1551,7 @@ type(iceberg), pointer :: berg
     call print_berg(stderr(), berg, 'evolve_iceberg, out of cell at end!')
     write(stderr(),'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'posn i,j,lon,lat,xi,yj=',i,j,lonn,latn,xi,yj
     write(stderr(),'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'posn box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
-    bounced=is_point_in_cell(bergs%grd, lon2, lat2, i, j, explain=.true.)
+    bounced=is_point_in_cell(bergs%grd, lonn, latn, i, j, explain=.true.)
     if (debug) call error_mesg('diamonds, evolve_iceberg','berg is out of posn at end!',FATAL)
     write(stderr(),'(i4,a4,32i7)') mpp_pe(),'Lon',(i,i=grd%isd,grd%ied)
     do j=grd%jed,grd%jsd,-1
@@ -1697,7 +1697,7 @@ integer :: icount, i0, j0
       endif
     endif
     lret=pos_within_cell(grd, lon, lat, i, j, xi, yj)
-  endif
+  endif ! debug
   icount=0
   do while ( .not.lret.and. icount<20 )
     icount=icount+1
@@ -2769,14 +2769,14 @@ logical, intent(in), optional :: quick
 type(iceberg), pointer :: this, prev
 
   if (associated(first)) then
-    if (.not. parallel_reprod .or. (present(quick).and.quick) ) then
+    if (.not. parallel_reprod .or. (present(quick).and.quick)) then
       berg%next=>first
       first%prev=>berg
       first=>berg
-    else
-      this=>first
-      prev=>NULL()
-      do while( associated(this) )
+      else
+        this=>first
+        prev=>NULL()
+        do while( associated(this) )
         if (inorder(berg,this)) then
           if (associated(prev)) then
             ! found a slot between bergs
@@ -2788,10 +2788,10 @@ type(iceberg), pointer :: this, prev
           berg%next=>this
           this%prev=>berg
           return
-        endif
-        prev=>this
-        this=>this%next
-      enddo
+          endif
+          prev=>this
+          this=>this%next
+        enddo
       ! reached end of list
       prev%next=>berg
       berg%prev=>prev
@@ -2837,21 +2837,17 @@ end subroutine insert_berg_into_list
     inorder=.true. ! passing the above tests mean the bergs 1 and 2 are identical?
   end function inorder
 
-function time_hash(berg)
-! Arguments
-type(iceberg), pointer :: berg
-real :: time_hash
-  time_hash=berg%start_day+366.*float(berg%start_year)
-end function time_hash
+  real function time_hash(berg)
+  ! Arguments
+  type(iceberg), pointer :: berg
+    time_hash=berg%start_day+366.*float(berg%start_year)
+  end function time_hash
 
-! ##############################################################################
-
-function pos_hash(berg)
-! Arguments
-type(iceberg), pointer :: berg
-real :: pos_hash
-  pos_hash=berg%start_lon+36000.*(berg%start_lat)
-end function pos_hash
+  real function pos_hash(berg)
+  ! Arguments
+  type(iceberg), pointer :: berg
+    pos_hash=berg%start_lon+360.*(berg%start_lat+90.)
+  end function pos_hash
 
 ! ##############################################################################
 
