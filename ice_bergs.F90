@@ -128,6 +128,7 @@ type, public :: icebergs ; private
   logical :: restarted=.false. ! Indicate whether we read state from a restart or not
   logical :: use_operator_splitting=.true. ! Use first order operator splitting for thermodynamics
   logical :: add_weight_to_ocean=.true. ! Add weight of bergs to ocean
+  logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
   type(buffer), pointer :: obuffer_n=>NULL(), ibuffer_n=>NULL()
   type(buffer), pointer :: obuffer_s=>NULL(), ibuffer_s=>NULL()
   type(buffer), pointer :: obuffer_e=>NULL(), ibuffer_e=>NULL()
@@ -149,7 +150,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.78 2009/03/12 20:14:36 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.79 2009/03/24 19:53:09 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -915,13 +916,15 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
 
   ! Return what ever calving we did not use and additional icebergs melt
   call mpp_clock_begin(bergs%clock_int)
-  where (grd%area(grd%isc:grd%iec,grd%jsc:grd%jec)>0.)
-    calving(:,:)=grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec)/grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) &
-                +grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec)
-  elsewhere
-    calving(:,:)=0.
-  end where
-  calving_hflx(:,:)=grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)
+  if (.not. bergs%passive_mode) then
+    where (grd%area(grd%isc:grd%iec,grd%jsc:grd%jec)>0.)
+      calving(:,:)=grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec)/grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) &
+                  +grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec)
+    elsewhere
+      calving(:,:)=0.
+    end where
+    calving_hflx(:,:)=grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)
+  endif
   call mpp_clock_end(bergs%clock_int)
 
   ! Diagnose budgets
@@ -1156,7 +1159,7 @@ real :: dmda
          +   ( (grd%mass_on_ocean(i-1,j  ,6)+grd%mass_on_ocean(i+1,j  ,4))   &
          +     (grd%mass_on_ocean(i  ,j-1,8)+grd%mass_on_ocean(i  ,j+1,2)) ) )
     if (grd%area(i,j)>0) dmda=dmda/grd%area(i,j)*grd%msk(i,j)
-    mass(i,j)=mass(i,j)+dmda
+    if (.not. bergs%passive_mode) mass(i,j)=mass(i,j)+dmda
   enddo; enddo
 
   call mpp_clock_end(bergs%clock_int)
@@ -2069,6 +2072,7 @@ real :: bergy_bit_erosion_fraction=0. ! Fraction of erosion melt flux to divert 
 real :: sicn_shift=0. ! Shift of sea-ice concentration in erosion flux modulation (0<sicn_shift<1)
 logical :: use_operator_splitting=.true. ! Use first order operator splitting for thermodynamics
 logical :: add_weight_to_ocean=.true. ! Add weight of icebergs + bits to ocean
+logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim)
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
@@ -2076,7 +2080,7 @@ real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250
 namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
          distribution, mass_scaling, initial_thickness, verbose_hrs, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
-         parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean
+         parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je
 type(icebergs_gridded), pointer :: grd
@@ -2279,6 +2283,7 @@ logical :: lerr
   bergs%use_operator_splitting=use_operator_splitting
   bergs%bergy_bit_erosion_fraction=bergy_bit_erosion_fraction
   bergs%sicn_shift=sicn_shift
+  bergs%passive_mode=passive_mode
   bergs%add_weight_to_ocean=add_weight_to_ocean
   allocate( bergs%initial_mass(nclasses) ); bergs%initial_mass(:)=initial_mass(:)
   allocate( bergs%distribution(nclasses) ); bergs%distribution(:)=distribution(:)
