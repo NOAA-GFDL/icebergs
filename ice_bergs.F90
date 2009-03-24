@@ -151,7 +151,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.88 2009/03/24 20:57:47 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.89 2009/03/24 20:58:57 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -792,7 +792,7 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
  !grd%va(grd%isc:grd%iec,grd%jsc:grd%jec)=sign(sqrt(abs(tauya(:,:))/0.01),tauya(:,:))  ! Note rough conversion from stress to speed
   call mpp_update_domains(grd%ua, grd%va, grd%domain, gridtype=BGRID_NE)
   ! Copy sea surface height and temperature(resides on A grid)
-  grd%ssh(grd%isc:grd%iec,grd%jsc:grd%jec)=ssh(:,:)
+  grd%ssh(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=ssh(:,:)
   call mpp_update_domains(grd%ssh, grd%domain)
   grd%sst(grd%isc:grd%iec,grd%jsc:grd%jec)=sst(:,:)-273.15 ! Note convert from Kelvin to Celsius
   call mpp_update_domains(grd%sst, grd%domain)
@@ -3161,6 +3161,7 @@ real :: d0,d1,d2,d3,d4,d5,d6,d7,d8,dmin
     write(0,'(i3,a,2i5,a,2i3)') mpp_pe(),'diamonds, find_cell_by_search: false negative 2 i,j=',i-is,j-js,' di,dj=',di,dj
     write(0,'(i3,a,2i5,a,2f8.3)') mpp_pe(),'diamonds, find_cell_by_search: false negative 2 io,jo=',io,jo
     write(0,'(i3,a,2i5,a,2f8.3)') mpp_pe(),'diamonds, find_cell_by_search: false negative 2 i,j=',i,j,' targ=',x,y
+    return
   endif
   find_cell_by_search=.false.
 
