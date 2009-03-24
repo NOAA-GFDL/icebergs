@@ -151,7 +151,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.85 2009/03/24 20:38:00 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.86 2009/03/24 20:49:19 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -2715,6 +2715,52 @@ end subroutine add_new_berg_to_list
 
 ! ##############################################################################
 
+subroutine count_out_of_order(bergs,label)
+! Arguments
+type(icebergs), pointer :: bergs
+character(len=*) :: label
+! Local variables
+type(iceberg), pointer :: this, next
+integer :: i, icnt1, icnt2
+
+  icnt1=0
+  this=>bergs%first
+  next=>NULL()
+  if (associated(this)) then
+    if (associated(this%next)) next=>this%next
+  endif
+  do while (associated(next))
+    if (.not. inorder(this,next,label)) icnt1=icnt1+1
+    this=>next
+    next=>next%next
+  enddo
+  call mpp_sum(icnt1)
+
+  i=0;
+  icnt2=0
+  this=>bergs%first
+  do while (associated(this))
+    i=1
+    if (this%ine<bergs%grd%isc .or. &
+        this%ine>bergs%grd%iec .or. &
+        this%jne<bergs%grd%jsc .or. &
+        this%jne>bergs%grd%jec) icnt2=icnt2+1
+    this=>this%next
+    if (i>1.and..not.associated(this%prev)) then
+      call error_mesg('diamonds, count_out_of_order', 'Pointer %prev is unassociated. This should not happen!', FATAL)
+    endif
+  enddo
+  call mpp_sum(icnt2)
+
+  if ((debug.or.icnt1.ne.0).and.mpp_pe().eq.mpp_root_pe()) then
+    write(stderr(),'(a,2(x,a,i6),x,a)') 'diamonds, count_out_of_order:', &
+      '# out of order=', icnt1,'# in halo=',icnt2,label
+  endif
+
+end subroutine count_out_of_order
+
+! ##############################################################################
+
 subroutine insert_berg_into_list(first, berg, quick)
 ! Arguments
 type(iceberg), pointer :: first, berg
@@ -2757,26 +2803,39 @@ type(iceberg), pointer :: this, prev
 
 end subroutine insert_berg_into_list
 
-! ##############################################################################
-
-function inorder(berg1,berg2)
-! Arguments
-type(iceberg), pointer :: berg1, berg2
-logical :: inorder
-! Local variables
-real :: hash1, hash2
-  inorder=.false. ! if "out of order", return false by returning from function
-  hash1=time_hash(berg1)
-  hash2=time_hash(berg1)
-  if (hash1>hash2) return ! want newer first
-  if (berg1%start_mass<berg2%start_mass) return ! want heavy first
-  hash1=pos_hash(berg1)
-  hash2=pos_hash(berg1)
-  if (hash1>hash2) return ! want south/east first
-  inorder=.true. ! passing the above tests mean the bergs 1 and 2 are in order
-end function inorder
-
-! ##############################################################################
+  logical function inorder(berg1, berg2, label)
+  ! Arguments
+  type(iceberg), pointer :: berg1, berg2
+  character(len=*), optional :: label
+  ! Local variables
+  real :: hash1, hash2
+    hash1=time_hash(berg1)
+    hash2=time_hash(berg2)
+    if (hash1<hash2) then ! want newer first
+      inorder=.true.
+      return
+    else if (hash1>hash2) then
+      inorder=.false.
+      return
+    endif
+    if (berg1%start_mass<berg2%start_mass) then ! want lightest first IF dates are the same
+      inorder=.true.
+      return
+    else if (berg1%start_mass>berg2%start_mass) then
+      inorder=.false.
+      return
+    endif
+    hash1=pos_hash(berg1)
+    hash2=pos_hash(berg2)
+    if (hash1<hash2) then ! want south/east first IF dates and mass are the same
+      inorder=.true.
+      return
+    else if (hash1>hash2) then
+      inorder=.false.
+      return
+    endif
+    inorder=.true. ! passing the above tests mean the bergs 1 and 2 are identical?
+  end function inorder
 
 function time_hash(berg)
 ! Arguments
@@ -4381,6 +4440,8 @@ logical :: check_halo
   deallocate( fld )
   deallocate( fld2 )
   deallocate( icnt )
+
+  if (debug) call count_out_of_order(bergs,txt)
 
 end subroutine bergs_chksum
 
