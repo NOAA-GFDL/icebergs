@@ -147,10 +147,11 @@ type, public :: icebergs ; private
   real :: bergy_mass_start=0., bergy_mass_end=0.
   real :: returned_mass_on_ocean=0.
   real :: net_melt=0., berg_melt=0., bergy_src=0., bergy_melt=0.
+  integer :: nbergs_calved=0, nbergs_melted=0, nbergs_start=0, nbergs_end=0
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.79 2009/03/24 19:53:09 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.80 2009/03/24 20:05:47 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -534,6 +535,7 @@ real, parameter :: perday=1./86400.
     if (Mnew<=0.) then ! Delete the berg
       call move_trajectory(bergs, this)
       call delete_iceberg_from_list(bergs%first, this)
+      bergs%nbergs_melted=bergs%nbergs_melted+1
     else ! Diagnose mass distribution on grid
       if (grd%id_virtual_area>0) grd%virtual_area(i,j)=grd%virtual_area(i,j)+(Wn*Ln+Abits)*this%mass_scaling ! m^2
       if (grd%id_mass>0 .or. bergs%add_weight_to_ocean) grd%mass(i,j)=grd%mass(i,j)+Mnew/grd%area(i,j)*this%mass_scaling ! kg/m2
@@ -954,7 +956,7 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
     call icebergs_incr_mass(bergs, grd%tmpc)
     call mpp_clock_begin(bergs%clock_dia); call mpp_clock_begin(bergs%clock) ! To enable calling of public s/r
     bergs%returned_mass_on_ocean=sum( grd%tmpc(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
-    nbergs=count_bergs(bergs)
+    bergs%nbergs_end=count_bergs(bergs)
     call mpp_sum(bergs%stored_end)
     call mpp_sum(bergs%stored_heat_end)
     call mpp_sum(bergs%floating_mass_end)
@@ -962,7 +964,9 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
     call mpp_sum(bergs%bergy_mass_end)
     call mpp_sum(bergs%floating_heat_end)
     call mpp_sum(bergs%returned_mass_on_ocean)
-    call mpp_sum(nbergs)
+    call mpp_sum(bergs%nbergs_end)
+    call mpp_sum(bergs%nbergs_calved)
+    call mpp_sum(bergs%nbergs_melted)
     call mpp_sum(bergs%net_calving_returned)
     call mpp_sum(bergs%net_outgoing_calving)
     call mpp_sum(bergs%net_calving_received)
@@ -984,9 +988,13 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
  100 format("diamonds: ",a19,3(a18,"=",es14.7,x,a2,:,","),a12,i8)
  200 format("diamonds: ",a19,10(a18,"=",es14.7,x,a2,:,","))
       call report_state('stored ice','kg','',bergs%stored_start,'',bergs%stored_end,'')
-      call report_state('floating','kg','',bergs%floating_mass_start,'',bergs%floating_mass_end,'',nbergs)
+      call report_state('floating','kg','',bergs%floating_mass_start,'',bergs%floating_mass_end,'',bergs%nbergs_end)
       call report_state('icebergs','kg','',bergs%icebergs_mass_start,'',bergs%icebergs_mass_end,'')
       call report_state('bits','kg','',bergs%bergy_mass_start,'',bergs%bergy_mass_end,'')
+      call report_istate('berg #','',bergs%nbergs_start,'',bergs%nbergs_end,'')
+      call report_ibudget('berg #','calved',bergs%nbergs_calved, &
+                                   'melted',bergs%nbergs_melted, &
+                                   '#',bergs%nbergs_start,bergs%nbergs_end)
       call report_budget('stored mass','kg','calving used',bergs%net_calving_used, &
                                             'bergs',bergs%net_calving_to_bergs, &
                                             'stored mass',bergs%stored_start,bergs%stored_end)
@@ -1024,7 +1032,10 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
         call report_consistant('bot interface','kg','sent',bergs%net_outgoing_calving,'seen by SIS',bergs%net_calving_returned)
       endif
     endif
+    bergs%nbergs_start=bergs%nbergs_end
     bergs%stored_start=bergs%stored_end
+    bergs%nbergs_melted=0
+    bergs%nbergs_calved=0
     bergs%stored_heat_start=bergs%stored_heat_end
     bergs%floating_heat_start=bergs%floating_heat_end
     bergs%floating_mass_start=bergs%floating_mass_end
@@ -1124,6 +1135,31 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
   200 format("diamonds: ",a19,10(a18,"=",es14.7,x,a2,:,","))
   end subroutine report_budget
 
+  subroutine report_istate(budgetstr,startstr,startval,endstr,endval,delstr)
+  ! Arguments
+  character*(*), intent(in) :: budgetstr, startstr, endstr, delstr
+  integer, intent(in) :: startval, endval
+  ! Local variables
+  write(stdout(),100) budgetstr//' state:', &
+                        startstr//' start',startval, &
+                        endstr//' end',endval, &
+                        delstr//'Delta',endval-startval
+  100 format("diamonds: ",a19,3(a18,"=",i14,x,:,","))
+  end subroutine report_istate
+
+  subroutine report_ibudget(budgetstr,instr,inval,outstr,outval,delstr,startval,endval)
+  ! Arguments
+  character*(*), intent(in) :: budgetstr, instr, outstr, delstr
+  integer, intent(in) :: inval, outval, startval, endval
+  ! Local variables
+  write(stdout(),200) budgetstr//' budget:', &
+                      instr//' in',inval, &
+                      outstr//' out',outval, &
+                      'Delta '//delstr,inval-outval, &
+                      'error',((endval-startval)-(inval-outval))
+  200 format("diamonds: ",a19,10(a18,"=",i14,x,:,","))
+  end subroutine report_ibudget
+
 end subroutine icebergs_run
 
 ! ##############################################################################
@@ -1173,7 +1209,7 @@ subroutine accumulate_calving(bergs)
 type(icebergs), pointer :: bergs
 ! Local variables
 type(icebergs_gridded), pointer :: grd
-real :: remaining_dist, stored_mass, net_calving_used
+real :: remaining_dist, net_calving_used
 integer :: k, i, j
 logical, save :: first_call=.true.
 
@@ -2502,6 +2538,7 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
   k=count_bergs(bergs)
   if (verbose) write(stdout(),'(2(a,i))') 'diamonds, read_restart_bergs: # bergs =',k,' on PE',mpp_pe()
   call mpp_sum(k)
+  bergs%nbergs_start=k
   if (mpp_pe().eq.mpp_root_pe()) then
     write(stdout(),'(a,i,a,i,a)') 'diamonds, read_restart_bergs: there were',nbergs_in_file,' bergs in the restart file and', &
      k,' bergs have been read'
@@ -2525,7 +2562,7 @@ use random_numbers_mod, only: initializeRandomNumberStream, getRandomNumbers, ra
 ! Arguments
 type(icebergs), pointer :: bergs
 ! Local variables
-integer :: k,i,siz(4)
+integer :: k,i
 character(len=30) :: filename
 type(icebergs_gridded), pointer :: grd
 real, allocatable, dimension(:,:) :: randnum
