@@ -151,7 +151,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.83 2009/03/24 20:30:14 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.84 2009/03/24 20:35:00 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -1780,13 +1780,20 @@ subroutine send_bergs_to_other_pes(bergs)
 type(icebergs), pointer :: bergs
 ! Local variables
 type(iceberg), pointer :: kick_the_bucket, this
-integer :: nbergs_to_send_e, nbergs_to_send_w, nbergs_incoming, i
+integer :: nbergs_to_send_e, nbergs_to_send_w
 integer :: nbergs_to_send_n, nbergs_to_send_s
+integer :: nbergs_rcvd_from_e, nbergs_rcvd_from_w
+integer :: nbergs_rcvd_from_n, nbergs_rcvd_from_s
 integer, parameter :: buffer_width=18
 type(icebergs_gridded), pointer :: grd
+integer :: i, nbergs_start, nbergs_end
 
   ! For convenience
   grd=>bergs%grd
+
+  if (debug) then
+    nbergs_start=count_bergs(bergs)
+  endif
 
   ! Find number of bergs that headed east/west
   nbergs_to_send_e=0
@@ -1832,34 +1839,38 @@ type(icebergs_gridded), pointer :: grd
 
   ! Receive bergs from west
   if (grd%pe_W.ne.NULL_PE) then
-    nbergs_incoming=-999
-    call mpp_recv(nbergs_incoming, glen=1, from_pe=grd%pe_W)
-    if (nbergs_incoming.lt.0) then
-      write(stderr(),*) 'pe=',mpp_pe(),' received a bad number',nbergs_incoming,' from',grd%pe_W,' (W) !!!!!!!!!!!!!!!!!!!!!!'
+    nbergs_rcvd_from_w=-999
+    call mpp_recv(nbergs_rcvd_from_w, glen=1, from_pe=grd%pe_W)
+    if (nbergs_rcvd_from_w.lt.0) then
+      write(stderr(),*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_w,' from',grd%pe_W,' (W) !!!!!!!!!!!!!!!!!!!!!!'
     endif
-    if (nbergs_incoming.gt.0) then
-      call increase_ibuffer(bergs%ibuffer_w, nbergs_incoming)
-      call mpp_recv(bergs%ibuffer_w%data, nbergs_incoming*buffer_width, grd%pe_W)
-      do i=1, nbergs_incoming
+    if (nbergs_rcvd_from_w.gt.0) then
+      call increase_ibuffer(bergs%ibuffer_w, nbergs_rcvd_from_w)
+      call mpp_recv(bergs%ibuffer_w%data, nbergs_rcvd_from_w*buffer_width, grd%pe_W)
+      do i=1, nbergs_rcvd_from_w
         call unpack_berg_from_buffer2(bergs%first, bergs%ibuffer_w, i)
       enddo
     endif
+  else
+    nbergs_rcvd_from_w=0
   endif
 
   ! Receive bergs from east
   if (grd%pe_E.ne.NULL_PE) then
-    nbergs_incoming=-999
-    call mpp_recv(nbergs_incoming, glen=1, from_pe=grd%pe_E)
-    if (nbergs_incoming.lt.0) then
-      write(stderr(),*) 'pe=',mpp_pe(),' received a bad number',nbergs_incoming,' from',grd%pe_E,' (E) !!!!!!!!!!!!!!!!!!!!!!'
+    nbergs_rcvd_from_e=-999
+    call mpp_recv(nbergs_rcvd_from_e, glen=1, from_pe=grd%pe_E)
+    if (nbergs_rcvd_from_e.lt.0) then
+      write(stderr(),*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_e,' from',grd%pe_E,' (E) !!!!!!!!!!!!!!!!!!!!!!'
     endif
-    if (nbergs_incoming.gt.0) then
-      call increase_ibuffer(bergs%ibuffer_e, nbergs_incoming)
-      call mpp_recv(bergs%ibuffer_e%data, nbergs_incoming*buffer_width, grd%pe_E)
-      do i=1, nbergs_incoming
+    if (nbergs_rcvd_from_e.gt.0) then
+      call increase_ibuffer(bergs%ibuffer_e, nbergs_rcvd_from_e)
+      call mpp_recv(bergs%ibuffer_e%data, nbergs_rcvd_from_e*buffer_width, grd%pe_E)
+      do i=1, nbergs_rcvd_from_e
         call unpack_berg_from_buffer2(bergs%first, bergs%ibuffer_e, i)
       enddo
     endif
+  else
+    nbergs_rcvd_from_e=0
   endif
 
   ! Find number of bergs that headed north/south
@@ -1909,35 +1920,77 @@ type(icebergs_gridded), pointer :: grd
 
   ! Receive bergs from south
   if (grd%pe_S.ne.NULL_PE) then
-    nbergs_incoming=-999
-    call mpp_recv(nbergs_incoming, glen=1, from_pe=grd%pe_S)
-    if (nbergs_incoming.lt.0) then
-      write(stderr(),*) 'pe=',mpp_pe(),' received a bad number',nbergs_incoming,' from',grd%pe_S,' (S) !!!!!!!!!!!!!!!!!!!!!!'
+    nbergs_rcvd_from_s=-999
+    call mpp_recv(nbergs_rcvd_from_s, glen=1, from_pe=grd%pe_S)
+    if (nbergs_rcvd_from_s.lt.0) then
+      write(stderr(),*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_s,' from',grd%pe_S,' (S) !!!!!!!!!!!!!!!!!!!!!!'
     endif
-    if (nbergs_incoming.gt.0) then
-      call increase_ibuffer(bergs%ibuffer_s, nbergs_incoming)
-      call mpp_recv(bergs%ibuffer_s%data, nbergs_incoming*buffer_width, grd%pe_S)
-      do i=1, nbergs_incoming
+    if (nbergs_rcvd_from_s.gt.0) then
+      call increase_ibuffer(bergs%ibuffer_s, nbergs_rcvd_from_s)
+      call mpp_recv(bergs%ibuffer_s%data, nbergs_rcvd_from_s*buffer_width, grd%pe_S)
+      do i=1, nbergs_rcvd_from_s
         call unpack_berg_from_buffer2(bergs%first, bergs%ibuffer_s, i)
       enddo
     endif
+  else
+    nbergs_rcvd_from_s=0
   endif
 
   ! Receive bergs from north
   if (grd%pe_N.ne.NULL_PE) then
-    nbergs_incoming=-999
-    call mpp_recv(nbergs_incoming, glen=1, from_pe=grd%pe_N)
-    if (nbergs_incoming.lt.0) then
-      write(stderr(),*) 'pe=',mpp_pe(),' received a bad number',nbergs_incoming,' from',grd%pe_N,' (N) !!!!!!!!!!!!!!!!!!!!!!'
+    nbergs_rcvd_from_n=-999
+    call mpp_recv(nbergs_rcvd_from_n, glen=1, from_pe=grd%pe_N)
+    if (nbergs_rcvd_from_n.lt.0) then
+      write(stderr(),*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_n,' from',grd%pe_N,' (N) !!!!!!!!!!!!!!!!!!!!!!'
     endif
-    if (nbergs_incoming.gt.0) then
-      call increase_ibuffer(bergs%ibuffer_n, nbergs_incoming)
-      call mpp_recv(bergs%ibuffer_n%data, nbergs_incoming*buffer_width, grd%pe_N)
-      do i=1, nbergs_incoming
+    if (nbergs_rcvd_from_n.gt.0) then
+      call increase_ibuffer(bergs%ibuffer_n, nbergs_rcvd_from_n)
+      call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N)
+      do i=1, nbergs_rcvd_from_n
         call unpack_berg_from_buffer2(bergs%first, bergs%ibuffer_n, i)
       enddo
     endif
+  else
+    nbergs_rcvd_from_n=0
   endif
+
+  if (debug) then
+    nbergs_end=count_bergs(bergs)
+    i=nbergs_rcvd_from_n+nbergs_rcvd_from_s+nbergs_rcvd_from_e+nbergs_rcvd_from_w &
+     -nbergs_to_send_n-nbergs_to_send_s-nbergs_to_send_e-nbergs_to_send_w
+    if (nbergs_end-(nbergs_start+i).ne.0) then
+      write(stderr(),'(a,i,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_end=',nbergs_end,' on PE',mpp_pe()
+      write(stderr(),'(a,i,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_start=',nbergs_start,' on PE',mpp_pe()
+      write(stderr(),'(a,i,a,i4)') 'diamonds, send_bergs_to_other_pes: delta=',i,' on PE',mpp_pe()
+      write(stderr(),'(a,i,a,i4)') 'diamonds, send_bergs_to_other_pes: error=',nbergs_end-(nbergs_start+i),' on PE',mpp_pe()
+      write(stderr(),'(a,i,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_to_send_n=',nbergs_to_send_n,' on PE',mpp_pe()
+      write(stderr(),'(a,i,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_to_send_s=',nbergs_to_send_s,' on PE',mpp_pe()
+      write(stderr(),'(a,i,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_to_send_e=',nbergs_to_send_e,' on PE',mpp_pe()
+      write(stderr(),'(a,i,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_to_send_w=',nbergs_to_send_w,' on PE',mpp_pe()
+      write(stderr(),'(a,i,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_rcvd_from_n=',nbergs_rcvd_from_n,' on PE',mpp_pe()
+      write(stderr(),'(a,i,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_rcvd_from_s=',nbergs_rcvd_from_s,' on PE',mpp_pe()
+      write(stderr(),'(a,i,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_rcvd_from_e=',nbergs_rcvd_from_e,' on PE',mpp_pe()
+      write(stderr(),'(a,i,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_rcvd_from_w=',nbergs_rcvd_from_w,' on PE',mpp_pe()
+      call error_mesg('diamonds, send_bergs_to_other_pes:', 'We lost some bergs!', FATAL)
+    endif
+  endif
+
+  if (debug) then
+    i=0
+    this=>bergs%first
+    do while (associated(this))
+      if (this%ine.lt.bergs%grd%isc .or. &
+          this%ine.gt.bergs%grd%iec .or. &
+          this%jne.lt.bergs%grd%jsc .or. &
+          this%jne.gt.bergs%grd%jec) i=i+1
+      this=>this%next
+    enddo ! while
+    call mpp_sum(i)
+    if (i>0 .and. mpp_pe()==mpp_root_pe()) then
+      write(stderr(),'(a,i4)') 'diamonds, send_bergs_to_other_pes: # of bergs outside computational domain = ',i
+      call error_mesg('diamonds, send_bergs_to_other_pes:', 'there are bergs still in halos!', FATAL)
+    endif ! root_pe
+  endif ! debug
 
   call mpp_sync_self()
 
