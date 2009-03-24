@@ -151,7 +151,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.80 2009/03/24 20:05:47 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.81 2009/03/24 20:15:19 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -731,8 +731,7 @@ type(time_type), intent(in) :: time
 real, dimension(:,:), intent(inout) :: calving, calving_hflx
 real, dimension(:,:), intent(in) :: uo, vo, ui, vi, tauxa, tauya, ssh, sst, cn, hi
 ! Local variables
-integer :: iyr, imon, iday, ihr, imin, isec, nbergs
-type(iceberg), pointer :: this
+integer :: iyr, imon, iday, ihr, imin, isec
 type(icebergs_gridded), pointer :: grd
 logical :: lerr, sample_traj, lbudget, lverbose
 real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
@@ -828,13 +827,7 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
 
   ! For each berg, evolve
   call mpp_clock_begin(bergs%clock_mom)
-  if (associated(bergs%first)) then
-    this=>bergs%first
-    do while (associated(this))
-      call evolve_iceberg(bergs,this)
-      this=>this%next
-    enddo
-  endif
+  if (associated(bergs%first)) call evolve_icebergs(bergs)
   call mpp_clock_end(bergs%clock_mom)
 
   ! Send bergs to other PEs
@@ -860,13 +853,7 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
 
   ! For each berg, record
   call mpp_clock_begin(bergs%clock_dia)
-  if (sample_traj.and.associated(bergs%first)) then
-    this=>bergs%first
-    do while (associated(this))
-      call record_posn(this, bergs%current_year ,bergs%current_yearday)
-      this=>this%next
-    enddo
-  endif
+  if (sample_traj.and.associated(bergs%first)) call record_posn(bergs)
 
   ! Gridded diagnostics
   if (grd%id_uo>0) &
@@ -1334,10 +1321,9 @@ end subroutine calve_icebergs
 
 ! ##############################################################################
 
-subroutine evolve_iceberg(bergs, berg)
+subroutine evolve_icebergs(bergs)
 ! Arguments
 type(icebergs), pointer :: bergs
-type(iceberg), pointer :: berg
 ! Local variables
 type(icebergs_gridded), pointer :: grd
 real :: uvel1, vvel1, lon1, lat1, u1, v1, dxdl1, ax1, ay1
@@ -1355,6 +1341,7 @@ integer :: i, j
 integer :: i1,j1,i2,j2,i3,j3,i4,j4
 real :: xi, yj
 logical :: bounced, on_tangential_plane
+type(iceberg), pointer :: berg
 
   ! 4th order Runge-Kutta to solve:
   !    d/dt X = V,  d/dt V = A
@@ -1371,6 +1358,9 @@ logical :: bounced, on_tangential_plane
   
   ! For convenience
   grd=>bergs%grd
+
+  berg=>bergs%first
+  do while (associated(berg)) ! loop over all bergs
 
   if (.not. is_point_in_cell(bergs%grd, berg%lon, berg%lat, berg%ine, berg%jne) ) then
     write(stderr(),'(i4,a4,32i7)') mpp_pe(),'Lon',(i,i=grd%isd,grd%ied)
@@ -1559,6 +1549,9 @@ logical :: bounced, on_tangential_plane
  !call interp_flds(grd, i, j, xi, yj, berg%uo, berg%vo, berg%ui, berg%vi, berg%ua, berg%va, berg%ssh_x, berg%ssh_y, berg%sst)
 
  !if (debug) call print_berg(stderr(), berg, 'evolve_iceberg, final posn.')
+
+  berg=>berg%next
+  enddo ! loop over all bergs
 
   contains
 
@@ -1762,7 +1755,7 @@ integer :: icount, i0, j0
 
 end subroutine adjust_index_and_ground
 
-end subroutine evolve_iceberg
+end subroutine evolve_icebergs
 
 ! ##############################################################################
 
@@ -2829,39 +2822,43 @@ end function count_bergs
 
 ! ##############################################################################
 
-subroutine record_posn(berg, current_year, current_yearday)
+subroutine record_posn(bergs)
 ! Arguments
-type(iceberg), pointer :: berg
-integer, intent(in) :: current_year
-real, intent(in) :: current_yearday
+type(icebergs), pointer :: bergs
 ! Local variables
 type(xyt) :: posn
+type(iceberg), pointer :: this
 
-  posn%lon=berg%lon
-  posn%lat=berg%lat
-  posn%year=current_year
-  posn%day=current_yearday
-  posn%uvel=berg%uvel
-  posn%vvel=berg%vvel
-  posn%mass=berg%mass
-  posn%mass_of_bits=berg%mass_of_bits
-  posn%heat_density=berg%heat_density
-  posn%thickness=berg%thickness
-  posn%width=berg%width
-  posn%length=berg%length
-  posn%uo=berg%uo
-  posn%vo=berg%vo
-  posn%ui=berg%ui
-  posn%vi=berg%vi
-  posn%ua=berg%ua
-  posn%va=berg%va
-  posn%ssh_x=berg%ssh_x
-  posn%ssh_y=berg%ssh_y
-  posn%sst=berg%sst
-  posn%cn=berg%cn
-  posn%hi=berg%hi
+  this=>bergs%first
+  do while (associated(this))
+    posn%lon=this%lon
+    posn%lat=this%lat
+    posn%year=bergs%current_year
+    posn%day=bergs%current_yearday
+    posn%uvel=this%uvel
+    posn%vvel=this%vvel
+    posn%mass=this%mass
+    posn%mass_of_bits=this%mass_of_bits
+    posn%heat_density=this%heat_density
+    posn%thickness=this%thickness
+    posn%width=this%width
+    posn%length=this%length
+    posn%uo=this%uo
+    posn%vo=this%vo
+    posn%ui=this%ui
+    posn%vi=this%vi
+    posn%ua=this%ua
+    posn%va=this%va
+    posn%ssh_x=this%ssh_x
+    posn%ssh_y=this%ssh_y
+    posn%sst=this%sst
+    posn%cn=this%cn
+    posn%hi=this%hi
 
-  call push_posn(berg%trajectory, posn)
+    call push_posn(this%trajectory, posn)
+
+    this=>this%next
+  enddo
 
 end subroutine record_posn
 
