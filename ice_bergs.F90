@@ -151,7 +151,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.84 2009/03/24 20:35:00 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.85 2009/03/24 20:38:00 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -1270,7 +1270,7 @@ subroutine calve_icebergs(bergs)
 type(icebergs), pointer :: bergs
 ! Local variables
 type(icebergs_gridded), pointer :: grd
-integer :: i,j,k
+integer :: i,j,k,icnt,icntmax
 type(iceberg) :: newberg
 logical :: lret
 real :: xi, yj, ddt, calving_to_bergs, calved_to_berg, heat_to_bergs, heat_to_berg
@@ -1281,11 +1281,12 @@ real :: xi, yj, ddt, calving_to_bergs, calved_to_berg, heat_to_bergs, heat_to_be
   grd%real_calving(:,:,:)=0.
   calving_to_bergs=0.
   heat_to_bergs=0.
+  icntmax=0
 
   do k=1, nclasses
     do j=grd%jsc, grd%jec
       do i=grd%isc, grd%iec
-        ddt=0.
+        ddt=0.; icnt=0
         do while (grd%stored_ice(i,j,k).ge.bergs%initial_mass(k)*bergs%mass_scaling(k))
           newberg%lon=0.25*((grd%lon(i,j)+grd%lon(i-1,j-1))+(grd%lon(i-1,j)+grd%lon(i,j-1)))
           newberg%lat=0.25*((grd%lat(i,j)+grd%lat(i-1,j-1))+(grd%lat(i-1,j)+grd%lat(i,j-1)))
@@ -1295,10 +1296,14 @@ real :: xi, yj, ddt, calving_to_bergs, calved_to_berg, heat_to_bergs, heat_to_be
             write(stderr(),*) 'diamonds, calve_icebergs: something went very wrong!',i,j,xi,yj
             call error_mesg('diamonds, calve_icebergs', 'berg is not in the correct cell!', FATAL)
           endif
+          if (debug.and.(xi<0..or.xi>1..or.yj<0..or.yj>1.)) then
+            write(stderr(),*) 'diamonds, calve_icebergs: something went very wrong!',i,j,xi,yj
+            call error_mesg('diamonds, calve_icebergs', 'berg xi,yj is not correct!', FATAL)
+          endif
           newberg%ine=i
           newberg%jne=j
-          newberg%xi=0.5 ! xi
-          newberg%yj=0.5 ! yj
+          newberg%xi=xi
+          newberg%yj=yj
           newberg%uvel=0.
           newberg%vvel=0.
           newberg%mass=bergs%initial_mass(k)
@@ -1314,7 +1319,6 @@ real :: xi, yj, ddt, calving_to_bergs, calved_to_berg, heat_to_bergs, heat_to_be
           newberg%mass_of_bits=0.
           newberg%heat_density=grd%stored_heat(i,j)/grd%stored_ice(i,j,k) ! This is in J/kg
           call add_new_berg_to_list(bergs%first, newberg)
-         !if (verbose) call print_berg(stderr(), bergs%first, 'calve_icebergs, new berg created')
           calved_to_berg=bergs%initial_mass(k)*bergs%mass_scaling(k) ! Units of kg
           ! Heat content
           heat_to_berg=calved_to_berg*newberg%heat_density ! Units of J
@@ -1324,11 +1328,16 @@ real :: xi, yj, ddt, calving_to_bergs, calved_to_berg, heat_to_bergs, heat_to_be
           grd%stored_ice(i,j,k)=grd%stored_ice(i,j,k)-calved_to_berg
           calving_to_bergs=calving_to_bergs+calved_to_berg
           grd%real_calving(i,j,k)=grd%real_calving(i,j,k)+calved_to_berg/bergs%dt
-          ddt=ddt+bergs%dt/100. ! Minor offset to start day
+          ddt=ddt+bergs%dt*2./17. ! Minor offset to start day
+          icnt=icnt+1
+          bergs%nbergs_calved=bergs%nbergs_calved+1
         enddo
+        icntmax=max(icntmax,icnt)
       enddo
     enddo
   enddo
+
+  if (debug.and.icntmax>1) write(stderr(),*) 'calve_icebergs: icnt=',icnt,' on',mpp_pe()
 
   bergs%net_calving_to_bergs=bergs%net_calving_to_bergs+calving_to_bergs
   bergs%net_heat_to_bergs=bergs%net_heat_to_bergs+heat_to_bergs
