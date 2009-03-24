@@ -151,7 +151,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.82 2009/03/24 20:22:10 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.83 2009/03/24 20:30:14 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -804,7 +804,6 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
 
   if (debug) then
     call bergs_chksum(bergs, 'run bergs (top)')
-    call count_out_of_order(bergs,'top')
     call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'run stored_ice (top)')
     call grd_chksum2(bergs%grd, bergs%grd%stored_heat, 'run stored_heat (top)')
     call grd_chksum2(bergs%grd, bergs%grd%calving, 'run calving (top)')
@@ -836,16 +835,19 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
   call mpp_clock_begin(bergs%clock_cal)
   ! Calve excess stored ice into icebergs
   call calve_icebergs(bergs)
+  if (debug) call bergs_chksum(bergs, 'run bergs (calved)')
   call mpp_clock_end(bergs%clock_cal)
 
   ! For each berg, evolve
   call mpp_clock_begin(bergs%clock_mom)
   if (associated(bergs%first)) call evolve_icebergs(bergs)
+  if (debug) call bergs_chksum(bergs, 'run bergs (evolved)',ignore_halo_violation=.true.)
   call mpp_clock_end(bergs%clock_mom)
 
   ! Send bergs to other PEs
   call mpp_clock_begin(bergs%clock_com)
   call send_bergs_to_other_pes(bergs)
+  if (debug) call bergs_chksum(bergs, 'run bergs (exchanged)')
   call mpp_clock_end(bergs%clock_com)
 
   ! Ice berg thermodynamics (melting) + rolling
@@ -862,6 +864,7 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
   if (bergs%add_weight_to_ocean) grd%mass_on_ocean(:,:,:)=0.
   grd%virtual_area(:,:)=0.
   if (associated(bergs%first)) call thermodynamics(bergs)
+  if (debug) call bergs_chksum(bergs, 'run bergs (thermo)')
   call mpp_clock_end(bergs%clock_the)
 
   ! For each berg, record
@@ -2690,41 +2693,44 @@ type(iceberg), pointer :: this, prev
     first=>berg
   endif
 
-  contains
-
-  function inorder(berg1,berg2)
-  ! Arguments
-  type(iceberg), pointer :: berg1, berg2
-  logical :: inorder
-  ! Local variables
-  real :: hash1, hash2
-    inorder=.false. ! if "out of order", return false by returning from function
-    hash1=time_hash(berg1)
-    hash2=time_hash(berg1)
-    if (hash1>hash2) return ! want newer first
-    if (berg1%start_mass<berg2%start_mass) return ! want heavy first
-    hash1=pos_hash(berg1)
-    hash2=pos_hash(berg1)
-    if (hash1>hash2) return ! want south/east first
-    inorder=.true. ! passing the above tests mean the bergs 1 and 2 are in order
-  end function inorder
-
-  function time_hash(berg)
-  ! Arguments
-  type(iceberg), pointer :: berg
-  real :: time_hash
-    time_hash=berg%start_day+366.*float(berg%start_year)
-  end function time_hash
-
-  function pos_hash(berg)
-  ! Arguments
-  type(iceberg), pointer :: berg
-  real :: pos_hash
-    pos_hash=berg%start_lon+36000.*(berg%start_lat)
-  end function pos_hash
-
-
 end subroutine insert_berg_into_list
+
+! ##############################################################################
+
+function inorder(berg1,berg2)
+! Arguments
+type(iceberg), pointer :: berg1, berg2
+logical :: inorder
+! Local variables
+real :: hash1, hash2
+  inorder=.false. ! if "out of order", return false by returning from function
+  hash1=time_hash(berg1)
+  hash2=time_hash(berg1)
+  if (hash1>hash2) return ! want newer first
+  if (berg1%start_mass<berg2%start_mass) return ! want heavy first
+  hash1=pos_hash(berg1)
+  hash2=pos_hash(berg1)
+  if (hash1>hash2) return ! want south/east first
+  inorder=.true. ! passing the above tests mean the bergs 1 and 2 are in order
+end function inorder
+
+! ##############################################################################
+
+function time_hash(berg)
+! Arguments
+type(iceberg), pointer :: berg
+real :: time_hash
+  time_hash=berg%start_day+366.*float(berg%start_year)
+end function time_hash
+
+! ##############################################################################
+
+function pos_hash(berg)
+! Arguments
+type(iceberg), pointer :: berg
+real :: pos_hash
+  pos_hash=berg%start_lon+36000.*(berg%start_lat)
+end function pos_hash
 
 ! ##############################################################################
 
@@ -2786,16 +2792,16 @@ type(iceberg), pointer :: berg
 character(len=*) :: label
 ! Local variables
 
+  write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,") start lon,lat,yr,day,mass=",2f10.4,i5,f7.2,es12.4)') &
+    label, mpp_pe(), berg%start_lon, berg%start_lat, &
+    berg%start_year, berg%start_day, berg%start_mass
   write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,a,2i5,3(a,2f10.4),a,2l2)') &
     label, mpp_pe(), ') i,j=',berg%ine, berg%jne, &
     ' xi,yj=', berg%xi, berg%yj, &
     ' lon,lat=', berg%lon, berg%lat, &
     ' u,v=', berg%uvel, berg%vvel, &
     ' p,n=', associated(berg%prev), associated(berg%next)
-  write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,") start lon,lat,yr,day,mass=",2f10.4,i5,f7.2,es12.4)') &
-    label, mpp_pe(), berg%start_lon, berg%start_lat, &
-    berg%start_year, berg%start_day, berg%start_mass
-  write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,6(a,2f10.4))') &
+  write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,") ",6(a,2f10.4))') &
     label, mpp_pe(), 'uo,vo=', berg%uo, berg%vo, 'ua,va=', berg%ua, berg%va, 'ui,vi=', berg%ui, berg%vi
 
 end subroutine print_berg
@@ -4238,19 +4244,31 @@ end subroutine grd_chksum2
 
 ! ##############################################################################
 
-subroutine bergs_chksum(bergs, txt)
+subroutine bergs_chksum(bergs, txt, ignore_halo_violation)
 ! Arguments
 type(icebergs), pointer :: bergs
 character(len=*), intent(in) :: txt
+logical, optional :: ignore_halo_violation
 ! Local variables
-integer :: i, j, nbergs, ichk1, ichk2
-real, allocatable :: fld(:,:)
+integer :: i, nbergs, ichk1, ichk2, ichk3
+real, allocatable :: fld(:,:), fld2(:,:)
+integer, allocatable :: icnt(:,:)
 type(iceberg), pointer :: this
+type(icebergs_gridded), pointer :: grd
+logical :: check_halo
+
+! For convenience
+  grd=>bergs%grd
 
   nbergs=count_bergs(bergs)
   call mpp_max(nbergs)
-  allocate( fld( nbergs, 8 ) )
+  allocate( fld( nbergs, 10 ) )
+  allocate( fld2( nbergs, 10 ) )
+  allocate( icnt( grd%isd:grd%ied, grd%jsd:grd%jed ) )
   fld(:,:)=0.
+  fld2(:,:)=0.
+  icnt(:,:)=0
+  grd%tmp(:,:)=0.
 
   this=>bergs%first
   i=0
@@ -4264,25 +4282,43 @@ type(iceberg), pointer :: this
     fld(i,6) = this%thickness
     fld(i,7) = this%width
     fld(i,8) = this%length
+    fld(i,9) = time_hash(this)
+    fld(i,10) = pos_hash(this)
+    icnt(this%ine,this%jne)=icnt(this%ine,this%jne)+1
+    fld2(i,:) = fld(i,:)*float( icnt(this%ine,this%jne) )
+    grd%tmp(this%ine,this%jne)=grd%tmp(this%ine,this%jne)+time_hash(this)*pos_hash(this)+this%mass
     this=>this%next
   enddo
 
   ichk1=mpp_chksum( fld )
-
+  ichk2=mpp_chksum( fld2 )
+  ichk3=mpp_chksum( grd%tmp )
   nbergs=count_bergs(bergs)
-  do i=1,nbergs; do j=1,8
-    fld(i,j) = fld(i,j)*float(i)
-  enddo; enddo
-  ichk2=mpp_chksum( fld )
 
-  nbergs=count_bergs(bergs)
+  if (nbergs.ne.sum(icnt(:,:))) then
+    write(stdout(),'("diamonds, bergs_chksum: ",2(a,i))') &
+      '# bergs =', nbergs, ' sum(icnt) =',sum(icnt(:,:))
+    call error_mesg('diamonds, bergs_chksum:', 'mismatch in berg count!', FATAL)
+  endif
+
+  check_halo=.true.
+  if (present(ignore_halo_violation)) then
+    if (ignore_halo_violation) check_halo=.false.
+  endif
+  if (check_halo.and.nbergs.ne.sum(icnt(grd%isc:grd%iec, grd%jsc:grd%jec))) then
+    write(stdout(),'("diamonds, bergs_chksum: ",2(a,i))') &
+      '# bergs =', nbergs, ' sum(icnt(comp_dom)) =',sum(icnt(:,:))
+    call error_mesg('diamonds, bergs_chksum:', 'mismatch in berg count on computational domain!', FATAL)
+  endif
+
   call mpp_sum(nbergs)
-
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(stdout(),'("diamonds, bergs_chksum: ",a18,3(x,a,"=",i))') &
-      txt, 'chksum', ichk1, 'chksum2',ichk2, '#', nbergs
+    write(stdout(),'("diamonds, bergs_chksum: ",a18,4(x,a,"=",i))') &
+      txt, 'chksum', ichk1, 'chksum2', ichk2, 'chksum3', ichk3, '#', nbergs
 
   deallocate( fld )
+  deallocate( fld2 )
+  deallocate( icnt )
 
 end subroutine bergs_chksum
 
