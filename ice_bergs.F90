@@ -151,7 +151,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.87 2009/03/24 20:56:10 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.88 2009/03/24 20:57:47 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -2761,44 +2761,43 @@ end subroutine count_out_of_order
 
 ! ##############################################################################
 
-subroutine insert_berg_into_list(first, berg, quick)
+subroutine insert_berg_into_list(first, newberg, quick)
 ! Arguments
-type(iceberg), pointer :: first, berg
+type(iceberg), pointer :: first, newberg
 logical, intent(in), optional :: quick
 ! Local variables
 type(iceberg), pointer :: this, prev
 
   if (associated(first)) then
     if (.not. parallel_reprod .or. (present(quick).and.quick)) then
-      berg%next=>first
-      first%prev=>berg
-      first=>berg
+      newberg%next=>first
+      first%prev=>newberg
+      first=>newberg
+    else
+      if (inorder(newberg,first,'insert1')) then
+        ! Insert at front of list
+        newberg%next=>first
+        first%prev=>newberg
+        first=>newberg
       else
         this=>first
         prev=>NULL()
         do while( associated(this) )
-        if (inorder(berg,this)) then
-          if (associated(prev)) then
-            ! found a slot between bergs
-            prev%next=>berg
-            berg%prev=>this%prev
-          else
-            first=>berg ! At start of list
-          endif
-          berg%next=>this
-          this%prev=>berg
-          return
+          if (inorder(newberg,this,'insert2') ) then
+            exit
           endif
           prev=>this
           this=>this%next
         enddo
-      ! reached end of list
-      prev%next=>berg
-      berg%prev=>prev
+        prev%next=>newberg
+        newberg%prev=>prev
+        if (associated(this)) this%prev=>newberg
+        newberg%next=>this
+      endif
     endif
   else
     ! list is empty so create it
-    first=>berg
+    first=>newberg
   endif
 
 end subroutine insert_berg_into_list
