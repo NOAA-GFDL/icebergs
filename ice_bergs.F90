@@ -151,7 +151,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.89 2009/03/24 20:58:57 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.90 2009/04/21 19:33:01 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -182,13 +182,14 @@ contains
 
 ! ##############################################################################
 
-subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, ax, ay)
+subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, debug_flag)
 ! Arguments
 type(icebergs), pointer :: bergs
 type(iceberg), pointer :: berg
 integer, intent(in) :: i, j
-real, intent(in) :: xi, yj, lat, uvel, vvel
+real, intent(in) :: xi, yj, lat, uvel, vvel, uvel0, vvel0, dt
 real, intent(inout) :: ax, ay
+logical, optional :: debug_flag
 ! Local variables
 type(icebergs_gridded), pointer :: grd
 real :: uo, vo, ui, vi, ua, va, uwave, vwave, ssh_x, ssh_y, sst, cn, hi
@@ -196,7 +197,7 @@ real :: f_cori, T, D, W, L, M, F
 real :: drag_ocn, drag_atm, drag_ice, wave_rad
 real :: c_ocn, c_atm, c_ice
 real :: ampl, wmod, Cr, Lwavelength, Lcutoff, Ltop
-real, parameter :: alpha=0.5, beta=1.0, accel_lim=1.e-2, Cr0=0.06, vel_lim=10.
+real, parameter :: alpha=0.0, beta=1.0, accel_lim=1.e-2, Cr0=0.06, vel_lim=15.
 real :: lambda, detA, A11, A12, axe, aye, D_hi
 real :: uveln, vveln, us, vs
 logical :: dumpit
@@ -247,7 +248,7 @@ integer :: itloop
   if (abs(ui)+abs(vi).eq.0.) c_ice=0.
 
   uveln=uvel; vveln=vvel ! Copy starting uvel, vvel
-  do itloop=1,2 ! Iterate on drag coefficients
+  do itloop=1,1 ! Iterate on drag coefficients
 
     us=0.5*(uveln+uvel); vs=0.5*(vveln+vvel)
     drag_ocn=c_ocn*sqrt( (us-uo)**2+(vs-vo)**2 )
@@ -255,16 +256,32 @@ integer :: itloop
     drag_ice=c_ice*sqrt( (us-ui)**2+(vs-vi)**2 )
 
     ! Explicit accelerations
-    axe= f_cori*vvel -gravity*ssh_x +wave_rad*uwave &
-        -drag_ocn*(uvel-uo) -drag_atm*(uvel-ua) -drag_ice*(uvel-ui)
-    aye=-f_cori*uvel -gravity*ssh_y +wave_rad*vwave &
-        -drag_ocn*(vvel-vo) -drag_atm*(vvel-va) -drag_ice*(vvel-vi)
+   !axe= f_cori*vvel -gravity*ssh_x +wave_rad*uwave &
+   !    -drag_ocn*(uvel-uo) -drag_atm*(uvel-ua) -drag_ice*(uvel-ui)
+   !aye=-f_cori*uvel -gravity*ssh_y +wave_rad*vwave &
+   !    -drag_ocn*(vvel-vo) -drag_atm*(vvel-va) -drag_ice*(vvel-vi)
+    axe=-gravity*ssh_x +wave_rad*uwave
+    aye=-gravity*ssh_y +wave_rad*vwave
+    if (alpha>0.) then ! If implicit, use time-level (n) rather than RK4 latest
+      axe=axe+f_cori*vvel0
+      aye=aye-f_cori*uvel0
+    else
+      axe=axe+f_cori*vvel
+      aye=aye-f_cori*uvel
+    endif
+    if (beta>0.) then ! If implicit, use time-level (n) rather than RK4 latest
+      axe=axe-drag_ocn*(uvel0-uo) -drag_atm*(uvel0-ua) -drag_ice*(uvel0-ui)
+      aye=aye-drag_ocn*(vvel0-vo) -drag_atm*(vvel0-va) -drag_ice*(vvel0-vi)
+    else
+      axe=axe-drag_ocn*(uvel-uo) -drag_atm*(uvel-ua) -drag_ice*(uvel-ui)
+      aye=aye-drag_ocn*(vvel-vo) -drag_atm*(vvel-va) -drag_ice*(vvel-vi)
+    endif
 
     ! Solve for implicit accelerations
     if (alpha+beta.gt.0.) then
       lambda=drag_ocn+drag_atm+drag_ice !+0.5*wave_rad
-      A11=1.+beta*bergs%dt*lambda
-      A12=alpha*bergs%dt*f_cori
+      A11=1.+beta*dt*lambda
+      A12=alpha*dt*f_cori
       detA=1./(A11**2+A12**2)
       ax=detA*(A11*axe+A12*aye)
       ay=detA*(A11*aye-A12*axe)
@@ -272,42 +289,43 @@ integer :: itloop
       ax=axe; ay=aye
     endif
 
-    uveln=uvel+bergs%dt*ax
-    vveln=vvel+bergs%dt*ay
+    uveln=uvel0+dt*ax
+    vveln=vvel0+dt*ay
 
   enddo ! itloop
   
   dumpit=.false.
-  if (abs(uveln)>vel_lim.or.abs(vveln)>vel_lim) dumpit=.true.
-  if (abs(ax)>accel_lim.or.abs(ay)>accel_lim) dumpit=.true.
+  if (abs(uveln)>vel_lim.or.abs(vveln)>vel_lim) then
+    dumpit=.true.
+    write(stderr(),'("pe=",i3,x,a)') mpp_pe(),'Dump triggered by excessive velocity'
+  endif
+  if (abs(ax)>accel_lim.or.abs(ay)>accel_lim) then
+    dumpit=.true.
+    write(stderr(),'("pe=",i3,x,a)') mpp_pe(),'Dump triggered by excessive acceleration'
+  endif
+  if (present(debug_flag)) then
+    if (debug_flag) dumpit=.true.
+    write(stderr(),'("pe=",i3,x,a)') mpp_pe(),'Debug dump flagged by arguments'
+  endif
   if (dumpit) then
-    write(stderr(),'(a,i3,9(1xa,es12.3))') 'Large acceleration detected pe=',mpp_pe(), &
-      'lon0=',berg%start_lon, &
-      'lat0=',berg%start_lat, &
-      'yr0=',float(berg%start_year), &
-      'day0=',berg%start_day, &
-      'mass0=',berg%start_mass, &
-      'scaling=',berg%mass_scaling
-    write(stderr(),'(a,i3,9(1xa,es12.3))') 'Geometry pe=',mpp_pe(), &
-      'M=',M, &
-      'T=',T, &
-      'D=',D, &
-      'F=',F, &
-      'W=',W, &
-      'L=',L
-    write(stderr(),'(a,i3,9(1xa,es12.3))') ' del U pe=',mpp_pe(), &
-      'u(n)=',uvel, &
-      'u(n+1)=',uvel+bergs%dt*ax, &
-      'v(n)=',vvel, &
-      'v(n+1)=',vvel+bergs%dt*ay
-    write(stderr(),'(a,i3,9(1xa,es12.3))') 'U accel. pe=',mpp_pe(), &
+ 100 format('pe=',i3,a15,9(x,a8,es12.3))
+ 200 format('pe=',i3,a15,(x,a8,i12),9(x,a8,es12.3))
+    write(stderr(),200) mpp_pe(),'Starting pars:', &
+      'yr0=',berg%start_year, 'day0=',berg%start_day, &
+      'lon0=',berg%start_lon, 'lat0=',berg%start_lat, 'mass0=',berg%start_mass, &
+      'sclng=',berg%mass_scaling
+    write(stderr(),100) mpp_pe(),'Geometry:', &
+      'M=',M, 'T=',T, 'D=',D, 'F=',F, 'W=',W, 'L=',L
+    write(stderr(),100) mpp_pe(),'delta U:', &
+      'u(n)=',uvel0, 'u(*)=', uvel, 'u(n+1)=',uvel+dt*ax, 'del u=',dt*ax
+    write(stderr(),100) mpp_pe(),'U terms', &
       'f*v=',f_cori*vvel, &
       'g*H_x=',-gravity*ssh_x, &
       'wave*ua=',wave_rad*uwave, &
       'd*(u-uo)=',-drag_ocn*(uvel-uo), &
       'd*(u-ua)=',-drag_atm*(uvel-ua), &
       'd*(u-ui)=',-drag_ice*(uvel-ui)
-    write(stderr(),'(a,i3,9(1xa,es12.3))') '  accel. pe=',mpp_pe(), &
+    write(stderr(),100) mpp_pe(),'U accel.', &
       'axe=',axe, &
       'ax=',ax, &
       'ax(cori)=',detA*(A11*(f_cori*vvel)+A12*(-f_cori*uvel)), &
@@ -316,14 +334,16 @@ integer :: itloop
       'ax(ocn)=',detA*(A11*(-drag_ocn*(uvel-uo))+A12*(-drag_ocn*(vvel-vo))), &
       'ax(atm)=',detA*(A11*(-drag_atm*(uvel-ua))+A12*(-drag_atm*(vvel-va))), &
       'ax(ice)=',detA*(A11*(-drag_ice*(uvel-ui))+A12*(-drag_ice*(vvel-vi)))
-    write(stderr(),'(a,i3,9(1xa,es12.3))') 'V accel. pe=',mpp_pe(), &
+    write(stderr(),100) mpp_pe(),'delta V:', &
+      'v(n)=',vvel0, 'v(*)=', vvel, 'v(n+1)=',vvel+dt*ay, 'del v=',dt*ay
+    write(stderr(),100) mpp_pe(),'V terms', &
       'f*u=',-f_cori*uvel, &
       'g*H_y=',-gravity*ssh_y, &
       'wave*va=',wave_rad*vwave, &
       'd*(v-vo)=',-drag_ocn*(vvel-vo), &
       'd*(v-va)=',-drag_atm*(vvel-va), &
       'd*(v-vi)=',-drag_ice*(vvel-vi)
-    write(stderr(),'(a,i3,9(1xa,es12.3))') '  accel. pe=',mpp_pe(), &
+    write(stderr(),100) mpp_pe(),'V accel. pe=', &
       'aye=',aye, &
       'ay=',ay, &
       'ay(cori)=',detA*(-A12*(f_cori*vvel)+A11*(-f_cori*uvel)), &
@@ -332,7 +352,7 @@ integer :: itloop
       'ay(ocn)=',detA*(-A12*(-drag_ocn*(uvel-uo))+A11*(-drag_ocn*(vvel-vo))), &
       'ay(atm)=',detA*(-A12*(-drag_atm*(uvel-ua))+A11*(-drag_atm*(vvel-va))), &
       'ay(ice)=',detA*(-A12*(-drag_ice*(uvel-ui))+A11*(-drag_ice*(vvel-vi)))
-    write(stderr(),'(a,i3,9(1xa,es12.3))') 'Vel scales pe=',mpp_pe(), &
+    write(stderr(),100) mpp_pe(),'Vel scales', &
       '|va-vo|=',sqrt((ua-uo)**2+(va-vo)**2), &
       '|vo-vb|=',sqrt((uvel-uo)**2+(vvel-vo)**2), &
       '|va-vb|=',sqrt((uvel-ua)**2+(vvel-va)**2), &
@@ -341,38 +361,88 @@ integer :: itloop
       '|va|=',sqrt((ua)**2+(va)**2), &
       '|vo|=',sqrt((uo)**2+(vo)**2), &
       '|vi|=',sqrt((ui)**2+(vi)**2)
-    write(stderr(),'(a,i3,9(1xa,es12.3))') 'Time scales pe=',mpp_pe(), &
-      'f=',f_cori, &
-      'wave_rad=',wave_rad, &
-      'do=',drag_ocn, &
-      'da=',drag_atm, &
-      'di=',drag_ice
-    write(stderr(),'(a,i3,9(1xa,es12.3))') ' u* pe=',mpp_pe(), &
+    write(stderr(),100) mpp_pe(),'Time scales', &
+      'f=',f_cori, 'wave_rad=',wave_rad, 'do=',drag_ocn, 'da=',drag_atm, 'di=',drag_ice
+    write(stderr(),100) mpp_pe(),'u*', &
       'd*=',lambda, &
       'u*=',(drag_ocn*uo+drag_atm*ua+drag_ice*ui)/lambda, &
       'uo*=',(drag_ocn*uo)/lambda, &
       'ua*=',(drag_atm*ua)/lambda, &
       'ui*=',(drag_ice*ui)/lambda
-    write(stderr(),'(a,i3,9(1xa,es12.3))') ' v* pe=',mpp_pe(), &
+    write(stderr(),100) mpp_pe(),'v*', &
       'd*=',lambda, &
       'v*=',(drag_ocn*vo+drag_atm*va+drag_ice*vi)/lambda, &
       'vo*=',(drag_ocn*vo)/lambda, &
       'va*=',(drag_atm*va)/lambda, &
       'vi*=',(drag_ice*vi)/lambda
-    write(stderr(),'(a,i3,9(1xa,es12.3))') '          pe=',mpp_pe(), &
-      'a=',sqrt(ampl), &
-      'Lwl=',Lwavelength, &
-      'Lcut=',Lcutoff, &
-      'Ltop=',Ltop, &
-      'hi=',hi, &
-      'Cr=',Cr
-    write(stderr(),'(a,i3,9(1xa,es12.3))') '          pe=',mpp_pe(), &
-      'xi=',xi, &
-      'yj=',yj, &
-      'lat=',lat
+    write(stderr(),100) mpp_pe(),'params', &
+      'a=',sqrt(ampl), 'Lwl=',Lwavelength, 'Lcut=',Lcutoff, 'Ltop=',Ltop, 'hi=',hi, 'Cr=',Cr
+    write(stderr(),100) mpp_pe(),'Position', &
+      'xi=',xi, 'yj=',yj, 'lat=',lat
+    call dump_locfld(grd,i,j,grd%msk,'MSK')
+    call dump_locfld(grd,i,j,grd%ssh,'SSH')
+    call dump_locfld(grd,i,j,grd%sst,'SST')
+    call dump_locvel(grd,i,j,grd%uo,'Uo')
+    call dump_locvel(grd,i,j,grd%vo,'Vo')
+    call dump_locvel(grd,i,j,grd%ua,'Ua')
+    call dump_locvel(grd,i,j,grd%va,'Va')
+    call dump_locvel(grd,i,j,grd%ui,'Ui')
+    call dump_locvel(grd,i,j,grd%vi,'Vi')
+    call dump_locfld(grd,i,j,grd%hi,'HI')
+    call dump_locfld(grd,i,j,grd%cn,'CN')
     call print_berg(stderr(),berg,'diamonds, accel, large accel')
   endif
 
+  contains
+
+  subroutine dump_locfld(grd,i0,j0,A,lbl)
+  ! Arguments
+  type(icebergs_gridded), pointer :: grd
+  integer, intent(in) :: i0, j0
+  real, dimension(grd%isd:grd%ied,grd%jsd:grd%jed), intent(in) :: A
+  character(len=*) :: lbl
+! Local variables
+  integer :: i, j, ii, jj
+  real :: B(-1:1,-1:1), fac
+
+  do jj=-1,1
+    j=max(grd%jsd,min(grd%jed,jj+j0))
+    do ii=-1,1
+      i=max(grd%isd,min(grd%ied,ii+i0))
+      B(ii,jj)=A(i,j)
+      if ((i.ne.ii+i0).or.(j.ne.jj+j0)) B(ii,jj)=-9.999999e-99
+    enddo
+  enddo
+  write(stderr(),'("pe=",i3,x,a8,3i12)') mpp_pe(),lbl,(i0+ii,ii=-1,1)
+  do jj=1,-1,-1
+    write(stderr(),'("pe=",i3,x,i8,3es12.4)') mpp_pe(),j0+jj,(B(ii,jj),ii=-1,1)
+  enddo
+  end subroutine dump_locfld
+  
+  subroutine dump_locvel(grd,i0,j0,A,lbl)
+  ! Arguments
+  type(icebergs_gridded), pointer :: grd
+  integer, intent(in) :: i0, j0
+  real, dimension(grd%isd:grd%ied,grd%jsd:grd%jed), intent(in) :: A
+  character(len=*) :: lbl
+! Local variables
+  integer :: i, j, ii, jj
+  real :: B(-1:0,-1:0), fac
+
+  do jj=-1,0
+    j=max(grd%jsd,min(grd%jed,jj+j0))
+    do ii=-1,0
+      i=max(grd%isd,min(grd%ied,ii+i0))
+      B(ii,jj)=A(i,j)
+      if ((i.ne.ii+i0).or.(j.ne.jj+j0)) B(ii,jj)=-9.999999e-99
+    enddo
+  enddo
+  write(stderr(),'("pe=",i3,x,a8,3i12)') mpp_pe(),lbl,(i0+ii,ii=-1,0)
+  do jj=0,-1,-1
+    write(stderr(),'("pe=",i3,x,i8,3es12.4)') mpp_pe(),j0+jj,(B(ii,jj),ii=-1,0)
+  enddo
+  end subroutine dump_locvel
+  
 end subroutine accel
 
 ! ##############################################################################
@@ -1365,7 +1435,7 @@ real :: r180_pi, dt, dt_2, dt_6, dydl, Rearth
 integer :: i, j
 integer :: i1,j1,i2,j2,i3,j3,i4,j4
 real :: xi, yj
-logical :: bounced, on_tangential_plane
+logical :: bounced, on_tangential_plane, error_flag
 type(iceberg), pointer :: berg
 
   ! 4th order Runge-Kutta to solve:
@@ -1425,7 +1495,7 @@ type(iceberg), pointer :: berg
   uvel1=berg%uvel; vvel1=berg%vvel
   if (on_tangential_plane) call rotvec_to_tang(lon1,uvel1,vvel1,xdot1,ydot1)
   u1=uvel1*dxdl1; v1=vvel1*dydl
-  call accel(bergs, berg, i, j, xi, yj, lat1, uvel1, vvel1, ax1, ay1)
+  call accel(bergs, berg, i, j, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1)
   if (on_tangential_plane) call rotvec_to_tang(lon1,ax1,ay1,xddot1,yddot1)
   
   !  X2 = X1+dt/2*V1 ; V2 = V1+dt/2*A1; A2=A(X2)
@@ -1439,16 +1509,35 @@ type(iceberg), pointer :: berg
     lon2=lon1+dt_2*u1; lat2=lat1+dt_2*v1
     uvel2=uvel1+dt_2*ax1; vvel2=vvel1+dt_2*ay1
   endif
-  call adjust_index_and_ground(grd, lon2, lat2, uvel2, vvel2, i, j, xi, yj, bounced)
+  i=i1;j=j1;xi=berg%xi;yj=berg%yj
+  call adjust_index_and_ground(grd, lon2, lat2, uvel2, vvel2, i, j, xi, yj, bounced, error_flag)
   i2=i; j2=j
   ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon2,lat2,x2,y2)
-  if (debug .and. .not. is_point_in_cell(bergs%grd, lon2, lat2, i, j) ) then
-   write(stderr(),*) 'diamonds, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
-   write(stderr(),*) 'diamonds, evolve_iceberg: i1,i2=',i1,i2
-   write(stderr(),*) 'diamonds, evolve_iceberg: lon1,lon2=',lon1,lon2
-   write(stderr(),*) 'diamonds, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
-   write(stderr(),*) 'diamonds, evolve_iceberg: j1,j2=',j1,j2
-   write(stderr(),*) 'diamonds, evolve_iceberg: lat1,lat2=',lat1,lat2
+  if (.not.error_flag) then
+    if (debug .and. .not. is_point_in_cell(bergs%grd, lon2, lat2, i, j)) error_flag=.true.
+  endif
+  if (error_flag) then
+   call print_fld(grd, grd%msk, 'msk')
+   call print_fld(grd, grd%ssh, 'ssh')
+   call print_fld(grd, grd%sst, 'sst')
+   call print_fld(grd, grd%hi, 'hi')
+   write(stderr(),'(a,6i5)') 'diamonds, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
+   write(stderr(),'(a,6i5)') 'diamonds, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
+   write(stderr(),'(a,6i5)') 'diamonds, evolve_iceberg: i1,i2,i=',i1,i2,i
+   write(stderr(),'(a,6i5)') 'diamonds, evolve_iceberg: j1,j2,j=',j1,j2,j
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: lon1,lon2=',lon1,lon2,berg%lon
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: lat1,lat2=',lat1,lat2,berg%lat
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: u1,u2,u0=',uvel1,uvel2,berg%uvel
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: v1,v2,v0=',vvel1,vvel2,berg%vvel
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: dt* ax1,ax2=',dt*ax1,dt*ax2
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: dt* ay1,ay2=',dt*ay1,dt*ay2
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: dt* u1,u2,u0=',dt*uvel1,dt*uvel2,dt*berg%uvel
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: dt* v1,v2,v0=',dt*vvel1,dt*vvel2,dt*berg%vvel
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: dt* u1,u2 (deg)=',dt*u1,dt*u2
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: dt* v1,v2 (deg)=',dt*v1,dt*v2
+   write(stderr(),*) 'Acceleration terms for position 1'
+   error_flag=pos_within_cell(grd, lon1, lat1, i1, j1, xi, yj)
+   call accel(bergs, berg, i1, j1, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, debug_flag=.true.)
     call print_berg(stderr(), berg, 'evolve_iceberg, out of position at 2')
     write(stderr(),'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'pos2 i,j,lon,lat,xi,yj=',i,j,lon2,lat2,xi,yj
     write(stderr(),'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'pos2 box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
@@ -1457,7 +1546,7 @@ type(iceberg), pointer :: berg
   endif
   dxdl2=r180_pi/(Rearth*cos(lat2*pi_180))
   u2=uvel2*dxdl2; v2=vvel2*dydl
-  call accel(bergs, berg, i, j, xi, yj, lat2, uvel2, vvel2, ax2, ay2)
+  call accel(bergs, berg, i, j, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt_2, ax2, ay2)
   if (on_tangential_plane) call rotvec_to_tang(lon2,ax2,ay2,xddot2,yddot2)
   
   !  X3 = X1+dt/2*V2 ; V3 = V1+dt/2*A2; A3=A(X3)
@@ -1471,16 +1560,38 @@ type(iceberg), pointer :: berg
     lon3=lon1+dt_2*u2; lat3=lat1+dt_2*v2
     uvel3=uvel1+dt_2*ax2; vvel3=vvel1+dt_2*ay2
   endif
-  call adjust_index_and_ground(grd, lon3, lat3, uvel3, vvel3, i, j, xi, yj, bounced)
+  i=i1;j=j1;xi=berg%xi;yj=berg%yj
+  call adjust_index_and_ground(grd, lon3, lat3, uvel3, vvel3, i, j, xi, yj, bounced, error_flag)
   i3=i; j3=j
   ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon3,lat3,x3,y3)
-  if (debug .and. .not. is_point_in_cell(bergs%grd, lon3, lat3, i, j) ) then
-   write(stderr(),*) 'diamonds, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
-   write(stderr(),*) 'diamonds, evolve_iceberg: i1,i2,i3=',i1,i2,i3
-   write(stderr(),*) 'diamonds, evolve_iceberg: lon1,lon2,lon3=',lon1,lon2,lon3
-   write(stderr(),*) 'diamonds, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
-   write(stderr(),*) 'diamonds, evolve_iceberg: j1,j2,j3=',j1,j2,j3
-   write(stderr(),*) 'diamonds, evolve_iceberg: lat1,lat2,lat3=',lat1,lat2,lat3
+  if (.not.error_flag) then
+    if (debug .and. .not. is_point_in_cell(bergs%grd, lon3, lat3, i, j)) error_flag=.true.
+  endif
+  if (error_flag) then
+   call print_fld(grd, grd%msk, 'msk')
+   call print_fld(grd, grd%ssh, 'ssh')
+   call print_fld(grd, grd%sst, 'sst')
+   call print_fld(grd, grd%hi, 'hi')
+   write(stderr(),'(a,6i5)') 'diamonds, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
+   write(stderr(),'(a,6i5)') 'diamonds, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
+   write(stderr(),'(a,6i5)') 'diamonds, evolve_iceberg: i1,i2,i3,i=',i1,i2,i3,i
+   write(stderr(),'(a,6i5)') 'diamonds, evolve_iceberg: j1,j2,j3,j=',j1,j2,j3,j
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: lon1,lon2,lon3=',lon1,lon2,lon3,berg%lon
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: lat1,lat2,lat3=',lat1,lat2,lat3,berg%lat
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: u1,u2,u3,u0=',uvel1,uvel2,uvel3,berg%uvel
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: v1,v2,v3,v0=',vvel1,vvel2,vvel3,berg%vvel
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: dt* ax1,ax2,ax3=',dt*ax1,dt*ax2,dt*ax3
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: dt* ay1,ay2,ay3=',dt*ay1,dt*ay2,dt*ay3
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: dt* u1,u2,u3,u0=',dt*uvel1,dt*uvel2,dt*uvel3,dt*berg%uvel
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: dt* v1,v2,v3,v0=',dt*vvel1,dt*vvel2,dt*vvel3,dt*berg%vvel
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: dt* u1,u2,u3 (deg)=',dt*u1,dt*u2,dt*u3
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: dt* v1,v2,v3 (deg)=',dt*v1,dt*v2,dt*v3
+   write(stderr(),*) 'Acceleration terms for position 1'
+   error_flag=pos_within_cell(grd, lon1, lat1, i1, j1, xi, yj)
+   call accel(bergs, berg, i1, j1, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, debug_flag=.true.)
+   write(stderr(),*) 'Acceleration terms for position 2'
+   error_flag=pos_within_cell(grd, lon2, lat2, i2, j2, xi, yj)
+   call accel(bergs, berg, i2, j2, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt_2, ax2, ay2, debug_flag=.true.)
     call print_berg(stderr(), berg, 'evolve_iceberg, out of position at 3')
     write(stderr(),'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'pos3 i,j,lon,lat,xi,yj=',i,j,lon3,lat3,xi,yj
     write(stderr(),'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'pos3 box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
@@ -1489,7 +1600,7 @@ type(iceberg), pointer :: berg
   endif
   dxdl3=r180_pi/(Rearth*cos(lat3*pi_180))
   u3=uvel3*dxdl3; v3=vvel3*dydl
-  call accel(bergs, berg, i, j, xi, yj, lat3, uvel3, vvel3, ax3, ay3)
+  call accel(bergs, berg, i, j, xi, yj, lat3, uvel3, vvel3, uvel1, vvel1, dt, ax3, ay3)
   if (on_tangential_plane) call rotvec_to_tang(lon3,ax3,ay3,xddot3,yddot3)
   
   !  X4 = X1+dt*V3 ; V4 = V1+dt*A3; A4=A(X4)
@@ -1503,16 +1614,41 @@ type(iceberg), pointer :: berg
     lon4=lon1+dt*u3; lat4=lat1+dt*v3
     uvel4=uvel1+dt*ax3; vvel4=vvel1+dt*ay3
   endif
-  call adjust_index_and_ground(grd, lon4, lat4, uvel4, vvel4, i, j, xi, yj, bounced)
+  i=i1;j=j1;xi=berg%xi;yj=berg%yj
+  call adjust_index_and_ground(grd, lon4, lat4, uvel4, vvel4, i, j, xi, yj, bounced, error_flag)
   i4=i; j4=j
   ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon4,lat4,x4,y4)
-  if (debug .and. .not. is_point_in_cell(bergs%grd, lon4, lat4, i, j) ) then
-   write(stderr(),*) 'diamonds, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
-   write(stderr(),*) 'diamonds, evolve_iceberg: i1,i2,i3,i4=',i1,i2,i3,i4
-   write(stderr(),*) 'diamonds, evolve_iceberg: lon1,lon2,lon3,lon4=',lon1,lon2,lon3,lon4
-   write(stderr(),*) 'diamonds, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
-   write(stderr(),*) 'diamonds, evolve_iceberg: j1,j2,j3,j4=',j1,j2,j3,j4
-   write(stderr(),*) 'diamonds, evolve_iceberg: lat1,lat2,lat3,lat4=',lat1,lat2,lat3,lat4
+  if (.not.error_flag) then
+    if (debug .and. .not. is_point_in_cell(bergs%grd, lon4, lat4, i, j)) error_flag=.true.
+  endif
+  if (error_flag) then
+   call print_fld(grd, grd%msk, 'msk')
+   call print_fld(grd, grd%ssh, 'ssh')
+   call print_fld(grd, grd%sst, 'sst')
+   call print_fld(grd, grd%hi, 'hi')
+   write(stderr(),'(a,6i5)') 'diamonds, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
+   write(stderr(),'(a,6i5)') 'diamonds, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
+   write(stderr(),'(a,6i5)') 'diamonds, evolve_iceberg: i1,i2,i3,i4,i=',i1,i2,i3,i4,i
+   write(stderr(),'(a,6i5)') 'diamonds, evolve_iceberg: j1,j2,j3,j4,j=',j1,j2,j3,j4,j
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: lon1,lon2,lon3,lon4=',lon1,lon2,lon3,lon4,berg%lon
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: lat1,lat2,lat3,lat4=',lat1,lat2,lat3,lat4,berg%lat
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: u1,u2,u3,u4,u0=',uvel1,uvel2,uvel3,uvel4,berg%uvel
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: v1,v2,v3,v4,v0=',vvel1,vvel2,vvel3,vvel4,berg%vvel
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: dt* ax1,ax2,ax3,ax4=',dt*ax1,dt*ax2,dt*ax3,dt*ax4
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: dt* ay1,ay2,ay3,ay4=',dt*ay1,dt*ay2,dt*ay3,dt*ay4
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: dt* u1,u2,u3,u4,u0=',dt*uvel1,dt*uvel2,dt*uvel3,dt*uvel4,dt*berg%uvel
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: dt* v1,v2,v3,v4,v0=',dt*vvel1,dt*vvel2,dt*vvel3,dt*vvel4,dt*berg%vvel
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: dt* u1,u2,u3,u4 (deg)=',dt*u1,dt*u2,dt*u3,dt*u4
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: dt* v1,v2,v3,v4 (deg)=',dt*v1,dt*v2,dt*v3,dt*v4
+   write(stderr(),*) 'Acceleration terms for position 1'
+   error_flag=pos_within_cell(grd, lon1, lat1, i1, j1, xi, yj)
+   call accel(bergs, berg, i1, j1, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, debug_flag=.true.)
+   write(stderr(),*) 'Acceleration terms for position 2'
+   error_flag=pos_within_cell(grd, lon2, lat2, i2, j2, xi, yj)
+   call accel(bergs, berg, i2, j2, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt_2, ax2, ay2, debug_flag=.true.)
+   write(stderr(),*) 'Acceleration terms for position 3'
+   error_flag=pos_within_cell(grd, lon3, lat3, i3, j3, xi, yj)
+   call accel(bergs, berg, i3, j3, xi, yj, lat3, uvel3, vvel3, uvel1, vvel1, dt, ax3, ay3, debug_flag=.true.)
     call print_berg(stderr(), berg, 'evolve_iceberg, out of position at 4')
     write(stderr(),'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'pos4 i,j,lon,lat,xi,yj=',i,j,lon4,lat4,xi,yj
     write(stderr(),'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'pos4 box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
@@ -1521,7 +1657,7 @@ type(iceberg), pointer :: berg
   endif
   dxdl4=r180_pi/(Rearth*cos(lat4*pi_180))
   u4=uvel4*dxdl4; v4=vvel4*dydl
-  call accel(bergs, berg, i, j, xi, yj, lat4, uvel4, vvel4, ax4, ay4)
+  call accel(bergs, berg, i, j, xi, yj, lat4, uvel4, vvel4, uvel1, vvel1, dt, ax4, ay4)
   if (on_tangential_plane) call rotvec_to_tang(lon4,ax4,ay4,xddot4,yddot4)
   
   !  Xn = X1+dt*(V1+2*V2+2*V3+V4)/6
@@ -1539,18 +1675,47 @@ type(iceberg), pointer :: berg
     uveln=berg%uvel+dt_6*( (ax1+ax4)+2.*(ax2+ax3) )
     vveln=berg%vvel+dt_6*( (ay1+ay4)+2.*(ay2+ay3) )
   endif
-  call adjust_index_and_ground(grd, lonn, latn, uveln, vveln, i, j, xi, yj, bounced)
+  i=i1;j=j1;xi=berg%xi;yj=berg%yj
+  call adjust_index_and_ground(grd, lonn, latn, uveln, vveln, i, j, xi, yj, bounced, error_flag)
 
-  if (.not. is_point_in_cell(bergs%grd, lonn, latn, i, j) ) then
-   write(stderr(),*) 'diamonds, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
-   write(stderr(),*) 'diamonds, evolve_iceberg: i1,i2,i3,i4,i=',i1,i2,i3,i4,i
-   write(stderr(),*) 'diamonds, evolve_iceberg: lon1,lon2,lon3,lon4,lonn=',lon1,lon2,lon3,lon4,lonn
-   write(stderr(),*) 'diamonds, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
-   write(stderr(),*) 'diamonds, evolve_iceberg: j1,j2,j3,j4,j=',j1,j2,j3,j4,j
-   write(stderr(),*) 'diamonds, evolve_iceberg: lat1,lat2,lat3,lat4,latn=',lat1,lat2,lat3,lat4,latn
-    call print_berg(stderr(), berg, 'evolve_iceberg, out of cell at end!')
+  if (.not.error_flag) then
+    if (.not. is_point_in_cell(bergs%grd, lonn, latn, i, j)) error_flag=.true.
+  endif
+  if (error_flag) then
+   call print_fld(grd, grd%msk, 'msk')
+   call print_fld(grd, grd%ssh, 'ssh')
+   call print_fld(grd, grd%sst, 'sst')
+   call print_fld(grd, grd%hi, 'hi')
+   write(stderr(),'(a,6i5)') 'diamonds, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
+   write(stderr(),'(a,6i5)') 'diamonds, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
+   write(stderr(),'(a,6i5)') 'diamonds, evolve_iceberg: i1,i2,i3,i4,i=',i1,i2,i3,i4,i
+   write(stderr(),'(a,6i5)') 'diamonds, evolve_iceberg: j1,j2,j3,j4,j=',j1,j2,j3,j4,j
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: lon1,lon2,lon3,lon4,lonn=',lon1,lon2,lon3,lon4,lonn,berg%lon
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: lat1,lat2,lat3,lat4,latn=',lat1,lat2,lat3,lat4,latn,berg%lat
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: u1,u2,u3,u4,un,u0=',uvel1,uvel2,uvel3,uvel4,uveln,berg%uvel
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: v1,v2,v3,v4,vn,v0=',vvel1,vvel2,vvel3,vvel4,vveln,berg%vvel
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: dt* ax1,ax2,ax3,ax4,axn=',dt*ax1,dt*ax2,dt*ax3,dt*ax4,dt_6*( (ax1+ax4)+2.*(ax2+ax3) )
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: dt* ay1,ay2,ay3,ay4,ayn=',dt*ay1,dt*ay2,dt*ay3,dt*ay4,dt_6*( (ay1+ay4)+2.*(ay2+ay3) )
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: dt* u1,u2,u3,u4,un,u0=',dt*uvel1,dt*uvel2,dt*uvel3,dt*uvel4,dt*uveln,dt*berg%uvel
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: dt* v1,v2,v3,v4,vn,v0=',dt*vvel1,dt*vvel2,dt*vvel3,dt*vvel4,dt*vveln,dt*berg%vvel
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: dt* u1,u2,u3,u4,u_rk (deg)=',dt*u1,dt*u2,dt*u3,dt*u4,dt_6*( (u1+u4)+2.*(u2+u3) )
+   write(stderr(),'(a,6es)') 'diamonds, evolve_iceberg: dt* v1,v2,v3,v4,v_rk (deg)=',dt*v1,dt*v2,dt*v3,dt*v4,dt_6*( (v1+v4)+2.*(v2+v3) )
+   write(stderr(),*) 'diamonds, evolve_iceberg: on_tangential_plane=',on_tangential_plane
+   write(stderr(),*) 'Acceleration terms for position 1'
+   error_flag=pos_within_cell(grd, lon1, lat1, i1, j1, xi, yj)
+   call accel(bergs, berg, i1, j1, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, debug_flag=.true.)
+   write(stderr(),*) 'Acceleration terms for position 2'
+   error_flag=pos_within_cell(grd, lon2, lat2, i2, j2, xi, yj)
+   call accel(bergs, berg, i2, j2, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt_2, ax2, ay2, debug_flag=.true.)
+   write(stderr(),*) 'Acceleration terms for position 3'
+   error_flag=pos_within_cell(grd, lon3, lat3, i3, j3, xi, yj)
+   call accel(bergs, berg, i3, j3, xi, yj, lat3, uvel3, vvel3, uvel1, vvel1, dt, ax3, ay3, debug_flag=.true.)
+   write(stderr(),*) 'Acceleration terms for position 4'
+   error_flag=pos_within_cell(grd, lon4, lat4, i4, j4, xi, yj)
+   call accel(bergs, berg, i4, j4, xi, yj, lat4, uvel4, vvel4, uvel1, vvel1, dt, ax4, ay4, debug_flag=.true.)
     write(stderr(),'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'posn i,j,lon,lat,xi,yj=',i,j,lonn,latn,xi,yj
     write(stderr(),'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'posn box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
+    call print_berg(stderr(), berg, 'evolve_iceberg, out of cell at end!')
     bounced=is_point_in_cell(bergs%grd, lonn, latn, i, j, explain=.true.)
     if (debug) call error_mesg('diamonds, evolve_iceberg','berg is out of posn at end!',FATAL)
     write(stderr(),'(i4,a4,32i7)') mpp_pe(),'Lon',(i,i=grd%isd,grd%ied)
@@ -1648,21 +1813,25 @@ type(iceberg), pointer :: berg
 
 ! ##############################################################################
 
-subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, bounced)
+subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, bounced, error)
 ! Arguments
 type(icebergs_gridded), pointer :: grd
 real, intent(inout) :: lon, lat, uvel, vvel, xi, yj
 integer, intent(inout) :: i,j
-logical, intent(out) :: bounced
+logical, intent(out) :: bounced, error
 ! Local variables
 logical lret, lpos
-real, parameter :: posn_eps=1e-3, sanity_acc=1.e-11
-integer :: icount, i0, j0
+real, parameter :: posn_eps=0.05
+integer :: icount, i0, j0, inm, jnm
+real :: xi0, yj0
 
   i0=i; j0=j ! original i,j
+  xi0=xi; yj0=yj ! original xi,yj
   bounced=.false.
+  error=.false.
   lret=pos_within_cell(grd, lon, lat, i, j, xi, yj)
-  if (debug) then
+!AJA  if (debug) then
+  if (.true.) then
     !Sanity check lret, xi and yj
     lret=is_point_in_cell(grd, lon, lat, i, j)
     if (xi<0. .or. xi>1. .or. yj<0. .or. yj>1.) then
@@ -1678,7 +1847,7 @@ integer :: icount, i0, j0
         write(stderr(),*) 'diamonds, adjust: fn is_point_in_cell=',lret
         lret=pos_within_cell(grd, lon, lat, i, j, xi, yj, explain=.true.)
         write(stderr(),*) 'diamonds, adjust: fn pos_within_cell=',lret
-       !stop 'This should never happen!'
+        stop 'This should never happen!'
      endif
     else
       if (.not.lret) then
@@ -1693,90 +1862,125 @@ integer :: icount, i0, j0
         write(stderr(),*) 'diamonds, adjust: fn is_point_in_cell=',lret
         lret=pos_within_cell(grd, lon, lat, i, j, xi, yj, explain=.true.)
         write(stderr(),*) 'diamonds, adjust: fn pos_within_cell=',lret
-       !stop 'This should never happen!'
+        stop 'This should never happen!'
       endif
     endif
     lret=pos_within_cell(grd, lon, lat, i, j, xi, yj)
   endif ! debug
+  if (lret) return ! Berg was already in cell
+
   icount=0
-  do while ( .not.lret.and. icount<20 )
+  inm=i0; jnm=j0 ! original i,j
+  do while ( .not.lret.and. icount<4 )
     icount=icount+1
     if (xi.lt.0.) then
-      if (grd%msk(i-1,j)>0.) then
-        if (i>grd%isd+1) i=i-1
-      else
-       !write(stderr(),'(a,6f8.3,i)') 'diamonds, adjust: bouncing berg from west',lon,lat,xi,yj,uvel,vvel,mpp_pe()
-        xi=posn_eps
-        lon=bilin(grd, grd%lon, i, j, xi, yj)
-        lat=bilin(grd, grd%lat, i, j, xi, yj)
-        bounced=.true.
+      if (inm>grd%isd) then
+        inm=inm-1
       endif
     elseif (xi.gt.1.) then
-      if (grd%msk(i+1,j)>0.) then
-        if (i<grd%ied) i=i+1
-      else
-       !write(stderr(),'(a,6f8.3,i)') 'diamonds, adjust: bouncing berg from east',lon,lat,xi,yj,uvel,vvel,mpp_pe()
-        xi=1.-posn_eps
-        lon=bilin(grd, grd%lon, i, j, xi, yj)
-        lat=bilin(grd, grd%lat, i, j, xi, yj)
-        bounced=.true.
+      if (inm<grd%ied) then
+        inm=inm+1
       endif
     endif
     if (yj.lt.0.) then
-      if (grd%msk(i,j-1)>0.) then
-        if (j>grd%jsd+1) j=j-1
-      else
-       !write(stderr(),'(a,6f8.3,i)') 'diamonds, adjust: bouncing berg from south',lon,lat,xi,yj,uvel,vvel,mpp_pe()
-        yj=posn_eps
-        lon=bilin(grd, grd%lon, i, j, xi, yj)
-        lat=bilin(grd, grd%lat, i, j, xi, yj)
-        bounced=.true.
+      if (jnm>grd%jsd) then
+        jnm=jnm-1
       endif
     elseif (yj.gt.1.) then
-      if (grd%msk(i,j+1)>0.) then
-        if (j<grd%jed) j=j+1
-      else
-       !write(stderr(),'(a,6f8.3,i)') 'diamonds, adjust: bouncing berg from north',lon,lat,xi,yj,uvel,vvel,mpp_pe()
-        yj=1.-posn_eps
-        lon=bilin(grd, grd%lon, i, j, xi, yj)
-        lat=bilin(grd, grd%lat, i, j, xi, yj)
-        bounced=.true.
+      if (jnm<grd%jed) then
+        jnm=jnm+1
       endif
     endif
-    lret=pos_within_cell(grd, lon, lat, i, j, xi, yj)
+    lret=pos_within_cell(grd, lon, lat, inm, jnm, xi, yj) ! Update xi and yj
+  enddo
+  if (abs(inm-i0)>1) then
+    write(stderr(),*) 'pe=',mpp_pe(),'diamonds, adjust: inm,i0,inm-i0=',inm,i0,inm-i0
+   !stop 'Moved too far in i without mask!'
+  endif
+  if (abs(jnm-j0)>1) then
+    write(stderr(),*) 'pe=',mpp_pe(),'diamonds, adjust: jnm,i0,jnm-j0=',jnm,j0,inm-j0
+   !stop 'Moved too far in j without mask!'
+  endif
+  lret=pos_within_cell(grd, lon, lat, i0, j0, xi, yj)
+
+  icount=0
+  do while ( .not.lret.and. icount<4 )
+    icount=icount+1
+    if (xi.lt.0.) then
+      if (i>grd%isd) then
+        if (grd%msk(i-1,j)>0.) then
+          if (i>grd%isd+1) i=i-1
+        else
+         !write(stderr(),'(a,6f8.3,i)') 'diamonds, adjust: bouncing berg from west',lon,lat,xi,yj,uvel,vvel,mpp_pe()
+          bounced=.true.
+        endif
+      endif
+    elseif (xi.gt.1.) then
+      if (i<grd%ied) then
+        if (grd%msk(i+1,j)>0.) then
+          if (i<grd%ied) i=i+1
+        else
+         !write(stderr(),'(a,6f8.3,i)') 'diamonds, adjust: bouncing berg from east',lon,lat,xi,yj,uvel,vvel,mpp_pe()
+          bounced=.true.
+        endif
+      endif
+    endif
+    if (yj.lt.0.) then
+      if (j>grd%jsd) then
+        if (grd%msk(i,j-1)>0.) then
+          if (j>grd%jsd+1) j=j-1
+        else
+         !write(stderr(),'(a,6f8.3,i)') 'diamonds, adjust: bouncing berg from south',lon,lat,xi,yj,uvel,vvel,mpp_pe()
+          bounced=.true.
+        endif
+      endif
+    elseif (yj.gt.1.) then
+      if (j<grd%jed) then
+        if (grd%msk(i,j+1)>0.) then
+          if (j<grd%jed) j=j+1
+        else
+         !write(stderr(),'(a,6f8.3,i)') 'diamonds, adjust: bouncing berg from north',lon,lat,xi,yj,uvel,vvel,mpp_pe()
+          bounced=.true.
+        endif
+      endif
+    endif
+    if (bounced) then
+      if (xi>1.) xi=1-posn_eps
+      if (xi<0.) xi=posn_eps
+      if (yj>1.) yj=1-posn_eps
+      if (yj<0.) yj=posn_eps
+      lon=bilin(grd, grd%lon, i, j, xi, yj)
+      lat=bilin(grd, grd%lat, i, j, xi, yj)
+    endif
+    if (debug) then
+      if (grd%msk(i,j)==0.) stop 'diamonds, adjust: Berg is in land! This should not happen...'
+    endif
+    lret=pos_within_cell(grd, lon, lat, i, j, xi, yj) ! Update xi and yj
   enddo
 
-  if (verbose .and. icount>3) &
-    write(stderr(),'(a,2i4,6f8.3,2i3)') 'diamonds, adjust: Large icount!!!',i,j,lon,lat,xi,yj,uvel,vvel,icount,mpp_pe()
+ !if (debug) then
+ !  if (abs(i-i0)>2) then
+ !    stop 'diamonds, adjust: Moved too far in i!'
+ !  endif
+ !  if (abs(j-j0)>2) then
+ !    stop 'diamonds, adjust: Moved too far in j!'
+ !  endif
+ !endif
 
-  if (.not.lret) then
-    write(stderr(),'(a,2f8.3,a,1i3)') 'diamonds, adjust: initially failed for lon,lat=',lon,lat,' on PE',mpp_pe()
-    lret=find_cell_wide(grd, lon, lat, i, j)
-    write(stderr(),'(a,l3,a,i3)') 'diamonds, adjust: lret=',lret,' on PE',mpp_pe()
-    if (lret) then
-      write(stderr(),'(a,i3,2f8.3)') 'diamonds, adjust: calling pos_within_cell on PE',mpp_pe(),lon,lat
-      lpos=pos_within_cell(grd, lon, lat, i, j, xi, yj)
-      if (.not.lpos) then 
-        write(stderr(),'(a,2i4,4f8.3,2i3)') 'diamonds, adjust: _wide worked but pos FAILED!!!',i,j,lon,lat,uvel,vvel,mpp_pe()
-        call error_mesg('diamonds, adjust', 'Probable grid inconsistency!', WARNING)
-      endif
-    endif
-    if (.not.lret) then
-      write(stderr(),'(a,2i4,4f8.3,2i3)') 'diamonds, adjust: _wide FAILED!!!',i,j,lon,lat,uvel,vvel,mpp_pe()
-    write(stderr(),'(i4,a4,32i7)') mpp_pe(),'Lon',(i,i=grd%isd,grd%ied)
-    do j=grd%jed,grd%jsd,-1
-      write(stderr(),'(2i4,32f7.1)') mpp_pe(),j,(grd%lon(i,j),i=grd%isd,grd%ied)
-    enddo
-    write(stderr(),'(i4,a4,32i7)') mpp_pe(),'Lat',(i,i=grd%isd,grd%ied)
-    do j=grd%jed,grd%jsd,-1
-      write(stderr(),'(2i4,32f7.1)') mpp_pe(),j,(grd%lat(i,j),i=grd%isd,grd%ied)
-    enddo
-      call error_mesg('diamonds, adjust', 'can not find a cell to place berg in!', FATAL)
-    endif
+  if (.not.bounced.and.lret.and.grd%msk(i,j)>0.) return ! Landed in ocean without bouncing so all is well
+  if (.not.bounced.and..not.lret) then
+    write(stderr(),*) 'diamonds, adjust: xi,yj=',xi,yj 
+    call error_mesg('diamonds, adjust', 'Berg is not in cell after bouncing!', FATAL)
   endif
+  if (xi>1.) xi=1-posn_eps
+  if (xi<0.) xi=posn_eps
+  if (yj>1.) yj=1-posn_eps
+  if (yj<0.) yj=posn_eps
+  lon=bilin(grd, grd%lon, i, j, xi, yj)
+  lat=bilin(grd, grd%lat, i, j, xi, yj)
+  lret=pos_within_cell(grd, lon, lat, i, j, xi, yj) ! Update xi and yj
 
-  if (debug.and.(abs(i-i0)>1 .or. abs(j-j0)>1)) &
-    write(stderr(),*) 'diamonds, adjust: Large change in i,j!!! i0=',i0,' i=',i,' j0=',j0,' j=',j,' pe=',mpp_pe()
+  if (.not. lret) call error_mesg('diamonds, adjust', 'Should not get here! Berg is not in cell after adjustment', FATAL)
 
 end subroutine adjust_index_and_ground
 
@@ -2369,7 +2573,7 @@ logical :: lerr
          ' [lon|lat][min|max]=', minval(grd%lon),maxval(grd%lon),minval(grd%lat),maxval(grd%lat)
   endif
 
- !if (mpp_pe().eq.22) then
+ !if (mpp_pe().eq.3) then
  !  write(stderr(),'(a3,32i7)') 'Lon',(i,i=grd%isd,grd%ied)
  !  do j=grd%jed,grd%jsd,-1
  !    write(stderr(),'(i3,32f7.1)') j,(grd%lon(i,j),i=grd%isd,grd%ied)
@@ -2377,6 +2581,10 @@ logical :: lerr
  !  write(stderr(),'(a3,32i7)') 'Lat',(i,i=grd%isd,grd%ied)
  !  do j=grd%jed,grd%jsd,-1
  !    write(stderr(),'(i3,32f7.1)') j,(grd%lat(i,j),i=grd%isd,grd%ied)
+ !  enddo
+ !  write(stderr(),'(a3,32i7)') 'Msk',(i,i=grd%isd,grd%ied)
+ !  do j=grd%jed,grd%jsd,-1
+ !    write(stderr(),'(i3,32f7.1)') j,(grd%msk(i,j),i=grd%isd,grd%ied)
  !  enddo
  !endif
 
@@ -4249,6 +4457,23 @@ integer :: iret
   endif
 
 end subroutine put_int
+
+! ##############################################################################
+
+subroutine print_fld(grd, fld, label)
+! Arguments
+type(icebergs_gridded), pointer :: grd
+real, intent(in) :: fld(grd%isd:grd%ied,grd%jsd:grd%jed)
+character(len=*) :: label
+! Local variables
+integer :: i, j
+
+  write(stderr(),'("pe=",i3,x,a8,32i10)') mpp_pe(),label,(i,i=grd%isd,grd%ied)
+  do j=grd%jed,grd%jsd,-1
+    write(stderr(),'("pe=",i3,x,i8,32es10.2)') mpp_pe(),j,(fld(i,j),i=grd%isd,grd%ied)
+  enddo
+
+end subroutine print_fld
 
 ! ##############################################################################
 
