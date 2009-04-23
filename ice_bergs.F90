@@ -151,7 +151,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.90 2009/04/21 19:33:01 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.91 2009/04/23 18:35:23 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -238,7 +238,7 @@ integer :: itloop
     uwave=ua/wmod ! Wave radiation force acts in wind direction ...
     vwave=va/wmod
   else
-    wave_rad=0.   ! ... and only when wind is present.
+    uwave=0.; vwave=0.; wave_rad=0. ! ... and only when wind is present.
   endif
 
   ! Weighted drag coefficients
@@ -248,7 +248,7 @@ integer :: itloop
   if (abs(ui)+abs(vi).eq.0.) c_ice=0.
 
   uveln=uvel; vveln=vvel ! Copy starting uvel, vvel
-  do itloop=1,1 ! Iterate on drag coefficients
+  do itloop=1,2 ! Iterate on drag coefficients
 
     us=0.5*(uveln+uvel); vs=0.5*(vveln+vvel)
     drag_ocn=c_ocn*sqrt( (us-uo)**2+(vs-vo)**2 )
@@ -279,7 +279,7 @@ integer :: itloop
 
     ! Solve for implicit accelerations
     if (alpha+beta.gt.0.) then
-      lambda=drag_ocn+drag_atm+drag_ice !+0.5*wave_rad
+      lambda=drag_ocn+drag_atm+drag_ice
       A11=1.+beta*dt*lambda
       A12=alpha*dt*f_cori
       detA=1./(A11**2+A12**2)
@@ -376,7 +376,7 @@ integer :: itloop
       'va*=',(drag_atm*va)/lambda, &
       'vi*=',(drag_ice*vi)/lambda
     write(stderr(),100) mpp_pe(),'params', &
-      'a=',sqrt(ampl), 'Lwl=',Lwavelength, 'Lcut=',Lcutoff, 'Ltop=',Ltop, 'hi=',hi, 'Cr=',Cr
+      'a=',ampl, 'Lwl=',Lwavelength, 'Lcut=',Lcutoff, 'Ltop=',Ltop, 'hi=',hi, 'Cr=',Cr
     write(stderr(),100) mpp_pe(),'Position', &
       'xi=',xi, 'yj=',yj, 'lat=',lat
     call dump_locfld(grd,i,j,grd%msk,'MSK')
@@ -1968,9 +1968,9 @@ real :: xi0, yj0
  !endif
 
   if (.not.bounced.and.lret.and.grd%msk(i,j)>0.) return ! Landed in ocean without bouncing so all is well
-  if (.not.bounced.and..not.lret) then
+  if (.not.bounced.and..not.lret) then ! This implies the berg traveled many cells
     write(stderr(),*) 'diamonds, adjust: xi,yj=',xi,yj 
-    call error_mesg('diamonds, adjust', 'Berg is not in cell after bouncing!', FATAL)
+    call error_mesg('diamonds, adjust', 'Berg is not in cell after bouncing!', WARNING)
   endif
   if (xi>1.) xi=1-posn_eps
   if (xi<0.) xi=posn_eps
