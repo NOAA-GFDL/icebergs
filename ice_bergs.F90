@@ -151,7 +151,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.91 2009/04/23 18:35:23 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.92 2009/04/30 13:37:19 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -176,7 +176,7 @@ logical :: budget=.true. ! Calculate budgets
 logical :: debug=.false. ! Turn on debugging
 logical :: really_debug=.false. ! Turn on debugging
 logical :: parallel_reprod=.true. ! Reproduce across different PE decompositions
-logical :: use_slow_find=.false. ! Use really slow (but robust) find_cell
+logical :: use_slow_find=.true. ! Use really slow (but robust) find_cell for reading restarts
 
 contains
 
@@ -1830,8 +1830,7 @@ real :: xi0, yj0
   bounced=.false.
   error=.false.
   lret=pos_within_cell(grd, lon, lat, i, j, xi, yj)
-!AJA  if (debug) then
-  if (.true.) then
+  if (debug) then
     !Sanity check lret, xi and yj
     lret=is_point_in_cell(grd, lon, lat, i, j)
     if (xi<0. .or. xi>1. .or. yj<0. .or. yj>1.) then
@@ -2805,7 +2804,7 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
       else
         localberg%mass_of_bits=0.
       endif
-      if (heat_density_id>0) then ! Allow reading of older restart with no bergy bits
+      if (heat_density_id>0) then ! Allow reading of older restart with no heat content
         localberg%heat_density=get_double(ncid, heat_density_id, k)
       else
         localberg%heat_density=0.
@@ -2829,7 +2828,7 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
     write(stdout(),'(a,i,a,i,a)') 'diamonds, read_restart_bergs: there were',nbergs_in_file,' bergs in the restart file and', &
      k,' bergs have been read'
   endif
-  if (debug.and.k.ne.nbergs_in_file) call error_mesg('diamonds, read_restart_bergs', 'wrong number of bergs read!', FATAL)
+  if (k.ne.nbergs_in_file) call error_mesg('diamonds, read_restart_bergs', 'wrong number of bergs read!', FATAL)
 
   bergs%floating_mass_start=sum_mass(bergs%first)
   call mpp_sum( bergs%floating_mass_start )
@@ -3272,12 +3271,16 @@ end subroutine move_trajectory
 
 logical function find_cell_by_search(grd, x, y, i, j)
 ! Arguments
-type(icebergs_gridded), intent(in) :: grd
+type(icebergs_gridded), pointer :: grd
 real, intent(in) :: x, y
 integer, intent(inout) :: i, j
 ! Local variables
 integer :: is,ie,js,je,di,dj,io,jo,icnt
 real :: d0,d1,d2,d3,d4,d5,d6,d7,d8,dmin
+logical :: explain=.false.
+
+911 continue
+
   find_cell_by_search=.false.
   is=grd%isc; ie=grd%iec; js=grd%jsc; je=grd%jec
 
@@ -3293,6 +3296,12 @@ real :: d0,d1,d2,d3,d4,d5,d6,d7,d8,dmin
   elseif (d4==dmin) then; i=is+1; j=je-1
   else
     call error_mesg('diamonds, find_cell_by_search:', 'This should never EVER happen! (1)', FATAL)
+  endif
+
+  if (explain) then
+    write(0,'(i3,a,2i4,f)') mpp_pe(),'Initial corner i-is,j-js,cost=',i-is,j-js,dmin
+    write(0,'(i3,a,3f)') mpp_pe(),'cost ',d4,d3
+    write(0,'(i3,a,3f)') mpp_pe(),'cost ',d1,d2
   endif
 
   if (is_point_in_cell(grd, x, y, i, j)) then
@@ -3331,6 +3340,13 @@ real :: d0,d1,d2,d3,d4,d5,d6,d7,d8,dmin
     i=min(ie, max(is, io+di))
     j=min(je, max(js, jo+dj))
 
+    if (explain) then
+      write(0,'(i3,a,2i4,f,a,2i4,a,2i4)') mpp_pe(),'Current position i,j,cost=',i,j,dmin,' di,dj=',di,dj,' old io,jo=',io,jo
+      write(0,'(i3,a,3f)') mpp_pe(),'cost ',d2,d1,d8
+      write(0,'(i3,a,3f)') mpp_pe(),'cost ',d3,d0,d7
+      write(0,'(i3,a,3f)') mpp_pe(),'cost ',d4,d5,d6
+    endif
+
     if (is_point_in_cell(grd, x, y, i, j)) then
       find_cell_by_search=.true.
       return
@@ -3347,11 +3363,19 @@ real :: d0,d1,d2,d3,d4,d5,d6,d7,d8,dmin
       if (is_point_in_cell(grd, x, y, i, j)) then
         find_cell_by_search=.true.
       else
-  !     find_cell_by_search=find_cell(grd, x, y, i, j)
+  !     find_cell_by_search=find_cell(grd, x, y, io, jo)
   !     if (find_cell_by_search) then
-  !       write(0,'(i3,a,2i5,a,2i3)') mpp_pe(),'diamonds, find_cell_by_search: false negative i,j=',i-is,j-js,' di,dj=',di,dj
-  !       write(0,'(i3,a,2i5,a,2f8.3)') mpp_pe(),'diamonds, find_cell_by_search: false negative io,jo=',io,jo
-  !       write(0,'(i3,a,2i5,a,2f8.3)') mpp_pe(),'diamonds, find_cell_by_search: false negative i,j=',i,j,' targ=',x,y
+  !       if (explain) then
+  !         call print_fld(grd, grd%lat, 'Lat')
+  !         call print_fld(grd, grd%lon, 'Lat')
+  !         do j=grd%jsd, grd%jed; do i=grd%isd, grd%ied
+  !           grd%tmp(i,j) = dcost(x,y,grd%lonc(i,j),grd%latc(i,j))
+  !         enddo; enddo
+  !         call print_fld(grd, grd%tmp, 'Cost')
+  !         stop 'Avoid recursing'
+  !       endif
+  !       write(0,'(i3,a,2i5,a,2i3,a,2f8.3)') mpp_pe(),'diamonds, find_cell_by_search: false negative io,jo=',io,jo,' di,dj=',di,dj,' targ=',x,y
+  !       explain=.true.; goto 911
   !     endif
       endif
       return
