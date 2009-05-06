@@ -151,7 +151,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.93 2009/05/06 17:44:51 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.94 2009/05/06 19:25:48 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -3712,7 +3712,7 @@ integer, intent(in) :: i, j
 real, intent(out) :: xi, yj
 logical, intent(in), optional :: explain
 ! Local variables
-real :: x1,y1,x2,y2,x3,y3,x4,y4,xx,yy
+real :: x1,y1,x2,y2,x3,y3,x4,y4,xx,yy,fac
 
   pos_within_cell=.false.; xi=-999.; yj=-999.
   if (i-1<grd%isd) return
@@ -3757,6 +3757,21 @@ real :: x1,y1,x2,y2,x3,y3,x4,y4,xx,yy
       write(stderr(),'(a,2f12.6)') 'pos_within_cell: y',yy
     endif
     call calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, xx, yy, xi, yj, explain=explain)
+    if (is_point_in_cell(grd, x, y, i, j)) then
+      if (abs(xi-0.5)>0.5.or.abs(yj-0.5)>0.5) then
+        ! Scale internal coordinates to be consistent with is_point_in_cell()
+        ! Note: this is intended to fix the inconsistency between the tangent plane
+        ! and lat-lon calculations
+        fac=2.*max( abs(xi-0.5), abs(yj-0.5) ); fac=max(1., fac)
+        xi=0.5+(xi-0.5)/fac
+        yj=0.5+(yj-0.5)/fac
+        call error_mesg('diamonds, pos_within_cell', 'in cell so scaling internal coordinates!', WARNING)
+      endif
+    else
+      if (abs(xi-0.5)<=0.5.and.abs(yj-0.5)<=0.5) then
+        call error_mesg('diamonds, pos_within_cell', 'out of cell but coordinates <=0.5!', WARNING)
+      endif
+    endif
   endif
 
   if (present(explain).and.explain) then
