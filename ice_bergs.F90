@@ -151,7 +151,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.92 2009/04/30 13:37:19 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.93 2009/05/06 17:44:51 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -390,6 +390,8 @@ integer :: itloop
     call dump_locvel(grd,i,j,grd%vi,'Vi')
     call dump_locfld(grd,i,j,grd%hi,'HI')
     call dump_locfld(grd,i,j,grd%cn,'CN')
+    call dump_locvel(grd,i,j,grd%lon,'Lon')
+    call dump_locvel(grd,i,j,grd%lat,'Lat')
     call print_berg(stderr(),berg,'diamonds, accel, large accel')
   endif
 
@@ -1823,13 +1825,14 @@ logical, intent(out) :: bounced, error
 logical lret, lpos
 real, parameter :: posn_eps=0.05
 integer :: icount, i0, j0, inm, jnm
-real :: xi0, yj0
+real :: xi0, yj0, lon0, lat0
 
-  i0=i; j0=j ! original i,j
-  xi0=xi; yj0=yj ! original xi,yj
   bounced=.false.
   error=.false.
+  lon0=lon; lat0=lat ! original position
+  i0=i; j0=j ! original i,j
   lret=pos_within_cell(grd, lon, lat, i, j, xi, yj)
+  xi0=xi; yj0=yj ! original xi,yj
   if (debug) then
     !Sanity check lret, xi and yj
     lret=is_point_in_cell(grd, lon, lat, i, j)
@@ -1846,7 +1849,8 @@ real :: xi0, yj0
         write(stderr(),*) 'diamonds, adjust: fn is_point_in_cell=',lret
         lret=pos_within_cell(grd, lon, lat, i, j, xi, yj, explain=.true.)
         write(stderr(),*) 'diamonds, adjust: fn pos_within_cell=',lret
-        stop 'This should never happen!'
+        write(0,*) 'This should never happen!'
+        error=.true.; return
      endif
     else
       if (.not.lret) then
@@ -1861,7 +1865,8 @@ real :: xi0, yj0
         write(stderr(),*) 'diamonds, adjust: fn is_point_in_cell=',lret
         lret=pos_within_cell(grd, lon, lat, i, j, xi, yj, explain=.true.)
         write(stderr(),*) 'diamonds, adjust: fn pos_within_cell=',lret
-        stop 'This should never happen!'
+        write(0,*) 'This should never happen!'
+        error=.true.; return
       endif
     endif
     lret=pos_within_cell(grd, lon, lat, i, j, xi, yj)
@@ -1944,9 +1949,9 @@ real :: xi0, yj0
       endif
     endif
     if (bounced) then
-      if (xi>1.) xi=1-posn_eps
+      if (xi>1.) xi=1.-posn_eps
       if (xi<0.) xi=posn_eps
-      if (yj>1.) yj=1-posn_eps
+      if (yj>1.) yj=1.-posn_eps
       if (yj<0.) yj=posn_eps
       lon=bilin(grd, grd%lon, i, j, xi, yj)
       lat=bilin(grd, grd%lat, i, j, xi, yj)
@@ -1968,18 +1973,32 @@ real :: xi0, yj0
 
   if (.not.bounced.and.lret.and.grd%msk(i,j)>0.) return ! Landed in ocean without bouncing so all is well
   if (.not.bounced.and..not.lret) then ! This implies the berg traveled many cells
-    write(stderr(),*) 'diamonds, adjust: xi,yj=',xi,yj 
-    call error_mesg('diamonds, adjust', 'Berg is not in cell after bouncing!', WARNING)
+    if (debug) then
+      write(stderr(),*) 'diamonds, adjust: lon0, lat0=',lon0,lat0
+      write(stderr(),*) 'diamonds, adjust: xi0, yj0=',xi0,yj0
+      write(stderr(),*) 'diamonds, adjust: i0,j0=',i0,j0 
+      write(stderr(),*) 'diamonds, adjust: lon, lat=',lon,lat
+      write(stderr(),*) 'diamonds, adjust: xi,yj=',xi,yj 
+      write(stderr(),*) 'diamonds, adjust: i,j=',i,j
+      write(stderr(),*) 'diamonds, adjust: inm,jnm=',inm,jnm
+      write(stderr(),*) 'diamonds, adjust: icount=',icount
+      lret=pos_within_cell(grd, lon, lat, i, j, xi, yj, explain=.true.)
+      write(stderr(),*) 'diamonds, adjust: lret=',lret
+    endif
+    call error_mesg('diamonds, adjust', 'Berg iterated many times without bouncing!', WARNING)
   endif
-  if (xi>1.) xi=1-posn_eps
+  if (xi>1.) xi=1.-posn_eps
   if (xi<0.) xi=posn_eps
-  if (yj>1.) yj=1-posn_eps
+  if (yj>1.) yj=1.-posn_eps
   if (yj<0.) yj=posn_eps
   lon=bilin(grd, grd%lon, i, j, xi, yj)
   lat=bilin(grd, grd%lat, i, j, xi, yj)
   lret=pos_within_cell(grd, lon, lat, i, j, xi, yj) ! Update xi and yj
 
-  if (.not. lret) call error_mesg('diamonds, adjust', 'Should not get here! Berg is not in cell after adjustment', FATAL)
+  if (.not. lret) then
+    write(stderr(),*) 'diamonds, adjust: Should not get here! Berg is not in cell after adjustment'
+    if (debug) error=.true.
+  endif
 
 end subroutine adjust_index_and_ground
 
@@ -3711,10 +3730,10 @@ real :: x1,y1,x2,y2,x3,y3,x4,y4,xx,yy
   y4=grd%lat(i-1,j  )
 
   if (present(explain).and.explain) then
-    write(stderr(),'(a,4f8.2)') 'pos_within_cell: x1..x4 ',x1,x2,x3,x4
-    write(stderr(),'(a,2f8.2)') 'pos_within_cell: x',x
-    write(stderr(),'(a,4f8.2)') 'pos_within_cell: y1..y4 ',y1,y2,y3,y4
-    write(stderr(),'(a,2f8.2)') 'pos_within_cell: y',y
+    write(stderr(),'(a,4f12.6)') 'pos_within_cell: x1..x4 ',x1,x2,x3,x4
+    write(stderr(),'(a,2f12.6)') 'pos_within_cell: x',x
+    write(stderr(),'(a,4f12.6)') 'pos_within_cell: y1..y4 ',y1,y2,y3,y4
+    write(stderr(),'(a,2f12.6)') 'pos_within_cell: y',y
   endif
 
   if (max(y1,y2,y3,y4)<89.999) then
@@ -3732,12 +3751,16 @@ real :: x1,y1,x2,y2,x3,y3,x4,y4,xx,yy
     x4=(90.-y4)*cos(grd%lon(i-1,j  )*pi_180)
     y4=(90.-y4)*sin(grd%lon(i-1,j  )*pi_180)
     if (present(explain).and.explain) then
-      write(stderr(),'(a,4f8.2)') 'pos_within_cell: x1..x4 ',x1,x2,x3,x4
-      write(stderr(),'(a,2f8.2)') 'pos_within_cell: x',xx
-      write(stderr(),'(a,4f8.2)') 'pos_within_cell: y1..y4 ',y1,y2,y3,y4
-      write(stderr(),'(a,2f8.2)') 'pos_within_cell: y',yy
+      write(stderr(),'(a,4f12.6)') 'pos_within_cell: x1..x4 ',x1,x2,x3,x4
+      write(stderr(),'(a,2f12.6)') 'pos_within_cell: x',xx
+      write(stderr(),'(a,4f12.6)') 'pos_within_cell: y1..y4 ',y1,y2,y3,y4
+      write(stderr(),'(a,2f12.6)') 'pos_within_cell: y',yy
     endif
-    call calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, xx, yy, xi, yj)
+    call calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, xx, yy, xi, yj, explain=explain)
+  endif
+
+  if (present(explain).and.explain) then
+    write(stderr(),'(a,2f12.6)') 'pos_within_cell: xi,yj=',xi,yj
   endif
 
  !if (.not. is_point_in_cell(grd, x, y, i, j) ) then
@@ -3746,7 +3769,7 @@ real :: x1,y1,x2,y2,x3,y3,x4,y4,xx,yy
  !endif
 
   if (xi.ge.0. .and. xi.le.1. .and. yj.ge.0. .and. yj.le.1.) then
-    pos_within_cell=is_point_in_cell(grd, x, y, i, j)
+    pos_within_cell=is_point_in_cell(grd, x, y, i, j, explain=explain)
     if (.not. pos_within_cell .and. verbose) then
       call error_mesg('diamonds, pos_within_cell', 'pos_within_cell is in cell BUT is_point_in_cell disagrees!', WARNING)
     endif
