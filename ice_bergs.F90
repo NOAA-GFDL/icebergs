@@ -16,6 +16,7 @@ use mpp_domains_mod, only: SCALAR_PAIR, CGRID_NE, BGRID_NE, CORNER
 use mpp_domains_mod, only: mpp_get_compute_domain, mpp_get_data_domain
 use mpp_domains_mod, only: CYCLIC_GLOBAL_DOMAIN, FOLD_NORTH_EDGE
 use mpp_domains_mod, only: mpp_get_neighbor_pe, NORTH, SOUTH, EAST, WEST
+use mpp_domains_mod, only: mpp_define_io_domain
 use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 use diag_manager_mod, only: register_diag_field, register_static_field, send_data
 use diag_manager_mod, only: diag_axis_init
@@ -151,7 +152,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.94 2009/05/06 19:25:48 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.95 2009/05/29 18:24:57 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -1311,7 +1312,7 @@ logical, save :: first_call=.true.
     call mpp_sum( bergs%stored_heat_start )
     if (mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a,es13.6,a)') &
         'diamonds, accumulate_calving: initial stored heat=',bergs%stored_heat_start,' J'
-  endif
+   endif
 
   remaining_dist=1.
   do k=1, nclasses
@@ -2225,7 +2226,7 @@ integer :: i, nbergs_start, nbergs_end
 
   call mpp_sync_self()
 
-  contains
+contains
 
   subroutine pack_berg_into_buffer2(berg, buff, n)
   ! Arguments
@@ -2378,12 +2379,12 @@ end subroutine send_bergs_to_other_pes
 ! ##############################################################################
 
 subroutine icebergs_init(bergs, &
-             gni, gnj, layout, axes, maskmap, x_cyclic, tripolar_grid, &
+             gni, gnj, layout, io_layout, axes, maskmap, x_cyclic, tripolar_grid, &
              dt, Time, ice_lon, ice_lat, ice_wet, ice_dx, ice_dy, ice_area, &
              cos_rot, sin_rot)
 ! Arguments
 type(icebergs), pointer :: bergs
-integer, intent(in) :: gni, gnj, layout(2), axes(2)
+integer, intent(in) :: gni, gnj, layout(2), io_layout(2), axes(2)
 logical, intent(in), optional :: maskmap(:,:)
 logical, intent(in) :: x_cyclic, tripolar_grid
 real, intent(in) :: dt
@@ -2469,7 +2470,9 @@ logical :: lerr
                              xhalo=halo, yhalo=halo, name='diamond')
   endif
 
- !write(stderr(),*) 'diamonds: get compute domain'
+  call mpp_define_io_domain(grd%domain, io_layout)
+
+ !write(stderr(),*) 'diamond: get compute domain'
   call mpp_get_compute_domain( grd%domain, grd%isc, grd%iec, grd%jsc, grd%jec )
   call mpp_get_data_domain( grd%domain, grd%isd, grd%ied, grd%jsd, grd%jed )
 
@@ -2694,16 +2697,16 @@ logical :: lerr
 
   ! Static fields
   id_class=register_static_field('icebergs', 'lon', axes, &
-               'longitude (corners)', 'degrees_E',require=.false.)
+               'longitude (corners)', 'degrees_E')
   if (id_class>0) lerr=send_data(id_class, grd%lon(grd%isc:grd%iec,grd%jsc:grd%jec))
   id_class=register_static_field('icebergs', 'lat', axes, &
-               'latitude (corners)', 'degrees_N',require=.false.)
+               'latitude (corners)', 'degrees_N')
   if (id_class>0) lerr=send_data(id_class, grd%lat(grd%isc:grd%iec,grd%jsc:grd%jec))
   id_class=register_static_field('icebergs', 'area', axes, &
-               'cell area', 'm^2',require=.false.)
+               'cell area', 'm^2')
   if (id_class>0) lerr=send_data(id_class, grd%area(grd%isc:grd%iec,grd%jsc:grd%jec))
   id_class=register_static_field('icebergs', 'mask', axes, &
-               'wet point mask', 'none',require=.false.)
+               'wet point mask', 'none')
   if (id_class>0) lerr=send_data(id_class, grd%msk(grd%isc:grd%iec,grd%jsc:grd%jec))
 
   if (debug) then
@@ -2878,21 +2881,21 @@ type(randomNumberStream) :: rns
   ! Read stored ice
   filename='INPUT/calving.res.nc'
   if (file_exist(filename)) then
-    if (mpp_pe().eq.mpp_root_pe()) write(stdout(),'(2a)') &
+    if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stdout(),'(2a)') &
      'diamonds, read_restart_calving: reading ',filename
     call read_data(filename, 'stored_ice', grd%stored_ice, grd%domain)
     if (field_exist(filename, 'stored_heat')) then
-      if (mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a)') &
-     'diamonds, read_restart_calving: reading stored_heat from restart file.'
+      if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a)') &
+       'diamonds, read_restart_calving: reading stored_heat from restart file.'
       call read_data(filename, 'stored_heat', grd%stored_heat, grd%domain)
     else
-      if (mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a)') &
+      if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a)') &
      'diamonds, read_restart_calving: stored_heat WAS NOT FOUND in the file. Setting to 0.'
       grd%stored_heat(:,:)=0.
     endif
     bergs%restarted=.true.
   else
-    if (mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a)') &
+    if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a)') &
      'diamonds, read_restart_calving: initializing stored ice to random numbers'
     allocate(randnum(grd%jsc:grd%jec, nclasses))
     do i=grd%isc, grd%iec
