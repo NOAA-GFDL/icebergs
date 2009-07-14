@@ -152,7 +152,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.95 2009/05/29 18:24:57 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.96 2009/07/14 14:51:17 wga Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -2757,9 +2757,13 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
     filename='icebergs.res.nc'; inquire(file=filename,exist=found_restart)
     if (found_restart) exit
     if (verbose.and.mpp_pe()==mpp_root_pe()) write(stdout(),'(a)') 'diamonds, read_restart_bergs: no restart file found'
-    return
+!   return ! leave s/r if no restart found
+    multiPErestart=.TRUE. ! This is to force sanity checking in a mulit-PE mode if no file was found on this PE
+    exit
   enddo 
 
+  if (found_restart) then ! only do the following if a file was found
+  
   if (verbose.and.mpp_pe()==mpp_root_pe()) write(stdout(),'(2a)') 'diamonds, read_restart_bergs: found restart file = ',filename
 
   ierr=nf_open(filename, NF_NOWRITE, ncid)
@@ -2837,13 +2841,18 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
       call add_new_berg_to_list(bergs%first, localberg)
       if (really_debug) call print_berg(stderr(), bergs%first, 'read_restart_bergs, add_new_berg_to_list')
     elseif (multiPErestart) then
-      write(stderr(),*) 'diamonds, read_restart_bergs: WARNING berg not on PE!'
+      call error_mesg('diamonds, read_restart_bergs', 'berg in PE file was not on PE!', FATAL)
     endif
   enddo
 
+  else ! if no restart file was read on this PE
+    nbergs_in_file=0
+  endif ! if (found_restart)
+  
   ! Sanity check
   k=count_bergs(bergs)
   if (verbose) write(stdout(),'(2(a,i))') 'diamonds, read_restart_bergs: # bergs =',k,' on PE',mpp_pe()
+  if (multiPErestart) call mpp_sum(nbergs_in_file) ! In case PE 0 didn't open a file
   call mpp_sum(k)
   bergs%nbergs_start=k
   if (mpp_pe().eq.mpp_root_pe()) then
