@@ -153,7 +153,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.101 2009/07/30 15:21:48 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.102 2009/07/30 15:31:00 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -179,6 +179,7 @@ logical :: debug=.false. ! Turn on debugging
 logical :: really_debug=.false. ! Turn on debugging
 logical :: parallel_reprod=.true. ! Reproduce across different PE decompositions
 logical :: use_slow_find=.true. ! Use really slow (but robust) find_cell for reading restarts
+logical :: ignore_ij_restart=.false. ! Read i,j location from restart if available (needed to use restarts on different grids)
 
 contains
 
@@ -2403,7 +2404,7 @@ real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250
 namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
          distribution, mass_scaling, initial_thickness, verbose_hrs, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
-         parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode
+         parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je
 type(icebergs_gridded), pointer :: grd
@@ -2724,7 +2725,7 @@ subroutine read_restart_bergs(bergs)
 type(icebergs), pointer :: bergs
 ! Local variables
 integer :: k, ierr, ncid, dimid, nbergs_in_file
-integer :: lonid, latid, uvelid, vvelid
+integer :: lonid, latid, uvelid, vvelid, ineid, jneid
 integer :: massid, thicknessid, widthid, lengthid
 integer :: start_lonid, start_latid, start_yearid, start_dayid, start_massid
 integer :: scaling_id, mass_of_bits_id, heat_density_id
@@ -2788,6 +2789,8 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
   scaling_id=inq_var(ncid, 'mass_scaling')
   mass_of_bits_id=inq_var(ncid, 'mass_of_bits',unsafe=.true.)
   heat_density_id=inq_var(ncid, 'heat_density',unsafe=.true.)
+  ineid=inq_var(ncid, 'ine',unsafe=.true.)
+  jneid=inq_var(ncid, 'jne',unsafe=.true.)
 
   ! Find approx outer bounds for tile
   lon0=minval( grd%lon(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
@@ -2799,16 +2802,27 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
    !write(stderr(),*) 'diamonds, read_restart_bergs: reading berg ',k
     localberg%lon=get_double(ncid, lonid, k)
     localberg%lat=get_double(ncid, latid, k)
-    if (use_slow_find) then
-      lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
-    else
-      lres=find_cell_by_search(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+    if (ineid>0 .and. jneid>0 .and. .not. ignore_ij_restart) then ! read i,j position and avoid the "find" step
+      localberg%ine=get_int(ncid, ineid, k)
+      localberg%jne=get_int(ncid, ineid, k)
+      if ( localberg%ine>=grd%isc .and. localberg%ine<=grd%iec .and. &
+           localberg%jne>=grd%jsc .and.localberg%jne<=grd%jec ) then
+        lres=.true.
+      else
+        lres=.false.
+      endif
+    else ! i,j are not available from the file so we search the grid to find out if we reside on this PE
+      if (use_slow_find) then
+        lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+      else
+        lres=find_cell_by_search(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+      endif
     endif
     if (really_debug) then
       write(stderr(),'(a,i,a,2f,a,i)') 'diamonds, read_restart_bergs: berg ',k,' is at ',localberg%lon,localberg%lat,' on PE ',mpp_pe()
       write(stderr(),*) 'diamonds, read_restart_bergs: lres = ',lres
     endif
-    if (lres) then
+    if (lres) then ! true if we reside on this PE grid
       localberg%uvel=get_double(ncid, uvelid, k)
       localberg%vvel=get_double(ncid, vvelid, k)
       localberg%mass=get_double(ncid, massid, k)
@@ -4230,7 +4244,7 @@ subroutine write_restart(bergs)
 type(icebergs), pointer :: bergs
 ! Local variables
 integer :: iret, ncid, i_dim, i
-integer :: lonid, latid, uvelid, vvelid
+integer :: lonid, latid, uvelid, vvelid, ineid, jneid
 integer :: massid, thicknessid, lengthid, widthid
 integer :: start_lonid, start_latid, start_yearid, start_dayid, start_massid
 integer :: scaling_id, mass_of_bits_id, heat_density_id
@@ -4256,6 +4270,8 @@ type(iceberg), pointer :: this
     uvelid = def_var(ncid, 'uvel', NF_DOUBLE, i_dim)
     vvelid = def_var(ncid, 'vvel', NF_DOUBLE, i_dim)
     massid = def_var(ncid, 'mass', NF_DOUBLE, i_dim)
+    ineid = def_var(ncid, 'ine', NF_INT, i_dim)
+    jneid = def_var(ncid, 'jne', NF_INT, i_dim)
     thicknessid = def_var(ncid, 'thickness', NF_DOUBLE, i_dim)
     widthid = def_var(ncid, 'width', NF_DOUBLE, i_dim)
     lengthid = def_var(ncid, 'length', NF_DOUBLE, i_dim)
@@ -4277,6 +4293,10 @@ type(iceberg), pointer :: this
     call put_att(ncid, uvelid, 'units', 'm/s')
     call put_att(ncid, vvelid, 'long_name', 'meridional velocity')
     call put_att(ncid, vvelid, 'units', 'm/s')
+    call put_att(ncid, ineid, 'long_name', 'i index')
+    call put_att(ncid, ineid, 'units', 'none')
+    call put_att(ncid, jneid, 'long_name', 'j index')
+    call put_att(ncid, jneid, 'units', 'none')
     call put_att(ncid, massid, 'long_name', 'mass')
     call put_att(ncid, massid, 'units', 'kg')
     call put_att(ncid, thicknessid, 'long_name', 'thickness')
@@ -4302,7 +4322,7 @@ type(iceberg), pointer :: this
     call put_att(ncid, heat_density_id, 'long_name', 'heat density')
     call put_att(ncid, heat_density_id, 'units', 'J/kg')
     iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_major_version', NF_INT, 1, file_format_major_version)
-    iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_minor_version', NF_INT, 2, file_format_minor_version)
+    iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_minor_version', NF_INT, 3, file_format_minor_version)
 
     ! End define mode
     iret = nf_enddef(ncid)
@@ -4316,6 +4336,8 @@ type(iceberg), pointer :: this
       call put_double(ncid, latid, i, this%lat)
       call put_double(ncid, uvelid, i, this%uvel)
       call put_double(ncid, vvelid, i, this%vvel)
+      call put_int(ncid, ineid, i, this%ine)
+      call put_int(ncid, jneid, i, this%jne)
       call put_double(ncid, massid, i, this%mass)
       call put_double(ncid, thicknessid, i, this%thickness)
       call put_double(ncid, widthid, i, this%width)
