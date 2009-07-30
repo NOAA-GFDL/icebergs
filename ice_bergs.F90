@@ -153,7 +153,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.102 2009/07/30 15:31:00 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.103 2009/07/30 20:14:14 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -2804,7 +2804,7 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
     localberg%lat=get_double(ncid, latid, k)
     if (ineid>0 .and. jneid>0 .and. .not. ignore_ij_restart) then ! read i,j position and avoid the "find" step
       localberg%ine=get_int(ncid, ineid, k)
-      localberg%jne=get_int(ncid, ineid, k)
+      localberg%jne=get_int(ncid, jneid, k)
       if ( localberg%ine>=grd%isc .and. localberg%ine<=grd%iec .and. &
            localberg%jne>=grd%jsc .and.localberg%jne<=grd%jec ) then
         lres=.true.
