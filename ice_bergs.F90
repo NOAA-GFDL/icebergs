@@ -153,7 +153,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.98 2009/07/30 14:17:39 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.99 2009/07/30 14:58:23 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -817,6 +817,18 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
   ! For convenience
   grd=>bergs%grd
 
+  grd%floating_melt(:,:)=0.
+  grd%berg_melt(:,:)=0.
+  grd%melt_buoy(:,:)=0.
+  grd%melt_eros(:,:)=0.
+  grd%melt_conv(:,:)=0.
+  grd%bergy_src(:,:)=0.
+  grd%bergy_melt(:,:)=0.
+  grd%bergy_mass(:,:)=0.
+  grd%mass(:,:)=0.
+  if (bergs%add_weight_to_ocean) grd%mass_on_ocean(:,:,:)=0.
+  grd%virtual_area(:,:)=0.
+
   ! Manage time
   call get_date(time, iyr, imon, iday, ihr, imin, isec)
   bergs%current_year=iyr
@@ -877,23 +889,8 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
   grd%hi(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=hi(:,:)
   call mpp_update_domains(grd%hi, grd%domain)
 
-  if (debug) then
-    call bergs_chksum(bergs, 'run bergs (top)')
-    call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'run stored_ice (top)')
-    call grd_chksum2(bergs%grd, bergs%grd%stored_heat, 'run stored_heat (top)')
-    call grd_chksum2(bergs%grd, bergs%grd%calving, 'run calving (top)')
-    call grd_chksum2(bergs%grd, bergs%grd%calving_hflx, 'run calving_hflx (top)')
-    call grd_chksum2(bergs%grd, bergs%grd%ssh, 'run ssh (top)')
-    call grd_chksum2(bergs%grd, bergs%grd%sst, 'run sst (top)')
-    call grd_chksum2(bergs%grd, bergs%grd%cn, 'run cn (top)')
-    call grd_chksum2(bergs%grd, bergs%grd%hi, 'run hi (top)')
-    call grd_chksum2(bergs%grd, bergs%grd%ua, 'run ua (top)')
-    call grd_chksum2(bergs%grd, bergs%grd%va, 'run va (top)')
-    call grd_chksum2(bergs%grd, bergs%grd%uo, 'run uo (top)')
-    call grd_chksum2(bergs%grd, bergs%grd%vo, 'run vo (top)')
-    call grd_chksum2(bergs%grd, bergs%grd%ui, 'run ui (top)')
-    call grd_chksum2(bergs%grd, bergs%grd%vi, 'run vi (top)')
-  endif
+  if (debug) call bergs_chksum(bergs, 'run bergs (top)')
+  if (debug) call checksum_gridded(bergs%grd, 'top of s/r run')
 
   ! Accumulate ice from calving
   call accumulate_calving(bergs)
@@ -911,35 +908,28 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
   ! Calve excess stored ice into icebergs
   call calve_icebergs(bergs)
   if (debug) call bergs_chksum(bergs, 'run bergs (calved)')
+  if (debug) call checksum_gridded(bergs%grd, 's/r run after calving')
   call mpp_clock_end(bergs%clock_cal)
 
   ! For each berg, evolve
   call mpp_clock_begin(bergs%clock_mom)
   if (associated(bergs%first)) call evolve_icebergs(bergs)
   if (debug) call bergs_chksum(bergs, 'run bergs (evolved)',ignore_halo_violation=.true.)
+  if (debug) call checksum_gridded(bergs%grd, 's/r run after evolve')
   call mpp_clock_end(bergs%clock_mom)
 
   ! Send bergs to other PEs
   call mpp_clock_begin(bergs%clock_com)
   call send_bergs_to_other_pes(bergs)
   if (debug) call bergs_chksum(bergs, 'run bergs (exchanged)')
+  if (debug) call checksum_gridded(bergs%grd, 's/r run after exchange')
   call mpp_clock_end(bergs%clock_com)
 
   ! Ice berg thermodynamics (melting) + rolling
   call mpp_clock_begin(bergs%clock_the)
-  grd%floating_melt(:,:)=0.
-  grd%berg_melt(:,:)=0.
-  grd%melt_buoy(:,:)=0.
-  grd%melt_eros(:,:)=0.
-  grd%melt_conv(:,:)=0.
-  grd%bergy_src(:,:)=0.
-  grd%bergy_melt(:,:)=0.
-  grd%bergy_mass(:,:)=0.
-  grd%mass(:,:)=0.
-  if (bergs%add_weight_to_ocean) grd%mass_on_ocean(:,:,:)=0.
-  grd%virtual_area(:,:)=0.
   if (associated(bergs%first)) call thermodynamics(bergs)
   if (debug) call bergs_chksum(bergs, 'run bergs (thermo)')
+  if (debug) call checksum_gridded(bergs%grd, 's/r run after thermodynamics')
   call mpp_clock_end(bergs%clock_the)
 
   ! For each berg, record
@@ -1139,31 +1129,8 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
     bergs%bergy_src=0.
   endif
 
-  if (debug) then
-    call bergs_chksum(bergs, 'run bergs (bot)')
-    call grd_chksum2(bergs%grd, bergs%grd%calving, 'run calving (bot)')
-    call grd_chksum2(bergs%grd, bergs%grd%uo, 'run uo (bot)')
-    call grd_chksum2(bergs%grd, bergs%grd%vo, 'run vo (bot)')
-    call grd_chksum2(bergs%grd, bergs%grd%ua, 'run ua (bot)')
-    call grd_chksum2(bergs%grd, bergs%grd%va, 'run va (bot)')
-    call grd_chksum2(bergs%grd, bergs%grd%ui, 'run ui (bot)')
-    call grd_chksum2(bergs%grd, bergs%grd%vi, 'run vi (bot)')
-    call grd_chksum2(bergs%grd, bergs%grd%ssh, 'run ssh (bot)')
-    call grd_chksum2(bergs%grd, bergs%grd%sst, 'run sst (bot)')
-    call grd_chksum2(bergs%grd, bergs%grd%hi, 'run hi (bot)')
-    call grd_chksum2(bergs%grd, bergs%grd%cn, 'run cn (bot)')
-    call grd_chksum2(bergs%grd, bergs%grd%floating_melt, 'run melt (bot)')
-    call grd_chksum2(bergs%grd, bergs%grd%melt_buoy, 'run melt_b (bot)')
-    call grd_chksum2(bergs%grd, bergs%grd%melt_eros, 'run melt_e (bot)')
-    call grd_chksum2(bergs%grd, bergs%grd%melt_conv, 'run melt_v (bot)')
-    call grd_chksum2(bergs%grd, bergs%grd%bergy_src, 'run bergy_src (bot)')
-    call grd_chksum2(bergs%grd, bergs%grd%bergy_melt, 'run bergy_melt (bot)')
-    call grd_chksum2(bergs%grd, bergs%grd%bergy_mass, 'run bergy_mass (bot)')
-    call grd_chksum2(bergs%grd, bergs%grd%virtual_area, 'run varea (bot)')
-    call grd_chksum2(bergs%grd, bergs%grd%mass, 'run mass (bot)')
-    call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'run stored_ice (bot)')
-    call grd_chksum2(bergs%grd, bergs%grd%stored_heat, 'run stored_heat (bot)')
-  endif
+  if (debug) call bergs_chksum(bergs, 'run bergs (bot)')
+  if (debug) call checksum_gridded(bergs%grd, 'end of s/r run')
   call mpp_clock_end(bergs%clock_dia)
 
   call mpp_clock_end(bergs%clock)
@@ -2727,6 +2694,8 @@ logical :: lerr
     call grd_chksum2(grd, grd%lat, 'init lat')
     call grd_chksum2(grd, grd%area, 'init area')
     call grd_chksum2(grd, grd%msk, 'init msk')
+    call grd_chksum2(grd, grd%cos, 'init cos')
+    call grd_chksum2(grd, grd%sin, 'init sin')
   endif
 
  !write(stderr(),*) 'diamonds: done'
@@ -2932,8 +2901,9 @@ type(randomNumberStream) :: rns
     deallocate(randnum)
   endif
 
-  call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'read stored_ice')
-  call grd_chksum2(bergs%grd, bergs%grd%stored_heat, 'read stored_heat')
+  call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'read_restart_calving, stored_ice')
+  call grd_chksum2(bergs%grd, bergs%grd%stored_heat, 'read_restart_calving, stored_heat')
+  call grd_chksum3(bergs%grd, bergs%grd%mass_on_ocean, 'read_restart_calving, mass_on_ocean')
 
   bergs%stored_start=sum( grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:) )
   call mpp_sum( bergs%stored_start )
@@ -4585,6 +4555,59 @@ end subroutine print_fld
 
 ! ##############################################################################
 
+subroutine checksum_gridded(grd, label)
+! Arguments
+type(icebergs_gridded), pointer :: grd
+character(len=*) :: label
+! Local variables
+
+  write(stdout(),'(2a)') 'diamonds: checksumming gridded data @ ',trim(label)
+
+  ! external forcing
+  call grd_chksum2(grd, grd%uo, 'uo')
+  call grd_chksum2(grd, grd%vo, 'vo')
+  call grd_chksum2(grd, grd%ua, 'ua')
+  call grd_chksum2(grd, grd%va, 'va')
+  call grd_chksum2(grd, grd%ui, 'ui')
+  call grd_chksum2(grd, grd%vi, 'vi')
+  call grd_chksum2(grd, grd%ssh, 'ssh')
+  call grd_chksum2(grd, grd%sst, 'sst')
+  call grd_chksum2(grd, grd%hi, 'hi')
+  call grd_chksum2(grd, grd%cn, 'cn')
+  call grd_chksum2(grd, grd%calving, 'calving')
+  call grd_chksum2(grd, grd%calving_hflx, 'calving_hflx')
+
+  ! state
+  call grd_chksum2(grd, grd%mass, 'mass')
+  call grd_chksum2(grd, grd%mass_on_ocean, 'mass_on_ocean')
+  call grd_chksum3(grd, grd%stored_ice, 'stored_ice')
+  call grd_chksum2(grd, grd%stored_heat, 'stored_heat')
+  call grd_chksum2(grd, grd%melt_buoy, 'melt_b')
+  call grd_chksum2(grd, grd%melt_eros, 'melt_e')
+  call grd_chksum2(grd, grd%melt_conv, 'melt_v')
+  call grd_chksum2(grd, grd%bergy_src, 'bergy_src')
+  call grd_chksum2(grd, grd%bergy_melt, 'bergy_melt')
+  call grd_chksum2(grd, grd%bergy_mass, 'bergy_mass')
+  call grd_chksum2(grd, grd%virtual_area, 'varea')
+  call grd_chksum2(grd, grd%floating_melt, 'floating_melt')
+  call grd_chksum2(grd, grd%berg_melt, 'berg_melt')
+
+  ! static
+  call grd_chksum2(grd, grd%lon, 'lon')
+  call grd_chksum2(grd, grd%lat, 'lat')
+  call grd_chksum2(grd, grd%lonc, 'lonc')
+  call grd_chksum2(grd, grd%latc, 'latc')
+  call grd_chksum2(grd, grd%dx, 'dx')
+  call grd_chksum2(grd, grd%dy, 'dy')
+  call grd_chksum2(grd, grd%area, 'area')
+  call grd_chksum2(grd, grd%msk, 'msk')
+  call grd_chksum2(grd, grd%cos, 'cos')
+  call grd_chksum2(grd, grd%sin, 'sin')
+
+end subroutine checksum_gridded
+
+! ##############################################################################
+
 subroutine grd_chksum3(grd, fld, txt)
 ! Arguments
 type(icebergs_gridded), pointer :: grd
@@ -4593,6 +4616,7 @@ character(len=*), intent(in) :: txt
 ! Local variables
 integer :: i, j, k, halo, icount
 real :: mean, rms, SD, minv, maxv
+real, dimension(lbound(fld,1):ubound(fld,1), lbound(fld,2):ubound(fld,2), lbound(fld,3):ubound(fld,3)) :: tmp
 
   halo=grd%halo
   mean=0.
@@ -4604,6 +4628,7 @@ real :: mean, rms, SD, minv, maxv
   k=lbound(fld,3)
   minv=fld(i,j,k)
   maxv=fld(i,j,k)
+  tmp(:,:,:)=0.
   do k=lbound(fld,3), ubound(fld,3)
     do j=lbound(fld,2)+halo, ubound(fld,2)-halo
       do i=lbound(fld,1)+halo, ubound(fld,1)-halo
@@ -4612,6 +4637,7 @@ real :: mean, rms, SD, minv, maxv
         rms=rms+fld(i,j,k)**2
         minv=min(minv,fld(i,j,k))
         maxv=max(maxv,fld(i,j,k))
+        tmp(i,j,k)=fld(i,j,k)*float(i+2*j+3*(k-1))
       enddo
     enddo
   enddo
@@ -4633,10 +4659,20 @@ real :: mean, rms, SD, minv, maxv
   sd=sqrt(sd/float(icount))
   i=mpp_chksum( fld(lbound(fld,1)+halo:ubound(fld,1)-halo, &
                     lbound(fld,2)+halo:ubound(fld,2)-halo,:) )
+  j=mpp_chksum( tmp(lbound(fld,1)+halo:ubound(fld,1)-halo, &
+                    lbound(fld,2)+halo:ubound(fld,2)-halo,:) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(stdout(),'("diamonds, grd_chksum3: ",a18,x,a,"=",i,5(x,a,"=",es16.9),x,a,"=",i)') &
-     txt, 'chksum', i, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd!, '#', icount
-   !write(stdout(),'("diamonds, grd_chksum3: ",a18,x,a,"=",i,5(x,a,"=",es21.14),x,a,"=",i)') &
+    write(stdout(),'("diamonds, grd_chksum3: ",a18,2(x,a,"=",i),5(x,a,"=",es16.9))') &
+     txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd
+#ifdef CHECKSUM_HALOS
+  i=mpp_chksum( fld(lbound(fld,1):ubound(fld,1), &
+                    lbound(fld,2):ubound(fld,2),:) )
+  j=mpp_chksum( tmp(lbound(fld,1):ubound(fld,1), &
+                    lbound(fld,2):ubound(fld,2),:) )
+  if (mpp_pe().eq.mpp_root_pe()) &
+    write(stdout(),'("diamonds, grd_chksum3* ",a18,2(x,a,"=",i),5(x,a,"=",es16.9))') &
+     txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd
+#endif
 
 end subroutine grd_chksum3
 
@@ -4659,8 +4695,8 @@ real :: mean, rms, SD, minv, maxv
   icount=0
   minv=fld(grd%isc,grd%jsc)
   maxv=fld(grd%isc,grd%jsc)
-  do j=grd%jsc, grd%jec
-    do i=grd%isc, grd%iec
+  do j=grd%jsd, grd%jed
+    do i=grd%isd, grd%ied
       icount=icount+1
       mean=mean+fld(i,j)
       rms=rms+fld(i,j)**2
@@ -4688,7 +4724,13 @@ real :: mean, rms, SD, minv, maxv
   if (mpp_pe().eq.mpp_root_pe()) &
     write(stdout(),'("diamonds, grd_chksum2: ",a18,2(x,a,"=",i),5(x,a,"=",es16.9),x,a,"=",i)') &
      txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd!, '#', icount
-   !write(stdout(),'("diamonds, grd_chksum2: ",a18,2(x,a,"=",i),5(x,a,"=",es21.14),x,a,"=",i)') &
+#ifdef CHECKSUM_HALOS
+  i=mpp_chksum( fld(grd%isd:grd%ied,grd%jsd:grd%jed) )
+  j=mpp_chksum( grd%tmp(grd%isd:grd%ied,grd%jsd:grd%jed) )
+  if (mpp_pe().eq.mpp_root_pe()) &
+    write(stdout(),'("diamonds, grd_chksum2* ",a18,2(x,a,"=",i),5(x,a,"=",es16.9),x,a,"=",i)') &
+     txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd!, '#', icount
+#endif
 
 end subroutine grd_chksum2
 
