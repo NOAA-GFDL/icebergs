@@ -3,7 +3,7 @@ module ice_bergs
 use constants_mod, only: radius, pi, omega, HLF
 use fms_mod, only: open_namelist_file, check_nml_error, close_file
 use fms_mod, only: field_exist, get_global_att_value
-use fms_mod, only: stdlog, stdout, stderr, error_mesg, FATAL, WARNING
+use fms_mod, only: stdlog, stderr, error_mesg, FATAL, WARNING
 use fms_mod, only: write_version_number, read_data, write_data, file_exist
 use mosaic_mod, only: get_mosaic_ntiles, get_mosaic_ncontacts
 use mpp_mod, only: mpp_pe, mpp_root_pe, mpp_sum, mpp_min, mpp_max, NULL_PE
@@ -153,7 +153,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.104 2009/07/30 20:17:11 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.105 2009/07/30 20:23:38 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -841,7 +841,7 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
   if (bergs%verbose_hrs>0 .and. mod(24*iday+ihr,bergs%verbose_hrs).eq.0) lverbose=verbose
   lbudget=.false.
   if (bergs%verbose_hrs>0 .and. mod(24*iday+ihr,bergs%verbose_hrs).eq.0) lbudget=budget
-  if (mpp_pe()==mpp_root_pe().and.lverbose) write(stdout(),'(a,3i5,a,3i5,a,i5,f8.3)') &
+  if (mpp_pe()==mpp_root_pe().and.lverbose) write(*,'(a,3i5,a,3i5,a,i5,f8.3)') &
        'diamonds: y,m,d=',iyr, imon, iday,' h,m,s=', ihr, imin, isec, &
        ' yr,yrdy=', bergs%current_year, bergs%current_yearday
 
@@ -1101,7 +1101,7 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
         call report_consistant('top interface','kg','from SIS',bergs%net_incoming_calving,'seen by diamonds',bergs%net_calving_received)
         call report_consistant('bot interface','kg','sent',bergs%net_outgoing_calving,'seen by SIS',bergs%net_calving_returned)
       endif
-      write(stdout(),'("diamonds: calved by class = ",i,20(",",i))') (bergs%nbergs_calved_by_class(k),k=1,nclasses)
+      write(*,'("diamonds: calved by class = ",i,20(",",i))') (bergs%nbergs_calved_by_class(k),k=1,nclasses)
     endif
     bergs%nbergs_start=bergs%nbergs_end
     bergs%stored_start=bergs%stored_end
@@ -1145,13 +1145,13 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
   integer, intent(in), optional :: nbergs
   ! Local variables
   if (present(nbergs)) then
-    write(stdout(),100) budgetstr//' state:', &
+    write(*,100) budgetstr//' state:', &
                         startstr//' start',startval,budgetunits, &
                         endstr//' end',endval,budgetunits, &
                         'Delta '//delstr,endval-startval,budgetunits, &
                         '# of bergs',nbergs
   else
-    write(stdout(),100) budgetstr//' state:', &
+    write(*,100) budgetstr//' state:', &
                         startstr//' start',startval,budgetunits, &
                         endstr//' end',endval,budgetunits, &
                         delstr//'Delta',endval-startval,budgetunits
@@ -1164,7 +1164,7 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
   character*(*), intent(in) :: budgetstr, budgetunits, startstr, endstr
   real, intent(in) :: startval, endval
   ! Local variables
-  write(stdout(),200) budgetstr//' check:', &
+  write(*,200) budgetstr//' check:', &
                       startstr,startval,budgetunits, &
                       endstr,endval,budgetunits, &
                       'error',(endval-startval)/((endval+startval)+1e-30),'nd'
@@ -1176,7 +1176,7 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
   character*(*), intent(in) :: budgetstr, budgetunits, instr, outstr, delstr
   real, intent(in) :: inval, outval, startval, endval
   ! Local variables
-  write(stdout(),200) budgetstr//' budget:', &
+  write(*,200) budgetstr//' budget:', &
                       instr//' in',inval,budgetunits, &
                       outstr//' out',outval,budgetunits, &
                       'Delta '//delstr,inval-outval,budgetunits, &
@@ -1189,7 +1189,7 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
   character*(*), intent(in) :: budgetstr, startstr, endstr, delstr
   integer, intent(in) :: startval, endval
   ! Local variables
-  write(stdout(),100) budgetstr//' state:', &
+  write(*,100) budgetstr//' state:', &
                         startstr//' start',startval, &
                         endstr//' end',endval, &
                         delstr//'Delta',endval-startval
@@ -1201,7 +1201,7 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
   character*(*), intent(in) :: budgetstr, instr, outstr, delstr
   integer, intent(in) :: inval, outval, startval, endval
   ! Local variables
-  write(stdout(),200) budgetstr//' budget:', &
+  write(*,200) budgetstr//' budget:', &
                       instr//' in',inval, &
                       outstr//' out',outval, &
                       'Delta '//delstr,inval-outval, &
@@ -1285,7 +1285,7 @@ logical, save :: first_call=.true.
    !enddo
     bergs%stored_start=sum( grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:) )
     call mpp_sum( bergs%stored_start )
-    if (mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a,es13.6,a)') &
+    if (mpp_pe().eq.mpp_root_pe()) write(*,'(a,es13.6,a)') &
         'diamonds, accumulate_calving: initial stored mass=',bergs%stored_start,' kg'
     do j=grd%jsc,grd%jec; do i=grd%isc,grd%iec
       if (grd%calving(i,j).ne.0.) grd%stored_heat(i,j)= & ! Need units of J
@@ -1295,7 +1295,7 @@ logical, save :: first_call=.true.
     enddo; enddo
     bergs%stored_heat_start=sum( grd%stored_heat(grd%isc:grd%iec,grd%jsc:grd%jec) )
     call mpp_sum( bergs%stored_heat_start )
-    if (mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a,es13.6,a)') &
+    if (mpp_pe().eq.mpp_root_pe()) write(*,'(a,es13.6,a)') &
         'diamonds, accumulate_calving: initial stored heat=',bergs%stored_heat_start,' J'
    endif
 
@@ -2753,7 +2753,7 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
     if (found_restart) exit
     filename='icebergs.res.nc'; inquire(file=filename,exist=found_restart)
     if (found_restart) exit
-    if (verbose.and.mpp_pe()==mpp_root_pe()) write(stdout(),'(a)') 'diamonds, read_restart_bergs: no restart file found'
+    if (verbose.and.mpp_pe()==mpp_root_pe()) write(*,'(a)') 'diamonds, read_restart_bergs: no restart file found'
 !   return ! leave s/r if no restart found
     multiPErestart=.TRUE. ! This is to force sanity checking in a mulit-PE mode if no file was found on this PE
     exit
@@ -2761,7 +2761,7 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
 
   if (found_restart) then ! only do the following if a file was found
   
-  if (verbose.and.mpp_pe()==mpp_root_pe()) write(stdout(),'(2a)') 'diamonds, read_restart_bergs: found restart file = ',filename
+  if (verbose.and.mpp_pe()==mpp_root_pe()) write(*,'(2a)') 'diamonds, read_restart_bergs: found restart file = ',filename
 
   ierr=nf_open(filename, NF_NOWRITE, ncid)
   if (ierr .ne. NF_NOERR) write(stderr(),*) 'diamonds, read_restart_bergs: nf_open failed'
@@ -2861,12 +2861,12 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
   
   ! Sanity check
   k=count_bergs(bergs)
-  if (verbose) write(stdout(),'(2(a,i))') 'diamonds, read_restart_bergs: # bergs =',k,' on PE',mpp_pe()
+  if (verbose) write(*,'(2(a,i))') 'diamonds, read_restart_bergs: # bergs =',k,' on PE',mpp_pe()
   if (multiPErestart) call mpp_sum(nbergs_in_file) ! In case PE 0 didn't open a file
   call mpp_sum(k)
   bergs%nbergs_start=k
   if (mpp_pe().eq.mpp_root_pe()) then
-    write(stdout(),'(a,i,a,i,a)') 'diamonds, read_restart_bergs: there were',nbergs_in_file,' bergs in the restart file and', &
+    write(*,'(a,i,a,i,a)') 'diamonds, read_restart_bergs: there were',nbergs_in_file,' bergs in the restart file and', &
      k,' bergs have been read'
   endif
   if (k.ne.nbergs_in_file) call error_mesg('diamonds, read_restart_bergs', 'wrong number of bergs read!', FATAL)
@@ -2877,7 +2877,7 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
   call mpp_sum( bergs%icebergs_mass_start )
   bergs%bergy_mass_start=sum_mass(bergs%first,justbits=.true.)
   call mpp_sum( bergs%bergy_mass_start )
-  if (mpp_pe().eq.mpp_root_pe().and.verbose) write(stdout(),'(a)') 'diamonds, read_restart_bergs: completed'
+  if (mpp_pe().eq.mpp_root_pe().and.verbose) write(*,'(a)') 'diamonds, read_restart_bergs: completed'
   
 end subroutine read_restart_bergs
 
@@ -2900,21 +2900,21 @@ type(randomNumberStream) :: rns
   ! Read stored ice
   filename='INPUT/calving.res.nc'
   if (file_exist(filename)) then
-    if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stdout(),'(2a)') &
+    if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') &
      'diamonds, read_restart_calving: reading ',filename
     call read_data(filename, 'stored_ice', grd%stored_ice, grd%domain)
     if (field_exist(filename, 'stored_heat')) then
-      if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a)') &
+      if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
        'diamonds, read_restart_calving: reading stored_heat from restart file.'
       call read_data(filename, 'stored_heat', grd%stored_heat, grd%domain)
     else
-      if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a)') &
+      if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
      'diamonds, read_restart_calving: stored_heat WAS NOT FOUND in the file. Setting to 0.'
       grd%stored_heat(:,:)=0.
     endif
     bergs%restarted=.true.
   else
-    if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stdout(),'(a)') &
+    if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
      'diamonds, read_restart_calving: initializing stored ice to random numbers'
     allocate(randnum(grd%jsc:grd%jec, nclasses))
     do i=grd%isc, grd%iec
@@ -3005,7 +3005,7 @@ integer :: i, icnt1, icnt2
   call mpp_sum(icnt2)
 
   if ((debug.or.icnt1.ne.0).and.mpp_pe().eq.mpp_root_pe()) then
-    write(stdout(),'(a,2(x,a,i6),x,a)') 'diamonds, count_out_of_order:', &
+    write(*,'(a,2(x,a,i6),x,a)') 'diamonds, count_out_of_order:', &
       '# out of order=', icnt1,'# in halo=',icnt2,label
   endif
 
@@ -3039,7 +3039,7 @@ integer :: icnt_id, icnt_same
   call mpp_sum(icnt_same)
 
   if ((debug.or.icnt_id>0.or.icnt_same>0).and.mpp_pe().eq.mpp_root_pe()) then
-    write(stdout(),'(a,2(x,a,i9),x,a)') 'diamonds, check_for_duplicates:', &
+    write(*,'(a,2(x,a,i9),x,a)') 'diamonds, check_for_duplicates:', &
       '# with same id=', icnt_id,'# identical bergs=',icnt_same,label
   endif
 
@@ -4186,7 +4186,7 @@ type(iceberg), pointer :: this, next
   call mpp_clock_end(bergs%clock_ini)
   deallocate(bergs)
 
-  if (mpp_pe()==mpp_root_pe()) write(stdout(),'(a,i)') 'diamonds: icebergs_end complete',mpp_pe()
+  if (mpp_pe()==mpp_root_pe()) write(*,'(a,i)') 'diamonds: icebergs_end complete',mpp_pe()
 
   contains
 
@@ -4264,7 +4264,7 @@ type(iceberg), pointer :: this
   if (associated(bergs%first)) then
 
     write(filename(1:28),'("RESTART/icebergs.res.nc.",I4.4)') mpp_pe()
-    if (verbose) write(stdout(),'(2a)') 'diamonds, write_restart: creating ',filename
+    if (verbose) write(*,'(2a)') 'diamonds, write_restart: creating ',filename
 
     iret = nf_create(filename, NF_CLOBBER, ncid)
     if (iret .ne. NF_NOERR) write(stderr(),*) 'diamonds, write_restart: nf_create failed'
@@ -4682,7 +4682,7 @@ type(icebergs_gridded), pointer :: grd
 character(len=*) :: label
 ! Local variables
 
-  write(stdout(),'(2a)') 'diamonds: checksumming gridded data @ ',trim(label)
+  write(*,'(2a)') 'diamonds: checksumming gridded data @ ',trim(label)
 
   ! external forcing
   call grd_chksum2(grd, grd%uo, 'uo')
@@ -4783,7 +4783,7 @@ real, dimension(lbound(fld,1):ubound(fld,1), lbound(fld,2):ubound(fld,2), lbound
   j=mpp_chksum( tmp(lbound(fld,1)+halo:ubound(fld,1)-halo, &
                     lbound(fld,2)+halo:ubound(fld,2)-halo,:) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(stdout(),'("diamonds, grd_chksum3: ",a18,2(x,a,"=",i),5(x,a,"=",es16.9))') &
+    write(*,'("diamonds, grd_chksum3: ",a18,2(x,a,"=",i),5(x,a,"=",es16.9))') &
      txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd
 #ifdef CHECKSUM_HALOS
   i=mpp_chksum( fld(lbound(fld,1):ubound(fld,1), &
@@ -4791,7 +4791,7 @@ real, dimension(lbound(fld,1):ubound(fld,1), lbound(fld,2):ubound(fld,2), lbound
   j=mpp_chksum( tmp(lbound(fld,1):ubound(fld,1), &
                     lbound(fld,2):ubound(fld,2),:) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(stdout(),'("diamonds, grd_chksum3* ",a18,2(x,a,"=",i),5(x,a,"=",es16.9))') &
+    write(*,'("diamonds, grd_chksum3* ",a18,2(x,a,"=",i),5(x,a,"=",es16.9))') &
      txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd
 #endif
 
@@ -4843,13 +4843,13 @@ real :: mean, rms, SD, minv, maxv
   i=mpp_chksum( fld(grd%isc:grd%iec,grd%jsc:grd%jec) )
   j=mpp_chksum( grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(stdout(),'("diamonds, grd_chksum2: ",a18,2(x,a,"=",i),5(x,a,"=",es16.9),x,a,"=",i)') &
+    write(*,'("diamonds, grd_chksum2: ",a18,2(x,a,"=",i),5(x,a,"=",es16.9),x,a,"=",i)') &
      txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd!, '#', icount
 #ifdef CHECKSUM_HALOS
   i=mpp_chksum( fld(grd%isd:grd%ied,grd%jsd:grd%jed) )
   j=mpp_chksum( grd%tmp(grd%isd:grd%ied,grd%jsd:grd%jed) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(stdout(),'("diamonds, grd_chksum2* ",a18,2(x,a,"=",i),5(x,a,"=",es16.9),x,a,"=",i)') &
+    write(*,'("diamonds, grd_chksum2* ",a18,2(x,a,"=",i),5(x,a,"=",es16.9),x,a,"=",i)') &
      txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd!, '#', icount
 #endif
 
@@ -4915,7 +4915,7 @@ logical :: check_halo
   nbergs=count_bergs(bergs)
 
   if (nbergs.ne.sum(icnt(:,:))) then
-    write(stdout(),'("diamonds, bergs_chksum: ",2(a,i))') &
+    write(*,'("diamonds, bergs_chksum: ",2(a,i))') &
       '# bergs =', nbergs, ' sum(icnt) =',sum(icnt(:,:))
     call error_mesg('diamonds, bergs_chksum:', 'mismatch in berg count!', FATAL)
   endif
@@ -4925,14 +4925,14 @@ logical :: check_halo
     if (ignore_halo_violation) check_halo=.false.
   endif
   if (check_halo.and.nbergs.ne.sum(icnt(grd%isc:grd%iec, grd%jsc:grd%jec))) then
-    write(stdout(),'("diamonds, bergs_chksum: ",2(a,i))') &
+    write(*,'("diamonds, bergs_chksum: ",2(a,i))') &
       '# bergs =', nbergs, ' sum(icnt(comp_dom)) =',sum(icnt(:,:))
     call error_mesg('diamonds, bergs_chksum:', 'mismatch in berg count on computational domain!', FATAL)
   endif
 
   call mpp_sum(nbergs)
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(stdout(),'("diamonds, bergs_chksum: ",a18,6(x,a,"=",i))') &
+    write(*,'("diamonds, bergs_chksum: ",a18,6(x,a,"=",i))') &
       txt, 'chksum', ichk1, 'chksum2', ichk2, 'chksum3', ichk3, 'chksum4', ichk4, 'chksum5', ichk5, '#', nbergs
 
   deallocate( fld )
