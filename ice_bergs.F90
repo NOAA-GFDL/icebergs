@@ -153,7 +153,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.100 2009/07/30 15:07:34 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.101 2009/07/30 15:21:48 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -1442,6 +1442,13 @@ type(iceberg), pointer :: berg
   ! For convenience
   grd=>bergs%grd
 
+  ! Common constants
+  r180_pi=1./pi_180
+  dt=bergs%dt
+  dt_2=0.5*dt
+  dt_6=dt/6.
+  Rearth=6360.e3
+
   berg=>bergs%first
   do while (associated(berg)) ! loop over all bergs
 
@@ -1463,11 +1470,6 @@ type(iceberg), pointer :: berg
 
   if (debug) call check_position(grd, berg, 'evolve_iceberg (top)')
 
-  r180_pi=1./pi_180
-  dt=bergs%dt
-  dt_2=0.5*dt
-  dt_6=dt/6.
-  Rearth=6360.e3
   i=berg%ine
   j=berg%jne
   xi=berg%xi
@@ -2918,6 +2920,10 @@ type(randomNumberStream) :: rns
 
   bergs%stored_start=sum( grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:) )
   call mpp_sum( bergs%stored_start )
+  bergs%stored_heat_start=sum( grd%stored_heat(grd%isc:grd%iec,grd%jsc:grd%jec) )
+  call mpp_sum( bergs%stored_heat_start )
+  bergs%floating_heat_start=sum_heat(bergs%first)
+  call mpp_sum( bergs%floating_heat_start )
 
 end subroutine read_restart_calving
 
@@ -2962,7 +2968,7 @@ integer :: i, icnt1, icnt2
     if (associated(this%next)) next=>this%next
   endif
   do while (associated(next))
-    if (.not. inorder(this,next,label)) icnt1=icnt1+1
+    if (.not. inorder(this,next)) icnt1=icnt1+1
     this=>next
     next=>next%next
   enddo
@@ -2985,11 +2991,45 @@ integer :: i, icnt1, icnt2
   call mpp_sum(icnt2)
 
   if ((debug.or.icnt1.ne.0).and.mpp_pe().eq.mpp_root_pe()) then
-    write(stderr(),'(a,2(x,a,i6),x,a)') 'diamonds, count_out_of_order:', &
+    write(stdout(),'(a,2(x,a,i6),x,a)') 'diamonds, count_out_of_order:', &
       '# out of order=', icnt1,'# in halo=',icnt2,label
   endif
 
+  call check_for_duplicates(bergs,label)
+
 end subroutine count_out_of_order
+
+! ##############################################################################
+
+subroutine check_for_duplicates(bergs,label)
+! Arguments
+type(icebergs), pointer :: bergs
+character(len=*) :: label
+! Local variables
+type(iceberg), pointer :: this1, next1, this2, next2
+integer :: icnt_id, icnt_same
+
+  icnt_id=0
+  icnt_same=0
+  this1=>bergs%first
+  do while (associated(this1))
+    this2=>this1%next
+    do while (associated(this2))
+      if (sameid(this1,this2)) icnt_id=icnt_id+1
+      if (sameberg(this1,this2)) icnt_same=icnt_same+1
+      this2=>this2%next
+    enddo
+    this1=>this1%next
+  enddo
+  call mpp_sum(icnt_id)
+  call mpp_sum(icnt_same)
+
+  if ((debug.or.icnt_id>0.or.icnt_same>0).and.mpp_pe().eq.mpp_root_pe()) then
+    write(stdout(),'(a,2(x,a,i9),x,a)') 'diamonds, check_for_duplicates:', &
+      '# with same id=', icnt_id,'# identical bergs=',icnt_same,label
+  endif
+
+end subroutine check_for_duplicates
 
 ! ##############################################################################
 
@@ -3006,7 +3046,7 @@ type(iceberg), pointer :: this, prev
       first%prev=>newberg
       first=>newberg
     else
-      if (inorder(newberg,first,'insert1')) then
+      if (inorder(newberg,first)) then
         ! Insert at front of list
         newberg%next=>first
         first%prev=>newberg
@@ -3015,7 +3055,7 @@ type(iceberg), pointer :: this, prev
         this=>first
         prev=>NULL()
         do while( associated(this) )
-          if (inorder(newberg,this,'insert2') ) then
+          if (inorder(newberg,this) ) then
             exit
           endif
           prev=>this
@@ -3034,10 +3074,11 @@ type(iceberg), pointer :: this, prev
 
 end subroutine insert_berg_into_list
 
-  logical function inorder(berg1, berg2, label)
+! ##############################################################################
+
+  logical function inorder(berg1, berg2)
   ! Arguments
   type(iceberg), pointer :: berg1, berg2
-  character(len=*), optional :: label
   ! Local variables
   real :: hash1, hash2
     hash1=time_hash(berg1)
@@ -3068,17 +3109,55 @@ end subroutine insert_berg_into_list
     inorder=.true. ! passing the above tests mean the bergs 1 and 2 are identical?
   end function inorder
 
+! ##############################################################################
+
   real function time_hash(berg)
   ! Arguments
   type(iceberg), pointer :: berg
     time_hash=berg%start_day+366.*float(berg%start_year)
   end function time_hash
 
+! ##############################################################################
+
   real function pos_hash(berg)
   ! Arguments
   type(iceberg), pointer :: berg
     pos_hash=berg%start_lon+360.*(berg%start_lat+90.)
   end function pos_hash
+
+! ##############################################################################
+
+logical function sameid(berg1, berg2)
+! Arguments
+type(iceberg), pointer :: berg1, berg2
+! Local variables
+  sameid=.false.
+  if (berg1%start_year.ne.berg2%start_year) return
+  if (berg1%start_day.ne.berg2%start_day) return
+  if (berg1%start_mass.ne.berg2%start_mass) return
+  if (berg1%start_lon.ne.berg2%start_lon) return
+  if (berg1%start_lat.ne.berg2%start_lat) return
+  sameid=.true. ! passing the above tests means that bergs 1 and 2 have the same id
+end function sameid
+
+! ##############################################################################
+
+logical function sameberg(berg1, berg2)
+! Arguments
+type(iceberg), pointer :: berg1, berg2
+! Local variables
+  sameberg=.false.
+  if (.not. sameid(berg1, berg2)) return
+  if (berg1%lon.ne.berg2%lon) return
+  if (berg1%lat.ne.berg2%lat) return
+  if (berg1%mass.ne.berg2%mass) return
+  if (berg1%uvel.ne.berg2%uvel) return
+  if (berg1%vvel.ne.berg2%vvel) return
+  if (berg1%thickness.ne.berg2%thickness) return
+  if (berg1%width.ne.berg2%width) return
+  if (berg1%length.ne.berg2%length) return
+  sameberg=.true. ! passing the above tests mean that bergs 1 and 2 are identical
+end function sameberg
 
 ! ##############################################################################
 
@@ -3771,11 +3850,11 @@ real :: x1,y1,x2,y2,x3,y3,x4,y4,xx,yy,fac
         fac=2.*max( abs(xi-0.5), abs(yj-0.5) ); fac=max(1., fac)
         xi=0.5+(xi-0.5)/fac
         yj=0.5+(yj-0.5)/fac
-        call error_mesg('diamonds, pos_within_cell', 'in cell so scaling internal coordinates!', WARNING)
+        if (debug) call error_mesg('diamonds, pos_within_cell', 'in cell so scaling internal coordinates!', WARNING)
       endif
     else
       if (abs(xi-0.5)<=0.5.and.abs(yj-0.5)<=0.5) then
-        call error_mesg('diamonds, pos_within_cell', 'out of cell but coordinates <=0.5!', WARNING)
+        if (debug) call error_mesg('diamonds, pos_within_cell', 'out of cell but coordinates <=0.5!', WARNING)
       endif
     endif
   endif
@@ -3792,7 +3871,7 @@ real :: x1,y1,x2,y2,x3,y3,x4,y4,xx,yy,fac
   if (xi.ge.0. .and. xi.le.1. .and. yj.ge.0. .and. yj.le.1.) then
     pos_within_cell=is_point_in_cell(grd, x, y, i, j, explain=explain)
     if (.not. pos_within_cell .and. verbose) then
-      call error_mesg('diamonds, pos_within_cell', 'pos_within_cell is in cell BUT is_point_in_cell disagrees!', WARNING)
+      if (debug) call error_mesg('diamonds, pos_within_cell', 'pos_within_cell is in cell BUT is_point_in_cell disagrees!', WARNING)
     endif
    !pos_within_cell=.true. ! commenting this out makes pos_within_cell agree with is_point_in_cell
   endif
@@ -4753,7 +4832,7 @@ type(icebergs), pointer :: bergs
 character(len=*), intent(in) :: txt
 logical, optional :: ignore_halo_violation
 ! Local variables
-integer :: i, nbergs, ichk1, ichk2, ichk3
+integer :: i, nbergs, ichk1, ichk2, ichk3, ichk4, ichk5, iberg
 real, allocatable :: fld(:,:), fld2(:,:)
 integer, allocatable :: icnt(:,:)
 type(iceberg), pointer :: this
@@ -4765,8 +4844,8 @@ logical :: check_halo
 
   nbergs=count_bergs(bergs)
   call mpp_max(nbergs)
-  allocate( fld( nbergs, 10 ) )
-  allocate( fld2( nbergs, 10 ) )
+  allocate( fld( nbergs, 11 ) )
+  allocate( fld2( nbergs, 11 ) )
   allocate( icnt( grd%isd:grd%ied, grd%jsd:grd%jed ) )
   fld(:,:)=0.
   fld2(:,:)=0.
@@ -4774,9 +4853,10 @@ logical :: check_halo
   grd%tmp(:,:)=0.
 
   this=>bergs%first
-  i=0
+  i=0; ichk4=0; ichk5=0
   do while(associated(this))
     i=i+1
+    iberg=berg_chksum(this)
     fld(i,1) = this%lon
     fld(i,2) = this%lat
     fld(i,3) = this%uvel
@@ -4787,15 +4867,20 @@ logical :: check_halo
     fld(i,8) = this%length
     fld(i,9) = time_hash(this)
     fld(i,10) = pos_hash(this)
+    fld(i,11) = float(iberg)
     icnt(this%ine,this%jne)=icnt(this%ine,this%jne)+1
-    fld2(i,:) = fld(i,:)*float( icnt(this%ine,this%jne) )
-    grd%tmp(this%ine,this%jne)=grd%tmp(this%ine,this%jne)+time_hash(this)*pos_hash(this)+this%mass
+    fld2(i,:) = fld(i,:)*float( icnt(this%ine,this%jne) )*float( i )
+    grd%tmp(this%ine,this%jne)=grd%tmp(this%ine,this%jne)+time_hash(this)*pos_hash(this)+log(this%mass)
+    ichk4=ichk4+iberg
+    ichk5=ichk5+iberg*i
     this=>this%next
   enddo
 
   ichk1=mpp_chksum( fld )
   ichk2=mpp_chksum( fld2 )
   ichk3=mpp_chksum( grd%tmp )
+  call mpp_sum( ichk4 )
+  call mpp_sum( ichk5 )
   nbergs=count_bergs(bergs)
 
   if (nbergs.ne.sum(icnt(:,:))) then
@@ -4816,8 +4901,8 @@ logical :: check_halo
 
   call mpp_sum(nbergs)
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(stdout(),'("diamonds, bergs_chksum: ",a18,4(x,a,"=",i))') &
-      txt, 'chksum', ichk1, 'chksum2', ichk2, 'chksum3', ichk3, '#', nbergs
+    write(stdout(),'("diamonds, bergs_chksum: ",a18,6(x,a,"=",i))') &
+      txt, 'chksum', ichk1, 'chksum2', ichk2, 'chksum3', ichk3, 'chksum4', ichk4, 'chksum5', ichk5, '#', nbergs
 
   deallocate( fld )
   deallocate( fld2 )
@@ -4826,6 +4911,60 @@ logical :: check_halo
   if (debug) call count_out_of_order(bergs,txt)
 
 end subroutine bergs_chksum
+
+! ##############################################################################
+
+integer function berg_chksum(berg )
+! Arguments
+type(iceberg), pointer :: berg
+! Local variables
+real :: rtmp(28)
+integer :: itmp(28+3), i8=0, ichk1, ichk2, ichk3
+integer :: i
+
+  rtmp(:)=0.
+  rtmp(1)=berg%lon
+  rtmp(2)=berg%lat
+  rtmp(3)=berg%uvel
+  rtmp(4)=berg%vvel
+  rtmp(5)=berg%mass
+  rtmp(6)=berg%thickness
+  rtmp(7)=berg%width
+  rtmp(8)=berg%length
+  rtmp(9)=berg%start_lon
+  rtmp(10)=berg%start_lat
+  rtmp(11)=berg%start_day
+  rtmp(12)=berg%start_mass
+  rtmp(13)=berg%mass_scaling
+  rtmp(14)=berg%mass_of_bits
+  rtmp(15)=berg%heat_density
+  rtmp(16)=berg%xi
+  rtmp(17)=berg%yj
+  rtmp(19)=berg%uo
+  rtmp(20)=berg%vo
+  rtmp(21)=berg%ui
+  rtmp(22)=berg%vi
+  rtmp(23)=berg%ua
+  rtmp(24)=berg%va
+  rtmp(25)=berg%ssh_x
+  rtmp(26)=berg%ssh_y
+  rtmp(27)=berg%cn
+  rtmp(28)=berg%hi
+
+  itmp(1:28)=transfer(rtmp,i8)
+  itmp(29)=berg%start_year
+  itmp(30)=berg%ine
+  itmp(31)=berg%jne
+
+  ichk1=0; ichk2=0; ichk3=0
+  do i=1,28+3
+   ichk1=ichk1+itmp(i)
+   ichk2=ichk2+itmp(i)*i
+   ichk3=ichk3+itmp(i)*i*i
+  enddo
+  berg_chksum=ichk1+ichk2+ichk3
+
+end function berg_chksum
 
 ! ##############################################################################
 
