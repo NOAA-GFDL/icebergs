@@ -149,10 +149,11 @@ type, public :: icebergs ; private
   real :: returned_mass_on_ocean=0.
   real :: net_melt=0., berg_melt=0., bergy_src=0., bergy_melt=0.
   integer :: nbergs_calved=0, nbergs_melted=0, nbergs_start=0, nbergs_end=0
+  integer, dimension(:), pointer :: nbergs_calved_by_class=>NULL()
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.97 2009/07/30 13:43:18 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.98 2009/07/30 14:17:39 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -805,7 +806,7 @@ type(time_type), intent(in) :: time
 real, dimension(:,:), intent(inout) :: calving, calving_hflx
 real, dimension(:,:), intent(in) :: uo, vo, ui, vi, tauxa, tauya, ssh, sst, cn, hi
 ! Local variables
-integer :: iyr, imon, iday, ihr, imin, isec
+integer :: iyr, imon, iday, ihr, imin, isec, k
 type(icebergs_gridded), pointer :: grd
 logical :: lerr, sample_traj, lbudget, lverbose
 real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
@@ -1043,6 +1044,7 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
     call mpp_sum(bergs%returned_mass_on_ocean)
     call mpp_sum(bergs%nbergs_end)
     call mpp_sum(bergs%nbergs_calved)
+    do k=1,nclasses; call mpp_sum(bergs%nbergs_calved_by_class(k)); enddo
     call mpp_sum(bergs%nbergs_melted)
     call mpp_sum(bergs%net_calving_returned)
     call mpp_sum(bergs%net_outgoing_calving)
@@ -1108,11 +1110,13 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
         call report_consistant('top interface','kg','from SIS',bergs%net_incoming_calving,'seen by diamonds',bergs%net_calving_received)
         call report_consistant('bot interface','kg','sent',bergs%net_outgoing_calving,'seen by SIS',bergs%net_calving_returned)
       endif
+      write(stdout(),'("diamonds: calved by class = ",i,20(",",i))') (bergs%nbergs_calved_by_class(k),k=1,nclasses)
     endif
     bergs%nbergs_start=bergs%nbergs_end
     bergs%stored_start=bergs%stored_end
     bergs%nbergs_melted=0
     bergs%nbergs_calved=0
+    bergs%nbergs_calved_by_class(:)=0
     bergs%stored_heat_start=bergs%stored_heat_end
     bergs%floating_heat_start=bergs%floating_heat_end
     bergs%floating_mass_start=bergs%floating_mass_end
@@ -1405,6 +1409,7 @@ real :: xi, yj, ddt, calving_to_bergs, calved_to_berg, heat_to_bergs, heat_to_be
           ddt=ddt+bergs%dt*2./17. ! Minor offset to start day
           icnt=icnt+1
           bergs%nbergs_calved=bergs%nbergs_calved+1
+          bergs%nbergs_calved_by_class(k)=bergs%nbergs_calved_by_class(k)+1
         enddo
         icntmax=max(icntmax,icnt)
       enddo
@@ -2535,6 +2540,7 @@ logical :: lerr
   allocate( grd%hi(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%hi(:,:)=0.
   allocate( grd%tmp(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%tmp(:,:)=0.
   allocate( grd%tmpc(grd%isc:grd%iec, grd%jsc:grd%jec) ); grd%tmpc(:,:)=0.
+  allocate( bergs%nbergs_calved_by_class(nclasses) ); bergs%nbergs_calved_by_class(:)=0
 
  !write(stderr(),*) 'diamonds: copying grid'
   ! Copy data declared on ice model computational domain
