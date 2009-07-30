@@ -153,7 +153,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.103 2009/07/30 20:14:14 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.104 2009/07/30 20:17:11 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -3090,38 +3090,47 @@ end subroutine insert_berg_into_list
 
 ! ##############################################################################
 
-  logical function inorder(berg1, berg2)
-  ! Arguments
-  type(iceberg), pointer :: berg1, berg2
-  ! Local variables
-  real :: hash1, hash2
-    hash1=time_hash(berg1)
-    hash2=time_hash(berg2)
-    if (hash1<hash2) then ! want newer first
-      inorder=.true.
-      return
-    else if (hash1>hash2) then
-      inorder=.false.
-      return
-    endif
-    if (berg1%start_mass<berg2%start_mass) then ! want lightest first IF dates are the same
-      inorder=.true.
-      return
-    else if (berg1%start_mass>berg2%start_mass) then
-      inorder=.false.
-      return
-    endif
-    hash1=pos_hash(berg1)
-    hash2=pos_hash(berg2)
-    if (hash1<hash2) then ! want south/east first IF dates and mass are the same
-      inorder=.true.
-      return
-    else if (hash1>hash2) then
-      inorder=.false.
-      return
-    endif
-    inorder=.true. ! passing the above tests mean the bergs 1 and 2 are identical?
-  end function inorder
+logical function inorder(berg1, berg2)
+! Arguments
+type(iceberg), pointer :: berg1, berg2
+! Local variables
+  if (berg1%start_year<berg2%start_year) then ! want newer first
+    inorder=.true.
+    return
+  else if (berg1%start_year>berg2%start_year) then
+    inorder=.false.
+    return
+  endif
+  if (berg1%start_day<berg2%start_day) then ! want newer first
+    inorder=.true.
+    return
+  else if (berg1%start_day>berg2%start_day) then
+    inorder=.false.
+    return
+  endif
+  if (berg1%start_mass<berg2%start_mass) then ! want lightest first
+    inorder=.true.
+    return
+  else if (berg1%start_mass>berg2%start_mass) then
+    inorder=.false.
+    return
+  endif
+  if (berg1%start_lon<berg2%start_lon) then ! want eastward first
+    inorder=.true.
+    return
+  else if (berg1%start_lon>berg2%start_lon) then
+    inorder=.false.
+    return
+  endif
+  if (berg1%start_lat<berg2%start_lat) then ! want southern first
+    inorder=.true.
+    return
+  else if (berg1%start_lat>berg2%start_lat) then
+    inorder=.false.
+    return
+  endif
+  inorder=.true. ! passing the above tests mean the bergs 1 and 2 are identical?
+end function inorder
 
 ! ##############################################################################
 
