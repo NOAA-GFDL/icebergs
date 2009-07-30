@@ -152,7 +152,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.96 2009/07/14 14:51:17 wga Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.97 2009/07/30 13:43:18 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -468,6 +468,7 @@ real, parameter :: perday=1./86400.
 
   this=>bergs%first
   do while(associated(this))
+    if (debug) call check_position(grd, this, 'thermodynamics (top)')
 
     call interp_flds(grd, this%ine, this%jne, this%xi, this%yj, this%uo, this%vo, &
             this%ui, this%vi, this%ua, this%va, this%ssh_x, this%ssh_y, this%sst, &
@@ -1476,6 +1477,8 @@ type(iceberg), pointer :: berg
     if (debug) call error_mesg('diamonds, evolve_iceberg','berg is in wrong starting cell!',FATAL)
   endif
 
+  if (debug) call check_position(grd, berg, 'evolve_iceberg (top)')
+
   r180_pi=1./pi_180
   dt=bergs%dt
   dt_2=0.5*dt
@@ -1742,6 +1745,7 @@ type(iceberg), pointer :: berg
  !call interp_flds(grd, i, j, xi, yj, berg%uo, berg%vo, berg%ui, berg%vi, berg%ua, berg%va, berg%ssh_x, berg%ssh_y, berg%sst)
 
  !if (debug) call print_berg(stderr(), berg, 'evolve_iceberg, final posn.')
+  if (debug) call check_position(grd, berg, 'evolve_iceberg (bot)')
 
   berg=>berg%next
   enddo ! loop over all bergs
@@ -2211,6 +2215,7 @@ integer :: i, nbergs_start, nbergs_end
     i=0
     this=>bergs%first
     do while (associated(this))
+      call check_position(grd, this, 'exchange (bot)')
       if (this%ine.lt.bergs%grd%isc .or. &
           this%ine.gt.bergs%grd%iec .or. &
           this%jne.lt.bergs%grd%jsc .or. &
@@ -2317,10 +2322,12 @@ contains
     localberg%heat_density=buff%data(18,n)
     lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
     if (lres) then
+      lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
       call add_new_berg_to_list(first, localberg)
     else
       lres=find_cell_wide(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
       if (lres) then
+        lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
         call add_new_berg_to_list(first, localberg)
       else
         write(stderr(),'("diamonds, unpack_berg_from_buffer pe=(",i3,a,2i4,a,2f8.2)') mpp_pe(),') Failed to find i,j=',localberg%ine,localberg%jne,' for lon,lat=',localberg%lon,localberg%lat
@@ -3884,6 +3891,27 @@ real :: x1,y1,x2,y2,x3,y3,x4,y4,xx,yy,fac
   end subroutine calc_xiyj
 
 end function pos_within_cell
+
+! ##############################################################################
+
+subroutine check_position(grd, berg, label)
+! Arguments
+type(icebergs_gridded), pointer :: grd
+type(iceberg), pointer :: berg
+character(len=*) :: label
+! Local variables
+real :: xi, yj
+logical :: lret
+
+  lret=pos_within_cell(grd, berg%lon, berg%lat, berg%ine, berg%jne, xi, yj)
+  if (xi.ne.berg%xi.or.yj.ne.berg%yj) then
+    write(stderr(),'("diamonds: check_position (",i4,") b%x,x,-=",3(es12.4,x),a)'),mpp_pe(),berg%xi,xi,berg%xi-xi,label
+    write(stderr(),'("diamonds: check_position (",i4,") b%y,y,-=",3(es12.4,x),a)'),mpp_pe(),berg%yj,yj,berg%yj-yj,label
+    call print_berg(stderr(), berg, 'check_position')
+    call error_mesg('diamonds, check_position','berg has inconsistent xi,yj!',FATAL)
+  endif
+
+end subroutine check_position
 
 ! ##############################################################################
 
