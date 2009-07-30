@@ -153,7 +153,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.99 2009/07/30 14:58:23 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.100 2009/07/30 15:07:34 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -1235,6 +1235,12 @@ real :: dmda
  !mass(:,:)=mass(:,:)+( grd%mass(grd%isc:grd%iec,grd%jsc:grd%jec) &
  !                    + grd%bergy_mass(grd%isc:grd%iec,grd%jsc:grd%jec) )
 
+
+  if (debug) then
+    bergs%grd%tmp(:,:)=0.; bergs%grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec)=mass
+    call grd_chksum2(bergs%grd, bergs%grd%tmp, 'mass in (incr)')
+  endif
+
   call mpp_update_domains(grd%mass_on_ocean, grd%domain)
   do j=grd%jsc, grd%jec; do i=grd%isc, grd%iec
     dmda=grd%mass_on_ocean(i,j,5) &
@@ -1245,6 +1251,12 @@ real :: dmda
     if (grd%area(i,j)>0) dmda=dmda/grd%area(i,j)*grd%msk(i,j)
     if (.not. bergs%passive_mode) mass(i,j)=mass(i,j)+dmda
   enddo; enddo
+
+  if (debug) then
+    call grd_chksum3(bergs%grd, bergs%grd%mass_on_ocean, 'mass bergs (incr)')
+    bergs%grd%tmp(:,:)=0.; bergs%grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec)=mass
+    call grd_chksum2(bergs%grd, bergs%grd%tmp, 'mass out (incr)')
+  endif
 
   call mpp_clock_end(bergs%clock_int)
   call mpp_clock_end(bergs%clock)
@@ -2903,7 +2915,6 @@ type(randomNumberStream) :: rns
 
   call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'read_restart_calving, stored_ice')
   call grd_chksum2(bergs%grd, bergs%grd%stored_heat, 'read_restart_calving, stored_heat')
-  call grd_chksum3(bergs%grd, bergs%grd%mass_on_ocean, 'read_restart_calving, mass_on_ocean')
 
   bergs%stored_start=sum( grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:) )
   call mpp_sum( bergs%stored_start )
