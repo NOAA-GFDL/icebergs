@@ -153,7 +153,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.105 2009/07/30 20:23:38 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.106 2009/07/30 20:39:20 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -4682,7 +4682,7 @@ type(icebergs_gridded), pointer :: grd
 character(len=*) :: label
 ! Local variables
 
-  write(*,'(2a)') 'diamonds: checksumming gridded data @ ',trim(label)
+  if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') 'diamonds: checksumming gridded data @ ',trim(label)
 
   ! external forcing
   call grd_chksum2(grd, grd%uo, 'uo')
