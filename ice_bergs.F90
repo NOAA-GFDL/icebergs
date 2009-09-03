@@ -130,6 +130,7 @@ type, public :: icebergs ; private
   logical :: use_operator_splitting=.true. ! Use first order operator splitting for thermodynamics
   logical :: add_weight_to_ocean=.true. ! Add weight of bergs to ocean
   logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
+  logical :: time_average_weight=.true. ! Time average the weight on the ocean
   type(buffer), pointer :: obuffer_n=>NULL(), ibuffer_n=>NULL()
   type(buffer), pointer :: obuffer_s=>NULL(), ibuffer_s=>NULL()
   type(buffer), pointer :: obuffer_e=>NULL(), ibuffer_e=>NULL()
@@ -153,7 +154,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.106 2009/07/30 20:39:20 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.107 2009/09/03 18:41:24 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -616,15 +617,18 @@ real, parameter :: perday=1./86400.
       if (grd%id_virtual_area>0) grd%virtual_area(i,j)=grd%virtual_area(i,j)+(Wn*Ln+Abits)*this%mass_scaling ! m^2
       if (grd%id_mass>0 .or. bergs%add_weight_to_ocean) grd%mass(i,j)=grd%mass(i,j)+Mnew/grd%area(i,j)*this%mass_scaling ! kg/m2
       if (grd%id_bergy_mass>0 .or. bergs%add_weight_to_ocean) grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+nMbits/grd%area(i,j)*this%mass_scaling ! kg/m2
-      if (bergs%add_weight_to_ocean) call spread_mass_across_ocean_cells(grd, i, j, this%xi, this%yj, Mnew, nMbits, this%mass_scaling)
+      if (bergs%add_weight_to_ocean .and. .not. bergs%time_average_weight) &
+         call spread_mass_across_ocean_cells(grd, i, j, this%xi, this%yj, Mnew, nMbits, this%mass_scaling)
     endif
   
     this=>next
   enddo
 
-  contains
+end subroutine thermodynamics
 
-  subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling)
+! ##############################################################################
+
+subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling)
   ! Arguments
   type(icebergs_gridded), pointer :: grd
   integer, intent(in) :: i, j
@@ -661,9 +665,7 @@ real, parameter :: perday=1./86400.
   grd%mass_on_ocean(i,j,8)=grd%mass_on_ocean(i,j,8)+yUxC*Mass
   grd%mass_on_ocean(i,j,9)=grd%mass_on_ocean(i,j,9)+yUxR*Mass
 
-  end subroutine spread_mass_across_ocean_cells
-
-end subroutine thermodynamics
+end subroutine spread_mass_across_ocean_cells
 
 ! ##############################################################################
 
@@ -1479,6 +1481,8 @@ type(iceberg), pointer :: berg
   on_tangential_plane=.false.
   if (berg%lat>89.) on_tangential_plane=.true.
   i1=i;j1=j
+  if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
+    call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
 
   ! A1 = A(X1)
   lon1=berg%lon; lat1=berg%lat
@@ -1505,6 +1509,8 @@ type(iceberg), pointer :: berg
   i=i1;j=j1;xi=berg%xi;yj=berg%yj
   call adjust_index_and_ground(grd, lon2, lat2, uvel2, vvel2, i, j, xi, yj, bounced, error_flag)
   i2=i; j2=j
+  if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
+    call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
   ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon2,lat2,x2,y2)
   if (.not.error_flag) then
     if (debug .and. .not. is_point_in_cell(bergs%grd, lon2, lat2, i, j)) error_flag=.true.
@@ -1556,6 +1562,8 @@ type(iceberg), pointer :: berg
   i=i1;j=j1;xi=berg%xi;yj=berg%yj
   call adjust_index_and_ground(grd, lon3, lat3, uvel3, vvel3, i, j, xi, yj, bounced, error_flag)
   i3=i; j3=j
+  if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
+    call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
   ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon3,lat3,x3,y3)
   if (.not.error_flag) then
     if (debug .and. .not. is_point_in_cell(bergs%grd, lon3, lat3, i, j)) error_flag=.true.
@@ -1670,6 +1678,8 @@ type(iceberg), pointer :: berg
   endif
   i=i1;j=j1;xi=berg%xi;yj=berg%yj
   call adjust_index_and_ground(grd, lonn, latn, uveln, vveln, i, j, xi, yj, bounced, error_flag)
+  if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
+    call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
 
   if (.not.error_flag) then
     if (.not. is_point_in_cell(bergs%grd, lonn, latn, i, j)) error_flag=.true.
@@ -2397,6 +2407,7 @@ real :: sicn_shift=0. ! Shift of sea-ice concentration in erosion flux modulatio
 logical :: use_operator_splitting=.true. ! Use first order operator splitting for thermodynamics
 logical :: add_weight_to_ocean=.true. ! Add weight of icebergs + bits to ocean
 logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
+logical :: time_average_weight=.true. ! Time average the weight on the ocean
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim)
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
@@ -2404,7 +2415,8 @@ real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250
 namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
          distribution, mass_scaling, initial_thickness, verbose_hrs, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
-         parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart
+         parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, &
+         time_average_weight
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je
 type(icebergs_gridded), pointer :: grd
@@ -2615,6 +2627,7 @@ logical :: lerr
   bergs%bergy_bit_erosion_fraction=bergy_bit_erosion_fraction
   bergs%sicn_shift=sicn_shift
   bergs%passive_mode=passive_mode
+  bergs%time_average_weight=time_average_weight
   bergs%add_weight_to_ocean=add_weight_to_ocean
   allocate( bergs%initial_mass(nclasses) ); bergs%initial_mass(:)=initial_mass(:)
   allocate( bergs%distribution(nclasses) ); bergs%distribution(:)=distribution(:)
