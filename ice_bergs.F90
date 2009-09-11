@@ -154,7 +154,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.107 2009/09/03 18:41:24 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.108 2009/09/11 18:24:52 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -181,6 +181,7 @@ logical :: really_debug=.false. ! Turn on debugging
 logical :: parallel_reprod=.true. ! Reproduce across different PE decompositions
 logical :: use_slow_find=.true. ! Use really slow (but robust) find_cell for reading restarts
 logical :: ignore_ij_restart=.false. ! Read i,j location from restart if available (needed to use restarts on different grids)
+logical :: generate_test_icebergs=.false. ! Create icebergs in absence of a restart file
 
 contains
 
@@ -2416,7 +2417,7 @@ namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
          distribution, mass_scaling, initial_thickness, verbose_hrs, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, &
-         time_average_weight
+         time_average_weight, generate_test_icebergs
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je
 type(icebergs_gridded), pointer :: grd
@@ -2884,6 +2885,8 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
   endif
   if (k.ne.nbergs_in_file) call error_mesg('diamonds, read_restart_bergs', 'wrong number of bergs read!', FATAL)
 
+  if (.not. found_restart .and. bergs%nbergs_start==0 .and. generate_test_icebergs) call genereate_bergs(bergs)
+
   bergs%floating_mass_start=sum_mass(bergs%first)
   call mpp_sum( bergs%floating_mass_start )
   bergs%icebergs_mass_start=sum_mass(bergs%first,justbergs=.true.)
@@ -2891,6 +2894,60 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
   bergs%bergy_mass_start=sum_mass(bergs%first,justbits=.true.)
   call mpp_sum( bergs%bergy_mass_start )
   if (mpp_pe().eq.mpp_root_pe().and.verbose) write(*,'(a)') 'diamonds, read_restart_bergs: completed'
+
+contains
+  
+  subroutine genereate_bergs(bergs)
+  ! Arguments
+  type(icebergs), pointer :: bergs
+  ! Local variables
+  integer :: i,j
+  type(iceberg) :: localberg ! NOT a pointer but an actual local variable
+
+    ! For convenience
+    grd=>bergs%grd
+
+    do j=grd%jsc,grd%jec; do i=grd%isc,grd%iec
+      if (grd%msk(i,j)>0. .and. abs(grd%latc(i,j))>60.) then
+        localberg%xi=0.5
+        localberg%yj=0.5
+        localberg%ine=i
+        localberg%jne=j
+        localberg%lon=bilin(grd, grd%lon, i, j, localberg%xi, localberg%yj)
+        localberg%lat=bilin(grd, grd%lat, i, j, localberg%xi, localberg%yj)
+        localberg%mass=bergs%initial_mass(1)
+        localberg%thickness=bergs%initial_thickness(1)
+        localberg%width=bergs%initial_width(1)
+        localberg%length=bergs%initial_length(1)
+        localberg%start_lon=localberg%lon
+        localberg%start_lat=localberg%lat
+        localberg%start_year=0
+        localberg%start_day=1
+        localberg%start_mass=localberg%mass
+        localberg%mass_scaling=bergs%mass_scaling(1)
+        localberg%mass_of_bits=0.
+        localberg%heat_density=0.
+        localberg%uvel=1.
+        localberg%vvel=0.
+        call add_new_berg_to_list(bergs%first, localberg)
+        localberg%uvel=-1.
+        localberg%vvel=0.
+        call add_new_berg_to_list(bergs%first, localberg)
+        localberg%uvel=0.
+        localberg%vvel=1.
+        call add_new_berg_to_list(bergs%first, localberg)
+        localberg%uvel=0.
+        localberg%vvel=-1.
+        call add_new_berg_to_list(bergs%first, localberg)
+      endif
+    enddo; enddo
+
+    bergs%nbergs_start=count_bergs(bergs)
+    call mpp_sum(bergs%nbergs_start)
+    if (mpp_pe().eq.mpp_root_pe()) &
+      write(*,'(a,i,a)') 'diamonds, generate_bergs: ',bergs%nbergs_start,' were generated'
+
+  end subroutine genereate_bergs
   
 end subroutine read_restart_bergs
 
