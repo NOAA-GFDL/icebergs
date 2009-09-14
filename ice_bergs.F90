@@ -131,6 +131,7 @@ type, public :: icebergs ; private
   logical :: add_weight_to_ocean=.true. ! Add weight of bergs to ocean
   logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
   logical :: time_average_weight=.true. ! Time average the weight on the ocean
+  real :: speed_limit=0. ! CFL speed limit for a berg
   type(buffer), pointer :: obuffer_n=>NULL(), ibuffer_n=>NULL()
   type(buffer), pointer :: obuffer_s=>NULL(), ibuffer_s=>NULL()
   type(buffer), pointer :: obuffer_e=>NULL(), ibuffer_e=>NULL()
@@ -154,7 +155,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.108 2009/09/11 18:24:52 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.109 2009/09/14 13:57:04 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -204,7 +205,7 @@ real :: c_ocn, c_atm, c_ice
 real :: ampl, wmod, Cr, Lwavelength, Lcutoff, Ltop
 real, parameter :: alpha=0.0, beta=1.0, accel_lim=1.e-2, Cr0=0.06, vel_lim=15.
 real :: lambda, detA, A11, A12, axe, aye, D_hi
-real :: uveln, vveln, us, vs
+real :: uveln, vveln, us, vs, speed, loc_dx, new_speed
 logical :: dumpit
 integer :: itloop
 
@@ -296,6 +297,15 @@ integer :: itloop
 
     uveln=uvel0+dt*ax
     vveln=vvel0+dt*ay
+
+    ! Limit speed of bergs based on a CFL criteria
+    if (bergs%speed_limit>0.) then
+      speed=sqrt(uveln*uveln+vveln*vveln) ! Speed of berg
+      loc_dx=min(0.5*(grd%dx(i,j)+grd%dx(i,j-1)),0.5*(grd%dy(i,j)-grd%dy(i-1,j))) ! min(dx,dy)
+      new_speed=min(loc_dx/dt*bergs%speed_limit,ax) ! Restrict speed to dx/dt x factor
+      uveln=uveln*(new_speed/speed) ! Scale velocity to reduce speed
+      vveln=vveln*(new_speed/speed) ! without changing the direction
+    endif
 
   enddo ! itloop
   
@@ -2409,6 +2419,7 @@ logical :: use_operator_splitting=.true. ! Use first order operator splitting fo
 logical :: add_weight_to_ocean=.true. ! Add weight of icebergs + bits to ocean
 logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
 logical :: time_average_weight=.true. ! Time average the weight on the ocean
+real :: speed_limit=0. ! CFL speed limit for a berg
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim)
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
@@ -2417,7 +2428,7 @@ namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
          distribution, mass_scaling, initial_thickness, verbose_hrs, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, &
-         time_average_weight, generate_test_icebergs
+         time_average_weight, generate_test_icebergs, speed_limit
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je
 type(icebergs_gridded), pointer :: grd
@@ -2629,6 +2640,7 @@ logical :: lerr
   bergs%sicn_shift=sicn_shift
   bergs%passive_mode=passive_mode
   bergs%time_average_weight=time_average_weight
+  bergs%speed_limit=speed_limit
   bergs%add_weight_to_ocean=add_weight_to_ocean
   allocate( bergs%initial_mass(nclasses) ); bergs%initial_mass(:)=initial_mass(:)
   allocate( bergs%distribution(nclasses) ); bergs%distribution(:)=distribution(:)
