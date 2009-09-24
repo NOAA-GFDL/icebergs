@@ -155,7 +155,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.109 2009/09/14 13:57:04 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.110 2009/09/24 18:13:42 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -301,10 +301,12 @@ integer :: itloop
     ! Limit speed of bergs based on a CFL criteria
     if (bergs%speed_limit>0.) then
       speed=sqrt(uveln*uveln+vveln*vveln) ! Speed of berg
-      loc_dx=min(0.5*(grd%dx(i,j)+grd%dx(i,j-1)),0.5*(grd%dy(i,j)-grd%dy(i-1,j))) ! min(dx,dy)
-      new_speed=min(loc_dx/dt*bergs%speed_limit,ax) ! Restrict speed to dx/dt x factor
-      uveln=uveln*(new_speed/speed) ! Scale velocity to reduce speed
-      vveln=vveln*(new_speed/speed) ! without changing the direction
+      if (speed>0.) then
+        loc_dx=min(0.5*(grd%dx(i,j)+grd%dx(i,j-1)),0.5*(grd%dy(i,j)-grd%dy(i-1,j))) ! min(dx,dy)
+        new_speed=min(loc_dx/dt*bergs%speed_limit,speed) ! Restrict speed to dx/dt x factor
+        uveln=uveln*(new_speed/speed) ! Scale velocity to reduce speed
+        vveln=vveln*(new_speed/speed) ! without changing the direction
+      endif
     endif
 
   enddo ! itloop
@@ -4782,7 +4784,7 @@ character(len=*) :: label
 
   ! state
   call grd_chksum2(grd, grd%mass, 'mass')
-  call grd_chksum2(grd, grd%mass_on_ocean, 'mass_on_ocean')
+  call grd_chksum3(grd, grd%mass_on_ocean, 'mass_on_ocean')
   call grd_chksum3(grd, grd%stored_ice, 'stored_ice')
   call grd_chksum2(grd, grd%stored_heat, 'stored_heat')
   call grd_chksum2(grd, grd%melt_buoy, 'melt_b')
