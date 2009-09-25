@@ -155,7 +155,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.110 2009/09/24 18:13:42 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.111 2009/09/25 13:04:52 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -302,7 +302,7 @@ integer :: itloop
     if (bergs%speed_limit>0.) then
       speed=sqrt(uveln*uveln+vveln*vveln) ! Speed of berg
       if (speed>0.) then
-        loc_dx=min(0.5*(grd%dx(i,j)+grd%dx(i,j-1)),0.5*(grd%dy(i,j)-grd%dy(i-1,j))) ! min(dx,dy)
+        loc_dx=min(0.5*(grd%dx(i,j)+grd%dx(i,j-1)),0.5*(grd%dy(i,j)+grd%dy(i-1,j))) ! min(dx,dy)
         new_speed=min(loc_dx/dt*bergs%speed_limit,speed) ! Restrict speed to dx/dt x factor
         uveln=uveln*(new_speed/speed) ! Scale velocity to reduce speed
         vveln=vveln*(new_speed/speed) ! without changing the direction
