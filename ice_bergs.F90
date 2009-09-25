@@ -151,11 +151,12 @@ type, public :: icebergs ; private
   real :: returned_mass_on_ocean=0.
   real :: net_melt=0., berg_melt=0., bergy_src=0., bergy_melt=0.
   integer :: nbergs_calved=0, nbergs_melted=0, nbergs_start=0, nbergs_end=0
+  integer :: nspeeding_tickets=0
   integer, dimension(:), pointer :: nbergs_calved_by_class=>NULL()
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.111 2009/09/25 13:04:52 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.112 2009/09/25 18:16:56 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -298,19 +299,23 @@ integer :: itloop
     uveln=uvel0+dt*ax
     vveln=vvel0+dt*ay
 
-    ! Limit speed of bergs based on a CFL criteria
-    if (bergs%speed_limit>0.) then
-      speed=sqrt(uveln*uveln+vveln*vveln) ! Speed of berg
-      if (speed>0.) then
-        loc_dx=min(0.5*(grd%dx(i,j)+grd%dx(i,j-1)),0.5*(grd%dy(i,j)+grd%dy(i-1,j))) ! min(dx,dy)
-        new_speed=min(loc_dx/dt*bergs%speed_limit,speed) ! Restrict speed to dx/dt x factor
-        uveln=uveln*(new_speed/speed) ! Scale velocity to reduce speed
-        vveln=vveln*(new_speed/speed) ! without changing the direction
-      endif
-    endif
-
   enddo ! itloop
   
+  ! Limit speed of bergs based on a CFL criteria
+  if (bergs%speed_limit>0.) then
+    speed=sqrt(uveln*uveln+vveln*vveln) ! Speed of berg
+    if (speed>0.) then
+      loc_dx=min(0.5*(grd%dx(i,j)+grd%dx(i,j-1)),0.5*(grd%dy(i,j)+grd%dy(i-1,j))) ! min(dx,dy)
+     !new_speed=min(loc_dx/dt*bergs%speed_limit,speed) ! Restrict speed to dx/dt x factor
+      new_speed=loc_dx/dt*bergs%speed_limit ! Speed limit as a factor of dx / dt 
+      if (new_speed<speed) then
+        uveln=uveln*(new_speed/speed) ! Scale velocity to reduce speed
+        vveln=vveln*(new_speed/speed) ! without changing the direction
+        bergs%nspeeding_tickets=bergs%nspeeding_tickets+1
+      endif
+    endif
+  endif
+
   dumpit=.false.
   if (abs(uveln)>vel_lim.or.abs(vveln)>vel_lim) then
     dumpit=.true.
@@ -1052,6 +1057,7 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
     call mpp_sum(bergs%nbergs_calved)
     do k=1,nclasses; call mpp_sum(bergs%nbergs_calved_by_class(k)); enddo
     call mpp_sum(bergs%nbergs_melted)
+    call mpp_sum(bergs%nspeeding_tickets)
     call mpp_sum(bergs%net_calving_returned)
     call mpp_sum(bergs%net_outgoing_calving)
     call mpp_sum(bergs%net_calving_received)
@@ -1117,12 +1123,14 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
         call report_consistant('bot interface','kg','sent',bergs%net_outgoing_calving,'seen by SIS',bergs%net_calving_returned)
       endif
       write(*,'("diamonds: calved by class = ",i,20(",",i))') (bergs%nbergs_calved_by_class(k),k=1,nclasses)
+      if (bergs%nspeeding_tickets>0) write(*,'("diamonds: speeding tickets issued = ",i)') bergs%nspeeding_tickets
     endif
     bergs%nbergs_start=bergs%nbergs_end
     bergs%stored_start=bergs%stored_end
     bergs%nbergs_melted=0
     bergs%nbergs_calved=0
     bergs%nbergs_calved_by_class(:)=0
+    bergs%nspeeding_tickets=0
     bergs%stored_heat_start=bergs%stored_heat_end
     bergs%floating_heat_start=bergs%floating_heat_end
     bergs%floating_mass_start=bergs%floating_mass_end
