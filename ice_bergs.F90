@@ -130,7 +130,7 @@ type, public :: icebergs ; private
   logical :: use_operator_splitting=.true. ! Use first order operator splitting for thermodynamics
   logical :: add_weight_to_ocean=.true. ! Add weight of bergs to ocean
   logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
-  logical :: time_average_weight=.true. ! Time average the weight on the ocean
+  logical :: time_average_weight=.false. ! Time average the weight on the ocean
   real :: speed_limit=0. ! CFL speed limit for a berg
   type(buffer), pointer :: obuffer_n=>NULL(), ibuffer_n=>NULL()
   type(buffer), pointer :: obuffer_s=>NULL(), ibuffer_s=>NULL()
@@ -156,7 +156,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.112 2009/09/25 18:16:56 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.113 2009/09/29 14:47:46 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -2428,7 +2428,7 @@ real :: sicn_shift=0. ! Shift of sea-ice concentration in erosion flux modulatio
 logical :: use_operator_splitting=.true. ! Use first order operator splitting for thermodynamics
 logical :: add_weight_to_ocean=.true. ! Add weight of icebergs + bits to ocean
 logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
-logical :: time_average_weight=.true. ! Time average the weight on the ocean
+logical :: time_average_weight=.false. ! Time average the weight on the ocean
 real :: speed_limit=0. ! CFL speed limit for a berg
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim)
