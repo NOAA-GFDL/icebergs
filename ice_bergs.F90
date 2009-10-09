@@ -80,6 +80,7 @@ type :: icebergs_gridded
   integer :: id_calving_hflx_in=-1, id_stored_heat=-1, id_melt_hflx=-1, id_heat_content=-1
   integer :: id_mass=-1, id_ui=-1, id_vi=-1, id_ua=-1, id_va=-1, id_sst=-1, id_cn=-1, id_hi=-1
   integer :: id_bergy_src=-1, id_bergy_melt=-1, id_bergy_mass=-1, id_berg_melt=-1
+  integer :: id_mass_on_ocn=-1
 end type icebergs_gridded
 
 type :: xyt
@@ -120,7 +121,7 @@ type, public :: icebergs ; private
   integer :: traj_sample_hrs
   integer :: verbose_hrs
   integer :: clock, clock_mom, clock_the, clock_int, clock_cal, clock_com, clock_ini, clock_ior, clock_iow, clock_dia ! ids for fms timers
-  real :: rho_bergs ! Density of icebergs
+  real :: rho_bergs ! Density of icebergs [kg/m^3]
   real :: LoW_ratio ! Initial ratio L/W for newly calved icebergs
   real :: bergy_bit_erosion_fraction ! Fraction of erosion melt flux to divert to bergy bits
   real :: sicn_shift ! Shift of sea-ice concentration in erosion flux modulation (0<sicn_shift<1)
@@ -131,7 +132,8 @@ type, public :: icebergs ; private
   logical :: add_weight_to_ocean=.true. ! Add weight of bergs to ocean
   logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
   logical :: time_average_weight=.false. ! Time average the weight on the ocean
-  real :: speed_limit=0. ! CFL speed limit for a berg
+  real :: speed_limit=0. ! CFL speed limit for a berg [m/s]
+  real :: clipping_depth=0. ! The effective depth at which to clip the weight felt by the ocean [m].
   type(buffer), pointer :: obuffer_n=>NULL(), ibuffer_n=>NULL()
   type(buffer), pointer :: obuffer_s=>NULL(), ibuffer_s=>NULL()
   type(buffer), pointer :: obuffer_e=>NULL(), ibuffer_e=>NULL()
@@ -156,7 +158,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.113 2009/09/29 14:47:46 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.114 2009/10/09 17:19:00 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -636,7 +638,7 @@ real, parameter :: perday=1./86400.
       if (grd%id_mass>0 .or. bergs%add_weight_to_ocean) grd%mass(i,j)=grd%mass(i,j)+Mnew/grd%area(i,j)*this%mass_scaling ! kg/m2
       if (grd%id_bergy_mass>0 .or. bergs%add_weight_to_ocean) grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+nMbits/grd%area(i,j)*this%mass_scaling ! kg/m2
       if (bergs%add_weight_to_ocean .and. .not. bergs%time_average_weight) &
-         call spread_mass_across_ocean_cells(grd, i, j, this%xi, this%yj, Mnew, nMbits, this%mass_scaling)
+         call spread_mass_across_ocean_cells(bergs, i, j, this%xi, this%yj, Mnew, nMbits, this%mass_scaling)
     endif
   
     this=>next
@@ -646,16 +648,24 @@ end subroutine thermodynamics
 
 ! ##############################################################################
 
-subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling)
+subroutine spread_mass_across_ocean_cells(bergs, i, j, x, y, Mberg, Mbits, scaling)
   ! Arguments
-  type(icebergs_gridded), pointer :: grd
+  type(icebergs), pointer :: bergs
   integer, intent(in) :: i, j
   real, intent(in) :: x, y, Mberg, Mbits, scaling
   ! Local variables
   real :: xL, xC, xR, yD, yC, yU, Mass
   real :: yDxL, yDxC, yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR
+  real, parameter :: rho_seawater=1035.
+  type(icebergs_gridded), pointer :: grd
+
+  ! For convenience
+  grd=>bergs%grd
   
   Mass=(Mberg+Mbits)*scaling
+  ! This line attempts to "clip" the weight felt by the ocean. The concept of
+  ! clipping is non-physical and this step should be replaced by grounding.
+  if (bergs%clipping_depth>0.) Mass=min(Mass,bergs%clipping_depth*grd%area(i,j)*rho_seawater)
   xL=min(0.5, max(0., 0.5-x))
   xR=min(0.5, max(0., x-0.5))
   xC=max(0., 1.-(xL+xR))
@@ -1236,14 +1246,16 @@ end subroutine icebergs_run
 
 ! ##############################################################################
 
-subroutine icebergs_incr_mass(bergs, mass)
+subroutine icebergs_incr_mass(bergs, mass, Time)
 ! Arguments
 type(icebergs), pointer :: bergs
 real, dimension(bergs%grd%isc:bergs%grd%iec,bergs%grd%jsc:bergs%grd%jec), intent(inout) :: mass
+type(time_type), intent(in), optional :: Time
 ! Local variables
 integer :: i, j
 type(icebergs_gridded), pointer :: grd
 real :: dmda
+logical :: lerr
 
   if (.not. associated(bergs)) return
 
@@ -1258,7 +1270,6 @@ real :: dmda
   ! Add iceberg+bits mass field to non-haloed SIS field (kg/m^2)
  !mass(:,:)=mass(:,:)+( grd%mass(grd%isc:grd%iec,grd%jsc:grd%jec) &
  !                    + grd%bergy_mass(grd%isc:grd%iec,grd%jsc:grd%jec) )
-
 
   if (debug) then
     bergs%grd%tmp(:,:)=0.; bergs%grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec)=mass
@@ -1276,10 +1287,16 @@ real :: dmda
     if (.not. bergs%passive_mode) mass(i,j)=mass(i,j)+dmda
   enddo; enddo
 
+  if (debug.or.grd%id_mass_on_ocn>0) then
+    bergs%grd%tmp(:,:)=0.; bergs%grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec)=mass
+  endif
   if (debug) then
     call grd_chksum3(bergs%grd, bergs%grd%mass_on_ocean, 'mass bergs (incr)')
-    bergs%grd%tmp(:,:)=0.; bergs%grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec)=mass
     call grd_chksum2(bergs%grd, bergs%grd%tmp, 'mass out (incr)')
+  endif
+  if (present(Time)) then
+    if (grd%id_mass_on_ocn>0) &
+      lerr=send_data(grd%id_mass_on_ocn, grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   endif
 
   call mpp_clock_end(bergs%clock_int)
@@ -1503,7 +1520,7 @@ type(iceberg), pointer :: berg
   if (berg%lat>89.) on_tangential_plane=.true.
   i1=i;j1=j
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-    call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
+    call spread_mass_across_ocean_cells(bergs, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
 
   ! A1 = A(X1)
   lon1=berg%lon; lat1=berg%lat
@@ -1531,7 +1548,7 @@ type(iceberg), pointer :: berg
   call adjust_index_and_ground(grd, lon2, lat2, uvel2, vvel2, i, j, xi, yj, bounced, error_flag)
   i2=i; j2=j
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-    call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
+    call spread_mass_across_ocean_cells(bergs, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
   ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon2,lat2,x2,y2)
   if (.not.error_flag) then
     if (debug .and. .not. is_point_in_cell(bergs%grd, lon2, lat2, i, j)) error_flag=.true.
@@ -1584,7 +1601,7 @@ type(iceberg), pointer :: berg
   call adjust_index_and_ground(grd, lon3, lat3, uvel3, vvel3, i, j, xi, yj, bounced, error_flag)
   i3=i; j3=j
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-    call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
+    call spread_mass_across_ocean_cells(bergs, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
   ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon3,lat3,x3,y3)
   if (.not.error_flag) then
     if (debug .and. .not. is_point_in_cell(bergs%grd, lon3, lat3, i, j)) error_flag=.true.
@@ -1700,7 +1717,7 @@ type(iceberg), pointer :: berg
   i=i1;j=j1;xi=berg%xi;yj=berg%yj
   call adjust_index_and_ground(grd, lonn, latn, uveln, vveln, i, j, xi, yj, bounced, error_flag)
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-    call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
+    call spread_mass_across_ocean_cells(bergs, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
 
   if (.not.error_flag) then
     if (.not. is_point_in_cell(bergs%grd, lonn, latn, i, j)) error_flag=.true.
@@ -2703,6 +2720,8 @@ logical :: lerr
      'Virtual coverage by icebergs', 'm^2')
   grd%id_mass=register_diag_field('icebergs', 'mass', axes, Time, &
      'Iceberg density field', 'kg/(m^2)')
+  grd%id_mass_on_ocn=register_diag_field('icebergs', 'mass_on_ocean', axes, Time, &
+     'Iceberg density field felt by ocean', 'kg/(m^2)')
   grd%id_stored_ice=register_diag_field('icebergs', 'stored_ice', axes3d, Time, &
      'Accumulated ice mass by class', 'kg')
   grd%id_real_calving=register_diag_field('icebergs', 'real_calving', axes3d, Time, &
