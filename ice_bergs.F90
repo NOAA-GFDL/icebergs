@@ -45,6 +45,7 @@ type :: icebergs_gridded
   real, dimension(:,:), pointer :: msk=>NULL() ! Ocean-land mask (1=ocean)
   real, dimension(:,:), pointer :: cos=>NULL() ! Cosine from rotation matrix to lat-lon coords
   real, dimension(:,:), pointer :: sin=>NULL() ! Sine from rotation matrix to lat-lon coords
+  real, dimension(:,:), pointer :: ocean_depth=>NULL() ! Depth of ocean (m)
   real, dimension(:,:), pointer :: uo=>NULL() ! Ocean zonal flow (m/s)
   real, dimension(:,:), pointer :: vo=>NULL() ! Ocean meridional flow (m/s)
   real, dimension(:,:), pointer :: ui=>NULL() ! Ice zonal flow (m/s)
@@ -133,6 +134,7 @@ type, public :: icebergs ; private
   logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
   logical :: time_average_weight=.false. ! Time average the weight on the ocean
   real :: speed_limit=0. ! CFL speed limit for a berg [m/s]
+  real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
   real :: clipping_depth=0. ! The effective depth at which to clip the weight felt by the ocean [m].
   type(buffer), pointer :: obuffer_n=>NULL(), ibuffer_n=>NULL()
   type(buffer), pointer :: obuffer_s=>NULL(), ibuffer_s=>NULL()
@@ -158,7 +160,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.114 2009/10/09 17:19:00 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.115 2009/10/10 02:51:32 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -480,7 +482,7 @@ type(icebergs), pointer :: bergs
 type(icebergs_gridded), pointer :: grd
 real :: M, T, W, L, SST, Vol, Ln, Wn, Tn, nVol, IC, Dn
 real :: Mv, Me, Mb, melt, dvo, dva, dM, Ss, dMe, dMb, dMv
-real :: Mnew, Mnew1, Mnew2
+real :: Mnew, Mnew1, Mnew2, Hocean
 real :: Mbits, nMbits, dMbitsE, dMbitsM, Lbits, Abits, Mbb
 integer :: i,j
 type(iceberg), pointer :: this, next
@@ -617,6 +619,7 @@ real, parameter :: perday=1./86400.
       T=Tn
       Tn=Wn
       Wn=T
+      Dn=(bergs%rho_bergs/rho_seawater)*Tn ! re-calculate draught (keel depth) for grounding
     endif
 
     ! Store the new state of iceberg (with L>W)
@@ -637,8 +640,13 @@ real, parameter :: perday=1./86400.
       if (grd%id_virtual_area>0) grd%virtual_area(i,j)=grd%virtual_area(i,j)+(Wn*Ln+Abits)*this%mass_scaling ! m^2
       if (grd%id_mass>0 .or. bergs%add_weight_to_ocean) grd%mass(i,j)=grd%mass(i,j)+Mnew/grd%area(i,j)*this%mass_scaling ! kg/m2
       if (grd%id_bergy_mass>0 .or. bergs%add_weight_to_ocean) grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+nMbits/grd%area(i,j)*this%mass_scaling ! kg/m2
-      if (bergs%add_weight_to_ocean .and. .not. bergs%time_average_weight) &
-         call spread_mass_across_ocean_cells(bergs, i, j, this%xi, this%yj, Mnew, nMbits, this%mass_scaling)
+      if (bergs%add_weight_to_ocean .and. .not. bergs%time_average_weight) then
+        if (bergs%grounding_fraction>0.) then
+          Hocean=bergs%grounding_fraction*(grd%ocean_depth(i,j)+grd%ssh(i,j))
+          if (Dn>Hocean) Mnew=Mnew*min(1.,Hocean/Dn)
+        endif
+        call spread_mass_across_ocean_cells(bergs, i, j, this%xi, this%yj, Mnew, nMbits, this%mass_scaling)
+      endif
     endif
   
     this=>next
@@ -871,7 +879,7 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
   if (bergs%verbose_hrs>0 .and. mod(24*iday+ihr,bergs%verbose_hrs).eq.0) lverbose=verbose
   lbudget=.false.
   if (bergs%verbose_hrs>0 .and. mod(24*iday+ihr,bergs%verbose_hrs).eq.0) lbudget=budget
-  if (mpp_pe()==mpp_root_pe().and.lverbose) write(*,'(a,3i5,a,3i5,a,i5,f8.3)') &
+  if (mpp_pe()==mpp_root_pe().and.(lverbose.or.lbudget)) write(*,'(a,3i5,a,3i5,a,i5,f8.3)') &
        'diamonds: y,m,d=',iyr, imon, iday,' h,m,s=', ihr, imin, isec, &
        ' yr,yrdy=', bergs%current_year, bergs%current_yearday
 
@@ -1267,13 +1275,9 @@ logical :: lerr
   ! For convenience
   grd=>bergs%grd
 
-  ! Add iceberg+bits mass field to non-haloed SIS field (kg/m^2)
- !mass(:,:)=mass(:,:)+( grd%mass(grd%isc:grd%iec,grd%jsc:grd%jec) &
- !                    + grd%bergy_mass(grd%isc:grd%iec,grd%jsc:grd%jec) )
-
   if (debug) then
-    bergs%grd%tmp(:,:)=0.; bergs%grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec)=mass
-    call grd_chksum2(bergs%grd, bergs%grd%tmp, 'mass in (incr)')
+    grd%tmp(:,:)=0.; grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec)=mass
+    call grd_chksum2(grd, grd%tmp, 'mass in (incr)')
   endif
 
   call mpp_update_domains(grd%mass_on_ocean, grd%domain)
@@ -1285,18 +1289,15 @@ logical :: lerr
          +     (grd%mass_on_ocean(i  ,j-1,8)+grd%mass_on_ocean(i  ,j+1,2)) ) )
     if (grd%area(i,j)>0) dmda=dmda/grd%area(i,j)*grd%msk(i,j)
     if (.not. bergs%passive_mode) mass(i,j)=mass(i,j)+dmda
+    if (grd%id_mass_on_ocn>0) grd%tmp(i,j)=dmda
   enddo; enddo
+  if (present(Time).and. (grd%id_mass_on_ocn>0)) &
+    lerr=send_data(grd%id_mass_on_ocn, grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
 
-  if (debug.or.grd%id_mass_on_ocn>0) then
-    bergs%grd%tmp(:,:)=0.; bergs%grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec)=mass
-  endif
   if (debug) then
-    call grd_chksum3(bergs%grd, bergs%grd%mass_on_ocean, 'mass bergs (incr)')
-    call grd_chksum2(bergs%grd, bergs%grd%tmp, 'mass out (incr)')
-  endif
-  if (present(Time)) then
-    if (grd%id_mass_on_ocn>0) &
-      lerr=send_data(grd%id_mass_on_ocn, grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+    grd%tmp(:,:)=0.; grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec)=mass
+    call grd_chksum3(grd, grd%mass_on_ocean, 'mass bergs (incr)')
+    call grd_chksum2(grd, grd%tmp, 'mass out (incr)')
   endif
 
   call mpp_clock_end(bergs%clock_int)
@@ -2423,7 +2424,7 @@ end subroutine send_bergs_to_other_pes
 subroutine icebergs_init(bergs, &
              gni, gnj, layout, io_layout, axes, maskmap, x_cyclic, tripolar_grid, &
              dt, Time, ice_lon, ice_lat, ice_wet, ice_dx, ice_dy, ice_area, &
-             cos_rot, sin_rot)
+             cos_rot, sin_rot, ocean_depth)
 ! Arguments
 type(icebergs), pointer :: bergs
 integer, intent(in) :: gni, gnj, layout(2), io_layout(2), axes(2)
@@ -2433,7 +2434,7 @@ real, intent(in) :: dt
 type (time_type), intent(in) :: Time ! current time
 real, dimension(:,:), intent(in) :: ice_lon, ice_lat, ice_wet
 real, dimension(:,:), intent(in) :: ice_dx, ice_dy, ice_area
-real, dimension(:,:), intent(in) :: cos_rot, sin_rot
+real, dimension(:,:), intent(in) :: cos_rot, sin_rot, ocean_depth
 ! Namelist parameters (and defaults)
 integer :: halo=4 ! Width of halo region
 integer :: traj_sample_hrs=24 ! Period between sampling of position for trajectory storage
@@ -2447,6 +2448,7 @@ logical :: add_weight_to_ocean=.true. ! Add weight of icebergs + bits to ocean
 logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
 logical :: time_average_weight=.false. ! Time average the weight on the ocean
 real :: speed_limit=0. ! CFL speed limit for a berg
+real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim)
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
@@ -2455,7 +2457,7 @@ namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
          distribution, mass_scaling, initial_thickness, verbose_hrs, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, &
-         time_average_weight, generate_test_icebergs, speed_limit
+         time_average_weight, generate_test_icebergs, speed_limit, grounding_fraction
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je
 type(icebergs_gridded), pointer :: grd
@@ -2545,6 +2547,7 @@ logical :: lerr
   allocate( grd%msk(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%msk(:,:)=0.
   allocate( grd%cos(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%cos(:,:)=1.
   allocate( grd%sin(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%sin(:,:)=0.
+  allocate( grd%ocean_depth(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%ocean_depth(:,:)=0.
   allocate( grd%calving(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%calving(:,:)=0.
   allocate( grd%calving_hflx(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%calving_hflx(:,:)=0.
   allocate( grd%stored_heat(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%stored_heat(:,:)=0.
@@ -2581,6 +2584,7 @@ logical :: lerr
   grd%lon(is:ie,js:je)=ice_lon(:,:)
   grd%lat(is:ie,js:je)=ice_lat(:,:)
   grd%area(is:ie,js:je)=ice_area(:,:)*(4.*pi*radius*radius)
+  grd%ocean_depth(is:ie,js:je)=ocean_depth(:,:)
   ! Copy data declared on ice model data domain
   is=grd%isc-1; ie=grd%iec+1; js=grd%jsc-1; je=grd%jec+1
   grd%dx(is:ie,js:je)=ice_dx(:,:)
@@ -2596,6 +2600,7 @@ logical :: lerr
   call mpp_update_domains(grd%msk, grd%domain)
   call mpp_update_domains(grd%cos, grd%domain, position=CORNER)
   call mpp_update_domains(grd%sin, grd%domain, position=CORNER)
+  call mpp_update_domains(grd%ocean_depth, grd%domain)
 
   ! Sanitize lon and lat at the SW edges
   do j=grd%jsc-1,grd%jsd,-1; do i=grd%isd,grd%ied
@@ -2668,6 +2673,7 @@ logical :: lerr
   bergs%passive_mode=passive_mode
   bergs%time_average_weight=time_average_weight
   bergs%speed_limit=speed_limit
+  bergs%grounding_fraction=grounding_fraction
   bergs%add_weight_to_ocean=add_weight_to_ocean
   allocate( bergs%initial_mass(nclasses) ); bergs%initial_mass(:)=initial_mass(:)
   allocate( bergs%distribution(nclasses) ); bergs%distribution(:)=distribution(:)
@@ -2758,6 +2764,9 @@ logical :: lerr
   id_class=register_static_field('icebergs', 'mask', axes, &
                'wet point mask', 'none')
   if (id_class>0) lerr=send_data(id_class, grd%msk(grd%isc:grd%iec,grd%jsc:grd%jec))
+  id_class=register_static_field('icebergs', 'ocean_depth', axes, &
+               'ocean depth', 'm')
+  if (id_class>0) lerr=send_data(id_class, grd%ocean_depth(grd%isc:grd%iec,grd%jsc:grd%jec))
 
   if (debug) then
     call grd_chksum2(grd, grd%lon, 'init lon')
@@ -2766,6 +2775,7 @@ logical :: lerr
     call grd_chksum2(grd, grd%msk, 'init msk')
     call grd_chksum2(grd, grd%cos, 'init cos')
     call grd_chksum2(grd, grd%sin, 'init sin')
+    call grd_chksum2(grd, grd%ocean_depth, 'init ocean_depth')
   endif
 
  !write(stderr(),*) 'diamonds: done'
@@ -4251,6 +4261,7 @@ type(iceberg), pointer :: this, next
   deallocate(bergs%grd%msk)
   deallocate(bergs%grd%cos)
   deallocate(bergs%grd%sin)
+  deallocate(bergs%grd%ocean_depth)
   deallocate(bergs%grd%calving)
   deallocate(bergs%grd%calving_hflx)
   deallocate(bergs%grd%stored_heat)
@@ -4835,6 +4846,7 @@ character(len=*) :: label
   call grd_chksum2(grd, grd%msk, 'msk')
   call grd_chksum2(grd, grd%cos, 'cos')
   call grd_chksum2(grd, grd%sin, 'sin')
+  call grd_chksum2(grd, grd%ocean_depth, 'depth')
 
 end subroutine checksum_gridded
 
