@@ -160,7 +160,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.118 2009/12/07 19:24:17 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.119 2009/12/07 21:05:32 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -2447,6 +2447,7 @@ logical :: use_operator_splitting=.true. ! Use first order operator splitting fo
 logical :: add_weight_to_ocean=.true. ! Add weight of icebergs + bits to ocean
 logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
 logical :: time_average_weight=.false. ! Time average the weight on the ocean
+logical :: fix_restart_dates=.true. ! After a restart, check that bergs were created before the current model date
 real :: speed_limit=0. ! CFL speed limit for a berg
 real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
@@ -2457,7 +2458,7 @@ namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
          distribution, mass_scaling, initial_thickness, verbose_hrs, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, &
-         time_average_weight, generate_test_icebergs, speed_limit, grounding_fraction
+         time_average_weight, generate_test_icebergs, speed_limit, grounding_fraction, fix_restart_dates
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je
 type(icebergs_gridded), pointer :: grd
@@ -2686,8 +2687,9 @@ logical :: lerr
 
   call mpp_clock_end(bergs%clock_ini)
   call mpp_clock_begin(bergs%clock_ior)
-  call read_restart_bergs(bergs)
+  call read_restart_bergs(bergs,Time)
   call bergs_chksum(bergs, 'read_restart bergs')
+  if (fix_restart_dates) call offset_berg_dates(bergs,Time)
   call read_restart_calving(bergs)
   call mpp_clock_end(bergs%clock_ior)
   call mpp_clock_begin(bergs%clock_ini)
@@ -2785,9 +2787,10 @@ end subroutine icebergs_init
 
 ! ##############################################################################
 
-subroutine read_restart_bergs(bergs)
+subroutine read_restart_bergs(bergs,Time)
 ! Arguments
 type(icebergs), pointer :: bergs
+type(time_type), intent(in) :: Time
 ! Local variables
 integer :: k, ierr, ncid, dimid, nbergs_in_file
 integer :: lonid, latid, uvelid, vvelid, ineid, jneid
@@ -2936,7 +2939,7 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
   endif
   if (k.ne.nbergs_in_file) call error_mesg('diamonds, read_restart_bergs', 'wrong number of bergs read!', FATAL)
 
-  if (.not. found_restart .and. bergs%nbergs_start==0 .and. generate_test_icebergs) call generate_bergs(bergs)
+  if (.not. found_restart .and. bergs%nbergs_start==0 .and. generate_test_icebergs) call generate_bergs(bergs,Time)
 
   bergs%floating_mass_start=sum_mass(bergs%first)
   call mpp_sum( bergs%floating_mass_start )
@@ -2948,15 +2951,19 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
 
 contains
   
-  subroutine generate_bergs(bergs)
+  subroutine generate_bergs(bergs,Time)
   ! Arguments
   type(icebergs), pointer :: bergs
+  type(time_type), intent(in) :: Time
   ! Local variables
   integer :: i,j
   type(iceberg) :: localberg ! NOT a pointer but an actual local variable
+  integer :: iyr, imon, iday, ihr, imin, isec
 
     ! For convenience
     grd=>bergs%grd
+
+    call get_date(Time, iyr, imon, iday, ihr, imin, isec)
 
     do j=grd%jsc,grd%jec; do i=grd%isc,grd%iec
       if (grd%msk(i,j)>0. .and. abs(grd%latc(i,j))>60.) then
@@ -2972,8 +2979,8 @@ contains
         localberg%length=bergs%initial_length(1)
         localberg%start_lon=localberg%lon
         localberg%start_lat=localberg%lat
-        localberg%start_year=0
-        localberg%start_day=1
+        localberg%start_year=iyr
+        localberg%start_day=float(iday)+(float(ihr)+float(imin)/60.)/24.
         localberg%start_mass=localberg%mass
         localberg%mass_scaling=bergs%mass_scaling(1)
         localberg%mass_of_bits=0.
@@ -3061,6 +3068,46 @@ type(randomNumberStream) :: rns
   call mpp_sum( bergs%floating_heat_start )
 
 end subroutine read_restart_calving
+
+! ##############################################################################
+
+subroutine offset_berg_dates(bergs,Time)
+! Arguments
+type(icebergs), pointer :: bergs
+type(time_type), intent(in) :: Time
+! Local variables
+type(iceberg), pointer :: this
+integer :: iyr, imon, iday, ihr, imin, isec, yr_offset
+real :: latest_start_year, berg_start_year
+
+  call get_date(Time, iyr, imon, iday, ihr, imin, isec)
+  latest_start_year=iyr-99999
+
+  this=>bergs%first
+  if (associated(this)) then
+   latest_start_year=float(this%start_year)+this%start_day/367.
+  endif
+  do while (associated(this))
+    berg_start_year=float(this%start_year)+this%start_day/367.
+    if (berg_start_year>latest_start_year) latest_start_year=berg_start_year
+    this=>this%next
+  enddo
+  call mpp_max(latest_start_year)
+
+  if (latest_start_year<float(iyr)+float(iday)/367.) return ! No conflicts!
+
+  yr_offset=int(latest_start_year+1.)-iyr
+  if (mpp_pe().eq.mpp_root_pe()) write(*,'(a,i,a)') &
+    'diamonds: Bergs found with creation dates after model date! Adjusting berg dates by ',yr_offset,' years'
+  call bergs_chksum(bergs, 'before adjusting start dates')
+  this=>bergs%first
+  do while (associated(this))
+    this%start_year=this%start_year-yr_offset
+    this=>this%next
+  enddo
+  call bergs_chksum(bergs, 'after adjusting start dates')
+
+end subroutine offset_berg_dates
 
 ! ##############################################################################
 
