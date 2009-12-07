@@ -160,7 +160,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.117 2009/12/07 19:21:32 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.118 2009/12/07 19:24:17 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -2936,7 +2936,7 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
   endif
   if (k.ne.nbergs_in_file) call error_mesg('diamonds, read_restart_bergs', 'wrong number of bergs read!', FATAL)
 
-  if (.not. found_restart .and. bergs%nbergs_start==0 .and. generate_test_icebergs) call genereate_bergs(bergs)
+  if (.not. found_restart .and. bergs%nbergs_start==0 .and. generate_test_icebergs) call generate_bergs(bergs)
 
   bergs%floating_mass_start=sum_mass(bergs%first)
   call mpp_sum( bergs%floating_mass_start )
@@ -2948,7 +2948,7 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
 
 contains
   
-  subroutine genereate_bergs(bergs)
+  subroutine generate_bergs(bergs)
   ! Arguments
   type(icebergs), pointer :: bergs
   ! Local variables
@@ -2998,7 +2998,7 @@ contains
     if (mpp_pe().eq.mpp_root_pe()) &
       write(*,'(a,i,a)') 'diamonds, generate_bergs: ',bergs%nbergs_start,' were generated'
 
-  end subroutine genereate_bergs
+  end subroutine generate_bergs
   
 end subroutine read_restart_bergs
 
