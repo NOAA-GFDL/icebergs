@@ -160,7 +160,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.116 2009/10/13 18:48:59 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.117 2009/12/07 19:21:32 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -1222,7 +1222,7 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
                       outstr//' out',outval,budgetunits, &
                       'Delta '//delstr,inval-outval,budgetunits, &
                       'error',((endval-startval)-(inval-outval))/max(1.e-30,max(abs(endval-startval),abs(inval-outval))),'nd'
-  200 format("diamonds: ",a19,3(a18,"=",es14.7,x,a2,:,","),a8,"=",es10.3)
+  200 format("diamonds: ",a19,3(a18,"=",es14.7,x,a2,:,","),a8,"=",es10.3,x,a2)
   end subroutine report_budget
 
   subroutine report_istate(budgetstr,startstr,startval,endstr,endval,delstr)
