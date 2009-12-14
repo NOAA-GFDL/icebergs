@@ -160,7 +160,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.119 2009/12/07 21:05:32 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.120 2009/12/14 20:33:50 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -871,7 +871,7 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
   ! Manage time
   call get_date(time, iyr, imon, iday, ihr, imin, isec)
   bergs%current_year=iyr
-  bergs%current_yearday=float(imon-1)*31.+float(iday-1)+(float(ihr)+(float(imin)+float(isec)/60.)/60.)/24.
+  bergs%current_yearday=yearday(imon, iday, ihr, imin, isec)
   ! Turn on sampling of trajectories, verbosity, budgets
   sample_traj=.false.
   if (bergs%traj_sample_hrs>0 .and. mod(24*iday+ihr,bergs%traj_sample_hrs).eq.0) sample_traj=.true.
@@ -3094,7 +3094,7 @@ real :: latest_start_year, berg_start_year
   enddo
   call mpp_max(latest_start_year)
 
-  if (latest_start_year<float(iyr)+float(iday)/367.) return ! No conflicts!
+  if (latest_start_year<=float(iyr)+yearday(imon, iday, ihr, imin, isec)/367.) return ! No conflicts!
 
   yr_offset=int(latest_start_year+1.)-iyr
   if (mpp_pe().eq.mpp_root_pe()) write(*,'(a,i,a)') &
@@ -3349,6 +3349,16 @@ type(iceberg), pointer :: berg1, berg2
   if (berg1%length.ne.berg2%length) return
   sameberg=.true. ! passing the above tests mean that bergs 1 and 2 are identical
 end function sameberg
+
+! ##############################################################################
+
+real function yearday(imon, iday, ihr, imin, isec)
+! Arguments
+integer, intent(in) :: imon, iday, ihr, imin, isec
+
+  yearday=float(imon-1)*31.+float(iday-1)+(float(ihr)+(float(imin)+float(isec)/60.)/60.)/24.
+
+end function yearday
 
 ! ##############################################################################
 
