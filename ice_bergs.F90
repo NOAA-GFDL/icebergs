@@ -160,7 +160,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.120 2009/12/14 20:33:50 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.121 2009/12/17 19:55:38 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -2346,7 +2346,7 @@ contains
     localberg%yj=buff%data(6,n)
     localberg%start_lon=buff%data(7,n)
     localberg%start_lat=buff%data(8,n)
-    localberg%start_year=int(buff%data(9,n)+0.5)
+    localberg%start_year=nint(buff%data(9,n))
     localberg%start_day=buff%data(10,n)
     localberg%start_mass=buff%data(11,n)
     localberg%mass=buff%data(12,n)
