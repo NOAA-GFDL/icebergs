@@ -160,7 +160,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.122 2009/12/17 21:13:16 aja Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.123 2009/12/17 21:15:12 aja Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -3148,9 +3148,9 @@ type(icebergs), pointer :: bergs
 character(len=*) :: label
 ! Local variables
 type(iceberg), pointer :: this, next
-integer :: i, icnt1, icnt2
+integer :: i, icnt1, icnt2, icnt3
 
-  icnt1=0
+  icnt1=0; icnt3=0
   this=>bergs%first
   next=>NULL()
   if (associated(this)) then
@@ -3158,6 +3158,7 @@ integer :: i, icnt1, icnt2
   endif
   do while (associated(next))
     if (.not. inorder(this,next)) icnt1=icnt1+1
+    if (inorder(this,next).and.inorder(next,this)) icnt3=icnt3+1
     this=>next
     next=>next%next
   enddo
@@ -3180,8 +3181,8 @@ integer :: i, icnt1, icnt2
   call mpp_sum(icnt2)
 
   if ((debug.or.icnt1.ne.0).and.mpp_pe().eq.mpp_root_pe()) then
-    write(*,'(a,2(x,a,i6),x,a)') 'diamonds, count_out_of_order:', &
-      '# out of order=', icnt1,'# in halo=',icnt2,label
+    write(*,'(a,3(x,a,i6),x,a)') 'diamonds, count_out_of_order:', &
+      '# out of order=', icnt1,'# in halo=',icnt2,'# identicals=',icnt3,label
   endif
 
   call check_for_duplicates(bergs,label)
@@ -4973,7 +4974,7 @@ type(icebergs_gridded), pointer :: grd
 real, dimension(:,:,:), intent(in) :: fld
 character(len=*), intent(in) :: txt
 ! Local variables
-integer :: i, j, k, halo, icount
+integer :: i, j, k, halo, icount, io, jo
 real :: mean, rms, SD, minv, maxv
 real, dimension(lbound(fld,1):ubound(fld,1), lbound(fld,2):ubound(fld,2), lbound(fld,3):ubound(fld,3)) :: tmp
 
@@ -4988,6 +4989,8 @@ real, dimension(lbound(fld,1):ubound(fld,1), lbound(fld,2):ubound(fld,2), lbound
   minv=fld(i,j,k)
   maxv=fld(i,j,k)
   tmp(:,:,:)=0.
+  io=grd%isd-lbound(fld,1)
+  jo=grd%jsd-lbound(fld,2)
   do k=lbound(fld,3), ubound(fld,3)
     do j=lbound(fld,2)+halo, ubound(fld,2)-halo
       do i=lbound(fld,1)+halo, ubound(fld,1)-halo
@@ -4996,7 +4999,7 @@ real, dimension(lbound(fld,1):ubound(fld,1), lbound(fld,2):ubound(fld,2), lbound
         rms=rms+fld(i,j,k)**2
         minv=min(minv,fld(i,j,k))
         maxv=max(maxv,fld(i,j,k))
-        tmp(i,j,k)=fld(i,j,k)*float(i+2*j+3*(k-1))
+        tmp(i,j,k)=fld(i,j,k)*float(i+io+2*(j+jo)+3*(k-1))
       enddo
     enddo
   enddo
@@ -5054,8 +5057,8 @@ real :: mean, rms, SD, minv, maxv
   icount=0
   minv=fld(grd%isc,grd%jsc)
   maxv=fld(grd%isc,grd%jsc)
-  do j=grd%jsd, grd%jed
-    do i=grd%isd, grd%ied
+  do j=grd%jsc, grd%jec
+    do i=grd%isc, grd%iec
       icount=icount+1
       mean=mean+fld(i,j)
       rms=rms+fld(i,j)**2
@@ -5122,7 +5125,7 @@ logical :: check_halo
   grd%tmp(:,:)=0.
 
   this=>bergs%first
-  i=0; ichk4=0; ichk5=0
+  i=0; ichk5=0
   do while(associated(this))
     i=i+1
     iberg=berg_chksum(this)
@@ -5138,17 +5141,16 @@ logical :: check_halo
     fld(i,10) = pos_hash(this)
     fld(i,11) = float(iberg)
     icnt(this%ine,this%jne)=icnt(this%ine,this%jne)+1
-    fld2(i,:) = fld(i,:)*float( icnt(this%ine,this%jne) )*float( i )
+    fld2(i,:) = fld(i,:)*float( icnt(this%ine,this%jne) ) !*float( i )
     grd%tmp(this%ine,this%jne)=grd%tmp(this%ine,this%jne)+time_hash(this)*pos_hash(this)+log(this%mass)
-    ichk4=ichk4+iberg
-    ichk5=ichk5+iberg*i
+    ichk5=ichk5+iberg
     this=>this%next
   enddo
 
   ichk1=mpp_chksum( fld )
   ichk2=mpp_chksum( fld2 )
   ichk3=mpp_chksum( grd%tmp )
-  call mpp_sum( ichk4 )
+  ichk4=mpp_chksum( grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec) )
   call mpp_sum( ichk5 )
   nbergs=count_bergs(bergs)
 
@@ -5172,6 +5174,9 @@ logical :: check_halo
   if (mpp_pe().eq.mpp_root_pe()) &
     write(*,'("diamonds, bergs_chksum: ",a18,6(x,a,"=",i))') &
       txt, 'chksum', ichk1, 'chksum2', ichk2, 'chksum3', ichk3, 'chksum4', ichk4, 'chksum5', ichk5, '#', nbergs
+
+  grd%tmp(:,:)=real(icnt(:,:))
+  call grd_chksum2(grd,grd%tmp,'# of bergs/cell')
 
   deallocate( fld )
   deallocate( fld2 )
