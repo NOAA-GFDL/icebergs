@@ -75,6 +75,8 @@ type :: icebergs_gridded
   real, dimension(:,:), pointer :: stored_heat=>NULL() ! Heat content of stored ice (J)
   real, dimension(:,:,:), pointer :: real_calving=>NULL() ! Calving rate into iceberg class at calving locations (kg/s)
   real, dimension(:,:), pointer :: iceberg_heat_content=>NULL() ! Distributed heat content of bergs (J/m^2)
+  real, dimension(:,:), pointer :: parity_x=>NULL() ! X component of vector point from i,j to i+1,j+1 (for detecting tri-polar fold)
+  real, dimension(:,:), pointer :: parity_y=>NULL() ! Y component of vector point from i,j to i+1,j+1 (for detecting tri-polar fold)
   ! Diagnostics handles
   integer :: id_uo=-1, id_vo=-1, id_calving=-1, id_stored_ice=-1, id_accum=-1, id_unused=-1, id_floating_melt=-1
   integer :: id_melt_buoy=-1, id_melt_eros=-1, id_melt_conv=-1, id_virtual_area=-1, id_real_calving=-1
@@ -160,7 +162,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.124 2012/07/02 19:21:09 Alistair.Adcroft Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.125 2012/07/02 19:31:18 Alistair.Adcroft Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -189,6 +191,7 @@ logical :: use_slow_find=.true. ! Use really slow (but robust) find_cell for rea
 logical :: ignore_ij_restart=.false. ! Read i,j location from restart if available (needed to use restarts on different grids)
 logical :: generate_test_icebergs=.false. ! Create icebergs in absence of a restart file
 logical :: use_roundoff_fix=.true. ! Use a "fix" for the round-off discrepancy between is_point_in_cell() and pos_within_cell()
+logical :: old_bug_rotated_weights=.false. ! Skip the rotation of off-center weights for rotated halo updates
 logical :: make_calving_reproduce=.false. ! Make the calving.res.nc file reproduce across pe count changes.
 
 contains
@@ -1304,6 +1307,20 @@ logical :: lerr
   endif
 
   call mpp_update_domains(grd%mass_on_ocean, grd%domain)
+  if (.not. old_bug_rotated_weights) then
+    do j=grd%jsd, grd%jed; do i=grd%isd, grd%ied
+      if (grd%parity_x(i,j)<0.) then
+        ! This block assumes both parity_x and parity_y are negative
+        ! (i.e. a 180 degree rotation). In general, we should handle
+        ! +/- 90 degree rotations as well but in CM2*-class models
+        ! this is not necessary. -aja
+        dmda=grd%mass_on_ocean(i,j,9); grd%mass_on_ocean(i,j,9)=grd%mass_on_ocean(i,j,1); grd%mass_on_ocean(i,j,1)=dmda
+        dmda=grd%mass_on_ocean(i,j,8); grd%mass_on_ocean(i,j,8)=grd%mass_on_ocean(i,j,2); grd%mass_on_ocean(i,j,2)=dmda
+        dmda=grd%mass_on_ocean(i,j,7); grd%mass_on_ocean(i,j,7)=grd%mass_on_ocean(i,j,3); grd%mass_on_ocean(i,j,3)=dmda
+        dmda=grd%mass_on_ocean(i,j,6); grd%mass_on_ocean(i,j,6)=grd%mass_on_ocean(i,j,4); grd%mass_on_ocean(i,j,4)=dmda
+      endif
+    enddo; enddo
+  endif
   do j=grd%jsc, grd%jec; do i=grd%isc, grd%iec
     dmda=grd%mass_on_ocean(i,j,5) &
          + ( ( (grd%mass_on_ocean(i-1,j-1,9)+grd%mass_on_ocean(i+1,j+1,1))   &
@@ -2089,6 +2106,21 @@ real :: xi0, yj0, lon0, lat0
     else
       call error_mesg('diamonds, adjust', 'Berg iterated many times without bouncing!', WARNING)
     endif
+    if (abs(i-i0)+abs(j-j0)==0) then
+      if (use_roundoff_fix) then
+        ! This is a special case due to round off where is_point_in_cell()
+        ! returns false but xi and yj are between 0 and 1.
+        ! It occurs very rarely but often enough to have brought down
+        ! ESM2G four times since the spin-up began. (as of 8/10/2010)
+        ! This temporary fix arbitrarily moves the berg toward the
+        ! center of the current cell.
+        xi=(xi-0.5)*(1.-posn_eps)+0.5
+        yj=(yj-0.5)*(1.-posn_eps)+0.5
+      endif
+      call error_mesg('diamonds, adjust', 'Berg did not move or bounce during iterations AND was not in cell. Adjusting!', WARNING)
+    else
+      call error_mesg('diamonds, adjust', 'Berg iterated many times without bouncing!', WARNING)
+    endif
   endif
   if (xi>1.) xi=1.-posn_eps
   if (xi<0.) xi=posn_eps
@@ -2526,7 +2558,7 @@ namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, &
          time_average_weight, generate_test_icebergs, speed_limit, grounding_fraction, fix_restart_dates, &
-         fix_restart_dates, use_roundoff_fix, make_calving_reproduce
+         use_roundoff_fix, old_bug_rotated_weights, make_calving_reproduce
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je
 type(icebergs_gridded), pointer :: grd
@@ -2651,6 +2683,8 @@ integer :: stdlogunit, stderrunit
   allocate( grd%tmp(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%tmp(:,:)=0.
   allocate( grd%tmpc(grd%isc:grd%iec, grd%jsc:grd%jec) ); grd%tmpc(:,:)=0.
   allocate( bergs%nbergs_calved_by_class(nclasses) ); bergs%nbergs_calved_by_class(:)=0
+  allocate( grd%parity_x(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_x(:,:)=1.
+  allocate( grd%parity_y(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_y(:,:)=1.
 
  !write(stderrunit,*) 'diamonds: copying grid'
   ! Copy data declared on ice model computational domain
@@ -2675,6 +2709,7 @@ integer :: stdlogunit, stderrunit
   call mpp_update_domains(grd%cos, grd%domain, position=CORNER)
   call mpp_update_domains(grd%sin, grd%domain, position=CORNER)
   call mpp_update_domains(grd%ocean_depth, grd%domain)
+  call mpp_update_domains(grd%parity_x, grd%parity_y, grd%domain, gridtype=AGRID) ! If either parity_x/y is -ve, we need rotation of vectors
 
   ! Sanitize lon and lat at the SW edges
   do j=grd%jsc-1,grd%jsd,-1; do i=grd%isd,grd%ied
