@@ -6,11 +6,16 @@ use fms_mod, only: field_exist, get_global_att_value
 use fms_mod, only: stdlog, stderr, error_mesg, FATAL, WARNING
 use fms_mod, only: write_version_number, read_data, write_data, file_exist
 use mosaic_mod, only: get_mosaic_ntiles, get_mosaic_ncontacts
-use mpp_mod, only: mpp_pe, mpp_root_pe, mpp_sum, mpp_min, mpp_max, NULL_PE
-use mpp_mod, only: mpp_send, mpp_recv, mpp_sync_self, mpp_chksum
+use mpp_mod, only: mpp_npes, mpp_pe, mpp_root_pe, mpp_sum, mpp_min, mpp_max, NULL_PE
+use mpp_mod, only: mpp_send, mpp_recv, mpp_sync_self, mpp_chksum, input_nml_file
 use mpp_mod, only: mpp_clock_begin, mpp_clock_end, mpp_clock_id
 use mpp_mod, only: CLOCK_COMPONENT, CLOCK_SUBCOMPONENT, CLOCK_LOOP
+use mpp_mod, only: COMM_TAG_1, COMM_TAG_2, COMM_TAG_3, COMM_TAG_4
+use mpp_mod, only: COMM_TAG_5, COMM_TAG_6, COMM_TAG_7, COMM_TAG_8
+use mpp_mod, only: COMM_TAG_9, COMM_TAG_10
+use mpp_mod, only: mpp_gather
 use fms_mod, only: clock_flag_default
+use fms_io_mod, only: get_instance_filename
 use mpp_domains_mod, only: domain2D, mpp_update_domains, mpp_define_domains
 use mpp_parameter_mod, only: SCALAR_PAIR, CGRID_NE, BGRID_NE, CORNER, AGRID
 use mpp_domains_mod, only: mpp_get_compute_domain, mpp_get_data_domain
@@ -162,7 +167,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.125 2012/07/02 19:31:18 Alistair.Adcroft Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.126 2013/05/21 18:02:15 Alistair.Adcroft Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -193,6 +198,9 @@ logical :: generate_test_icebergs=.false. ! Create icebergs in absence of a rest
 logical :: use_roundoff_fix=.true. ! Use a "fix" for the round-off discrepancy between is_point_in_cell() and pos_within_cell()
 logical :: old_bug_rotated_weights=.false. ! Skip the rotation of off-center weights for rotated halo updates
 logical :: make_calving_reproduce=.false. ! Make the calving.res.nc file reproduce across pe count changes.
+character(len=10) :: restart_input_dir = 'INPUT/'
+
+logical :: folded_north_on_pe = .false.
 
 contains
 
@@ -626,10 +634,10 @@ real, parameter :: perday=1./86400.
     ! Rolling
     Dn=(bergs%rho_bergs/rho_seawater)*Tn ! draught (keel depth)
     if ( Dn>0. ) then
-      if ( max(Wn,Ln)<sqrt(0.92*(Dn**2)+58.32*Dn) ) then
-        T=Tn
-        Tn=Wn
-        Wn=T
+       if ( max(Wn,Ln)<sqrt(0.92*(Dn**2)+58.32*Dn) ) then
+          T=Tn
+          Tn=Wn
+          Wn=T
         Dn=(bergs%rho_bergs/rho_seawater)*Tn ! re-calculate draught (keel depth) for grounding
       endif
     endif
@@ -891,15 +899,15 @@ integer :: stderrunit
   ! Turn on sampling of trajectories, verbosity, budgets
   sample_traj=.false.
   if (bergs%traj_sample_hrs>0) then
-    if (mod(24*iday+ihr,bergs%traj_sample_hrs).eq.0) sample_traj=.true.
+     if (mod(24*iday+ihr,bergs%traj_sample_hrs).eq.0) sample_traj=.true.
   end if
   lverbose=.false.
   if (bergs%verbose_hrs>0) then
-    if (mod(24*iday+ihr,bergs%verbose_hrs).eq.0) lverbose=verbose
+     if (mod(24*iday+ihr,bergs%verbose_hrs).eq.0) lverbose=verbose
   end if
   lbudget=.false.
   if (bergs%verbose_hrs>0) then
-    if (mod(24*iday+ihr,bergs%verbose_hrs).eq.0) lbudget=budget
+     if (mod(24*iday+ihr,bergs%verbose_hrs).eq.0) lbudget=budget
   end if
   if (mpp_pe()==mpp_root_pe().and.lverbose) write(*,'(a,3i5,a,3i5,a,i5,f8.3)') &
        'diamonds: y,m,d=',iyr, imon, iday,' h,m,s=', ihr, imin, isec, &
@@ -2106,21 +2114,6 @@ real :: xi0, yj0, lon0, lat0
     else
       call error_mesg('diamonds, adjust', 'Berg iterated many times without bouncing!', WARNING)
     endif
-    if (abs(i-i0)+abs(j-j0)==0) then
-      if (use_roundoff_fix) then
-        ! This is a special case due to round off where is_point_in_cell()
-        ! returns false but xi and yj are between 0 and 1.
-        ! It occurs very rarely but often enough to have brought down
-        ! ESM2G four times since the spin-up began. (as of 8/10/2010)
-        ! This temporary fix arbitrarily moves the berg toward the
-        ! center of the current cell.
-        xi=(xi-0.5)*(1.-posn_eps)+0.5
-        yj=(yj-0.5)*(1.-posn_eps)+0.5
-      endif
-      call error_mesg('diamonds, adjust', 'Berg did not move or bounce during iterations AND was not in cell. Adjusting!', WARNING)
-    else
-      call error_mesg('diamonds, adjust', 'Berg iterated many times without bouncing!', WARNING)
-    endif
   endif
   if (xi>1.) xi=1.-posn_eps
   if (xi<0.) xi=posn_eps
@@ -2193,30 +2186,30 @@ integer :: stderrunit
 
   ! Send bergs east
   if (grd%pe_E.ne.NULL_PE) then
-    call mpp_send(nbergs_to_send_e, plen=1, to_pe=grd%pe_E)
+    call mpp_send(nbergs_to_send_e, plen=1, to_pe=grd%pe_E, tag=COMM_TAG_1)
     if (nbergs_to_send_e.gt.0) then
-      call mpp_send(bergs%obuffer_e%data, nbergs_to_send_e*buffer_width, grd%pe_E)
+      call mpp_send(bergs%obuffer_e%data, nbergs_to_send_e*buffer_width, grd%pe_E, tag=COMM_TAG_2)
     endif
   endif
 
   ! Send bergs west
   if (grd%pe_W.ne.NULL_PE) then
-    call mpp_send(nbergs_to_send_w, plen=1, to_pe=grd%pe_W)
+    call mpp_send(nbergs_to_send_w, plen=1, to_pe=grd%pe_W, tag=COMM_TAG_3)
     if (nbergs_to_send_w.gt.0) then
-      call mpp_send(bergs%obuffer_w%data, nbergs_to_send_w*buffer_width, grd%pe_W)
+      call mpp_send(bergs%obuffer_w%data, nbergs_to_send_w*buffer_width, grd%pe_W, tag=COMM_TAG_4)
     endif
   endif
 
   ! Receive bergs from west
   if (grd%pe_W.ne.NULL_PE) then
     nbergs_rcvd_from_w=-999
-    call mpp_recv(nbergs_rcvd_from_w, glen=1, from_pe=grd%pe_W)
+    call mpp_recv(nbergs_rcvd_from_w, glen=1, from_pe=grd%pe_W, tag=COMM_TAG_1)
     if (nbergs_rcvd_from_w.lt.0) then
       write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_w,' from',grd%pe_W,' (W) !!!!!!!!!!!!!!!!!!!!!!'
     endif
     if (nbergs_rcvd_from_w.gt.0) then
       call increase_ibuffer(bergs%ibuffer_w, nbergs_rcvd_from_w)
-      call mpp_recv(bergs%ibuffer_w%data, nbergs_rcvd_from_w*buffer_width, grd%pe_W)
+      call mpp_recv(bergs%ibuffer_w%data, nbergs_rcvd_from_w*buffer_width, grd%pe_W, tag=COMM_TAG_2)
       do i=1, nbergs_rcvd_from_w
         call unpack_berg_from_buffer2(bergs%first, bergs%ibuffer_w, i)
       enddo
@@ -2228,13 +2221,13 @@ integer :: stderrunit
   ! Receive bergs from east
   if (grd%pe_E.ne.NULL_PE) then
     nbergs_rcvd_from_e=-999
-    call mpp_recv(nbergs_rcvd_from_e, glen=1, from_pe=grd%pe_E)
+    call mpp_recv(nbergs_rcvd_from_e, glen=1, from_pe=grd%pe_E, tag=COMM_TAG_3)
     if (nbergs_rcvd_from_e.lt.0) then
       write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_e,' from',grd%pe_E,' (E) !!!!!!!!!!!!!!!!!!!!!!'
     endif
     if (nbergs_rcvd_from_e.gt.0) then
       call increase_ibuffer(bergs%ibuffer_e, nbergs_rcvd_from_e)
-      call mpp_recv(bergs%ibuffer_e%data, nbergs_rcvd_from_e*buffer_width, grd%pe_E)
+      call mpp_recv(bergs%ibuffer_e%data, nbergs_rcvd_from_e*buffer_width, grd%pe_E, tag=COMM_TAG_4)
       do i=1, nbergs_rcvd_from_e
         call unpack_berg_from_buffer2(bergs%first, bergs%ibuffer_e, i)
       enddo
@@ -2274,30 +2267,38 @@ integer :: stderrunit
 
   ! Send bergs north
   if (grd%pe_N.ne.NULL_PE) then
-    call mpp_send(nbergs_to_send_n, plen=1, to_pe=grd%pe_N)
+    if(folded_north_on_pe) then
+       call mpp_send(nbergs_to_send_n, plen=1, to_pe=grd%pe_N, tag=COMM_TAG_9)
+    else 
+       call mpp_send(nbergs_to_send_n, plen=1, to_pe=grd%pe_N, tag=COMM_TAG_5)
+    endif
     if (nbergs_to_send_n.gt.0) then
-      call mpp_send(bergs%obuffer_n%data, nbergs_to_send_n*buffer_width, grd%pe_N)
+       if(folded_north_on_pe) then
+          call mpp_send(bergs%obuffer_n%data, nbergs_to_send_n*buffer_width, grd%pe_N, tag=COMM_TAG_10)
+       else
+          call mpp_send(bergs%obuffer_n%data, nbergs_to_send_n*buffer_width, grd%pe_N, tag=COMM_TAG_6)
+       endif
     endif
   endif
 
   ! Send bergs south
   if (grd%pe_S.ne.NULL_PE) then
-    call mpp_send(nbergs_to_send_s, plen=1, to_pe=grd%pe_S)
+    call mpp_send(nbergs_to_send_s, plen=1, to_pe=grd%pe_S, tag=COMM_TAG_7)
     if (nbergs_to_send_s.gt.0) then
-      call mpp_send(bergs%obuffer_s%data, nbergs_to_send_s*buffer_width, grd%pe_S)
+      call mpp_send(bergs%obuffer_s%data, nbergs_to_send_s*buffer_width, grd%pe_S, tag=COMM_TAG_8)
     endif
   endif
 
   ! Receive bergs from south
   if (grd%pe_S.ne.NULL_PE) then
     nbergs_rcvd_from_s=-999
-    call mpp_recv(nbergs_rcvd_from_s, glen=1, from_pe=grd%pe_S)
+    call mpp_recv(nbergs_rcvd_from_s, glen=1, from_pe=grd%pe_S, tag=COMM_TAG_5)
     if (nbergs_rcvd_from_s.lt.0) then
       write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_s,' from',grd%pe_S,' (S) !!!!!!!!!!!!!!!!!!!!!!'
     endif
     if (nbergs_rcvd_from_s.gt.0) then
       call increase_ibuffer(bergs%ibuffer_s, nbergs_rcvd_from_s)
-      call mpp_recv(bergs%ibuffer_s%data, nbergs_rcvd_from_s*buffer_width, grd%pe_S)
+      call mpp_recv(bergs%ibuffer_s%data, nbergs_rcvd_from_s*buffer_width, grd%pe_S, tag=COMM_TAG_6)
       do i=1, nbergs_rcvd_from_s
         call unpack_berg_from_buffer2(bergs%first, bergs%ibuffer_s, i)
       enddo
@@ -2309,13 +2310,21 @@ integer :: stderrunit
   ! Receive bergs from north
   if (grd%pe_N.ne.NULL_PE) then
     nbergs_rcvd_from_n=-999
-    call mpp_recv(nbergs_rcvd_from_n, glen=1, from_pe=grd%pe_N)
+    if(folded_north_on_pe) then
+       call mpp_recv(nbergs_rcvd_from_n, glen=1, from_pe=grd%pe_N, tag=COMM_TAG_9)
+    else
+       call mpp_recv(nbergs_rcvd_from_n, glen=1, from_pe=grd%pe_N, tag=COMM_TAG_7)
+    endif
     if (nbergs_rcvd_from_n.lt.0) then
       write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_n,' from',grd%pe_N,' (N) !!!!!!!!!!!!!!!!!!!!!!'
     endif
     if (nbergs_rcvd_from_n.gt.0) then
       call increase_ibuffer(bergs%ibuffer_n, nbergs_rcvd_from_n)
-      call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N)
+      if(folded_north_on_pe) then
+         call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_10)
+      else
+         call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_8)
+      endif
       do i=1, nbergs_rcvd_from_n
         call unpack_berg_from_buffer2(bergs%first, bergs%ibuffer_n, i)
       enddo
@@ -2572,10 +2581,14 @@ integer :: stdlogunit, stderrunit
 
 ! Read namelist parameters
  !write(stderrunit,*) 'diamonds: reading namelist'
+#ifdef INTERNAL_FILE_NML
+  read (input_nml_file, nml=icebergs_nml, iostat=ierr)
+#else
   iunit = open_namelist_file()
   read  (iunit, icebergs_nml,iostat=ierr)
-  ierr = check_nml_error(ierr, 'icebergs_nml')
-  call close_file(iunit)
+  call close_file (iunit)
+#endif
+  ierr = check_nml_error(ierr,'icebergs_nml')
 
   if (really_debug) debug=.true. ! One implies the other...
 
@@ -2633,6 +2646,9 @@ integer :: stdlogunit, stderrunit
   call mpp_get_neighbor_pe(grd%domain, SOUTH, grd%pe_S)
   call mpp_get_neighbor_pe(grd%domain, EAST, grd%pe_E)
   call mpp_get_neighbor_pe(grd%domain, WEST, grd%pe_W)
+
+  folded_north_on_pe = .false.
+  if(tripolar_grid .and. grd%jec == gnj) folded_north_on_pe = .true. 
  !write(stderrunit,'(a,6i4)') 'diamonds, icebergs_init: pe,n,s,e,w =',mpp_pe(),grd%pe_N,grd%pe_S,grd%pe_E,grd%pe_W, NULL_PE
 
  !if (verbose) &
@@ -2900,14 +2916,15 @@ subroutine read_restart_bergs(bergs,Time)
 type(icebergs), pointer :: bergs
 type(time_type), intent(in) :: Time
 ! Local variables
+integer, dimension(:), allocatable :: found_restart_int
 integer :: k, ierr, ncid, dimid, nbergs_in_file
 integer :: lonid, latid, uvelid, vvelid, ineid, jneid
 integer :: massid, thicknessid, widthid, lengthid
 integer :: start_lonid, start_latid, start_yearid, start_dayid, start_massid
 integer :: scaling_id, mass_of_bits_id, heat_density_id
-logical :: lres, found_restart, multiPErestart=.false.
+logical :: lres, found_restart, multiPErestart
 real :: lon0, lon1, lat0, lat1
-character(len=30) :: filename
+character(len=33) :: filename, filename_base
 type(icebergs_gridded), pointer :: grd
 type(iceberg) :: localberg ! NOT a pointer but an actual local variable
 integer :: stderrunit
@@ -2920,26 +2937,32 @@ integer :: stderrunit
 
   ! Find a restart file
   multiPErestart=.false.
-  do
-    filename='INPUT/icebergs.res.nc'; inquire(file=filename,exist=found_restart)
-    if (found_restart) exit
-    write(filename(1:27),'("INPUT/icebergs.res.nc.",I4.4)') mpp_pe()
-    inquire(file=filename,exist=found_restart)
-    if (found_restart) multiPErestart=.true.
-    if (found_restart) exit
-    write(filename(1:21),'("icebergs.res.nc.",I4.4)') mpp_pe()
-    inquire(file=filename,exist=found_restart)
-    if (found_restart) multiPErestart=.true.
-    if (found_restart) exit
-    filename='icebergs.res.nc'; inquire(file=filename,exist=found_restart)
-    if (found_restart) exit
-    if (verbose.and.mpp_pe()==mpp_root_pe()) write(*,'(a)') 'diamonds, read_restart_bergs: no restart file found'
-!   return ! leave s/r if no restart found
-    multiPErestart=.true. ! This is to force sanity checking in a mulit-PE mode if no file was found on this PE
-    exit
-  enddo 
 
-  if (found_restart) then ! only do the following if a file was found
+  ! Zero out nbergs_in_file
+  nbergs_in_file = 0
+
+  filename_base=trim(restart_input_dir)//'icebergs.res.nc'
+
+  found_restart = find_restart_file(filename_base, filename, multiPErestart)
+
+  ! Check if no restart found on any pe
+  allocate(found_restart_int(mpp_npes()))
+  if (found_restart) then
+     k=1
+  else
+     k=0
+  endif
+  call mpp_gather((/k/),found_restart_int)
+  if (sum(found_restart_int)==0.and.mpp_pe()==mpp_root_pe())&
+       & write(*,'(a)') 'diamonds, read_restart_bergs: no restart file found'
+  deallocate(found_restart_int)
+
+  if (.not.found_restart) then
+
+  multiPErestart=.true. ! This is to force sanity checking in a mulit-PE mode if no file was found on this PE
+
+  elseif (found_restart) then ! if (.not.found_restart)
+  ! only do the following if a file was found
   
   if (verbose.and.mpp_pe()==mpp_root_pe()) write(*,'(2a)') 'diamonds, read_restart_bergs: found restart file = ',filename
 
@@ -3038,7 +3061,7 @@ integer :: stderrunit
 
   else ! if no restart file was read on this PE
     nbergs_in_file=0
-  endif ! if (found_restart)
+  endif ! if (.not.found_restart)
   
   ! Sanity check
   k=count_bergs(bergs)
@@ -3130,7 +3153,7 @@ use random_numbers_mod, only: initializeRandomNumberStream, getRandomNumbers, ra
 type(icebergs), pointer :: bergs
 ! Local variables
 integer :: k,i,j
-character(len=30) :: filename
+character(len=37) :: filename, actual_filename
 type(icebergs_gridded), pointer :: grd
 real, allocatable, dimension(:,:) :: randnum
 type(randomNumberStream) :: rns
@@ -3139,7 +3162,7 @@ type(randomNumberStream) :: rns
   grd=>bergs%grd
 
   ! Read stored ice
-  filename='INPUT/calving.res.nc'
+  filename=trim(restart_input_dir)//'calving.res.nc'
   if (file_exist(filename)) then
     if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') &
      'diamonds, read_restart_calving: reading ',filename
@@ -4066,15 +4089,15 @@ integer :: stderrunit
 
   if (present(explain)) then
    if(explain) then
-    write(stderrunit,'(a,i3,a,10f12.4)') 'sum_sign_dot_prod4: x=',mpp_pe(),':', &
+   write(stderrunit,'(a,i3,a,10f12.4)') 'sum_sign_dot_prod4: x=',mpp_pe(),':', &
                            x0,x1,x2,x3, x
-    write(stderrunit,'(a,i3,a,10f12.4)') 'sum_sign_dot_prod4: X=',mpp_pe(),':', &
+   write(stderrunit,'(a,i3,a,10f12.4)') 'sum_sign_dot_prod4: X=',mpp_pe(),':', &
                            xx0,xx1,xx2,xx3, xx
-    write(stderrunit,'(a,i3,a,10f12.4)') 'sum_sign_dot_prod4: y=',mpp_pe(),':', &
+   write(stderrunit,'(a,i3,a,10f12.4)') 'sum_sign_dot_prod4: y=',mpp_pe(),':', &
                            y0,y1,y2,y3, y
-    write(stderrunit,'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: l=',mpp_pe(),':', &
+   write(stderrunit,'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod4: l=',mpp_pe(),':', &
                            l0,l1,l2,l3
-    write(stderrunit,'(a,i3,a,10f12.4)') 'sum_sign_dot_prod4: p=',mpp_pe(),':', &
+   write(stderrunit,'(a,i3,a,10f12.4)') 'sum_sign_dot_prod4: p=',mpp_pe(),':', &
                            p0,p1,p2,p3, abs( (abs(p0)+abs(p2))+(abs(p1)+abs(p3)) - abs((p0+p2)+(p1+p3)) )
    endif
   endif
@@ -4122,15 +4145,15 @@ integer :: stderrunit
 
   if (present(explain)) then
    if(explain) then
-    write(stderrunit,'(a,i3,a,10f12.4)') 'sum_sign_dot_prod5: x=',mpp_pe(),':', &
+   write(stderrunit,'(a,i3,a,10f12.4)') 'sum_sign_dot_prod5: x=',mpp_pe(),':', &
                            x0,x1,x2,x3,x4, x
-    write(stderrunit,'(a,i3,a,10f12.4)') 'sum_sign_dot_prod5: X=',mpp_pe(),':', &
+   write(stderrunit,'(a,i3,a,10f12.4)') 'sum_sign_dot_prod5: X=',mpp_pe(),':', &
                            xx0,xx1,xx2,xx3,xx4, xx
-    write(stderrunit,'(a,i3,a,10f12.4)') 'sum_sign_dot_prod5: y=',mpp_pe(),':', &
+   write(stderrunit,'(a,i3,a,10f12.4)') 'sum_sign_dot_prod5: y=',mpp_pe(),':', &
                            y0,y1,y2,y3,y4, y
-    write(stderrunit,'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod5: l=',mpp_pe(),':', &
+   write(stderrunit,'(a,i3,a,1p10e12.4)') 'sum_sign_dot_prod5: l=',mpp_pe(),':', &
                            l0,l1,l2,l3,l4
-    write(stderrunit,'(a,i3,a,10f12.4)') 'sum_sign_dot_prod5: p=',mpp_pe(),':', &
+   write(stderrunit,'(a,i3,a,10f12.4)') 'sum_sign_dot_prod5: p=',mpp_pe(),':', &
                            p0,p1,p2,p3,p4
    endif
   endif
@@ -4170,10 +4193,10 @@ integer :: stderrunit
 
   if (present(explain)) then
     if(explain) then
-      write(stderrunit,'(a,4f12.6)') 'pos_within_cell: x1..x4 ',x1,x2,x3,x4
-      write(stderrunit,'(a,2f12.6)') 'pos_within_cell: x',x
-      write(stderrunit,'(a,4f12.6)') 'pos_within_cell: y1..y4 ',y1,y2,y3,y4
-      write(stderrunit,'(a,2f12.6)') 'pos_within_cell: y',y
+    write(stderrunit,'(a,4f12.6)') 'pos_within_cell: x1..x4 ',x1,x2,x3,x4
+    write(stderrunit,'(a,2f12.6)') 'pos_within_cell: x',x
+    write(stderrunit,'(a,4f12.6)') 'pos_within_cell: y1..y4 ',y1,y2,y3,y4
+    write(stderrunit,'(a,2f12.6)') 'pos_within_cell: y',y
     endif
   endif
 
@@ -4193,11 +4216,11 @@ integer :: stderrunit
     y4=(90.-y4)*sin(grd%lon(i-1,j  )*pi_180)
     if (present(explain)) then
       if(explain) then
-        write(stderrunit,'(a,4f12.6)') 'pos_within_cell: x1..x4 ',x1,x2,x3,x4
-        write(stderrunit,'(a,2f12.6)') 'pos_within_cell: x',xx
-        write(stderrunit,'(a,4f12.6)') 'pos_within_cell: y1..y4 ',y1,y2,y3,y4
-        write(stderrunit,'(a,2f12.6)') 'pos_within_cell: y',yy
-        endif
+      write(stderrunit,'(a,4f12.6)') 'pos_within_cell: x1..x4 ',x1,x2,x3,x4
+      write(stderrunit,'(a,2f12.6)') 'pos_within_cell: x',xx
+      write(stderrunit,'(a,4f12.6)') 'pos_within_cell: y1..y4 ',y1,y2,y3,y4
+      write(stderrunit,'(a,2f12.6)') 'pos_within_cell: y',yy
+      endif
     endif
     call calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, xx, yy, xi, yj, explain=explain)
     if (is_point_in_cell(grd, x, y, i, j)) then
@@ -4218,7 +4241,7 @@ integer :: stderrunit
   endif
 
   if (present(explain)) then
-    if(explain) write(stderrunit,'(a,2f12.6)') 'pos_within_cell: xi,yj=',xi,yj
+	if(explain) write(stderrunit,'(a,2f12.6)') 'pos_within_cell: xi,yj=',xi,yj
   endif
 
  !if (.not. is_point_in_cell(grd, x, y, i, j) ) then
@@ -4603,7 +4626,7 @@ integer :: lonid, latid, uvelid, vvelid, ineid, jneid
 integer :: massid, thicknessid, lengthid, widthid
 integer :: start_lonid, start_latid, start_yearid, start_dayid, start_massid
 integer :: scaling_id, mass_of_bits_id, heat_density_id
-character(len=28) :: filename
+character(len=35) :: filename
 type(iceberg), pointer :: this
 integer :: stderrunit
  
@@ -4613,7 +4636,8 @@ integer :: stderrunit
   ! Only create a restart file for this PE if we have anything to say
   if (associated(bergs%first)) then
 
-    write(filename(1:28),'("RESTART/icebergs.res.nc.",I4.4)') mpp_pe()
+    call get_instance_filename("RESTART/icebergs.res.nc", filename)
+    write(filename,'(A,".",I4.4)') trim(filename), mpp_pe()
     if (verbose) write(*,'(2a)') 'diamonds, write_restart: creating ',filename
 
     iret = nf_create(filename, NF_CLOBBER, ncid)
@@ -4754,14 +4778,21 @@ integer :: lonid, latid, yearid, dayid, uvelid, vvelid
 integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid
 integer :: cnid, hiid
 integer :: mid, did, wid, lid, mbid, hdid
-character(len=30) :: filename
+character(len=37) :: filename
+character(len=7) :: pe_name
 type(xyt), pointer :: this, next
 integer :: stderrunit
 
   ! Get the stderr unit number
   stderrunit=stderr()
-
-  write(filename(1:30),'("iceberg_trajectories.nc.",I4.4)') mpp_pe()
+  
+  call get_instance_filename("iceberg_trajectories.nc", filename)
+  if (mpp_npes()>10000) then
+     write(pe_name,'(a,i6.6)' )'.', mpp_pe()    
+  else
+     write(pe_name,'(a,i4.4)' )'.', mpp_pe()    
+  endif
+  filename=trim(filename)//trim(pe_name)
   if (debug) write(stderrunit,*) 'diamonds, write_trajectory: creating ',filename
 
   iret = nf_create(filename, NF_CLOBBER, ncid)
@@ -5174,7 +5205,7 @@ real, dimension(lbound(fld,1):ubound(fld,1), lbound(fld,2):ubound(fld,2), lbound
   j=mpp_chksum( tmp(lbound(fld,1)+halo:ubound(fld,1)-halo, &
                     lbound(fld,2)+halo:ubound(fld,2)-halo,:) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(*,'("diamonds, grd_chksum3: ",a18,2(x,a,"=",i8),5(x,a,"=",es16.9))') &
+    write(*,'("diamonds, grd_chksum3: ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9))') &
      txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd
 #ifdef CHECKSUM_HALOS
   i=mpp_chksum( fld(lbound(fld,1):ubound(fld,1), &
@@ -5182,7 +5213,7 @@ real, dimension(lbound(fld,1):ubound(fld,1), lbound(fld,2):ubound(fld,2), lbound
   j=mpp_chksum( tmp(lbound(fld,1):ubound(fld,1), &
                     lbound(fld,2):ubound(fld,2),:) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(*,'("diamonds, grd_chksum3* ",a18,2(x,a,"=",i),5(x,a,"=",es16.9))') &
+    write(*,'("diamonds, grd_chksum3* ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9))') &
      txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd
 #endif
 
@@ -5234,13 +5265,13 @@ real :: mean, rms, SD, minv, maxv
   i=mpp_chksum( fld(grd%isc:grd%iec,grd%jsc:grd%jec) )
   j=mpp_chksum( grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(*,'("diamonds, grd_chksum2: ",a18,2(x,a,"=",i8),5(x,a,"=",es16.9),x,a,"=",i8)') &
+    write(*,'("diamonds, grd_chksum2: ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9),x,a,"=",i8)') &
      txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd!, '#', icount
 #ifdef CHECKSUM_HALOS
   i=mpp_chksum( fld(grd%isd:grd%ied,grd%jsd:grd%jed) )
   j=mpp_chksum( grd%tmp(grd%isd:grd%ied,grd%jsd:grd%jed) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(*,'("diamonds, grd_chksum2* ",a18,2(x,a,"=",i),5(x,a,"=",es16.9),x,a,"=",i)') &
+    write(*,'("diamonds, grd_chksum2* ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9),x,a,"=",i)') &
      txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd!, '#', icount
 #endif
 
@@ -5322,7 +5353,7 @@ logical :: check_halo
 
   call mpp_sum(nbergs)
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(*,'("diamonds, bergs_chksum: ",a18,6(x,a,"=",i8))') &
+    write(*,'("diamonds, bergs_chksum: ",a18,6(x,a,"=",i22))') &
       txt, 'chksum', ichk1, 'chksum2', ichk2, 'chksum3', ichk3, 'chksum4', ichk4, 'chksum5', ichk5, '#', nbergs
 
   grd%tmp(:,:)=real(icnt(:,:))
@@ -5391,5 +5422,41 @@ integer :: i
 end function berg_chksum
 
 ! ##############################################################################
+
+logical function find_restart_file(filename, actual_file, multiPErestart)
+  character(len=*), intent(in) :: filename
+  character(len=*), intent(out) :: actual_file
+  logical, intent(out) :: multiPErestart
+
+  character(len=6) :: pe_name
+
+  find_restart_file = .false.
+
+  ! If running as ensemble, add the ensemble id string to the filename
+  call get_instance_filename(filename, actual_file)
+    
+  ! Prefer combined restart files.
+  inquire(file=actual_file,exist=find_restart_file)
+  if (find_restart_file) return
+    
+  ! Uncombined restart
+  if (mpp_npes()>10000) then
+     write(pe_name,'(a,i6.6)' )'.', mpp_pe()    
+  else
+     write(pe_name,'(a,i4.4)' )'.', mpp_pe()    
+  endif
+  actual_file=trim(actual_file)//trim(pe_name)
+  inquire(file=actual_file,exist=find_restart_file)
+  if (find_restart_file) then
+     multiPErestart=.true.
+     return
+  endif
+
+  ! No file found, Reset all return parameters
+  find_restart_file=.false.
+  actual_file = ''
+  multiPErestart=.false.
+
+end function find_restart_file
 
 end module
