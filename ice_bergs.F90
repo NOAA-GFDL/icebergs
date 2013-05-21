@@ -88,7 +88,7 @@ type :: icebergs_gridded
   integer :: id_calving_hflx_in=-1, id_stored_heat=-1, id_melt_hflx=-1, id_heat_content=-1
   integer :: id_mass=-1, id_ui=-1, id_vi=-1, id_ua=-1, id_va=-1, id_sst=-1, id_cn=-1, id_hi=-1
   integer :: id_bergy_src=-1, id_bergy_melt=-1, id_bergy_mass=-1, id_berg_melt=-1
-  integer :: id_mass_on_ocn=-1
+  integer :: id_mass_on_ocn=-1, id_ssh=-1, id_fax=-1, id_fay=-1
 end type icebergs_gridded
 
 type :: xyt
@@ -167,7 +167,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.127 2013/05/21 18:47:18 Alistair.Adcroft Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.128 2013/05/21 20:35:21 Alistair.Adcroft Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -198,6 +198,7 @@ logical :: generate_test_icebergs=.false. ! Create icebergs in absence of a rest
 logical :: use_roundoff_fix=.true. ! Use a "fix" for the round-off discrepancy between is_point_in_cell() and pos_within_cell()
 logical :: old_bug_rotated_weights=.false. ! Skip the rotation of off-center weights for rotated halo updates
 logical :: make_calving_reproduce=.false. ! Make the calving.res.nc file reproduce across pe count changes.
+logical :: old_bug_bilin=.true. ! If true, uses the inverted bilin function (use False to get correct answer)
 character(len=10) :: restart_input_dir = 'INPUT/'
 
 logical :: folded_north_on_pe = .false.
@@ -742,7 +743,7 @@ real :: dxm, dx0, dxp
 real :: hxm, hxp
 real, parameter :: ssh_coast=0.00
 
-  cos_rot=bilin(grd, grd%cos, i, j, xi, yj)
+  cos_rot=bilin(grd, grd%cos, i, j, xi, yj) ! If true, uses the inverted bilin function
   sin_rot=bilin(grd, grd%sin, i, j, xi, yj)
 
   uo=bilin(grd, grd%uo, i, j, xi, yj)
@@ -854,8 +855,13 @@ real, intent(in) :: fld(grd%isd:grd%ied,grd%jsd:grd%jed), xi, yj
 integer, intent(in) :: i, j
 ! Local variables
 
-  bilin=(fld(i,j  )*(1.-xi)+fld(i-1,j  )*xi)*(1.-yj) &
-       +(fld(i,j-1)*(1.-xi)+fld(i-1,j-1)*xi)*yj
+  if (old_bug_bilin) then
+    bilin=(fld(i,j  )*(1.-xi)+fld(i-1,j  )*xi)*(1.-yj) &
+         +(fld(i,j-1)*(1.-xi)+fld(i-1,j-1)*xi)*yj
+  else
+    bilin=(fld(i,j  )*xi+fld(i-1,j  )*(1.-xi))*yj &
+         +(fld(i,j-1)*xi+fld(i-1,j-1)*(1.-xi))*(1.-yj)
+  endif
 
 end function bilin
 
@@ -943,7 +949,7 @@ integer :: stderrunit
   grd%ui(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=ui(:,:)
   grd%vi(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=vi(:,:)
   call mpp_update_domains(grd%ui, grd%vi, grd%domain, gridtype=BGRID_NE)
-  ! Copy atmospheric stress (resides on A grid)
+  ! Copy atmospheric stress (resides on B grid)
   grd%ua(grd%isc:grd%iec,grd%jsc:grd%jec)=tauxa(:,:) ! Note rough conversion from stress to speed
   grd%va(grd%isc:grd%iec,grd%jsc:grd%jec)=tauya(:,:) ! Note rough conversion from stress to speed
   call invert_tau_for_du(grd%ua, grd%va) ! Note rough conversion from stress to speed
@@ -1051,6 +1057,13 @@ integer :: stderrunit
     lerr=send_data(grd%id_stored_ice, grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:), Time)
   if (grd%id_real_calving>0) &
     lerr=send_data(grd%id_real_calving, grd%real_calving(grd%isc:grd%iec,grd%jsc:grd%jec,:), Time)
+  if (grd%id_ssh>0) &
+    lerr=send_data(grd%id_ssh, grd%ssh(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (grd%id_fax>0) &
+    lerr=send_data(grd%id_fax, tauxa(:,:), Time)
+  if (grd%id_fay>0) &
+    lerr=send_data(grd%id_fay, tauya(:,:), Time)
+
 
   ! Dump icebergs to screen
   if (really_debug) call print_bergs(stderrunit,bergs,'icebergs_run, status')
@@ -2559,6 +2572,7 @@ logical :: add_weight_to_ocean=.true. ! Add weight of icebergs + bits to ocean
 logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
 logical :: time_average_weight=.false. ! Time average the weight on the ocean
 logical :: fix_restart_dates=.true. ! After a restart, check that bergs were created before the current model date
+logical :: do_unit_tests=.false. ! Conduct some unit tests
 real :: speed_limit=0. ! CFL speed limit for a berg
 real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
@@ -2570,7 +2584,7 @@ namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, &
          time_average_weight, generate_test_icebergs, speed_limit, grounding_fraction, fix_restart_dates, &
-         use_roundoff_fix, old_bug_rotated_weights, make_calving_reproduce
+         use_roundoff_fix, old_bug_rotated_weights, make_calving_reproduce, do_unit_tests, old_bug_bilin
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je
 type(icebergs_gridded), pointer :: grd
@@ -2879,6 +2893,12 @@ integer :: stdlogunit, stderrunit
      'Sea ice concentration', '(fraction)')
   grd%id_hi=register_diag_field('icebergs', 'hi', axes, Time, &
      'Sea ice thickness', 'm')
+  grd%id_ssh=register_diag_field('icebergs', 'ssh', axes, Time, &
+     'Sea surface hieght', 'm')
+  grd%id_fax=register_diag_field('icebergs', 'taux', axes, Time, &
+     'X-stress on ice from atmosphere', 'N m^-2')
+  grd%id_fay=register_diag_field('icebergs', 'tauy', axes, Time, &
+     'Y-stress on ice from atmosphere', 'N m^-2')
 
   ! Static fields
   id_class=register_static_field('icebergs', 'lon', axes, &
@@ -2905,6 +2925,10 @@ integer :: stdlogunit, stderrunit
     call grd_chksum2(grd, grd%cos, 'init cos')
     call grd_chksum2(grd, grd%sin, 'init sin')
     call grd_chksum2(grd, grd%ocean_depth, 'init ocean_depth')
+  endif
+
+  if (do_unit_tests) then
+   if (unitTests(bergs)) call error_mesg('diamonds, icebergs_init', 'Unit tests failed!', FATAL)
   endif
 
  !write(stderrunit,*) 'diamonds: done'
@@ -5461,5 +5485,36 @@ logical function find_restart_file(filename, actual_file, multiPErestart)
   multiPErestart=.false.
 
 end function find_restart_file
+
+! ##############################################################################
+
+logical function unitTests(bergs)
+  type(icebergs), pointer :: bergs
+  type(icebergs_gridded), pointer :: grd
+  ! Local variables
+  integer :: stderrunit,i,j
+
+  ! This function returns True is a unit test fails
+  unitTests=.false.
+  ! For convenience
+  grd=>bergs%grd
+  stderrunit=stderr()
+  
+  i=grd%isc; j=grd%jsc
+  call localTest( bilin(grd, grd%lon, i, j, 0., 1.), grd%lon(i-1,j) )
+  call localTest( bilin(grd, grd%lon, i, j, 1., 1.), grd%lon(i,j) )
+  call localTest( bilin(grd, grd%lat, i, j, 1., 0.), grd%lat(i,j-1) )
+  call localTest( bilin(grd, grd%lat, i, j, 1., 1.), grd%lat(i,j) )
+
+  contains
+  subroutine localTest(answer, rightAnswer)
+  real, intent(in) :: answer, rightAnswer
+  if (answer==rightAnswer) return
+  unitTests=.true.
+  write(stderrunit,*) 'a=',answer,'b=',rightAnswer
+  end subroutine localTest
+end function unitTests
+
+! ##############################################################################
 
 end module
