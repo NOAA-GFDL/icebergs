@@ -167,7 +167,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.126 2013/05/21 18:02:15 Alistair.Adcroft Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.127 2013/05/21 18:47:18 Alistair.Adcroft Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -609,15 +609,15 @@ real, parameter :: perday=1./86400.
       grd%bergy_src(i,j)=grd%bergy_src(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
       melt=dMbitsM/bergs%dt ! melt rate of bergy bits in kg/s
       grd%bergy_melt(i,j)=grd%bergy_melt(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
-      if(grd%id_melt_buoy>0) then
+      if (grd%id_melt_buoy>0) then
         melt=dMb/bergs%dt ! melt rate due to buoyancy term in kg/s
         grd%melt_buoy(i,j)=grd%melt_buoy(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
       endif
-      if(grd%id_melt_eros>0) then
+      if (grd%id_melt_eros>0) then
         melt=dMe/bergs%dt ! erosion rate in kg/s
         grd%melt_eros(i,j)=grd%melt_eros(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
       endif
-      if(grd%id_melt_conv>0) then
+      if (grd%id_melt_conv>0) then
         melt=dMv/bergs%dt ! melt rate due to convection term in kg/s
         grd%melt_conv(i,j)=grd%melt_conv(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
       endif
@@ -638,7 +638,7 @@ real, parameter :: perday=1./86400.
           T=Tn
           Tn=Wn
           Wn=T
-        Dn=(bergs%rho_bergs/rho_seawater)*Tn ! re-calculate draught (keel depth) for grounding
+          Dn=(bergs%rho_bergs/rho_seawater)*Tn ! re-calculate draught (keel depth) for grounding
       endif
     endif
 
@@ -657,9 +657,12 @@ real, parameter :: perday=1./86400.
       call delete_iceberg_from_list(bergs%first, this)
       bergs%nbergs_melted=bergs%nbergs_melted+1
     else ! Diagnose mass distribution on grid
-      if (grd%id_virtual_area>0) grd%virtual_area(i,j)=grd%virtual_area(i,j)+(Wn*Ln+Abits)*this%mass_scaling ! m^2
-      if (grd%id_mass>0 .or. bergs%add_weight_to_ocean) grd%mass(i,j)=grd%mass(i,j)+Mnew/grd%area(i,j)*this%mass_scaling ! kg/m2
-      if (grd%id_bergy_mass>0 .or. bergs%add_weight_to_ocean) grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+nMbits/grd%area(i,j)*this%mass_scaling ! kg/m2
+      if (grd%id_virtual_area>0) &
+        grd%virtual_area(i,j)=grd%virtual_area(i,j)+(Wn*Ln+Abits)*this%mass_scaling ! m^2
+      if (grd%id_mass>0 .or. bergs%add_weight_to_ocean) &
+        grd%mass(i,j)=grd%mass(i,j)+Mnew/grd%area(i,j)*this%mass_scaling ! kg/m2
+      if (grd%id_bergy_mass>0 .or. bergs%add_weight_to_ocean) &
+        grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+nMbits/grd%area(i,j)*this%mass_scaling ! kg/m2
       if (bergs%add_weight_to_ocean .and. .not. bergs%time_average_weight) then
         if (bergs%grounding_fraction>0.) then
           Hocean=bergs%grounding_fraction*(grd%ocean_depth(i,j)+grd%ssh(i,j))
@@ -2267,13 +2270,13 @@ integer :: stderrunit
 
   ! Send bergs north
   if (grd%pe_N.ne.NULL_PE) then
-    if(folded_north_on_pe) then
+    if (folded_north_on_pe) then
        call mpp_send(nbergs_to_send_n, plen=1, to_pe=grd%pe_N, tag=COMM_TAG_9)
     else 
        call mpp_send(nbergs_to_send_n, plen=1, to_pe=grd%pe_N, tag=COMM_TAG_5)
     endif
     if (nbergs_to_send_n.gt.0) then
-       if(folded_north_on_pe) then
+       if (folded_north_on_pe) then
           call mpp_send(bergs%obuffer_n%data, nbergs_to_send_n*buffer_width, grd%pe_N, tag=COMM_TAG_10)
        else
           call mpp_send(bergs%obuffer_n%data, nbergs_to_send_n*buffer_width, grd%pe_N, tag=COMM_TAG_6)
@@ -2310,7 +2313,7 @@ integer :: stderrunit
   ! Receive bergs from north
   if (grd%pe_N.ne.NULL_PE) then
     nbergs_rcvd_from_n=-999
-    if(folded_north_on_pe) then
+    if (folded_north_on_pe) then
        call mpp_recv(nbergs_rcvd_from_n, glen=1, from_pe=grd%pe_N, tag=COMM_TAG_9)
     else
        call mpp_recv(nbergs_rcvd_from_n, glen=1, from_pe=grd%pe_N, tag=COMM_TAG_7)
@@ -2320,7 +2323,7 @@ integer :: stderrunit
     endif
     if (nbergs_rcvd_from_n.gt.0) then
       call increase_ibuffer(bergs%ibuffer_n, nbergs_rcvd_from_n)
-      if(folded_north_on_pe) then
+      if (folded_north_on_pe) then
          call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_10)
       else
          call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_8)
@@ -2620,12 +2623,12 @@ integer :: stdlogunit, stderrunit
 
 ! Set up iceberg domain
  !write(stderrunit,*) 'diamonds: defining domain'
-  if(tripolar_grid) then
+  if (tripolar_grid) then
     call mpp_define_domains( (/1,gni,1,gnj/), layout, grd%domain, &
 !                            maskmap=maskmap, &
                              xflags=CYCLIC_GLOBAL_DOMAIN, xhalo=halo,  &
                              yflags=FOLD_NORTH_EDGE, yhalo=halo, name='diamond')
-  else if(x_cyclic) then
+  elseif (x_cyclic) then
     call mpp_define_domains( (/1,gni,1,gnj/), layout, grd%domain, &
 !                            maskmap=maskmap, &
                              xflags=CYCLIC_GLOBAL_DOMAIN, &
@@ -2648,7 +2651,7 @@ integer :: stdlogunit, stderrunit
   call mpp_get_neighbor_pe(grd%domain, WEST, grd%pe_W)
 
   folded_north_on_pe = .false.
-  if(tripolar_grid .and. grd%jec == gnj) folded_north_on_pe = .true. 
+  if (tripolar_grid .and. grd%jec == gnj) folded_north_on_pe = .true. 
  !write(stderrunit,'(a,6i4)') 'diamonds, icebergs_init: pe,n,s,e,w =',mpp_pe(),grd%pe_N,grd%pe_S,grd%pe_E,grd%pe_W, NULL_PE
 
  !if (verbose) &
@@ -3271,7 +3274,7 @@ type(iceberg), pointer :: new=>null()
   call create_iceberg(new, bergvals)
 
   if (present(quick)) then
-    if(quick) call insert_berg_into_list(first, new, quick=.true.)
+    if (quick) call insert_berg_into_list(first, new, quick=.true.)
   else
     call insert_berg_into_list(first, new)
   endif
@@ -3372,7 +3375,7 @@ logical, intent(in), optional :: quick
 type(iceberg), pointer :: this, prev
 logical :: quickly = .false.
 
-if(present(quick)) quickly = quick
+if (present(quick)) quickly = quick
 
   if (associated(first)) then
     if (.not. parallel_reprod .or. quickly) then
@@ -3417,35 +3420,35 @@ type(iceberg), pointer :: berg1, berg2
   if (berg1%start_year<berg2%start_year) then ! want newer first
     inorder=.true.
     return
-  else if (berg1%start_year>berg2%start_year) then
+  elseif (berg1%start_year>berg2%start_year) then
     inorder=.false.
     return
   endif
   if (berg1%start_day<berg2%start_day) then ! want newer first
     inorder=.true.
     return
-  else if (berg1%start_day>berg2%start_day) then
+  elseif (berg1%start_day>berg2%start_day) then
     inorder=.false.
     return
   endif
   if (berg1%start_mass<berg2%start_mass) then ! want lightest first
     inorder=.true.
     return
-  else if (berg1%start_mass>berg2%start_mass) then
+  elseif (berg1%start_mass>berg2%start_mass) then
     inorder=.false.
     return
   endif
   if (berg1%start_lon<berg2%start_lon) then ! want eastward first
     inorder=.true.
     return
-  else if (berg1%start_lon>berg2%start_lon) then
+  elseif (berg1%start_lon>berg2%start_lon) then
     inorder=.false.
     return
   endif
   if (berg1%start_lat<berg2%start_lat) then ! want southern first
     inorder=.true.
     return
-  else if (berg1%start_lat>berg2%start_lat) then
+  elseif (berg1%start_lat>berg2%start_lat) then
     inorder=.false.
     return
   endif
@@ -4088,7 +4091,7 @@ integer :: stderrunit
 
 
   if (present(explain)) then
-   if(explain) then
+   if (explain) then
    write(stderrunit,'(a,i3,a,10f12.4)') 'sum_sign_dot_prod4: x=',mpp_pe(),':', &
                            x0,x1,x2,x3, x
    write(stderrunit,'(a,i3,a,10f12.4)') 'sum_sign_dot_prod4: X=',mpp_pe(),':', &
@@ -4144,7 +4147,7 @@ integer :: stderrunit
   endif
 
   if (present(explain)) then
-   if(explain) then
+   if (explain) then
    write(stderrunit,'(a,i3,a,10f12.4)') 'sum_sign_dot_prod5: x=',mpp_pe(),':', &
                            x0,x1,x2,x3,x4, x
    write(stderrunit,'(a,i3,a,10f12.4)') 'sum_sign_dot_prod5: X=',mpp_pe(),':', &
@@ -4192,7 +4195,7 @@ integer :: stderrunit
   y4=grd%lat(i-1,j  )
 
   if (present(explain)) then
-    if(explain) then
+    if (explain) then
     write(stderrunit,'(a,4f12.6)') 'pos_within_cell: x1..x4 ',x1,x2,x3,x4
     write(stderrunit,'(a,2f12.6)') 'pos_within_cell: x',x
     write(stderrunit,'(a,4f12.6)') 'pos_within_cell: y1..y4 ',y1,y2,y3,y4
@@ -4215,7 +4218,7 @@ integer :: stderrunit
     x4=(90.-y4)*cos(grd%lon(i-1,j  )*pi_180)
     y4=(90.-y4)*sin(grd%lon(i-1,j  )*pi_180)
     if (present(explain)) then
-      if(explain) then
+      if (explain) then
       write(stderrunit,'(a,4f12.6)') 'pos_within_cell: x1..x4 ',x1,x2,x3,x4
       write(stderrunit,'(a,2f12.6)') 'pos_within_cell: x',xx
       write(stderrunit,'(a,4f12.6)') 'pos_within_cell: y1..y4 ',y1,y2,y3,y4
@@ -4241,7 +4244,7 @@ integer :: stderrunit
   endif
 
   if (present(explain)) then
-	if(explain) write(stderrunit,'(a,2f12.6)') 'pos_within_cell: xi,yj=',xi,yj
+    if (explain) write(stderrunit,'(a,2f12.6)') 'pos_within_cell: xi,yj=',xi,yj
   endif
 
  !if (.not. is_point_in_cell(grd, x, y, i, j) ) then
@@ -4274,7 +4277,7 @@ integer :: stderrunit
 
   expl=.false.
   if (present(explain)) then
-     if(explain) expl=.true.
+     if (explain) expl=.true.
   endif
   alpha=x2-x1
   delta=y2-y1
@@ -4931,7 +4934,7 @@ integer :: iret
 integer :: stderrunit
 logical :: unsafely=.false.
 
-if(present(unsafe)) unsafely=unsafe
+if (present(unsafe)) unsafely=unsafe
   ! Get the stderr unit number
   stderrunit=stderr()
 
