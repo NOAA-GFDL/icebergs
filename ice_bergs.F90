@@ -10,9 +10,6 @@ use mpp_mod, only: mpp_npes, mpp_pe, mpp_root_pe, mpp_sum, mpp_min, mpp_max, NUL
 use mpp_mod, only: mpp_send, mpp_recv, mpp_sync_self, mpp_chksum, input_nml_file
 use mpp_mod, only: mpp_clock_begin, mpp_clock_end, mpp_clock_id
 use mpp_mod, only: CLOCK_COMPONENT, CLOCK_SUBCOMPONENT, CLOCK_LOOP
-use mpp_mod, only: COMM_TAG_1, COMM_TAG_2, COMM_TAG_3, COMM_TAG_4
-use mpp_mod, only: COMM_TAG_5, COMM_TAG_6, COMM_TAG_7, COMM_TAG_8
-use mpp_mod, only: COMM_TAG_9, COMM_TAG_10
 use mpp_mod, only: mpp_gather
 use fms_mod, only: clock_flag_default
 use fms_io_mod, only: get_instance_filename
@@ -167,7 +164,7 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.128 2013/05/21 20:35:21 Alistair.Adcroft Exp $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 1.1.2.129 2013/05/22 15:24:13 Alistair.Adcroft Exp $'
 character(len=*), parameter :: tagname = '$Name:  $'
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -2202,30 +2199,30 @@ integer :: stderrunit
 
   ! Send bergs east
   if (grd%pe_E.ne.NULL_PE) then
-    call mpp_send(nbergs_to_send_e, plen=1, to_pe=grd%pe_E, tag=COMM_TAG_1)
+    call mpp_send(nbergs_to_send_e, plen=1, to_pe=grd%pe_E)
     if (nbergs_to_send_e.gt.0) then
-      call mpp_send(bergs%obuffer_e%data, nbergs_to_send_e*buffer_width, grd%pe_E, tag=COMM_TAG_2)
+      call mpp_send(bergs%obuffer_e%data, nbergs_to_send_e*buffer_width, grd%pe_E)
     endif
   endif
 
   ! Send bergs west
   if (grd%pe_W.ne.NULL_PE) then
-    call mpp_send(nbergs_to_send_w, plen=1, to_pe=grd%pe_W, tag=COMM_TAG_3)
+    call mpp_send(nbergs_to_send_w, plen=1, to_pe=grd%pe_W)
     if (nbergs_to_send_w.gt.0) then
-      call mpp_send(bergs%obuffer_w%data, nbergs_to_send_w*buffer_width, grd%pe_W, tag=COMM_TAG_4)
+      call mpp_send(bergs%obuffer_w%data, nbergs_to_send_w*buffer_width, grd%pe_W)
     endif
   endif
 
   ! Receive bergs from west
   if (grd%pe_W.ne.NULL_PE) then
     nbergs_rcvd_from_w=-999
-    call mpp_recv(nbergs_rcvd_from_w, glen=1, from_pe=grd%pe_W, tag=COMM_TAG_1)
+    call mpp_recv(nbergs_rcvd_from_w, glen=1, from_pe=grd%pe_W)
     if (nbergs_rcvd_from_w.lt.0) then
       write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_w,' from',grd%pe_W,' (W) !!!!!!!!!!!!!!!!!!!!!!'
     endif
     if (nbergs_rcvd_from_w.gt.0) then
       call increase_ibuffer(bergs%ibuffer_w, nbergs_rcvd_from_w)
-      call mpp_recv(bergs%ibuffer_w%data, nbergs_rcvd_from_w*buffer_width, grd%pe_W, tag=COMM_TAG_2)
+      call mpp_recv(bergs%ibuffer_w%data, nbergs_rcvd_from_w*buffer_width, grd%pe_W)
       do i=1, nbergs_rcvd_from_w
         call unpack_berg_from_buffer2(bergs%first, bergs%ibuffer_w, i)
       enddo
@@ -2237,13 +2234,13 @@ integer :: stderrunit
   ! Receive bergs from east
   if (grd%pe_E.ne.NULL_PE) then
     nbergs_rcvd_from_e=-999
-    call mpp_recv(nbergs_rcvd_from_e, glen=1, from_pe=grd%pe_E, tag=COMM_TAG_3)
+    call mpp_recv(nbergs_rcvd_from_e, glen=1, from_pe=grd%pe_E)
     if (nbergs_rcvd_from_e.lt.0) then
       write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_e,' from',grd%pe_E,' (E) !!!!!!!!!!!!!!!!!!!!!!'
     endif
     if (nbergs_rcvd_from_e.gt.0) then
       call increase_ibuffer(bergs%ibuffer_e, nbergs_rcvd_from_e)
-      call mpp_recv(bergs%ibuffer_e%data, nbergs_rcvd_from_e*buffer_width, grd%pe_E, tag=COMM_TAG_4)
+      call mpp_recv(bergs%ibuffer_e%data, nbergs_rcvd_from_e*buffer_width, grd%pe_E)
       do i=1, nbergs_rcvd_from_e
         call unpack_berg_from_buffer2(bergs%first, bergs%ibuffer_e, i)
       enddo
@@ -2284,37 +2281,37 @@ integer :: stderrunit
   ! Send bergs north
   if (grd%pe_N.ne.NULL_PE) then
     if (folded_north_on_pe) then
-       call mpp_send(nbergs_to_send_n, plen=1, to_pe=grd%pe_N, tag=COMM_TAG_9)
+       call mpp_send(nbergs_to_send_n, plen=1, to_pe=grd%pe_N)
     else 
-       call mpp_send(nbergs_to_send_n, plen=1, to_pe=grd%pe_N, tag=COMM_TAG_5)
+       call mpp_send(nbergs_to_send_n, plen=1, to_pe=grd%pe_N)
     endif
     if (nbergs_to_send_n.gt.0) then
        if (folded_north_on_pe) then
-          call mpp_send(bergs%obuffer_n%data, nbergs_to_send_n*buffer_width, grd%pe_N, tag=COMM_TAG_10)
+          call mpp_send(bergs%obuffer_n%data, nbergs_to_send_n*buffer_width, grd%pe_N)
        else
-          call mpp_send(bergs%obuffer_n%data, nbergs_to_send_n*buffer_width, grd%pe_N, tag=COMM_TAG_6)
+          call mpp_send(bergs%obuffer_n%data, nbergs_to_send_n*buffer_width, grd%pe_N)
        endif
     endif
   endif
 
   ! Send bergs south
   if (grd%pe_S.ne.NULL_PE) then
-    call mpp_send(nbergs_to_send_s, plen=1, to_pe=grd%pe_S, tag=COMM_TAG_7)
+    call mpp_send(nbergs_to_send_s, plen=1, to_pe=grd%pe_S)
     if (nbergs_to_send_s.gt.0) then
-      call mpp_send(bergs%obuffer_s%data, nbergs_to_send_s*buffer_width, grd%pe_S, tag=COMM_TAG_8)
+      call mpp_send(bergs%obuffer_s%data, nbergs_to_send_s*buffer_width, grd%pe_S)
     endif
   endif
 
   ! Receive bergs from south
   if (grd%pe_S.ne.NULL_PE) then
     nbergs_rcvd_from_s=-999
-    call mpp_recv(nbergs_rcvd_from_s, glen=1, from_pe=grd%pe_S, tag=COMM_TAG_5)
+    call mpp_recv(nbergs_rcvd_from_s, glen=1, from_pe=grd%pe_S)
     if (nbergs_rcvd_from_s.lt.0) then
       write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_s,' from',grd%pe_S,' (S) !!!!!!!!!!!!!!!!!!!!!!'
     endif
     if (nbergs_rcvd_from_s.gt.0) then
       call increase_ibuffer(bergs%ibuffer_s, nbergs_rcvd_from_s)
-      call mpp_recv(bergs%ibuffer_s%data, nbergs_rcvd_from_s*buffer_width, grd%pe_S, tag=COMM_TAG_6)
+      call mpp_recv(bergs%ibuffer_s%data, nbergs_rcvd_from_s*buffer_width, grd%pe_S)
       do i=1, nbergs_rcvd_from_s
         call unpack_berg_from_buffer2(bergs%first, bergs%ibuffer_s, i)
       enddo
@@ -2327,9 +2324,9 @@ integer :: stderrunit
   if (grd%pe_N.ne.NULL_PE) then
     nbergs_rcvd_from_n=-999
     if (folded_north_on_pe) then
-       call mpp_recv(nbergs_rcvd_from_n, glen=1, from_pe=grd%pe_N, tag=COMM_TAG_9)
+       call mpp_recv(nbergs_rcvd_from_n, glen=1, from_pe=grd%pe_N)
     else
-       call mpp_recv(nbergs_rcvd_from_n, glen=1, from_pe=grd%pe_N, tag=COMM_TAG_7)
+       call mpp_recv(nbergs_rcvd_from_n, glen=1, from_pe=grd%pe_N)
     endif
     if (nbergs_rcvd_from_n.lt.0) then
       write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_n,' from',grd%pe_N,' (N) !!!!!!!!!!!!!!!!!!!!!!'
@@ -2337,9 +2334,9 @@ integer :: stderrunit
     if (nbergs_rcvd_from_n.gt.0) then
       call increase_ibuffer(bergs%ibuffer_n, nbergs_rcvd_from_n)
       if (folded_north_on_pe) then
-         call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_10)
+         call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N)
       else
-         call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_8)
+         call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N)
       endif
       do i=1, nbergs_rcvd_from_n
         call unpack_berg_from_buffer2(bergs%first, bergs%ibuffer_n, i)
