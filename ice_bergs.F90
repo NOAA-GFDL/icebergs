@@ -13,6 +13,8 @@ use mpp_mod, only: CLOCK_COMPONENT, CLOCK_SUBCOMPONENT, CLOCK_LOOP
 use mpp_mod, only: COMM_TAG_1, COMM_TAG_2, COMM_TAG_3, COMM_TAG_4
 use mpp_mod, only: COMM_TAG_5, COMM_TAG_6, COMM_TAG_7, COMM_TAG_8
 use mpp_mod, only: COMM_TAG_9, COMM_TAG_10
+use mpp_mod, only: COMM_TAG_11, COMM_TAG_12, COMM_TAG_13, COMM_TAG_14
+
 use mpp_mod, only: mpp_gather
 use fms_mod, only: clock_flag_default
 use fms_io_mod, only: get_instance_filename
@@ -166,8 +168,8 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 20.0.2.7 2014/01/24 19:33:16 Niki.Zadeh Exp $'
-character(len=*), parameter :: tagname = '$Name: bergs_io_domain_restart_nnz $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 20.0.2.10 2014/02/04 20:12:16 Niki.Zadeh Exp $'
+character(len=*), parameter :: tagname = '$Name: tikal_201403 $'
 
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -203,6 +205,7 @@ character(len=10) :: restart_input_dir = 'INPUT/'
 logical :: folded_north_on_pe = .false.
 
 integer, parameter :: buffer_width=20
+integer, parameter :: buffer_width_traj=23
 !I/O vars
 type(domain2d), pointer, save :: io_domain=>NULL()
 integer, save :: io_tile_id(1), io_tile_root_pe, io_npes
@@ -2538,13 +2541,148 @@ end subroutine send_bergs_to_other_pes
 
   end subroutine increase_ibuffer
 
+  subroutine increase_ibuffer_traj(old,delta)
+  ! Arguments
+  type(buffer), pointer :: old
+  integer, intent(in) :: delta
+  ! Local variables
+  type(buffer), pointer :: new
+  integer :: new_size, old_size
+
+    if (.not.associated(old)) then
+      new_size=delta+delta_buf
+      old_size=0
+    else
+      old_size=old%size
+      if (delta<old%size) then
+        new_size=old%size+delta
+      else
+        new_size=delta+delta_buf
+      endif
+    endif
+
+    if (old_size.ne.new_size) then
+      allocate(new)
+      allocate(new%data(buffer_width_traj,new_size))
+      new%size=new_size
+      if (associated(old)) then
+        new%data(:,1:old%size)=old%data(:,1:old%size)
+        deallocate(old%data)
+        deallocate(old)
+      endif
+      old=>new
+     !write(stderr(),*) 'diamonds, increase_ibuffer',mpp_pe(),' increased to',new_size
+    endif
+
+  end subroutine increase_ibuffer_traj
+
+  subroutine increase_buffer_traj(old,delta)
+  ! Arguments
+  type(buffer), pointer :: old
+  integer, intent(in) :: delta
+  ! Local variables
+  type(buffer), pointer :: new
+  integer :: new_size
+
+    if (.not.associated(old)) then
+      new_size=delta
+    else
+      new_size=old%size+delta
+    endif
+    allocate(new)
+    allocate(new%data(buffer_width_traj,new_size))
+    new%size=new_size
+    if (associated(old)) then
+      new%data(:,1:old%size)=old%data(:,1:old%size)
+      deallocate(old%data)
+      deallocate(old)
+    endif
+    old=>new
+   !write(stderr(),*) 'diamonds, increase_buffer',mpp_pe(),' increased to',new_size
+
+  end subroutine increase_buffer_traj
+
+  subroutine pack_traj_into_buffer2(traj, buff, n)
+  ! Arguments
+  type(xyt), pointer :: traj
+  type(buffer), pointer :: buff
+  integer, intent(in) :: n
+  ! Local variables
+
+    if (.not.associated(buff)) call increase_buffer_traj(buff,delta_buf)
+    if (n>buff%size) call increase_buffer_traj(buff,delta_buf)
+
+    buff%data(1,n)=traj%lon
+    buff%data(2,n)=traj%lat
+    buff%data(3,n)=float(traj%year)
+    buff%data(4,n)=traj%day
+    buff%data(5,n)=traj%uvel
+    buff%data(6,n)=traj%vvel
+    buff%data(7,n)=traj%mass
+    buff%data(8,n)=traj%mass_of_bits
+    buff%data(9,n)=traj%heat_density
+    buff%data(10,n)=traj%thickness
+    buff%data(11,n)=traj%width
+    buff%data(12,n)=traj%length
+    buff%data(13,n)=traj%uo
+    buff%data(14,n)=traj%vo
+    buff%data(15,n)=traj%ui
+    buff%data(16,n)=traj%vi
+    buff%data(17,n)=traj%ua
+    buff%data(18,n)=traj%va
+    buff%data(19,n)=traj%ssh_x
+    buff%data(20,n)=traj%ssh_y
+    buff%data(21,n)=traj%sst
+    buff%data(22,n)=traj%cn
+    buff%data(23,n)=traj%hi
+
+  end subroutine pack_traj_into_buffer2
+
+  subroutine unpack_traj_from_buffer2(first, buff, n)
+  ! Arguments
+  type(xyt), pointer :: first
+  type(buffer), pointer :: buff
+  integer, intent(in) :: n
+ ! Local variables
+  type(xyt) :: traj
+  integer :: stderrunit
+  ! Get the stderr unit number
+  stderrunit = stderr()
+
+    traj%lon=buff%data(1,n)
+    traj%lat=buff%data(2,n)
+    traj%year=nint(buff%data(3,n))
+    traj%day=buff%data(4,n)
+    traj%uvel=buff%data(5,n)
+    traj%vvel=buff%data(6,n)
+    traj%mass=buff%data(7,n)
+    traj%mass_of_bits=buff%data(8,n)
+    traj%heat_density=buff%data(9,n)
+    traj%thickness=buff%data(10,n)
+    traj%width=buff%data(11,n)
+    traj%length=buff%data(12,n)
+    traj%uo=buff%data(13,n)
+    traj%vo=buff%data(14,n)
+    traj%ui=buff%data(15,n)
+    traj%vi=buff%data(16,n)
+    traj%ua=buff%data(17,n)
+    traj%va=buff%data(18,n)
+    traj%ssh_x=buff%data(19,n)
+    traj%ssh_y=buff%data(20,n)
+    traj%sst=buff%data(21,n)
+    traj%cn=buff%data(22,n)
+    traj%hi=buff%data(23,n)
+
+    call append_posn(first, traj) 
+
+  end subroutine unpack_traj_from_buffer2
 
 ! ##############################################################################
 
 subroutine icebergs_init(bergs, &
-             gni, gnj, layout, io_layout, axes, maskmap, x_cyclic, tripolar_grid, &
+             gni, gnj, layout, io_layout, axes, x_cyclic, tripolar_grid, &
              dt, Time, ice_lon, ice_lat, ice_wet, ice_dx, ice_dy, ice_area, &
-             cos_rot, sin_rot)
+             cos_rot, sin_rot, maskmap)
 ! Arguments
 type(icebergs), pointer :: bergs
 integer, intent(in) :: gni, gnj, layout(2), io_layout(2), axes(2)
@@ -2643,17 +2781,17 @@ integer :: stdlogunit, stderrunit
  !write(stderrunit,*) 'diamonds: defining domain'
   if(tripolar_grid) then
     call mpp_define_domains( (/1,gni,1,gnj/), layout, grd%domain, &
-!                            maskmap=maskmap, &
+                             maskmap=maskmap, &
                              xflags=CYCLIC_GLOBAL_DOMAIN, xhalo=halo,  &
                              yflags=FOLD_NORTH_EDGE, yhalo=halo, name='diamond')
   else if(x_cyclic) then
     call mpp_define_domains( (/1,gni,1,gnj/), layout, grd%domain, &
-!                            maskmap=maskmap, &
+                             maskmap=maskmap, &
                              xflags=CYCLIC_GLOBAL_DOMAIN, &
                              xhalo=halo, yhalo=halo, name='diamond')
   else
     call mpp_define_domains( (/1,gni,1,gnj/), layout, grd%domain, &
-!                            maskmap=maskmap, &
+                            maskmap=maskmap, &
                              xhalo=halo, yhalo=halo, name='diamond')
   endif
 
@@ -3740,6 +3878,30 @@ type(xyt), pointer :: new_posn
 
 end subroutine push_posn
 
+subroutine append_posn(trajectory, posn_vals)
+! This routine appends a new position leaf to the end of the given trajectory 
+! Arguments
+type(xyt), pointer :: trajectory
+type(xyt) :: posn_vals
+! Local variables
+type(xyt), pointer :: new_posn,next,last
+
+  allocate(new_posn)
+  new_posn=posn_vals
+  new_posn%next=>null()
+  if(.NOT. associated(trajectory)) then
+     trajectory=>new_posn
+  else
+     ! Find end of the trajectory and point it to the  new leaf
+     next=>trajectory
+     do while (associated(next))
+        last=>next
+        next=>next%next
+     enddo
+     last%next=>new_posn
+  endif
+end subroutine append_posn
+
 ! ##############################################################################
 
 subroutine move_trajectory(bergs, berg)
@@ -4546,9 +4708,7 @@ type(iceberg), pointer :: this, next
     this=>next
   enddo
 
-  if (associated(bergs%trajectories)) then
-    call write_trajectory(bergs%trajectories)
-  endif
+  call write_trajectory(bergs%trajectories)
 
   deallocate(bergs%grd%lon)
   deallocate(bergs%grd%lat)
@@ -4680,7 +4840,7 @@ integer :: massid, thicknessid, lengthid, widthid
 integer :: start_lonid, start_latid, start_yearid, start_dayid, start_massid
 integer :: scaling_id, mass_of_bits_id, heat_density_id
 character(len=35) :: filename
-type(iceberg), pointer :: this, last_berg_mark
+type(iceberg), pointer :: this
 integer :: stderrunit
 !I/O vars
 type(iceberg), pointer :: bergs4io=>NULL()
@@ -4717,10 +4877,10 @@ integer :: from_pe,np
      !Receive bergs from all pes in this I/O tile !FRAGILE!SCARY!
      do np=2,size(io_tile_pelist) ! Note: np starts from 2 to exclude self
         from_pe=io_tile_pelist(np)
-        call mpp_recv(nbergs_rcvd_io, glen=1, from_pe=from_pe, tag=COMM_TAG_1)
+        call mpp_recv(nbergs_rcvd_io, glen=1, from_pe=from_pe, tag=COMM_TAG_13)
         if (nbergs_rcvd_io .gt. 0) then
            call increase_ibuffer(bergs%ibuffer_io, nbergs_rcvd_io)
-           call mpp_recv(bergs%ibuffer_io%data, nbergs_rcvd_io*buffer_width,from_pe=from_pe, tag=COMM_TAG_2)
+           call mpp_recv(bergs%ibuffer_io%data, nbergs_rcvd_io*buffer_width,from_pe=from_pe, tag=COMM_TAG_14)
            do i=1, nbergs_rcvd_io
               call unpack_berg_from_buffer2(bergs4io, bergs%ibuffer_io, i, grd, force_append=.true.)
            enddo
@@ -4738,9 +4898,9 @@ integer :: from_pe,np
         enddo
      endif
         
-     call mpp_send(nbergs_sent_io, plen=1, to_pe=io_tile_root_pe, tag=COMM_TAG_1)
+     call mpp_send(nbergs_sent_io, plen=1, to_pe=io_tile_root_pe, tag=COMM_TAG_13)
      if (nbergs_sent_io .gt. 0) then
-        call mpp_send(bergs%obuffer_io%data, nbergs_sent_io*buffer_width, to_pe=io_tile_root_pe, tag=COMM_TAG_2)
+        call mpp_send(bergs%obuffer_io%data, nbergs_sent_io*buffer_width, to_pe=io_tile_root_pe, tag=COMM_TAG_14)
      endif
   endif
 
@@ -4750,10 +4910,20 @@ integer :: from_pe,np
 
     call get_instance_filename("RESTART/icebergs.res.nc", filename)
 
-    if(io_tile_id(1) .lt. 0) then
-       write(filename,'(A,".",I4.4)') trim(filename), mpp_pe() 
-    elseif( io_npes > 1) then
-       write(filename,'(A,".",I4.4)') trim(filename), io_tile_id(1)
+    if(io_tile_id(1) .ge. 0) then !io_tile_root_pes write
+       if(io_npes .gt. 1) then !attach tile_id  to filename only if there is more than one I/O pe
+          if (io_tile_id(1)<10000) then
+             write(filename,'(A,".",I4.4)') trim(filename), io_tile_id(1) 
+          else
+             write(filename,'(A,".",I6.6)') trim(filename), io_tile_id(1) 
+          endif
+       endif
+    else !All pes write, attach pe# to filename
+       if (mpp_npes()<10000) then
+          write(filename,'(A,".",I4.4)') trim(filename), mpp_pe() 
+       else
+          write(filename,'(A,".",I6.6)') trim(filename), mpp_pe() 
+       endif
     endif
     if (verbose) write(*,'(2a)') 'diamonds, write_restart: creating ',filename
 
@@ -4858,6 +5028,8 @@ integer :: from_pe,np
     ! Finish up
     iret = nf_close(ncid)
     if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_restart: nf_close failed'
+    ! Deallocate bergs4io
+    call destroy_iceberg(bergs4io)
 
   endif !(is_io_tile_root_pe .AND. associated(bergs4io) ) 
 
@@ -4903,17 +5075,86 @@ character(len=7) :: pe_name
 type(xyt), pointer :: this, next
 integer :: stderrunit
 
+!I/O vars
+type(xyt), pointer :: traj4io=>NULL()
+integer :: ntrajs_sent_io,ntrajs_rcvd_io
+integer :: from_pe,np
+type(buffer), pointer :: obuffer_io=>null(), ibuffer_io=>null()
+
   ! Get the stderr unit number
   stderrunit=stderr()
-  
-  call get_instance_filename("iceberg_trajectories.nc", filename)
-  if (mpp_npes()>10000) then
-     write(pe_name,'(a,i6.6)' )'.', mpp_pe()    
-  else
-     write(pe_name,'(a,i4.4)' )'.', mpp_pe()    
+
+  !Assemble the list of trajectories from all pes in this I/O tile
+
+  !First add the trajs on the io_tile_root_pe (if any) to the I/O list
+  if(is_io_tile_root_pe) then
+     if(associated(trajectory)) then
+        this=>trajectory
+        do while (associated(this))
+           call append_posn(traj4io, this)
+           this=>this%next
+        enddo
+     endif
   endif
-  filename=trim(filename)//trim(pe_name)
-  if (debug) write(stderrunit,*) 'diamonds, write_trajectory: creating ',filename
+
+  !Now gather and append the bergs from all pes in the io_tile to the list on corresponding io_tile_root_pe
+  ntrajs_sent_io =0
+  ntrajs_rcvd_io =0 
+
+  if(is_io_tile_root_pe) then
+     !Receive trajs from all pes in this I/O tile !FRAGILE!SCARY!
+     do np=2,size(io_tile_pelist) ! Note: np starts from 2 to exclude self
+        from_pe=io_tile_pelist(np)
+        call mpp_recv(ntrajs_rcvd_io, glen=1, from_pe=from_pe, tag=COMM_TAG_11)
+        if (ntrajs_rcvd_io .gt. 0) then
+           call increase_ibuffer_traj(ibuffer_io, ntrajs_rcvd_io)
+           call mpp_recv(ibuffer_io%data, ntrajs_rcvd_io*buffer_width_traj,from_pe=from_pe, tag=COMM_TAG_12)
+           do i=1, ntrajs_rcvd_io
+              call unpack_traj_from_buffer2(traj4io, ibuffer_io, i)
+           enddo
+       endif
+     enddo
+  else
+     !Pack and Send trajs to the root pe for this I/O tile
+     if (associated(trajectory)) then
+        this=>trajectory
+        do while (associated(this))
+           ntrajs_sent_io = ntrajs_sent_io +1
+           call pack_traj_into_buffer2(this, obuffer_io, ntrajs_sent_io)
+
+           this=>this%next
+        enddo
+     endif
+        
+     call mpp_send(ntrajs_sent_io, plen=1, to_pe=io_tile_root_pe, tag=COMM_TAG_11)
+     if (ntrajs_sent_io .gt. 0) then
+        call mpp_send(obuffer_io%data, ntrajs_sent_io*buffer_width_traj, to_pe=io_tile_root_pe, tag=COMM_TAG_12)
+     endif
+  endif
+
+
+
+  !Now start writing in the io_tile_root_pe if there are any bergs in the I/O list
+
+  if(is_io_tile_root_pe .AND. associated(traj4io)) then
+ 
+  call get_instance_filename("iceberg_trajectories.nc", filename)
+    if(io_tile_id(1) .ge. 0) then !io_tile_root_pes write
+       if(io_npes .gt. 1) then !attach tile_id  to filename only if there is more than one I/O pe
+          if (io_tile_id(1)<10000) then
+             write(filename,'(A,".",I4.4)') trim(filename), io_tile_id(1) 
+          else
+             write(filename,'(A,".",I6.6)') trim(filename), io_tile_id(1) 
+          endif
+       endif
+    else !All pes write, attach pe# to filename
+       if (mpp_npes()<10000) then
+          write(filename,'(A,".",I4.4)') trim(filename), mpp_pe() 
+       else
+          write(filename,'(A,".",I6.6)') trim(filename), mpp_pe() 
+       endif
+    endif
+  if (verbose) write(*,'(2a)') 'diamonds, write_trajectory: creating ',filename
 
   iret = nf_create(filename, NF_CLOBBER, ncid)
   if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_create failed'
@@ -5001,7 +5242,7 @@ integer :: stderrunit
   iret = nf_enddef(ncid)
        
   ! Write variables
-  this=>trajectory; i=0
+  this=>traj4io; i=0
   do while (associated(this))
     i=i+1
     call put_double(ncid, lonid, i, this%lon)
@@ -5035,6 +5276,8 @@ integer :: stderrunit
   ! Finish up
   iret = nf_close(ncid)
   if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_close failed',mpp_pe(),filename
+
+  endif !(is_io_tile_root_pe .AND. associated(traj4io))
 
 end subroutine write_trajectory
 
