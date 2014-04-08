@@ -163,8 +163,8 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 19.0.2.2.2.2.4.5.2.1 2013/03/21 14:59:38 William.Cooke Exp $'
-character(len=*), parameter :: tagname = '$Name: siena_201305 $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 20.0 2013/12/13 23:28:21 fms Exp $'
+character(len=*), parameter :: tagname = '$Name: tikal $'
 
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -2542,6 +2542,7 @@ logical :: add_weight_to_ocean=.true. ! Add weight of icebergs + bits to ocean
 logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
 logical :: time_average_weight=.false. ! Time average the weight on the ocean
 logical :: fix_restart_dates=.true. ! After a restart, check that bergs were created before the current model date
+logical :: reproduce_siena=.false. !To reproduce siena answers which change across PE layout change set to .true.
 real :: speed_limit=0. ! CFL speed limit for a berg
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim)
@@ -2552,7 +2553,7 @@ namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, &
          time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, &
-         old_bug_rotated_weights, make_calving_reproduce, restart_input_dir
+         old_bug_rotated_weights, make_calving_reproduce, restart_input_dir, reproduce_siena
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je
 type(icebergs_gridded), pointer :: grd
@@ -2580,6 +2581,15 @@ integer :: stdlogunit, stderrunit
 ! Log version and parameters
   call write_version_number(version, tagname)
   write (stdlogunit, icebergs_nml)
+
+  if( reproduce_siena ) then
+     if( mpp_pe() == mpp_root_pe() ) then
+        call error_mesg("ice_bergs: You have overridden the default value of reproduce_siena " // &
+                        "and set it to .true. in icebergs_nml. This is a temporary workaround to " // &
+                        "allow for consistency in continuing experiments.",  "Please use the default " //&
+                        "value (.false.) as this option will be removed in a future release. ", WARNING)
+     endif
+  endif
 
 ! Allocate overall structure
  !write(stderrunit,*) 'diamonds: allocating bergs'
@@ -2721,6 +2731,7 @@ integer :: stdlogunit, stderrunit
   enddo; enddo
 
   ! Sanitize lon for the tile (need continuous longitudes within one tile)
+  if(reproduce_siena) then
   j=grd%jsc; do i=grd%isc+1,grd%ied
     minl=grd%lon(i-1,j)-180.
     grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
@@ -2737,7 +2748,28 @@ integer :: stdlogunit, stderrunit
       minl=grd%lon(i,j+1)-180.
       grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
   enddo; enddo
-
+  else  !The fix to reproduce across PE layout change, from AJA
+  j=grd%jsc; do i=grd%isc+1,grd%ied
+    minl=grd%lon(i-1,j)-180.
+    if (abs(grd%lon(i,j)-(modulo(grd%lon(i,j)-minl,360.)+minl))>180.) &
+       grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
+  enddo
+  j=grd%jsc; do i=grd%isc-1,grd%isd,-1
+    minl=grd%lon(i+1,j)-180.
+    if (abs(grd%lon(i,j)-(modulo(grd%lon(i,j)-minl,360.)+minl))>180.) &
+       grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
+  enddo
+  do j=grd%jsc+1,grd%jed; do i=grd%isd,grd%ied
+      minl=grd%lon(i,j-1)-180.
+      if (abs(grd%lon(i,j)-(modulo(grd%lon(i,j)-minl,360.)+minl))>180.) &
+         grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
+  enddo; enddo
+  do j=grd%jsc-1,grd%jsd,-1; do i=grd%isd,grd%ied
+      minl=grd%lon(i,j+1)-180.
+      if (abs(grd%lon(i,j)-(modulo(grd%lon(i,j)-minl,360.)+minl))>180.) &
+         grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
+  enddo; enddo
+  endif
   ! lonc, latc used for searches
   do j=grd%jsd+1,grd%jed; do i=grd%isd+1,grd%ied
     grd%lonc(i,j)=0.25*( (grd%lon(i,j)+grd%lon(i-1,j-1)) &
@@ -2873,6 +2905,8 @@ integer :: stdlogunit, stderrunit
   if (debug) then
     call grd_chksum2(grd, grd%lon, 'init lon')
     call grd_chksum2(grd, grd%lat, 'init lat')
+    call grd_chksum2(grd, grd%lonc, 'init lonc')
+    call grd_chksum2(grd, grd%latc, 'init latc')
     call grd_chksum2(grd, grd%area, 'init area')
     call grd_chksum2(grd, grd%msk, 'init msk')
     call grd_chksum2(grd, grd%cos, 'init cos')
