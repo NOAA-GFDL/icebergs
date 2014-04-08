@@ -163,8 +163,8 @@ type, public :: icebergs ; private
 end type icebergs
 
 ! Global constants
-character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 19.0.2.2.2.2.4.5 2013/03/02 17:09:39 Seth.Underwood Exp $'
-character(len=*), parameter :: tagname = '$Name: siena_201303 $'
+character(len=*), parameter :: version = '$Id: ice_bergs.F90,v 19.0.2.2.2.2.4.5.2.1 2013/03/21 14:59:38 William.Cooke Exp $'
+character(len=*), parameter :: tagname = '$Name: siena_201305 $'
 
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 integer, parameter :: file_format_major_version=0
@@ -2922,7 +2922,7 @@ integer :: stderrunit
 
   ! Check if no restart found on any pe
   allocate(found_restart_int(mpp_npes()))
-  if (found_restart==.true.) then
+  if (found_restart .eqv. .true.) then
      k=1
   else
      k=0
