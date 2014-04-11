@@ -193,6 +193,12 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   integer, dimension(:), pointer :: nbergs_calved_by_class=>null()
 end type icebergs
 
+#ifdef _FILE_VERSION
+  character(len=128) :: version = _FILE_VERSION
+#else
+  character(len=128) :: version = 'unknown'
+#endif
+
 contains
 
 
@@ -210,7 +216,7 @@ use mpp_domains_mod, only: CYCLIC_GLOBAL_DOMAIN, FOLD_NORTH_EDGE
 use mpp_domains_mod, only: mpp_get_neighbor_pe, NORTH, SOUTH, EAST, WEST
 use mpp_domains_mod, only: mpp_define_io_domain
 
-use mpp_mod, only: mpp_clock_begin, mpp_clock_end, mpp_clock_id
+use mpp_mod, only: mpp_clock_begin, mpp_clock_end, mpp_clock_id, input_nml_file
 use mpp_mod, only: CLOCK_COMPONENT, CLOCK_SUBCOMPONENT, CLOCK_LOOP
 
 use fms_mod, only: open_namelist_file, check_nml_error, close_file
@@ -263,6 +269,7 @@ integer :: stdlogunit, stderrunit
   ! Get the stderr and stdlog unit numbers
   stderrunit=stderr()
   stdlogunit=stdlog()
+  write(stdlogunit,*) "ice_bergs_framework: "//trim(version)
 
 ! Read namelist parameters
  !write(stderrunit,*) 'diamonds: reading namelist'

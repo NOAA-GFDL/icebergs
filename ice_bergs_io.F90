@@ -45,6 +45,12 @@ integer, save :: io_tile_id(1), io_tile_root_pe, io_npes
 integer, allocatable,save :: io_tile_pelist(:)
 logical :: is_io_tile_root_pe = .true.
 
+#ifdef _FILE_VERSION
+  character(len=128) :: version = _FILE_VERSION
+#else
+  character(len=128) :: version = 'unknown'
+#endif
+
 contains
 
 subroutine ice_bergs_io_init(bergs, io_layout)
@@ -52,6 +58,13 @@ type(icebergs), pointer :: bergs
 integer, intent(in) :: io_layout(2)
 
 integer :: np
+integer :: stdlogunit, stderrunit
+
+  ! Get the stderr and stdlog unit numbers
+  stderrunit=stderr()
+  stdlogunit=stdlog()
+  write(stdlogunit,*) "ice_bergs_framework: "//trim(version)
+
   !I/O layout init 
   io_tile_id=-1
   io_domain => mpp_get_io_domain(bergs%grd%domain)

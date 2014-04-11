@@ -7,7 +7,7 @@ use fms_mod, only: stdlog, stderr, error_mesg, FATAL, WARNING
 use fms_mod, only: write_version_number, read_data, write_data, file_exist
 use mosaic_mod, only: get_mosaic_ntiles, get_mosaic_ncontacts
 use mpp_mod, only: mpp_npes, mpp_pe, mpp_root_pe, mpp_sum, mpp_min, mpp_max, NULL_PE
-use mpp_mod, only: mpp_send, mpp_recv, mpp_sync_self, mpp_chksum, input_nml_file
+use mpp_mod, only: mpp_send, mpp_recv, mpp_sync_self, mpp_chksum
 use mpp_mod, only: mpp_clock_begin, mpp_clock_end, mpp_clock_id
 use mpp_mod, only: CLOCK_COMPONENT, CLOCK_SUBCOMPONENT, CLOCK_LOOP
 
@@ -44,13 +44,8 @@ use ice_bergs_io,        only: read_restart_bergs,read_restart_calving
 
 implicit none ; private
 
-public icebergs_init, icebergs_end, icebergs_run, icebergs_stock_pe
+public icebergs_init, icebergs_end, icebergs_run, icebergs_stock_pe, icebergs
 public icebergs_incr_mass, icebergs_save_restart
-
-
-! Global constants
-character(len=*), parameter :: version = '$Id: $'
-character(len=*), parameter :: tagname = '$Name: $'
 
 real, parameter :: pi_180=pi/180. ! Converts degrees to radians
 real, parameter :: rho_ice=916.7 ! Density of fresh ice @ 0oC (kg/m^3)
@@ -64,6 +59,12 @@ real, parameter :: Cd_wv=0.9 ! (Vertical) Drag coefficient between bergs and oce
 real, parameter :: Cd_wh=0.0012 ! (Horizontal) Drag coefficient between bergs and ocean (?)
 real, parameter :: Cd_iv=0.9 ! (Vertical) Drag coefficient between bergs and sea-ice (?)
 !TOM> no horizontal drag for sea ice! real, parameter :: Cd_ih=0.0012 ! (Horizontal) Drag coefficient between bergs and sea-ice (?)
+
+#ifdef _FILE_VERSION
+  character(len=128) :: version = _FILE_VERSION
+#else
+  character(len=128) :: version = 'unknown'
+#endif
 
 contains
 
@@ -87,6 +88,7 @@ integer :: stdlogunit, stderrunit
   ! Get the stderr and stdlog unit numbers
   stderrunit=stderr()
   stdlogunit=stdlog()
+  write(stdlogunit,*) "ice_bergs: "//trim(version)
 
   call ice_bergs_framework_init(bergs, &
              gni, gnj, layout, io_layout, axes, x_cyclic, tripolar_grid, &
