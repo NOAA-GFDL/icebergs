@@ -43,6 +43,7 @@ logical :: fix_restart_dates=.true. ! After a restart, check that bergs were cre
 public nclasses,buffer_width,buffer_width_traj
 public verbose, really_debug, debug, restart_input_dir,make_calving_reproduce,use_roundoff_fix
 public ignore_ij_restart, use_slow_find,generate_test_icebergs,old_bug_rotated_weights,budget
+public orig_read
 
 
 !Public types

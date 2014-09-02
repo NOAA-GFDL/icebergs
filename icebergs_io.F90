@@ -8,7 +8,7 @@ use mpp_mod, only: mpp_npes, mpp_pe, mpp_root_pe, mpp_sum, mpp_min, mpp_max, NUL
 use mpp_mod, only: mpp_send, mpp_recv, mpp_gather, mpp_chksum
 use mpp_mod, only: COMM_TAG_11, COMM_TAG_12, COMM_TAG_13, COMM_TAG_14
 
-use fms_mod, only: stdlog, stderr, error_mesg, FATAL, WARNING
+use fms_mod, only: stdlog, stderr, error_mesg, FATAL, WARNING, NOTE
 use fms_mod, only: field_exist, file_exist, read_data, write_data
 
 use fms_io_mod, only: get_instance_filename
