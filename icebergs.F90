@@ -1,6 +1,6 @@
 module ice_bergs
 
-use constants_mod, only: radius, pi, omega, HLF
+use constants_mod, only: pi, omega, HLF
 use fms_mod, only: open_namelist_file, check_nml_error, close_file
 use fms_mod, only: field_exist, get_global_att_value
 use fms_mod, only: stdlog, stderr, error_mesg, FATAL, WARNING
@@ -15,13 +15,9 @@ use mpp_mod, only: mpp_gather
 use fms_mod, only: clock_flag_default
 use fms_io_mod, only: get_instance_filename
 use mpp_domains_mod, only: domain2D, mpp_update_domains, mpp_define_domains
-use mpp_parameter_mod, only: SCALAR_PAIR, CGRID_NE, BGRID_NE, CORNER, AGRID
+use mpp_parameter_mod, only: CGRID_NE, BGRID_NE, CORNER, AGRID
 use mpp_domains_mod, only: mpp_get_compute_domain, mpp_get_data_domain
-use mpp_domains_mod, only: CYCLIC_GLOBAL_DOMAIN, FOLD_NORTH_EDGE
 use mpp_domains_mod, only: mpp_get_neighbor_pe, NORTH, SOUTH, EAST, WEST
-use mpp_domains_mod, only: mpp_define_io_domain
-use mpp_domains_mod, only: mpp_domain_is_tile_root_pe,mpp_get_domain_tile_root_pe
-use mpp_domains_mod, only: mpp_get_tile_pelist,mpp_get_tile_npes,mpp_get_io_domain,mpp_get_tile_id
 use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 use diag_manager_mod, only: register_diag_field, register_static_field, send_data
 use diag_manager_mod, only: diag_axis_init
@@ -70,14 +66,14 @@ contains
 
 ! ##############################################################################
 subroutine icebergs_init(bergs, &
-             gni, gnj, layout, io_layout, axes, x_cyclic, tripolar_grid, &
+             gni, gnj, layout, io_layout, axes, dom_x_flags, dom_y_flags, &
              dt, Time, ice_lon, ice_lat, ice_wet, ice_dx, ice_dy, ice_area, &
              cos_rot, sin_rot, maskmap)
 ! Arguments
 type(icebergs), pointer :: bergs
 integer, intent(in) :: gni, gnj, layout(2), io_layout(2), axes(2)
 logical, intent(in), optional :: maskmap(:,:)
-logical, intent(in) :: x_cyclic, tripolar_grid
+integer, intent(in) :: dom_x_flags, dom_y_flags
 real, intent(in) :: dt
 type (time_type), intent(in) :: Time ! current time
 real, dimension(:,:), intent(in) :: ice_lon, ice_lat, ice_wet
@@ -91,7 +87,7 @@ integer :: stdlogunit, stderrunit
   write(stdlogunit,*) "ice_bergs: "//trim(version)
 
   call ice_bergs_framework_init(bergs, &
-             gni, gnj, layout, io_layout, axes, x_cyclic, tripolar_grid, &
+             gni, gnj, layout, io_layout, axes, dom_x_flags, dom_y_flags, &
              dt, Time, ice_lon, ice_lat, ice_wet, ice_dx, ice_dy, ice_area, &
              cos_rot, sin_rot, maskmap)
 
@@ -736,17 +732,24 @@ end subroutine interp_flds
 
 ! ##############################################################################
 
-subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh, sst, calving_hflx, cn, hi)
+subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh, sst, calving_hflx, cn, hi, &
+                        stagger, stress_stagger)
 ! Arguments
 type(icebergs), pointer :: bergs
 type(time_type), intent(in) :: time
 real, dimension(:,:), intent(inout) :: calving, calving_hflx
 real, dimension(:,:), intent(in) :: uo, vo, ui, vi, tauxa, tauya, ssh, sst, cn, hi
+integer,    optional, intent(in) :: stagger, stress_stagger
 ! Local variables
 integer :: iyr, imon, iday, ihr, imin, isec, k
 type(icebergs_gridded), pointer :: grd
 logical :: lerr, sample_traj, lbudget, lverbose
 real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
+integer :: i, j, Iu, ju, iv, Jv, Iu_off, ju_off, iv_off, Jv_off
+real :: mask
+real, dimension(:,:), allocatable :: uC_tmp, vC_tmp
+integer :: vel_stagger, str_stagger
+
 integer :: stderrunit
 
   ! Get the stderr unit number
@@ -754,6 +757,9 @@ integer :: stderrunit
 
   call mpp_clock_begin(bergs%clock)
   call mpp_clock_begin(bergs%clock_int)
+
+  vel_stagger = BGRID_NE ; if (present(stagger)) vel_stagger = stagger
+  str_stagger = vel_stagger ; if (present(stress_stagger)) str_stagger = stress_stagger
 
   ! For convenience
   grd=>bergs%grd
@@ -810,17 +816,71 @@ integer :: stderrunit
   tmpsum=sum( grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
   bergs%net_incoming_calving_heat=bergs%net_incoming_calving_heat+tmpsum*bergs%dt ! Units of J
 
-  ! Copy ocean flow (resides on B grid)
-  grd%uo(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=uo(:,:)
-  grd%vo(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=vo(:,:)
+  if (vel_stagger == BGRID_NE) then
+    ! Copy ocean and ice velocities. They are already on B-grid u-points.
+    grd%uo(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1) = uo(:,:)
+    grd%vo(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1) = vo(:,:)
+    call mpp_update_domains(grd%uo, grd%vo, grd%domain, gridtype=BGRID_NE)
+    grd%ui(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1) = ui(:,:)
+    grd%vi(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1) = vi(:,:)
+    call mpp_update_domains(grd%ui, grd%vi, grd%domain, gridtype=BGRID_NE)
+  elseif (vel_stagger == CGRID_NE) then
+    ! The u- and v- points will have different offsets with symmetric memory.
+    Iu_off = (size(uo,1) - (grd%iec - grd%isc))/2 - grd%isc + 1
+    ju_off = (size(uo,2) - (grd%jec - grd%jsc))/2 - grd%jsc + 1
+    iv_off = (size(vo,1) - (grd%iec - grd%isc))/2 - grd%isc + 1
+    Jv_off = (size(vo,2) - (grd%jec - grd%jsc))/2 - grd%jsc + 1
+    do I=grd%isc-1,grd%iec ; do J=grd%jsc-1,grd%jec
+      ! Interpolate ocean and ice velocities from C-grid velocity points.
+      Iu = i + Iu_off ; ju = j + ju_off ; iv = i + iv_off ; Jv = j + Jv_off
+      ! This masking is needed for now to prevent icebergs from running up on to land.
+      mask = min(grd%msk(i,j), grd%msk(i+1,j), grd%msk(i,j+1), grd%msk(i+1,j+1))
+      grd%uo(I,J) = mask * 0.5*(uo(Iu,ju)+uo(Iu,ju+1))
+      grd%ui(I,J) = mask * 0.5*(ui(Iu,ju)+ui(Iu,ju+1))
+      grd%vo(I,J) = mask * 0.5*(vo(iv,Jv)+vo(iv+1,Jv))
+      grd%vi(I,J) = mask * 0.5*(vi(iv,Jv)+vo(iv+1,Jv))
+    enddo ; enddo
+  else
+    call error_mesg('diamonds, iceberg_run', 'Unrecognized value of stagger!', FATAL)
+  endif
+
+  if (str_stagger == BGRID_NE) then
+    ! Copy wind stress components on B-grid u-points.
+    grd%ua(grd%isc:grd%iec,grd%jsc:grd%jec) = tauxa(:,:)
+    grd%va(grd%isc:grd%iec,grd%jsc:grd%jec) = tauya(:,:)
+  elseif (str_stagger == CGRID_NE) then
+    ! The u- and v- points will have different offsets with symmetric memory.
+    Iu_off = (size(tauxa,1) - (grd%iec - grd%isc))/2 - grd%isc + 1
+    ju_off = (size(tauxa,2) - (grd%jec - grd%jsc))/2 - grd%jsc + 1
+    iv_off = (size(tauya,1) - (grd%iec - grd%isc))/2 - grd%isc + 1
+    Jv_off = (size(tauya,2) - (grd%jec - grd%jsc))/2 - grd%jsc + 1
+    allocate(uC_tmp(grd%isd:grd%ied,grd%jsd:grd%jed), &
+             vC_tmp(grd%isd:grd%ied,grd%jsd:grd%jed))
+    !   If the iceberg model used symmetric memory, the starting value of these
+    ! copies would need to be decremented by 1.
+    do I=grd%isc,grd%iec ; do j=grd%jsc,grd%jec
+      uC_tmp(I,j) = tauxa(I+Iu_off, j+ju_off)
+    enddo ; enddo
+    do i=grd%isc,grd%iec ; do J=grd%jsc,grd%jec
+      vC_tmp(i,J) = tauya(i+iv_off, J+Jv_off)
+    enddo ; enddo
+
+    call mpp_update_domains(uC_tmp, vC_tmp, grd%domain, gridtype=CGRID_NE)
+    do I=grd%isc-1,grd%iec ; do J=grd%jsc-1,grd%jec
+      ! Interpolate wind stresses from C-grid velocity-points.
+      ! This masking is needed for now to prevent icebergs from running up on to land.
+      mask = min(grd%msk(i,j), grd%msk(i+1,j), grd%msk(i,j+1), grd%msk(i+1,j+1))
+      grd%ua(I,J) = mask * 0.5*(uC_tmp(I,j)+uC_tmp(I,j+1))
+      grd%va(I,J) = mask * 0.5*(vC_tmp(i,J)+vC_tmp(i+1,J))
+    enddo ; enddo
+    deallocate(uC_tmp, vC_tmp)
+  else
+    call error_mesg('diamonds, iceberg_run', 'Unrecognized value of stress_stagger!', FATAL)
+  endif
+
   call mpp_update_domains(grd%uo, grd%vo, grd%domain, gridtype=BGRID_NE)
-  ! Copy ice flow (resides on B grid)
-  grd%ui(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=ui(:,:)
-  grd%vi(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=vi(:,:)
   call mpp_update_domains(grd%ui, grd%vi, grd%domain, gridtype=BGRID_NE)
-  ! Copy atmospheric stress (resides on A grid)
-  grd%ua(grd%isc:grd%iec,grd%jsc:grd%jec)=tauxa(:,:) ! Note rough conversion from stress to speed
-  grd%va(grd%isc:grd%iec,grd%jsc:grd%jec)=tauya(:,:) ! Note rough conversion from stress to speed
+
   call invert_tau_for_du(grd%ua, grd%va) ! Note rough conversion from stress to speed
  !grd%ua(grd%isc:grd%iec,grd%jsc:grd%jec)=sign(sqrt(abs(tauxa(:,:))/0.01),tauxa(:,:))  ! Note rough conversion from stress to speed
  !grd%va(grd%isc:grd%iec,grd%jsc:grd%jec)=sign(sqrt(abs(tauya(:,:))/0.01),tauya(:,:))  ! Note rough conversion from stress to speed
@@ -872,7 +932,7 @@ integer :: stderrunit
   if (debug) call checksum_gridded(bergs%grd, 's/r run after exchange')
   call mpp_clock_end(bergs%clock_com)
 
-  ! Ice berg thermodynamics (melting) + rolling
+  ! Iceberg thermodynamics (melting) + rolling
   call mpp_clock_begin(bergs%clock_the)
   if (associated(bergs%first)) call thermodynamics(bergs)
   if (debug) call bergs_chksum(bergs, 'run bergs (thermo)')
