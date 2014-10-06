@@ -43,6 +43,7 @@ logical :: fix_restart_dates=.true. ! After a restart, check that bergs were cre
 public nclasses,buffer_width,buffer_width_traj
 public verbose, really_debug, debug, restart_input_dir,make_calving_reproduce,use_roundoff_fix
 public ignore_ij_restart, use_slow_find,generate_test_icebergs,old_bug_rotated_weights,budget
+public orig_read
 
 
 !Public types
@@ -193,6 +194,10 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   integer, dimension(:), pointer :: nbergs_calved_by_class=>null()
 end type icebergs
 
+! Needs to be module global so can be public to icebergs_mod.
+! Remove when backward compatibility no longer needed
+logical :: orig_read=.false.
+
 #ifdef _FILE_VERSION
   character(len=128) :: version = _FILE_VERSION
 #else
@@ -257,7 +262,8 @@ namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, &
          time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, &
-         old_bug_rotated_weights, make_calving_reproduce, restart_input_dir
+         old_bug_rotated_weights, make_calving_reproduce, restart_input_dir, orig_read
+
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
 type(icebergs_gridded), pointer :: grd

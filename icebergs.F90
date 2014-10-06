@@ -34,9 +34,10 @@ use ice_bergs_framework, only: record_posn,check_position,print_berg,print_bergs
 use ice_bergs_framework, only: add_new_berg_to_list,delete_iceberg_from_list,destroy_iceberg
 use ice_bergs_framework, only: grd_chksum2,grd_chksum3
 use ice_bergs_framework, only: fix_restart_dates, offset_berg_dates
+use ice_bergs_framework, only: orig_read  ! Remove when backward compatibility no longer needed
 
 use ice_bergs_io,        only: ice_bergs_io_init,write_restart,write_trajectory
-use ice_bergs_io,        only: read_restart_bergs,read_restart_calving
+use ice_bergs_io,        only: read_restart_bergs,read_restart_bergs_orig,read_restart_calving
 
 implicit none ; private
 
@@ -93,7 +94,11 @@ integer :: stdlogunit, stderrunit
 
   call mpp_clock_begin(bergs%clock_ior)
   call ice_bergs_io_init(bergs,io_layout)
-  call read_restart_bergs(bergs,Time)
+  if(orig_read) then
+     call read_restart_bergs_orig(bergs,Time)
+  else
+     call read_restart_bergs(bergs,Time)
+  endif
   call bergs_chksum(bergs, 'read_restart bergs')
   if (fix_restart_dates) call offset_berg_dates(bergs,Time)
   call read_restart_calving(bergs)
