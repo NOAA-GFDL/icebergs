@@ -205,7 +205,7 @@ contains
 ! ##############################################################################
 
 subroutine ice_bergs_framework_init(bergs, &
-             gni, gnj, layout, io_layout, axes, x_cyclic, tripolar_grid, &
+             gni, gnj, layout, io_layout, axes, dom_x_flags, dom_y_flags, &
              dt, Time, ice_lon, ice_lat, ice_wet, ice_dx, ice_dy, ice_area, &
              cos_rot, sin_rot, maskmap)
 
@@ -229,7 +229,7 @@ use diag_manager_mod, only: diag_axis_init
 type(icebergs), pointer :: bergs
 integer, intent(in) :: gni, gnj, layout(2), io_layout(2), axes(2)
 logical, intent(in), optional :: maskmap(:,:)
-logical, intent(in) :: x_cyclic, tripolar_grid
+integer, intent(in) :: dom_x_flags, dom_y_flags
 real, intent(in) :: dt
 type (time_type), intent(in) :: Time ! current time
 real, dimension(:,:), intent(in) :: ice_lon, ice_lat, ice_wet
@@ -247,7 +247,6 @@ logical :: use_operator_splitting=.true. ! Use first order operator splitting fo
 logical :: add_weight_to_ocean=.true. ! Add weight of icebergs + bits to ocean
 logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
 logical :: time_average_weight=.false. ! Time average the weight on the ocean
-logical :: reproduce_siena=.false. !To reproduce siena answers which change across PE layout change set to .true.
 real :: speed_limit=0. ! CFL speed limit for a berg
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim)
@@ -258,7 +257,7 @@ namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, &
          time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, &
-         old_bug_rotated_weights, make_calving_reproduce, restart_input_dir, reproduce_siena
+         old_bug_rotated_weights, make_calving_reproduce, restart_input_dir
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
 type(icebergs_gridded), pointer :: grd
@@ -286,14 +285,6 @@ integer :: stdlogunit, stderrunit
 
   write (stdlogunit, icebergs_nml)
 
-  if( reproduce_siena ) then
-     if( mpp_pe() == mpp_root_pe() ) then
-        call error_mesg("ice_bergs: You have overridden the default value of reproduce_siena " // &
-                        "and set it to .true. in icebergs_nml. This is a temporary workaround to " // &
-                        "allow for consistency in continuing experiments.",  "Please use the default " //&
-                        "value (.false.) as this option will be removed in a future release. ", WARNING)
-     endif
-  endif
 
 ! Allocate overall structure
  !write(stderrunit,*) 'diamonds: allocating bergs'
@@ -319,21 +310,10 @@ integer :: stdlogunit, stderrunit
 
 ! Set up iceberg domain
  !write(stderrunit,*) 'diamonds: defining domain'
-  if(tripolar_grid) then
-    call mpp_define_domains( (/1,gni,1,gnj/), layout, grd%domain, &
-                             maskmap=maskmap, &
-                             xflags=CYCLIC_GLOBAL_DOMAIN, xhalo=halo,  &
-                             yflags=FOLD_NORTH_EDGE, yhalo=halo, name='diamond')
-  else if(x_cyclic) then
-    call mpp_define_domains( (/1,gni,1,gnj/), layout, grd%domain, &
-                             maskmap=maskmap, &
-                             xflags=CYCLIC_GLOBAL_DOMAIN, &
-                             xhalo=halo, yhalo=halo, name='diamond')
-  else
-    call mpp_define_domains( (/1,gni,1,gnj/), layout, grd%domain, &
-                            maskmap=maskmap, &
-                             xhalo=halo, yhalo=halo, name='diamond')
-  endif
+  call mpp_define_domains( (/1,gni,1,gnj/), layout, grd%domain, &
+                           maskmap=maskmap, &
+                           xflags=dom_x_flags, xhalo=halo,  &
+                           yflags=dom_y_flags, yhalo=halo, name='diamond')
 
   call mpp_define_io_domain(grd%domain, io_layout)
 
@@ -346,8 +326,7 @@ integer :: stdlogunit, stderrunit
   call mpp_get_neighbor_pe(grd%domain, EAST, grd%pe_E)
   call mpp_get_neighbor_pe(grd%domain, WEST, grd%pe_W)
 
-  folded_north_on_pe = .false.
-  if(tripolar_grid .and. grd%jec == gnj) folded_north_on_pe = .true. 
+  folded_north_on_pe = ((dom_y_flags == FOLD_NORTH_EDGE) .and. (grd%jec == gnj)) 
  !write(stderrunit,'(a,6i4)') 'diamonds, icebergs_init: pe,n,s,e,w =',mpp_pe(),grd%pe_N,grd%pe_S,grd%pe_E,grd%pe_W, NULL_PE
 
  !if (verbose) &
@@ -405,7 +384,7 @@ integer :: stdlogunit, stderrunit
   is=grd%isc; ie=grd%iec; js=grd%jsc; je=grd%jec
   grd%lon(is:ie,js:je)=ice_lon(:,:)
   grd%lat(is:ie,js:je)=ice_lat(:,:)
-  grd%area(is:ie,js:je)=ice_area(:,:)*(4.*pi*radius*radius)
+  grd%area(is:ie,js:je)=ice_area(:,:) !sis2 has *(4.*pi*radius*radius)
   ! Copy data declared on ice model data domain
   is=grd%isc-1; ie=grd%iec+1; js=grd%jsc-1; je=grd%jec+1
   grd%dx(is:ie,js:je)=ice_dx(:,:)
@@ -429,51 +408,35 @@ integer :: stdlogunit, stderrunit
       if (grd%lat(i,j).gt.900.) grd%lat(i,j)=2.*grd%lat(i,j+1)-grd%lat(i,j+2)
   enddo; enddo
 
-  do j=grd%jsd,grd%jed; do i=grd%isd,grd%ied
-      if (grd%lon(i,j).gt.900.) write(stderrunit,*) 'bad lon: ',mpp_pe(),i-grd%isc+1,j-grd%jsc+1
-      if (grd%lat(i,j).gt.900.) write(stderrunit,*) 'bad lat: ',mpp_pe(),i-grd%isc+1,j-grd%jsc+1
+  if (.not. present(maskmap)) then ! Using a maskmap causes tickles this sanity check
+    do j=grd%jsd,grd%jed; do i=grd%isd,grd%ied
+      if (grd%lon(i,j).gt.900.) write(stderrunit,*) 'bad lon: ',mpp_pe(),i-grd%isc+1,j-grd%jsc+1,grd%lon(i,j)
+      if (grd%lat(i,j).gt.900.) write(stderrunit,*) 'bad lat: ',mpp_pe(),i-grd%isc+1,j-grd%jsc+1,grd%lat(i,j)
+    enddo; enddo
+  endif
+
+ !The fix to reproduce across PE layout change, from AJA
+  j=grd%jsc; do i=grd%isc+1,grd%ied
+    minl=grd%lon(i-1,j)-180.
+    if (abs(grd%lon(i,j)-(modulo(grd%lon(i,j)-minl,360.)+minl))>180.) &
+       grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
+  enddo
+  j=grd%jsc; do i=grd%isc-1,grd%isd,-1
+    minl=grd%lon(i+1,j)-180.
+    if (abs(grd%lon(i,j)-(modulo(grd%lon(i,j)-minl,360.)+minl))>180.) &
+       grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
+  enddo
+  do j=grd%jsc+1,grd%jed; do i=grd%isd,grd%ied
+      minl=grd%lon(i,j-1)-180.
+      if (abs(grd%lon(i,j)-(modulo(grd%lon(i,j)-minl,360.)+minl))>180.) &
+         grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
+  enddo; enddo
+  do j=grd%jsc-1,grd%jsd,-1; do i=grd%isd,grd%ied
+      minl=grd%lon(i,j+1)-180.
+      if (abs(grd%lon(i,j)-(modulo(grd%lon(i,j)-minl,360.)+minl))>180.) &
+         grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
   enddo; enddo
 
-  ! Sanitize lon for the tile (need continuous longitudes within one tile)
-  if(reproduce_siena) then
-  j=grd%jsc; do i=grd%isc+1,grd%ied
-    minl=grd%lon(i-1,j)-180.
-    grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
-  enddo
-  j=grd%jsc; do i=grd%isc-1,grd%isd,-1
-    minl=grd%lon(i+1,j)-180.
-    grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
-  enddo
-  do j=grd%jsc+1,grd%jed; do i=grd%isd,grd%ied
-      minl=grd%lon(i,j-1)-180.
-      grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
-  enddo; enddo
-  do j=grd%jsc-1,grd%jsd,-1; do i=grd%isd,grd%ied
-      minl=grd%lon(i,j+1)-180.
-      grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
-  enddo; enddo
-  else  !The fix to reproduce across PE layout change, from AJA
-  j=grd%jsc; do i=grd%isc+1,grd%ied
-    minl=grd%lon(i-1,j)-180.
-    if (abs(grd%lon(i,j)-(modulo(grd%lon(i,j)-minl,360.)+minl))>180.) &
-       grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
-  enddo
-  j=grd%jsc; do i=grd%isc-1,grd%isd,-1
-    minl=grd%lon(i+1,j)-180.
-    if (abs(grd%lon(i,j)-(modulo(grd%lon(i,j)-minl,360.)+minl))>180.) &
-       grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
-  enddo
-  do j=grd%jsc+1,grd%jed; do i=grd%isd,grd%ied
-      minl=grd%lon(i,j-1)-180.
-      if (abs(grd%lon(i,j)-(modulo(grd%lon(i,j)-minl,360.)+minl))>180.) &
-         grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
-  enddo; enddo
-  do j=grd%jsc-1,grd%jsd,-1; do i=grd%isd,grd%ied
-      minl=grd%lon(i,j+1)-180.
-      if (abs(grd%lon(i,j)-(modulo(grd%lon(i,j)-minl,360.)+minl))>180.) &
-         grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
-  enddo; enddo
-  endif
   ! lonc, latc used for searches
   do j=grd%jsd+1,grd%jed; do i=grd%isd+1,grd%ied
     grd%lonc(i,j)=0.25*( (grd%lon(i,j)+grd%lon(i-1,j-1)) &
