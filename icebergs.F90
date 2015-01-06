@@ -26,7 +26,7 @@ use ice_bergs_framework, only: ice_bergs_framework_init
 use ice_bergs_framework, only: icebergs_gridded, xyt, iceberg, icebergs, buffer
 use ice_bergs_framework, only: verbose, really_debug,debug,old_bug_rotated_weights,budget,use_roundoff_fix
 use ice_bergs_framework, only: find_cell,find_cell_by_search,count_bergs,is_point_in_cell,pos_within_cell
-use ice_bergs_framework, only: nclasses
+use ice_bergs_framework, only: nclasses,old_bug_bilin
 use ice_bergs_framework, only: sum_mass,sum_heat,bilin,yearday,count_bergs,bergs_chksum
 use ice_bergs_framework, only: checksum_gridded,add_new_berg_to_list
 use ice_bergs_framework, only: send_bergs_to_other_pes,move_trajectory
@@ -69,17 +69,19 @@ contains
 subroutine icebergs_init(bergs, &
              gni, gnj, layout, io_layout, axes, dom_x_flags, dom_y_flags, &
              dt, Time, ice_lon, ice_lat, ice_wet, ice_dx, ice_dy, ice_area, &
-             cos_rot, sin_rot, maskmap)
+             cos_rot, sin_rot, ocean_depth, maskmap)
 ! Arguments
 type(icebergs), pointer :: bergs
 integer, intent(in) :: gni, gnj, layout(2), io_layout(2), axes(2)
-logical, intent(in), optional :: maskmap(:,:)
 integer, intent(in) :: dom_x_flags, dom_y_flags
 real, intent(in) :: dt
 type (time_type), intent(in) :: Time ! current time
 real, dimension(:,:), intent(in) :: ice_lon, ice_lat, ice_wet
 real, dimension(:,:), intent(in) :: ice_dx, ice_dy, ice_area
 real, dimension(:,:), intent(in) :: cos_rot, sin_rot
+real, dimension(:,:), intent(in), optional :: ocean_depth
+logical, intent(in), optional :: maskmap(:,:)
+
 integer :: stdlogunit, stderrunit
 
   ! Get the stderr and stdlog unit numbers
@@ -90,7 +92,7 @@ integer :: stdlogunit, stderrunit
   call ice_bergs_framework_init(bergs, &
              gni, gnj, layout, io_layout, axes, dom_x_flags, dom_y_flags, &
              dt, Time, ice_lon, ice_lat, ice_wet, ice_dx, ice_dy, ice_area, &
-             cos_rot, sin_rot, maskmap)
+             cos_rot, sin_rot, ocean_depth=ocean_depth, maskmap=maskmap)
 
   call mpp_clock_begin(bergs%clock_ior)
   call ice_bergs_io_init(bergs,io_layout)
@@ -402,7 +404,7 @@ type(icebergs), pointer :: bergs
 type(icebergs_gridded), pointer :: grd
 real :: M, T, W, L, SST, Vol, Ln, Wn, Tn, nVol, IC, Dn
 real :: Mv, Me, Mb, melt, dvo, dva, dM, Ss, dMe, dMb, dMv
-real :: Mnew, Mnew1, Mnew2
+real :: Mnew, Mnew1, Mnew2, Hocean
 real :: Mbits, nMbits, dMbitsE, dMbitsM, Lbits, Abits, Mbb
 integer :: i,j, stderrunit
 type(iceberg), pointer :: this, next
@@ -541,6 +543,7 @@ real, parameter :: perday=1./86400.
           T=Tn
           Tn=Wn
           Wn=T
+          Dn=(bergs%rho_bergs/rho_seawater)*Tn ! re-calculate draught (keel depth) for grounding
       end if
     endif
 
@@ -565,8 +568,13 @@ real, parameter :: perday=1./86400.
            & grd%mass(i,j)=grd%mass(i,j)+Mnew/grd%area(i,j)*this%mass_scaling ! kg/m2
       if (grd%id_bergy_mass>0 .or. bergs%add_weight_to_ocean)&
            & grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+nMbits/grd%area(i,j)*this%mass_scaling ! kg/m2
-      if (bergs%add_weight_to_ocean .and. .not. bergs%time_average_weight) &
-         call spread_mass_across_ocean_cells(grd, i, j, this%xi, this%yj, Mnew, nMbits, this%mass_scaling)
+      if (bergs%add_weight_to_ocean .and. .not. bergs%time_average_weight) then
+        if (bergs%grounding_fraction>0.) then
+          Hocean=bergs%grounding_fraction*(grd%ocean_depth(i,j)+grd%ssh(i,j))
+          if (Dn>Hocean) Mnew=Mnew*min(1.,Hocean/Dn)
+        endif
+        call spread_mass_across_ocean_cells(grd, i, j, this%xi, this%yj, Mnew, nMbits, this%mass_scaling)
+      endif
     endif
   
     this=>next
@@ -584,8 +592,13 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
   ! Local variables
   real :: xL, xC, xR, yD, yC, yU, Mass
   real :: yDxL, yDxC, yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR
+  real, parameter :: rho_seawater=1035.
   
   Mass=(Mberg+Mbits)*scaling
+  ! This line attempts to "clip" the weight felt by the ocean. The concept of
+  ! clipping is non-physical and this step should be replaced by grounding.
+  if (grd%clipping_depth>0.) Mass=min(Mass,grd%clipping_depth*grd%area(i,j)*rho_seawater)
+
   xL=min(0.5, max(0., 0.5-x))
   xR=min(0.5, max(0., x-0.5))
   xC=max(0., 1.-(xL+xR))
@@ -631,7 +644,7 @@ real :: dxm, dx0, dxp
 real :: hxm, hxp
 real, parameter :: ssh_coast=0.00
 
-  cos_rot=bilin(grd, grd%cos, i, j, xi, yj)
+  cos_rot=bilin(grd, grd%cos, i, j, xi, yj) ! If true, uses the inverted bilin function
   sin_rot=bilin(grd, grd%sin, i, j, xi, yj)
 
   uo=bilin(grd, grd%uo, i, j, xi, yj)
@@ -991,6 +1004,13 @@ integer :: stderrunit
     lerr=send_data(grd%id_stored_ice, grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:), Time)
   if (grd%id_real_calving>0) &
     lerr=send_data(grd%id_real_calving, grd%real_calving(grd%isc:grd%iec,grd%jsc:grd%jec,:), Time)
+  if (grd%id_ssh>0) &
+    lerr=send_data(grd%id_ssh, grd%ssh(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (grd%id_fax>0) &
+    lerr=send_data(grd%id_fax, tauxa(:,:), Time)
+  if (grd%id_fay>0) &
+    lerr=send_data(grd%id_fay, tauya(:,:), Time)
+
 
   ! Dump icebergs to screen
   if (really_debug) call print_bergs(stderrunit,bergs,'icebergs_run, status')
@@ -1231,14 +1251,16 @@ end subroutine icebergs_run
 
 ! ##############################################################################
 
-subroutine icebergs_incr_mass(bergs, mass)
+subroutine icebergs_incr_mass(bergs, mass, Time)
 ! Arguments
 type(icebergs), pointer :: bergs
 real, dimension(bergs%grd%isc:bergs%grd%iec,bergs%grd%jsc:bergs%grd%jec), intent(inout) :: mass
+type(time_type), intent(in), optional :: Time
 ! Local variables
 integer :: i, j
 type(icebergs_gridded), pointer :: grd
 real :: dmda
+logical :: lerr
 
   if (.not. associated(bergs)) return
 
@@ -1256,8 +1278,8 @@ real :: dmda
 
 
   if (debug) then
-    bergs%grd%tmp(:,:)=0.; bergs%grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec)=mass
-    call grd_chksum2(bergs%grd, bergs%grd%tmp, 'mass in (incr)')
+    grd%tmp(:,:)=0.; grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec)=mass
+    call grd_chksum2(grd, grd%tmp, 'mass in (incr)')
   endif
 
   call mpp_update_domains(grd%mass_on_ocean, grd%domain)
@@ -1283,12 +1305,15 @@ real :: dmda
          +     (grd%mass_on_ocean(i  ,j-1,8)+grd%mass_on_ocean(i  ,j+1,2)) ) )
     if (grd%area(i,j)>0) dmda=dmda/grd%area(i,j)*grd%msk(i,j)
     if (.not. bergs%passive_mode) mass(i,j)=mass(i,j)+dmda
+    if (grd%id_mass_on_ocn>0) grd%tmp(i,j)=dmda
   enddo; enddo
+  if (present(Time).and. (grd%id_mass_on_ocn>0)) &
+    lerr=send_data(grd%id_mass_on_ocn, grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
 
   if (debug) then
-    call grd_chksum3(bergs%grd, bergs%grd%mass_on_ocean, 'mass bergs (incr)')
-    bergs%grd%tmp(:,:)=0.; bergs%grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec)=mass
-    call grd_chksum2(bergs%grd, bergs%grd%tmp, 'mass out (incr)')
+    grd%tmp(:,:)=0.; grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec)=mass
+    call grd_chksum3(grd, grd%mass_on_ocean, 'mass bergs (incr)')
+    call grd_chksum2(grd, grd%tmp, 'mass out (incr)')
   endif
 
   call mpp_clock_end(bergs%clock_int)
@@ -2162,6 +2187,7 @@ type(iceberg), pointer :: this, next
   deallocate(bergs%grd%msk)
   deallocate(bergs%grd%cos)
   deallocate(bergs%grd%sin)
+  deallocate(bergs%grd%ocean_depth)
   deallocate(bergs%grd%calving)
   deallocate(bergs%grd%calving_hflx)
   deallocate(bergs%grd%stored_heat)
