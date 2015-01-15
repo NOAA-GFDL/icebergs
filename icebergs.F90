@@ -69,11 +69,12 @@ contains
 subroutine icebergs_init(bergs, &
              gni, gnj, layout, io_layout, axes, dom_x_flags, dom_y_flags, &
              dt, Time, ice_lon, ice_lat, ice_wet, ice_dx, ice_dy, ice_area, &
-             cos_rot, sin_rot, maskmap)
+             cos_rot, sin_rot, maskmap, fractional_area)
 ! Arguments
 type(icebergs), pointer :: bergs
 integer, intent(in) :: gni, gnj, layout(2), io_layout(2), axes(2)
 logical, intent(in), optional :: maskmap(:,:)
+logical, intent(in), optional :: fractional_area
 integer, intent(in) :: dom_x_flags, dom_y_flags
 real, intent(in) :: dt
 type (time_type), intent(in) :: Time ! current time
@@ -90,7 +91,7 @@ integer :: stdlogunit, stderrunit
   call ice_bergs_framework_init(bergs, &
              gni, gnj, layout, io_layout, axes, dom_x_flags, dom_y_flags, &
              dt, Time, ice_lon, ice_lat, ice_wet, ice_dx, ice_dy, ice_area, &
-             cos_rot, sin_rot, maskmap)
+             cos_rot, sin_rot, maskmap, fractional_area)
 
   call mpp_clock_begin(bergs%clock_ior)
   call ice_bergs_io_init(bergs,io_layout)
