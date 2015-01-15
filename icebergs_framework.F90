@@ -33,15 +33,16 @@ logical :: generate_test_icebergs=.false. ! Create icebergs in absence of a rest
 logical :: use_roundoff_fix=.true. ! Use a "fix" for the round-off discrepancy between is_point_in_cell() and pos_within_cell()
 logical :: old_bug_rotated_weights=.false. ! Skip the rotation of off-center weights for rotated halo updates
 logical :: make_calving_reproduce=.false. ! Make the calving.res.nc file reproduce across pe count changes.
+logical :: old_bug_bilin=.true. ! If true, uses the inverted bilin function (use False to get correct answer)
 character(len=10) :: restart_input_dir = 'INPUT/'
 integer, parameter :: delta_buf=25 ! Size by which to increment buffers
 real, parameter :: pi_180=pi/180. ! Converts degrees to radians
 logical :: fix_restart_dates=.true. ! After a restart, check that bergs were created before the current model date
-
+logical :: do_unit_tests=.false. ! Conduct some unit tests
 
 !Public params !Niki: write a subroutine to expose these
 public nclasses,buffer_width,buffer_width_traj
-public verbose, really_debug, debug, restart_input_dir,make_calving_reproduce,use_roundoff_fix
+public verbose, really_debug, debug, restart_input_dir,make_calving_reproduce,old_bug_bilin,use_roundoff_fix
 public ignore_ij_restart, use_slow_find,generate_test_icebergs,old_bug_rotated_weights,budget
 public orig_read
 
@@ -81,6 +82,7 @@ type :: icebergs_gridded
   real, dimension(:,:), pointer :: msk=>null() ! Ocean-land mask (1=ocean)
   real, dimension(:,:), pointer :: cos=>null() ! Cosine from rotation matrix to lat-lon coords
   real, dimension(:,:), pointer :: sin=>null() ! Sine from rotation matrix to lat-lon coords
+  real, dimension(:,:), pointer :: ocean_depth=>NULL() ! Depth of ocean (m)
   real, dimension(:,:), pointer :: uo=>null() ! Ocean zonal flow (m/s)
   real, dimension(:,:), pointer :: vo=>null() ! Ocean meridional flow (m/s)
   real, dimension(:,:), pointer :: ui=>null() ! Ice zonal flow (m/s)
@@ -118,6 +120,10 @@ type :: icebergs_gridded
   integer :: id_calving_hflx_in=-1, id_stored_heat=-1, id_melt_hflx=-1, id_heat_content=-1
   integer :: id_mass=-1, id_ui=-1, id_vi=-1, id_ua=-1, id_va=-1, id_sst=-1, id_cn=-1, id_hi=-1
   integer :: id_bergy_src=-1, id_bergy_melt=-1, id_bergy_mass=-1, id_berg_melt=-1
+  integer :: id_mass_on_ocn=-1, id_ssh=-1, id_fax=-1, id_fay=-1
+
+  real :: clipping_depth=0. ! The effective depth at which to clip the weight felt by the ocean [m].
+
 end type icebergs_gridded
 
 type :: xyt
@@ -158,7 +164,7 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   integer :: traj_sample_hrs
   integer :: verbose_hrs
   integer :: clock, clock_mom, clock_the, clock_int, clock_cal, clock_com, clock_ini, clock_ior, clock_iow, clock_dia ! ids for fms timers
-  real :: rho_bergs ! Density of icebergs
+  real :: rho_bergs ! Density of icebergs [kg/m^3]
   real :: LoW_ratio ! Initial ratio L/W for newly calved icebergs
   real :: bergy_bit_erosion_fraction ! Fraction of erosion melt flux to divert to bergy bits
   real :: sicn_shift ! Shift of sea-ice concentration in erosion flux modulation (0<sicn_shift<1)
@@ -169,7 +175,8 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   logical :: add_weight_to_ocean=.true. ! Add weight of bergs to ocean
   logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
   logical :: time_average_weight=.false. ! Time average the weight on the ocean
-  real :: speed_limit=0. ! CFL speed limit for a berg
+  real :: speed_limit=0. ! CFL speed limit for a berg [m/s]
+  real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
   type(buffer), pointer :: obuffer_n=>null(), ibuffer_n=>null()
   type(buffer), pointer :: obuffer_s=>null(), ibuffer_s=>null()
   type(buffer), pointer :: obuffer_e=>null(), ibuffer_e=>null()
@@ -212,7 +219,7 @@ contains
 subroutine ice_bergs_framework_init(bergs, &
              gni, gnj, layout, io_layout, axes, dom_x_flags, dom_y_flags, &
              dt, Time, ice_lon, ice_lat, ice_wet, ice_dx, ice_dy, ice_area, &
-             cos_rot, sin_rot, maskmap, fractional_area)
+             cos_rot, sin_rot, ocean_depth, maskmap, fractional_area)
 
 use mpp_parameter_mod, only: SCALAR_PAIR, CGRID_NE, BGRID_NE, CORNER, AGRID
 use mpp_domains_mod, only: mpp_update_domains, mpp_define_domains
@@ -233,14 +240,16 @@ use diag_manager_mod, only: diag_axis_init
 ! Arguments
 type(icebergs), pointer :: bergs
 integer, intent(in) :: gni, gnj, layout(2), io_layout(2), axes(2)
-logical, intent(in), optional :: maskmap(:,:)
-logical, intent(in), optional :: fractional_area
 integer, intent(in) :: dom_x_flags, dom_y_flags
 real, intent(in) :: dt
 type (time_type), intent(in) :: Time ! current time
 real, dimension(:,:), intent(in) :: ice_lon, ice_lat, ice_wet
 real, dimension(:,:), intent(in) :: ice_dx, ice_dy, ice_area
 real, dimension(:,:), intent(in) :: cos_rot, sin_rot
+real, dimension(:,:), intent(in),optional :: ocean_depth
+logical, intent(in), optional :: maskmap(:,:)
+logical, intent(in), optional :: fractional_area
+
 ! Namelist parameters (and defaults)
 integer :: halo=4 ! Width of halo region
 integer :: traj_sample_hrs=24 ! Period between sampling of position for trajectory storage
@@ -254,6 +263,8 @@ logical :: add_weight_to_ocean=.true. ! Add weight of icebergs + bits to ocean
 logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
 logical :: time_average_weight=.false. ! Time average the weight on the ocean
 real :: speed_limit=0. ! CFL speed limit for a berg
+real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
+logical :: do_unit_tests=.false. ! Conduct some unit tests
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim)
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
@@ -263,7 +274,7 @@ namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, &
          time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, &
-         old_bug_rotated_weights, make_calving_reproduce, restart_input_dir, orig_read
+         old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -354,6 +365,7 @@ integer :: stdlogunit, stderrunit
   allocate( grd%msk(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%msk(:,:)=0.
   allocate( grd%cos(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%cos(:,:)=1.
   allocate( grd%sin(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%sin(:,:)=0.
+  allocate( grd%ocean_depth(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%ocean_depth(:,:)=0.
   allocate( grd%calving(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%calving(:,:)=0.
   allocate( grd%calving_hflx(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%calving_hflx(:,:)=0.
   allocate( grd%stored_heat(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%stored_heat(:,:)=0.
@@ -396,6 +408,8 @@ integer :: stdlogunit, stderrunit
   if(present(fractional_area)) then
     if(fractional_area) grd%area(is:ie,js:je)=ice_area(:,:) *(4.*pi*radius*radius)
   endif
+  if(present(ocean_depth)) grd%ocean_depth(is:ie,js:je)=ocean_depth(:,:)
+
   ! Copy data declared on ice model data domain
   is=grd%isc-1; ie=grd%iec+1; js=grd%jsc-1; je=grd%jec+1
   grd%dx(is:ie,js:je)=ice_dx(:,:)
@@ -411,6 +425,7 @@ integer :: stdlogunit, stderrunit
   call mpp_update_domains(grd%msk, grd%domain)
   call mpp_update_domains(grd%cos, grd%domain, position=CORNER)
   call mpp_update_domains(grd%sin, grd%domain, position=CORNER)
+  call mpp_update_domains(grd%ocean_depth, grd%domain)
   call mpp_update_domains(grd%parity_x, grd%parity_y, grd%domain, gridtype=AGRID) ! If either parity_x/y is -ve, we need rotation of vectors
 
   ! Sanitize lon and lat at the SW edges
@@ -490,6 +505,7 @@ integer :: stdlogunit, stderrunit
   bergs%passive_mode=passive_mode
   bergs%time_average_weight=time_average_weight
   bergs%speed_limit=speed_limit
+  bergs%grounding_fraction=grounding_fraction
   bergs%add_weight_to_ocean=add_weight_to_ocean
   allocate( bergs%initial_mass(nclasses) ); bergs%initial_mass(:)=initial_mass(:)
   allocate( bergs%distribution(nclasses) ); bergs%distribution(:)=distribution(:)
@@ -533,6 +549,8 @@ integer :: stdlogunit, stderrunit
      'Virtual coverage by icebergs', 'm^2')
   grd%id_mass=register_diag_field('icebergs', 'mass', axes, Time, &
      'Iceberg density field', 'kg/(m^2)')
+  grd%id_mass_on_ocn=register_diag_field('icebergs', 'mass_on_ocean', axes, Time, &
+     'Iceberg density field felt by ocean', 'kg/(m^2)')
   grd%id_stored_ice=register_diag_field('icebergs', 'stored_ice', axes3d, Time, &
      'Accumulated ice mass by class', 'kg')
   grd%id_real_calving=register_diag_field('icebergs', 'real_calving', axes3d, Time, &
@@ -555,6 +573,12 @@ integer :: stdlogunit, stderrunit
      'Sea ice concentration', '(fraction)')
   grd%id_hi=register_diag_field('icebergs', 'hi', axes, Time, &
      'Sea ice thickness', 'm')
+  grd%id_ssh=register_diag_field('icebergs', 'ssh', axes, Time, &
+     'Sea surface hieght', 'm')
+  grd%id_fax=register_diag_field('icebergs', 'taux', axes, Time, &
+     'X-stress on ice from atmosphere', 'N m^-2')
+  grd%id_fay=register_diag_field('icebergs', 'tauy', axes, Time, &
+     'Y-stress on ice from atmosphere', 'N m^-2')
 
   ! Static fields
   id_class=register_static_field('icebergs', 'lon', axes, &
@@ -569,6 +593,9 @@ integer :: stdlogunit, stderrunit
   id_class=register_static_field('icebergs', 'mask', axes, &
                'wet point mask', 'none')
   if (id_class>0) lerr=send_data(id_class, grd%msk(grd%isc:grd%iec,grd%jsc:grd%jec))
+  id_class=register_static_field('icebergs', 'ocean_depth', axes, &
+               'ocean depth', 'm')
+  if (id_class>0) lerr=send_data(id_class, grd%ocean_depth(grd%isc:grd%iec,grd%jsc:grd%jec))
 
   if (debug) then
     call grd_chksum2(grd, grd%lon, 'init lon')
@@ -579,6 +606,11 @@ integer :: stdlogunit, stderrunit
     call grd_chksum2(grd, grd%msk, 'init msk')
     call grd_chksum2(grd, grd%cos, 'init cos')
     call grd_chksum2(grd, grd%sin, 'init sin')
+    call grd_chksum2(grd, grd%ocean_depth, 'init ocean_depth')
+  endif
+
+  if (do_unit_tests) then
+   if (unitTests(bergs)) call error_mesg('diamonds, icebergs_init', 'Unit tests failed!', FATAL)
   endif
 
  !write(stderrunit,*) 'diamonds: done'
@@ -2433,6 +2465,7 @@ character(len=*) :: label
   call grd_chksum2(grd, grd%msk, 'msk')
   call grd_chksum2(grd, grd%cos, 'cos')
   call grd_chksum2(grd, grd%sin, 'sin')
+  call grd_chksum2(grd, grd%ocean_depth, 'depth')
 
 end subroutine checksum_gridded
 
@@ -2719,9 +2752,13 @@ real, intent(in) :: fld(grd%isd:grd%ied,grd%jsd:grd%jed), xi, yj
 integer, intent(in) :: i, j
 ! Local variables
 
-  bilin=(fld(i,j  )*(1.-xi)+fld(i-1,j  )*xi)*(1.-yj) &
-       +(fld(i,j-1)*(1.-xi)+fld(i-1,j-1)*xi)*yj
-
+  if (old_bug_bilin) then
+    bilin=(fld(i,j  )*(1.-xi)+fld(i-1,j  )*xi)*(1.-yj) &
+         +(fld(i,j-1)*(1.-xi)+fld(i-1,j-1)*xi)*yj
+  else
+    bilin=(fld(i,j  )*xi+fld(i-1,j  )*(1.-xi))*yj &
+         +(fld(i,j-1)*xi+fld(i-1,j-1)*(1.-xi))*(1.-yj)
+  endif
 end function bilin
 
 ! ##############################################################################
@@ -2744,5 +2781,36 @@ integer :: stderrunit
   enddo
 
 end subroutine print_fld
+
+! ##############################################################################
+
+logical function unitTests(bergs)
+  type(icebergs), pointer :: bergs
+  type(icebergs_gridded), pointer :: grd
+  ! Local variables
+  integer :: stderrunit,i,j
+
+  ! This function returns True is a unit test fails
+  unitTests=.false.
+  ! For convenience
+  grd=>bergs%grd
+  stderrunit=stderr()
+  
+  i=grd%isc; j=grd%jsc
+  call localTest( bilin(grd, grd%lon, i, j, 0., 1.), grd%lon(i-1,j) )
+  call localTest( bilin(grd, grd%lon, i, j, 1., 1.), grd%lon(i,j) )
+  call localTest( bilin(grd, grd%lat, i, j, 1., 0.), grd%lat(i,j-1) )
+  call localTest( bilin(grd, grd%lat, i, j, 1., 1.), grd%lat(i,j) )
+
+  contains
+  subroutine localTest(answer, rightAnswer)
+  real, intent(in) :: answer, rightAnswer
+  if (answer==rightAnswer) return
+  unitTests=.true.
+  write(stderrunit,*) 'a=',answer,'b=',rightAnswer
+  end subroutine localTest
+end function unitTests
+
+! ##############################################################################
 
 end module
