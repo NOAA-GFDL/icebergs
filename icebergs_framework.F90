@@ -212,7 +212,7 @@ contains
 subroutine ice_bergs_framework_init(bergs, &
              gni, gnj, layout, io_layout, axes, dom_x_flags, dom_y_flags, &
              dt, Time, ice_lon, ice_lat, ice_wet, ice_dx, ice_dy, ice_area, &
-             cos_rot, sin_rot, maskmap)
+             cos_rot, sin_rot, maskmap, fractional_area)
 
 use mpp_parameter_mod, only: SCALAR_PAIR, CGRID_NE, BGRID_NE, CORNER, AGRID
 use mpp_domains_mod, only: mpp_update_domains, mpp_define_domains
@@ -234,6 +234,7 @@ use diag_manager_mod, only: diag_axis_init
 type(icebergs), pointer :: bergs
 integer, intent(in) :: gni, gnj, layout(2), io_layout(2), axes(2)
 logical, intent(in), optional :: maskmap(:,:)
+logical, intent(in), optional :: fractional_area
 integer, intent(in) :: dom_x_flags, dom_y_flags
 real, intent(in) :: dt
 type (time_type), intent(in) :: Time ! current time
@@ -391,6 +392,10 @@ integer :: stdlogunit, stderrunit
   grd%lon(is:ie,js:je)=ice_lon(:,:)
   grd%lat(is:ie,js:je)=ice_lat(:,:)
   grd%area(is:ie,js:je)=ice_area(:,:) !sis2 has *(4.*pi*radius*radius)
+  !For SIS not to change answers
+  if(present(fractional_area)) then
+    if(fractional_area) grd%area(is:ie,js:je)=ice_area(:,:) *(4.*pi*radius*radius)
+  endif
   ! Copy data declared on ice model data domain
   is=grd%isc-1; ie=grd%iec+1; js=grd%jsc-1; je=grd%jec+1
   grd%dx(is:ie,js:je)=ice_dx(:,:)
