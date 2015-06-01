@@ -2164,7 +2164,11 @@ type(iceberg), pointer :: this, next
 
   if (.not.associated(bergs)) return
 
-  call icebergs_save_restart(bergs)
+  ! icebergs_save_restart() is called directly by SIS1 and SIS2 so
+  ! we do not need to call it a second time. If icebergs were controlled
+  ! by the coupler then the icebergs would need to take responsibility for
+  ! the restarts at the end of the run.
+  !call icebergs_save_restart(bergs)
 
   call mpp_clock_begin(bergs%clock_ini)
   ! Delete bergs and structures
