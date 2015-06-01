@@ -112,7 +112,7 @@ integer :: stdlogunit, stderrunit
 
 end subroutine icebergs_init
 
-subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, axe, aye, debug_flag) !Seperated total acceleration (ax, ay) and implicit part (bx ,by) accelerations - Alon
+subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, axn, ayn, debug_flag) !Saving exp acceleration for Verlet - Alon
 !subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, debug_flag) !old version commmented out by Alon
 ! Arguments
 type(icebergs), pointer :: bergs
@@ -120,7 +120,7 @@ type(iceberg), pointer :: berg
 integer, intent(in) :: i, j
 real, intent(in) :: xi, yj, lat, uvel, vvel, uvel0, vvel0, dt
 !real, intent(inout) :: ax, ay  !old version - Alon
-real, intent(inout) :: ax, ay, axe, aye ! Added explicit accelerations to output -Alon
+real, intent(inout) :: ax, ay, axn, ayn ! Added explicit accelerations to output -Alon
 logical, optional :: debug_flag
 ! Local variables
 type(icebergs_gridded), pointer :: grd
@@ -130,8 +130,7 @@ real :: drag_ocn, drag_atm, drag_ice, wave_rad
 real :: c_ocn, c_atm, c_ice
 real :: ampl, wmod, Cr, Lwavelength, Lcutoff, Ltop
 real, parameter :: alpha=0.0, beta=1.0, accel_lim=1.e-2, Cr0=0.06, vel_lim=15.
-real :: lambda, detA, A11, A12, D_hi ! Removed axe, aye from line - Alon
-!real :: lambda, detA, A11, A12, axe, aye, D_hi !old version - Alon
+real :: lambda, detA, A11, A12, axe, aye, D_hi 
 real :: uveln, vveln, us, vs, speed, loc_dx, new_speed
 logical :: dumpit
 integer :: itloop
@@ -236,7 +235,14 @@ integer :: stderrunit
     vveln=vvel0+dt*ay
 
   enddo ! itloop
-  
+ 
+!Saving the totally explicit part of the acceleration to use in finding the next position and u_star -Alon
+    axn=-gravity*ssh_x +wave_rad*uwave !Alon
+    ayn=-gravity*ssh_y +wave_rad*vwave !Alon
+
+
+
+ 
   ! Limit speed of bergs based on a CFL criteria
   if (bergs%speed_limit>0.) then
     speed=sqrt(uveln*uveln+vveln*vveln) ! Speed of berg
@@ -1501,6 +1507,7 @@ integer :: i, j
 integer :: i1,j1,i2,j2,i3,j3,i4,j4
 real :: xi, yj
 logical :: bounced, on_tangential_plane, error_flag
+logical :: Ranga_not_verlet  ! Ranga_not_verlet=1 for Range Katta, =0 for Verlet method. Added by Alon
 type(iceberg), pointer :: berg
 integer :: stderrunit
 
@@ -1529,6 +1536,10 @@ integer :: stderrunit
   dt_2=0.5*dt
   dt_6=dt/6.
   Rearth=6360.e3
+
+  !Choosing time stepping scheme - Alon
+   Ranga_not_verlet=.true.    !true=Ranga Katta, False=Verlet   , Alon
+
 
   berg=>bergs%first
   do while (associated(berg)) ! loop over all bergs
@@ -1562,7 +1573,9 @@ integer :: stderrunit
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
     call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
 
-  ! A1 = A(X1)
+  if (Ranga_not_verlet) then !Start of the Range Katta Loop -Added by Alon
+
+ ! A1 = A(X1)
   lon1=berg%lon; lat1=berg%lat
   if (on_tangential_plane) call rotpos_to_tang(lon1,lat1,x1,y1)
   dxdl1=r180_pi/(Rearth*cos(lat1*pi_180))
@@ -1814,6 +1827,9 @@ integer :: stderrunit
       write(stderrunit,'(2i4,32f7.1)') mpp_pe(),j,(grd%lat(i,j),i=grd%isd,grd%ied)
     enddo
   endif
+ 
+  endif ! End of the Range Katta Loop -added by Alon  
+
 
   berg%lon=lonn
   berg%lat=latn
