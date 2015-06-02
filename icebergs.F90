@@ -194,16 +194,17 @@ integer :: stderrunit
   uveln=uvel; vveln=vvel ! Copy starting uvel, vvel
   do itloop=1,2 ! Iterate on drag coefficients
 
-    us=0.5*(uveln+uvel); vs=0.5*(vveln+vvel)
-    drag_ocn=c_ocn*sqrt( (us-uo)**2+(vs-vo)**2 )
-    drag_atm=c_atm*sqrt( (us-ua)**2+(vs-va)**2 )
-    drag_ice=c_ice*sqrt( (us-ui)**2+(vs-vi)**2 )
+! These four lines commented out by Alon to use Bob's scheme rather than Alistairs. (will change answers)
+ !   us=0.5*(uveln+uvel); vs=0.5*(vveln+vvel)
+ !   drag_ocn=c_ocn*sqrt( (us-uo)**2+(vs-vo)**2 )
+ !   drag_atm=c_atm*sqrt( (us-ua)**2+(vs-va)**2 )
+ !   drag_ice=c_ice*sqrt( (us-ui)**2+(vs-vi)**2 )
 
 !Alon's proposed change - This would change it to Bob's improved scheme.
-!    !us=uveln; vs=vveln     This line is no longer needed
-!    drag_ocn=c_ocn*0.5*(sqrt( (uveln-uo)**2+(vveln-vo)**2 )+sqrt( (uvel-uo)**2+(vvel-vo)**2 ))
-!    drag_atm=c_atm*0.5*(sqrt( (uveln-ua)**2+(vveln-va)**2 )+sqrt( (uvel-ua)**2+(vvel-va)**2 ))
-!    drag_ice=c_ice*0.5*(sqrt( (uveln-ui)**2+(vveln-vi)**2 )+sqrt( (uvel-ui)**2+(vvel-vi)**2 ))
+    !us=uveln; vs=vveln     This line is no longer needed
+    drag_ocn=c_ocn*0.5*(sqrt( (uveln-uo)**2+(vveln-vo)**2 )+sqrt( (uvel-uo)**2+(vvel-vo)**2 ))
+    drag_atm=c_atm*0.5*(sqrt( (uveln-ua)**2+(vveln-va)**2 )+sqrt( (uvel-ua)**2+(vvel-va)**2 ))
+    drag_ice=c_ice*0.5*(sqrt( (uveln-ui)**2+(vveln-vi)**2 )+sqrt( (uvel-ui)**2+(vvel-vi)**2 ))
 
     ! Explicit accelerations
    !axe= f_cori*vvel -gravity*ssh_x +wave_rad*uwave &
