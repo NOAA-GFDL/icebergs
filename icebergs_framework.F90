@@ -15,8 +15,8 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 
 implicit none ; private
 
-integer, parameter :: buffer_width=20
-integer, parameter :: buffer_width_traj=23
+integer, parameter :: buffer_width=24 !Changed from 20 to 24 by Alon 
+integer, parameter :: buffer_width_traj=27  !Changed from 23 by Alon
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 
 !Local Vars
@@ -129,6 +129,7 @@ end type icebergs_gridded
 type :: xyt
   real :: lon, lat, day
   real :: mass, thickness, width, length, uvel, vvel
+  real :: axn, ayn, bxn, byn  !Explicit and implicit accelerations !Alon 
   real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi
   real :: mass_of_bits, heat_density
   integer :: year
@@ -139,6 +140,7 @@ type :: iceberg
   type(iceberg), pointer :: prev=>null(), next=>null()
   ! State variables (specific to the iceberg, needed for restarts)
   real :: lon, lat, uvel, vvel, mass, thickness, width, length
+  real :: axn, ayn, bxn, byn  !Explicit and implicit accelerations !Alon 
   real :: start_lon, start_lat, start_day, start_mass, mass_scaling
   real :: mass_of_bits, heat_density
   integer :: start_year
@@ -932,6 +934,10 @@ end subroutine send_bergs_to_other_pes
     buff%data(18,n)=berg%heat_density
     buff%data(19,n)=berg%ine
     buff%data(20,n)=berg%jne
+    buff%data(21,n)=berg%axn  !Alon
+    buff%data(22,n)=berg%ayn  !Alon
+    buff%data(23,n)=berg%bxn  !Alon
+    buff%data(24,n)=berg%byn  !Alon
 
   end subroutine pack_berg_into_buffer2
 
@@ -970,6 +976,7 @@ end subroutine send_bergs_to_other_pes
   logical, optional :: force_append
  ! Local variables
  !real :: lon, lat, uvel, vvel, xi, yj
+
  !real :: start_lon, start_lat, start_day, start_mass
  !integer :: ine, jne, start_year
   logical :: lres
@@ -1006,7 +1013,12 @@ end subroutine send_bergs_to_other_pes
        call add_new_berg_to_list(first, localberg) 
     else
        
-    lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+    localberg%axn=buff%data(21,n) !Alon
+    localberg%ayn=buff%data(22,n) !Alon
+    localberg%bxn=buff%data(23,n) !Alon
+    localberg%byn=buff%data(24,n) !Alon
+   
+     lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
     if (lres) then
       lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
       call add_new_berg_to_list(first, localberg)
@@ -1020,6 +1032,8 @@ end subroutine send_bergs_to_other_pes
              & mpp_pe(),') Failed to find i,j=',localberg%ine,localberg%jne,' for lon,lat=',localberg%lon,localberg%lat
         write(stderrunit,*) localberg%lon,localberg%lat
         write(stderrunit,*) localberg%uvel,localberg%vvel
+        write(stderrunit,*) localberg%axn,localberg%ayn !Alon
+        write(stderrunit,*) localberg%bxn,localberg%byn !Alon
         write(stderrunit,*) grd%isc,grd%iec,grd%jsc,grd%jec
         write(stderrunit,*) grd%isd,grd%ied,grd%jsd,grd%jed
         write(stderrunit,*) grd%lon(grd%isc-1,grd%jsc-1),grd%lon(grd%iec,grd%jsc)
@@ -1163,6 +1177,10 @@ end subroutine send_bergs_to_other_pes
     buff%data(21,n)=traj%sst
     buff%data(22,n)=traj%cn
     buff%data(23,n)=traj%hi
+    buff%data(24,n)=traj%axn !Alon
+    buff%data(25,n)=traj%ayn !Alon
+    buff%data(26,n)=traj%bxn !Alon
+    buff%data(27,n)=traj%byn !Alon
 
   end subroutine pack_traj_into_buffer2
 
@@ -1200,6 +1218,10 @@ end subroutine send_bergs_to_other_pes
     traj%sst=buff%data(21,n)
     traj%cn=buff%data(22,n)
     traj%hi=buff%data(23,n)
+    traj%axn=buff%data(24,n) !Alon
+    traj%ayn=buff%data(25,n) !Alon
+    traj%bxn=buff%data(26,n) !Alon
+    traj%byn=buff%data(27,n) !Alon
 
     call append_posn(first, traj) 
 
@@ -1448,6 +1470,10 @@ type(iceberg), pointer :: berg1, berg2
   if (berg1%thickness.ne.berg2%thickness) return
   if (berg1%width.ne.berg2%width) return
   if (berg1%length.ne.berg2%length) return
+  if (berg1%axn.ne.berg2%axn) return  !Alon
+  if (berg1%ayn.ne.berg2%ayn) return  !Alon
+  if (berg1%bxn.ne.berg2%bxn) return  !Alon
+  if (berg1%byn.ne.berg2%byn) return  !Alon
   sameberg=.true. ! passing the above tests mean that bergs 1 and 2 are identical
 end function sameberg
 
@@ -1533,10 +1559,12 @@ character(len=*) :: label
     ' xi,yj=', berg%xi, berg%yj, &
     ' lon,lat=', berg%lon, berg%lat, &
     ' u,v=', berg%uvel, berg%vvel, &
+    ' axn,ayn=', berg%axn, berg%ayn, &
+    ' bxn,byn=', berg%bxn, berg%byn, &
     ' p,n=', associated(berg%prev), associated(berg%next)
   write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,") ",6(a,2f10.4))') &
     label, mpp_pe(), 'uo,vo=', berg%uo, berg%vo, 'ua,va=', berg%ua, berg%va, 'ui,vi=', berg%ui, berg%vi
-
+!Two lines above added by Alon
 end subroutine print_berg
 
 ! ##############################################################################
@@ -1613,6 +1641,10 @@ type(iceberg), pointer :: this
     posn%sst=this%sst
     posn%cn=this%cn
     posn%hi=this%hi
+    posn%axn=this%axn
+    posn%ayn=this%ayn
+    posn%bxn=this%bxn
+    posn%byn=this%byn
 
     call push_posn(this%trajectory, posn)
 
@@ -2619,8 +2651,8 @@ logical :: check_halo
 
   nbergs=count_bergs(bergs)
   call mpp_max(nbergs)
-  allocate( fld( nbergs, 11 ) )
-  allocate( fld2( nbergs, 11 ) )
+  allocate( fld( nbergs, 15 ) ) !Changed from 11 to 15 by Alon
+  allocate( fld2( nbergs, 15 ) ) !Changed from 11 to 15 by Alon
   allocate( icnt( grd%isd:grd%ied, grd%jsd:grd%jed ) )
   fld(:,:)=0.
   fld2(:,:)=0.
@@ -2640,9 +2672,13 @@ logical :: check_halo
     fld(i,6) = this%thickness
     fld(i,7) = this%width
     fld(i,8) = this%length
-    fld(i,9) = time_hash(this)
-    fld(i,10) = pos_hash(this)
-    fld(i,11) = float(iberg)
+    fld(i,9) = this%axn !added by Alon
+    fld(i,10) = this%ayn !added by Alon
+    fld(i,11) = this%bxn !added by Alon
+    fld(i,12) = this%byn !added by Alon
+    fld(i,13) = time_hash(this) !Changed from 9 to 13 by Alon
+    fld(i,14) = pos_hash(this) !Changed from 10 to 12 by Alon
+    fld(i,15) = float(iberg) !Changed from 11 to 15 by Alon
     icnt(this%ine,this%jne)=icnt(this%ine,this%jne)+1
     fld2(i,:) = fld(i,:)*float( icnt(this%ine,this%jne) ) !*float( i )
     grd%tmp(this%ine,this%jne)=grd%tmp(this%ine,this%jne)+time_hash(this)*pos_hash(this)+log(this%mass)
@@ -2695,8 +2731,8 @@ integer function berg_chksum(berg )
 ! Arguments
 type(iceberg), pointer :: berg
 ! Local variables
-real :: rtmp(28)
-integer :: itmp(28+3), i8=0, ichk1, ichk2, ichk3
+real :: rtmp(32) !Changed from 28 to 32 by Alon
+integer :: itmp(32+3), i8=0, ichk1, ichk2, ichk3 !Changed from 28 to 32 by Alon
 integer :: i
 
   rtmp(:)=0.
@@ -2727,14 +2763,18 @@ integer :: i
   rtmp(26)=berg%ssh_y
   rtmp(27)=berg%cn
   rtmp(28)=berg%hi
+  rtmp(29)=berg%axn !Added by Alon
+  rtmp(30)=berg%ayn !Added by Alon
+  rtmp(31)=berg%bxn !Added by Alon
+  rtmp(32)=berg%byn !Added by Alon
 
-  itmp(1:28)=transfer(rtmp,i8)
-  itmp(29)=berg%start_year
-  itmp(30)=berg%ine
-  itmp(31)=berg%jne
+  itmp(1:32)=transfer(rtmp,i8) !Changed from 28 to 32 by Alon
+  itmp(33)=berg%start_year !Changed from 29 to 33 by Alon
+  itmp(34)=berg%ine !Changed from 30 to 34 by Alon
+  itmp(35)=berg%jne !Changed from 31 to 35 by Alon
 
   ichk1=0; ichk2=0; ichk3=0
-  do i=1,28+3
+  do i=1,32+3 !Changd from 28 to 32 by Alon
    ichk1=ichk1+itmp(i)
    ichk2=ichk2+itmp(i)*i
    ichk3=ichk3+itmp(i)*i*i
