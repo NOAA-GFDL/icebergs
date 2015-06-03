@@ -191,7 +191,9 @@ integer :: stderrunit
   c_ice=rho_ice     /M*(0.5*Cd_iv*W*hi              )
   if (abs(ui)+abs(vi).eq.0.) c_ice=0.
 
-  uveln=uvel; vveln=vvel ! Copy starting uvel, vvel
+!  uveln=uvel; vveln=vvel ! Copy starting uvel, vvel  !Commented out by Alon
+  uveln=uvel0; vveln=vvel0 ! Copy starting uvel, vvel !Added by Alon 
+ 
   do itloop=1,2 ! Iterate on drag coefficients
 
 ! These four lines commented out by Alon to use Bob's scheme rather than Alistairs. (will change answers)
@@ -202,9 +204,9 @@ integer :: stderrunit
 
 !Alon's proposed change - This would change it to Bob's improved scheme.
     !us=uveln; vs=vveln     This line is no longer needed
-    drag_ocn=c_ocn*0.5*(sqrt( (uveln-uo)**2+(vveln-vo)**2 )+sqrt( (uvel-uo)**2+(vvel-vo)**2 ))
-    drag_atm=c_atm*0.5*(sqrt( (uveln-ua)**2+(vveln-va)**2 )+sqrt( (uvel-ua)**2+(vvel-va)**2 ))
-    drag_ice=c_ice*0.5*(sqrt( (uveln-ui)**2+(vveln-vi)**2 )+sqrt( (uvel-ui)**2+(vvel-vi)**2 ))
+    drag_ocn=c_ocn*0.5*(sqrt( (uveln-uo)**2+(vveln-vo)**2 )+sqrt( (uvel0-uo)**2+(vvel0-vo)**2 ))
+    drag_atm=c_atm*0.5*(sqrt( (uveln-ua)**2+(vveln-va)**2 )+sqrt( (uvel0-ua)**2+(vvel0-va)**2 ))
+    drag_ice=c_ice*0.5*(sqrt( (uveln-ui)**2+(vveln-vi)**2 )+sqrt( (uvel0-ui)**2+(vvel0-vi)**2 ))
 
     ! Explicit accelerations
    !axe= f_cori*vvel -gravity*ssh_x +wave_rad*uwave &
@@ -1560,7 +1562,7 @@ integer :: stderrunit
   Rearth=6360.e3
 
   !Choosing time stepping scheme - Alon
-   Runge_not_verlet=.true.    !true=Runge Kutta, False=Verlet   , Alon
+   Runge_not_verlet=.False.    !true=Runge Kutta, False=Verlet   , Alon
 
 
   berg=>bergs%first
@@ -1862,6 +1864,8 @@ integer :: stderrunit
  ! X2 = X1+dt*V1+((dt^2)/2)*a_n +((dt^2)/2)*b_n = X1+dt*u_star +((dt^2)/2)*b_n 
  ! V2 = V1+dt/2*a_n +dt/2*a_np1 +dt*b_n = u_star + dt/2*a_np1 + dt*b_np1 = u_star +dt*ax
 
+!print *, 'you are here!'
+
 lon1=berg%lon; lat1=berg%lat
   if (on_tangential_plane) call rotpos_to_tang(lon1,lat1,x1,y1)
   dxdl1=r180_pi/(Rearth*cos(lat1*pi_180))
@@ -1870,45 +1874,52 @@ lon1=berg%lon; lat1=berg%lat
 
 !Loading past acceleartions - Alon
   axn=berg%axn; ayn=berg%ayn !Alon
-  byn=berg%bxn; byn=berg%byn !Alon
+  bxn=berg%bxn; byn=berg%byn !Alon
 
-! Turn the velocities into u_star, v_star. - Alon (not sure how this works with tangent plane)
-  uvel1=uvel1+dt_2*axn                                              !Alon
-  vvel1=vvel1+dt_2*ayn                                              !Alon
+! Velocities used to update the position
+  uvel2=uvel1+(dt_2*axn)+(dt_2*bxn)                    !Alon
+  vvel2=vvel1+(dt_2*ayn)+(dt_2*byn)                    !Alon
 
-if (on_tangential_plane) call rotvec_to_tang(lon1,uvel1,vvel1,xdot1,ydot1)
-  u1=uvel1*dxdl1; v1=vvel1*dydl
+if (on_tangential_plane) call rotvec_to_tang(lon1,uvel2,vvel2,xdot2,ydot2)
+  u2=uvel2*dxdl1; v2=vvel2*dydl
 
-  if (on_tangential_plane) call rotvec_to_tang(lon1,bxn,byn,bxddot,byddot)    !Added by Alon  -rotation of implicit velocity.
 
 !Solving for new position
   if (on_tangential_plane) then
-    xn=x1+dt_2*xdot1+(dt*dt*(bxddot)/2) ; yn=y1+dt_2*ydot1+(dt*dt*(byddot/2))             !Alon
+    xn=x1+(dt*xdot2) ; yn=y1+(dt*ydot2)             !Alon
     call rotpos_from_tang(xn,yn,lonn,latn)
   else
-    lonn=lon1+dt_2*u1+(dt*dt*(bxn)/2) ; latn=lat1+dt_2*v1+(dt*dt*(byn/2))  !Alon
-    uvel2=uvel1+dt*ax1; vvel2=vvel1+dt*ay1    !Alon , we call it uvel2, vvel2 until it is put into lat/long co-ordinates, where it becomes uveln, vveln
+    lonn=lon1+(dt*u2) ; latn=lat1+(dt*v2)  !Alon
   endif
-  dxdl2=r180_pi/(Rearth*cos(latn*pi_180))
+  dxdln=r180_pi/(Rearth*cos(latn*pi_180))
+
+! Turn the velocities into u_star, v_star.(uvel3 is v_star) - Alon (not sure how this works with tangent plane)
+  uvel3=uvel1+(dt_2*axn)                  !Alon
+  vvel3=vvel1+(dt_2*ayn)                  !Alon
 
 
-!Solving for the new velocity
-  call accel(bergs, berg, i, j, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, axn, ayn, bxn, byn, Runge_not_verlet) !axn, ayn, bxn, byn ,Runge_not_verlet  - Added by Alon
-  if (on_tangential_plane) call rotvec_to_tang(lon1,ax1,ay1,xddot1,yddot1)
-  if (on_tangential_plane) then
-    xdotn=xdot1+dt*xddot1; ydotn=ydot1+dt*yddot1                                    !Alon
-    call rotvec_from_tang(lonn,xdotn,ydotn,uveln,vveln)
-  else
-    uvel2=uvel1+dt*ax1; vvel2=vvel1+dt*ay1    !Alon , we call it uvel2, vvel2 until it is put into lat/long co-ordinates, where it becomes uveln, vveln
-  endif
-  uveln=uvel2*dxdl2; vveln=vvel2*dydl    !Converted to degrees.
-
-!Adjusting mass...
+!Adjusting mass...                      Alon decided to move this before calculating the new velocities (so that acceleration can be a fn(r_np1)
   i=i1;j=j1;xi=berg%xi;yj=berg%yj
-  call adjust_index_and_ground(grd, lonn, latn, uveln, vveln, i, j, xi, yj, bounced, error_flag)
+  call adjust_index_and_ground(grd, lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag)  !Alon:"unclear which velocity to use here?"
   i2=i; j2=j
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
     call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
+
+
+!Calling the acceleration
+  call accel(bergs, berg, i, j, xi, yj, latn, uvel3, vvel3, uvel1, vvel1, dt_2, ax1, ay1, axn, ayn, bxn, byn, Runge_not_verlet) !axn, ayn, bxn, byn ,Runge_not_verlet  - Added by Alon
+
+!Solving for the new velocity
+  if (on_tangential_plane) then
+    call rotvec_to_tang(lonn,uvel3,vvel3,xdot3,ydot3)
+    call rotvec_to_tang(lon1,ax1,ay1,xddot1,yddot1)
+    xdotn=xdot3+(dt*xddot1); ydotn=ydot3+(dt*yddot1)                                    !Alon
+    call rotvec_from_tang(lonn,xdotn,ydotn,uveln,vveln)
+  else
+    uvel4=uvel3+dt*ax1; vvel4=vvel3+dt*ay1    !Alon , we call it uvel3, vvel3 until it is put into lat/long co-ordinates, where it becomes uveln, vveln
+  endif
+  uveln=uvel4*dxdln; vveln=vvel4*dydl    !Converted to degrees.
+
 
 !Debugging
   if (.not.error_flag) then
@@ -1925,16 +1936,16 @@ if (on_tangential_plane) call rotvec_to_tang(lon1,uvel1,vvel1,xdot1,ydot1)
    write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: j1,j2,j=',j1,j2,j
    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: lon1,lonn=',lon1,lonn,berg%lon
    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: lat1,latn=',lat1,latn,berg%lat
-   write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: u1,un,u0=',uvel1,uveln,berg%uvel
-   write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: v1,vn,v0=',vvel1,vveln,berg%vvel
+   write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: u3,un,u0=',uvel3,uveln,berg%uvel
+   write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: v3,vn,v0=',vvel3,vveln,berg%vvel
    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ax1=',&
         & dt*ax1
    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ay1=',&
         & dt*ay1
-   write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* u1,un,u0=',&
-        & dt*uvel1,dt*uvel2,dt*berg%uvel
-   write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* v1,vn,v0=',&
-        & dt*vvel1,dt*vvel2,dt*berg%vvel
+   write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* u3,un,u0=',&
+        & dt*uvel3,dt*uveln,dt*berg%uvel
+   write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* v3,vn,v0=',&
+        & dt*vvel3,dt*vveln,dt*berg%vvel
    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* u1,u_n (deg)=',&
         & dt*u1,dt*uveln
    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* v1,v_n (deg)=',&
@@ -1942,7 +1953,7 @@ if (on_tangential_plane) call rotvec_to_tang(lon1,uvel1,vvel1,xdot1,ydot1)
    write(stderrunit,*) 'diamonds, evolve_iceberg: on_tangential_plane=',on_tangential_plane
    write(stderrunit,*) 'Acceleration terms for position 1'
    error_flag=pos_within_cell(grd, lon1, lat1, i1, j1, xi, yj)
-   call accel(bergs, berg, i1, j1, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, axn, ayn, bxn, byn, Runge_not_verlet, debug_flag=.true.)  !axn, ayn, bxn, byn, Runge_not_verlet   - Added by Alon
+   call accel(bergs, berg, i2, j2, xi, yj, latn, uvel3, vvel3, uvel1, vvel1, dt_2, ax1, ay1, axn, ayn, bxn, byn, Runge_not_verlet, debug_flag=.true.)  !axn, ayn, bxn, byn, Runge_not_verlet   - Added by Alon
    
     write(stderrunit,'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'posn i,j,lon,lat,xi,yj=',i,j,lonn,latn,xi,yj
     write(stderrunit,'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'posn box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
@@ -1964,6 +1975,7 @@ if (on_tangential_plane) call rotvec_to_tang(lon1,uvel1,vvel1,xdot1,ydot1)
   endif ! End of the Verlet Stepiing -added by Alon  
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+!print *, 'you are here again!';
   berg%lon=lonn
   berg%lat=latn
   berg%uvel=uveln
