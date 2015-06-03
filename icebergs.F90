@@ -1562,8 +1562,8 @@ integer :: stderrunit
   Rearth=6360.e3
 
   !Choosing time stepping scheme - Alon
-   Runge_not_verlet=.False.    !true=Runge Kutta, False=Verlet   , Alon
-
+   !Runge_not_verlet=.False.    !Loading manually: true=Runge Kutta, False=Verlet   , Alon
+   Runge_not_verlet=bergs%Runge_not_Verlet  ! Loading directly from namelist/default , Alon
 
   berg=>bergs%first
   do while (associated(berg)) ! loop over all bergs
