@@ -498,10 +498,10 @@ real :: Total_mass  !Added by Alon
 !Added by Alon  - If a freq distribution is input, we have to convert the freq distribution to a mass flux distribution)
 if (input_freq_distribution) then
      Total_mass=0.
-     do j=1:nclasses
+     do j=1,nclasses
           Total_mass=Total_mass+(distribution(j)*initial_mass(j))
      enddo
-     do j=1:nclasses
+     do j=1,nclasses
            distribution(j)=(distribution(j)*initial_mass(j))/Total_mass
      enddo
 endif 
