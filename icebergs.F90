@@ -1907,7 +1907,7 @@ if (on_tangential_plane) call rotvec_to_tang(lon1,uvel2,vvel2,xdot2,ydot2)
 
 
 !Calling the acceleration
-  call accel(bergs, berg, i, j, xi, yj, latn, uvel3, vvel3, uvel1, vvel1, dt_2, ax1, ay1, axn, ayn, bxn, byn, Runge_not_verlet) !axn, ayn, bxn, byn ,Runge_not_verlet  - Added by Alon
+  call accel(bergs, berg, i, j, xi, yj, latn, uvel3, vvel3, uvel1, vvel1, dt, ax1, ay1, axn, ayn, bxn, byn, Runge_not_verlet) !axn, ayn, bxn, byn ,Runge_not_verlet  - Added by Alon
 
 !Solving for the new velocity
   if (on_tangential_plane) then
