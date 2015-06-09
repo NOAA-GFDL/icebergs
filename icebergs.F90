@@ -129,7 +129,7 @@ real :: f_cori, T, D, W, L, M, F
 real :: drag_ocn, drag_atm, drag_ice, wave_rad
 real :: c_ocn, c_atm, c_ice
 real :: ampl, wmod, Cr, Lwavelength, Lcutoff, Ltop
-real, parameter :: alpha=0.0, beta=1.0, accel_lim=1.e-2, Cr0=0.06, vel_lim=15.
+real, parameter :: alpha=1.0, beta=1.0, accel_lim=1.e-2, Cr0=0.06, vel_lim=15.
 real :: lambda, detA, A11, A12, axe, aye, D_hi 
 real :: uveln, vveln, us, vs, speed, loc_dx, new_speed
 logical :: dumpit
