@@ -267,7 +267,7 @@ real :: grounding_fraction=0. ! Fraction of water column depth at which groundin
 logical :: do_unit_tests=.false. ! Conduct some unit tests
 logical :: input_freq_distribution=.false. ! Alon: flag to show if input distribution is freq or mass dist (=1 if input is a freq dist, =0 to use an input mass dist)
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
-real, dimension(nclasses) :: distribution=(/0.25, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim) , Also 0.24 changed to 0.25 by Alon
+real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim) , 
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
 real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
 namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
