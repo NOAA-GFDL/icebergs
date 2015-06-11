@@ -129,7 +129,7 @@ real :: f_cori, T, D, W, L, M, F
 real :: drag_ocn, drag_atm, drag_ice, wave_rad
 real :: c_ocn, c_atm, c_ice
 real :: ampl, wmod, Cr, Lwavelength, Lcutoff, Ltop
-real, parameter :: alpha=1.0, beta=1.0, C_N=1.0, accel_lim=1.e-2, Cr0=0.06, vel_lim=15.
+real, parameter :: alpha=1.0, beta=1.0, C_N=0.0, accel_lim=1.e-2, Cr0=0.06, vel_lim=15.
 real :: lambda, detA, A11, A12, RHS_x, RHS_y, D_hi 
 real :: uveln, vveln, us, vs, speed, loc_dx, new_speed
 real :: u_star, v_star    !Added by Alon
@@ -247,7 +247,11 @@ integer :: stderrunit
     if (alpha+beta.gt.0.) then
       lambda=drag_ocn+drag_atm+drag_ice
       A11=1.+dt*lambda
-      A12=dt/2.*f_cori  !Think about this more for non-Crank Nicolson.  Why use dt_2?
+      A12=dt*f_cori  
+      if (C_N>0.) then   !For Crank-Nicolson Coriolis term.   
+          A12=A12/2.
+      endif
+
       detA=1./(A11**2+A12**2)
       ax=detA*(A11*RHS_x+A12*RHS_y)
       ay=detA*(A11*RHS_y-A12*RHS_x)
@@ -1681,7 +1685,7 @@ integer :: stderrunit
   u2=uvel2*dxdl2; v2=vvel2*dydl
   call accel(bergs, berg, i, j, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt_2, ax2, ay2, axn2, ayn2, bxn, byn, Runge_not_verlet) !axn, ayn, bxn, byn, Runge_not_verlet - Added by Alon
   if (on_tangential_plane) call rotvec_to_tang(lon2,ax2,ay2,xddot2,yddot2)
-  if (on_tangential_plane) call rotvec_to_tang(lon2,axn2,ayn2,xddot2n,yddot2n)
+  if (on_tangential_plane) call rotvec_to_tang(lon2,axn2,ayn2,xddot2n,yddot2n) !Alon
   
   !  X3 = X1+dt/2*V2 ; V3 = V1+dt/2*A2; A3=A(X3)
  !if (debug) write(stderr(),*) 'diamonds, evolve: x3=...'
@@ -1738,7 +1742,7 @@ integer :: stderrunit
   u3=uvel3*dxdl3; v3=vvel3*dydl
   call accel(bergs, berg, i, j, xi, yj, lat3, uvel3, vvel3, uvel1, vvel1, dt, ax3, ay3, axn3, ayn3, bxn, byn, Runge_not_verlet) !axn, ayn, bxn, byn, Runge_not_verlet   - Added by Alon
   if (on_tangential_plane) call rotvec_to_tang(lon3,ax3,ay3,xddot3,yddot3)
-  if (on_tangential_plane) call rotvec_to_tang(lon3,axn3,ayn3,xddot3n,yddot3n)
+  if (on_tangential_plane) call rotvec_to_tang(lon3,axn3,ayn3,xddot3n,yddot3n) !Alon
   
   !  X4 = X1+dt*V3 ; V4 = V1+dt*A3; A4=A(X4)
  !if (debug) write(stderr(),*) 'diamonds, evolve: x4=...'
