@@ -22,6 +22,7 @@ use ice_bergs_framework, only: icebergs_gridded, xyt, iceberg, icebergs, buffer
 use ice_bergs_framework, only: pack_berg_into_buffer2,unpack_berg_from_buffer2
 use ice_bergs_framework, only: pack_traj_into_buffer2,unpack_traj_from_buffer2
 use ice_bergs_framework, only: find_cell,find_cell_by_search,count_bergs,is_point_in_cell,pos_within_cell,append_posn
+use ice_bergs_framework, only: push_posn
 use ice_bergs_framework, only: add_new_berg_to_list,destroy_iceberg
 use ice_bergs_framework, only: increase_ibuffer,increase_ibuffer_traj,grd_chksum2,grd_chksum3
 use ice_bergs_framework, only: sum_mass,sum_heat,bilin
@@ -29,7 +30,7 @@ use ice_bergs_framework, only: sum_mass,sum_heat,bilin
 use ice_bergs_framework, only: nclasses, buffer_width, buffer_width_traj
 use ice_bergs_framework, only: verbose, really_debug, debug, restart_input_dir,make_calving_reproduce
 use ice_bergs_framework, only: ignore_ij_restart, use_slow_find,generate_test_icebergs,print_berg
-
+use ice_bergs_framework, only: reverse_list
 
 implicit none ; private
 
@@ -844,7 +845,7 @@ type(buffer), pointer :: obuffer_io=>null(), ibuffer_io=>null()
      if(associated(trajectory)) then
         this=>trajectory
         do while (associated(this))
-           call append_posn(traj4io, this)
+           call push_posn(traj4io, this)
            this=>this%next
         enddo
      endif
@@ -853,6 +854,7 @@ type(buffer), pointer :: obuffer_io=>null(), ibuffer_io=>null()
   !Now gather and append the bergs from all pes in the io_tile to the list on corresponding io_tile_root_pe
   ntrajs_sent_io =0
   ntrajs_rcvd_io =0 
+
 
   if(is_io_tile_root_pe) then
      !Receive trajs from all pes in this I/O tile !FRAGILE!SCARY!
@@ -867,6 +869,7 @@ type(buffer), pointer :: obuffer_io=>null(), ibuffer_io=>null()
            enddo
        endif
      enddo
+     call reverse_list(traj4io)
   else
      !Pack and Send trajs to the root pe for this I/O tile
      if (associated(trajectory)) then

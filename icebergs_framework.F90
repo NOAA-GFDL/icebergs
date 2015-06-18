@@ -65,6 +65,7 @@ public sum_mass,sum_heat,bilin,yearday,bergs_chksum
 public checksum_gridded
 public grd_chksum2,grd_chksum3
 public fix_restart_dates, offset_berg_dates
+public reverse_list
 
 type :: icebergs_gridded
   type(domain2D), pointer :: domain ! MPP domain
@@ -1201,7 +1202,9 @@ end subroutine send_bergs_to_other_pes
     traj%cn=buff%data(22,n)
     traj%hi=buff%data(23,n)
 
-    call append_posn(first, traj) 
+!    call append_posn(first, traj) !This call could take a very long time (as if the run hangs) if there are millions of nodes in the list. Use push_posn instead and reverse the list later before writing the file.
+! 
+    call push_posn(first, traj) 
 
   end subroutine unpack_traj_from_buffer2
 
@@ -1622,6 +1625,30 @@ type(iceberg), pointer :: this
 end subroutine record_posn
 
 ! ##############################################################################
+
+subroutine reverse_list(list)
+  ! Arguments
+  type(xyt), pointer :: list
+  
+  ! Local variables
+  type(xyt), pointer :: head,tail,node
+  integer :: i
+
+  i=0
+  head=>list
+  tail=>list
+  node=>list%next
+  list%next=>null()
+  do while (associated(node))  
+     head=>node
+     node=>node%next
+     head%next=>tail
+     tail=>head
+     i=i+1
+  enddo
+  list=>head
+  print*,'reverse_list number of nodes= ',i
+end subroutine reverse_list
 
 subroutine push_posn(trajectory, posn_vals)
 ! Arguments
