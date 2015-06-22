@@ -112,6 +112,138 @@ integer :: stdlogunit, stderrunit
 
 end subroutine icebergs_init
 
+
+! ##############################################################################
+
+subroutine interactive_force(bergs,berg,IA_x, IA_y) !Calculating interactive force between icebergs. Alon,  Markpoint_4
+type(icebergs), pointer :: bergs
+type(iceberg), pointer :: berg
+type(iceberg), pointer :: other_berg
+real :: T1, L1, W1, lon1, lat1, x1, y1, R1, A1   !Current iceberg
+real :: T2, L2, W2, lon2, lat2, x2, y2, R2, A2   !Other iceberg
+real :: L_crit, r_dist_x, r_dist_y, r_dist, A_o, trapped, T_min
+real :: Rearth
+real :: kappa_s, accel_spring
+real, intent(inout) :: IA_x, IA_y 
+integer :: stderrunit
+
+Rearth=6360.e3
+kappa_s=1.e-4
+
+! Get the stderr unit number.  Not sure what this does
+  stderrunit = stderr()
+
+IA_x=0.
+IA_y=0.
+
+L1=berg%length
+W1=berg%width
+T1=berg%thickness 
+A1=L1*W1 
+R1=sqrt(A1/pi) ! Interaction radius of the iceberg (assuming circular icebergs)
+lon1=berg%lon; lat1=berg%lat
+call rotpos_to_tang(lon1,lat1,x1,y1)
+
+  other_berg=>bergs%first
+  do while (associated(other_berg)) ! loop over all other bergs    - Need to think about which icebergs to loop over
+       L2=other_berg%length
+       W2=other_berg%width
+       T2=other_berg%thickness 
+       A2=L2*W2
+       R2=sqrt(A2/pi) ! Interaction radius of the other iceberg
+       L_crit=(R1+R2)
+       lon2=berg%lon; lat2=berg%lat
+       call rotpos_to_tang(lon2,lat2,x2,y2)
+
+       r_dist_x=x1-x2 ; r_dist_y=y1-y2
+       r_dist=sqrt( ((x1-x2)**2) + ((y1-y2)**2) )
+
+      call overlap_area(R1,R2,r_dist,A_o,trapped)
+      T_min=min(T1,T2)
+      accel_spring=kappa_s*(T_min/T1)*(A_o/A1)
+
+      if (r_dist>0) then
+          IA_x=IA_x+(accel_spring*(r_dist_x/r_dist))
+          IA_y=IA_y+(accel_spring*(r_dist_y/r_dist))
+      endif
+
+       other_berg=>other_berg%next
+  enddo ! loop over all bergs
+
+  contains
+
+
+   subroutine overlap_area(R1,R2,d,A,trapped)
+        real, intent(in) :: R1, R2, d
+        real, intent(out) :: A, Trapped
+        real :: R1_sq, R2_sq, d_sq  
+        R1_sq=R1**2
+        R2_sq=R2**2
+        d_sq=d**2
+        Trapped=0.
+
+if (d>0) then
+        if (d<(R1+R2)) then
+             if (d>abs(R1-R2)) then
+                  A= (R1_sq*acos((d_sq+R1_sq-R2_sq)/(2.*d*R1)))  +  (R2_sq*acos((d_sq+R2_sq-R1_sq)/(2.*d*R2)))  - (0.5*sqrt((-d+R1+R2)*(d+R1-R2)*(d-R1+R2)*(d+R1+R2)))
+             else
+                  A=min(pi*R1_sq,pi*R2_sq) 
+                  Trapped=1.
+             endif
+       else
+             A=0.
+       endif
+else
+       A=0.     ! No area of perfectly overlapping bergs (ie: a berg interacting with itself)
+endif
+
+   end subroutine overlap_area
+
+
+  subroutine rotpos_to_tang(lon, lat, x, y)
+  ! Arguments
+  real, intent(in) :: lon, lat
+  real, intent(out) :: x, y
+  ! Local variables
+  real :: r,colat,clon,slon
+
+    if (lat>90.) then
+      write(stderrunit,*) 'diamonds, rotpos_to_tang: lat>90 already!',lat
+      call error_mesg('diamonds, rotpos_to_tang','Something went very wrong!',FATAL)
+    endif
+    if (lat==90.) then
+      write(stderrunit,*) 'diamonds, rotpos_to_tang: lat==90 already!',lat
+      call error_mesg('diamonds, rotpos_to_tang','Something went wrong!',FATAL)
+    endif
+
+    colat=90.-lat
+    r=Rearth*(colat*pi_180)
+    clon=cos(lon*pi_180)
+    slon=sin(lon*pi_180)
+    x=r*clon
+    y=r*slon
+
+  end subroutine rotpos_to_tang
+
+
+
+end subroutine interactive_force
+
+
+! ##############################################################################
+
+
+!call Interactive_damping(bergs,berg, P_11, P_12, P_21, P_22, P_times_u_x, P_times_u_y) ! Damping forces, Made by Alon.
+
+
+
+
+
+
+!end subroutine interactive_force
+
+! ##############################################################################
+
 subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, axn, ayn, bxn, byn, Runge_not_Verlet, debug_flag) !Saving  acceleration for Verlet, Adding Verlet flag - Alon
 !subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, debug_flag) !old version commmented out by Alon
 ! Arguments
@@ -133,6 +265,8 @@ real, parameter :: alpha=1.0, beta=1.0, C_N=1.0, accel_lim=1.e-2, Cr0=0.06, vel_
 real :: lambda, detA, A11, A12, RHS_x, RHS_y, D_hi 
 real :: uveln, vveln, us, vs, speed, loc_dx, new_speed
 real :: u_star, v_star    !Added by Alon
+real :: IA_x, IA_y    !Added by Alon
+real :: P_11, P_12, P_21, P_22, P_time_u_x, P_times_u_y    !Added by Alon
 logical :: dumpit
 logical, intent(in) :: Runge_not_Verlet  ! Flag to specify whether it is Runge-Kutta or Verlet
 integer :: itloop
@@ -148,7 +282,7 @@ integer :: stderrunit
   ! For convenience
   grd=>bergs%grd
 
-  ! Interpolate gridded fields to berg 
+  ! Interpolate gridded fields to berg     - Note: It should be possible to move this to evolve, so that it only needs to be called once. !!!!
   call interp_flds(grd, i, j, xi, yj, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi)
 
    f_cori=(2.*omega)*sin(pi_180*lat)
@@ -166,6 +300,13 @@ integer :: stderrunit
   ayn=0.
   bxn=0.
   byn=0.
+
+! Interactive spring acceleration - Note: It should be possible to move this to evolve, so that it only needs to be called once. !!!!
+  call Interactive_force(bergs,berg,IA_x, IA_y) ! Spring forces, Made by Alon.
+
+!IA_x=0.
+!IA_y=0.
+
 
   hi=min(hi,D)
   D_hi=max(0.,D-hi)
@@ -203,12 +344,12 @@ integer :: stderrunit
 
     ! Half half accelerations  - axn, ayn
     if (.not.Runge_not_Verlet) then  
-        axn=-gravity*ssh_x +wave_rad*uwave
-        ayn=-gravity*ssh_y +wave_rad*vwave
+        axn=-gravity*ssh_x +wave_rad*uwave + IA_x
+        ayn=-gravity*ssh_y +wave_rad*vwave + IA_y
     else
     ! Not half half accelerations  - for RK
-        bxn=-gravity*ssh_x +wave_rad*uwave
-        byn=-gravity*ssh_y +wave_rad*vwave
+        bxn=-gravity*ssh_x +wave_rad*uwave + IA_x
+        byn=-gravity*ssh_y +wave_rad*vwave + IA_y
      endif
 
   if (alpha>0.) then ! If implicit Coriolis, use u_star rather than RK4 latest  !Alon
@@ -233,6 +374,7 @@ integer :: stderrunit
     drag_atm=c_atm*0.5*(sqrt( (us-ua)**2+(vs-va)**2 )+sqrt( (uvel0-ua)**2+(vvel0-va)**2 ))
     drag_ice=c_ice*0.5*(sqrt( (us-ui)**2+(vs-vi)**2 )+sqrt( (uvel0-ui)**2+(vvel0-vi)**2 ))
 
+!    call Interactive_damping(bergs,berg, P_11, P_12, P_21, P_22, P_times_u_x, P_times_u_y) ! Damping forces, Made by Alon.
 
      RHS_x=(axn/2) + bxn
      RHS_y=(ayn/2) + byn
@@ -274,8 +416,8 @@ integer :: stderrunit
     axn=0.
     ayn=0.
     if (.not.Runge_not_Verlet) then
-        axn=-gravity*ssh_x +wave_rad*uwave
-        ayn=-gravity*ssh_y +wave_rad*vwave
+        axn=-gravity*ssh_x +wave_rad*uwave + IA_x
+        ayn=-gravity*ssh_y +wave_rad*vwave + IA_y
     endif
     if (C_N>0.) then !  C_N=1 for Crank Nicolson Coriolis, C_N=0 for full implicit Coriolis !Alon 
       axn=axn+f_cori*vveln
