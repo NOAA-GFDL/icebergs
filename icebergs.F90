@@ -2005,6 +2005,9 @@ integer :: stderrunit
     vveln=berg%vvel+dt_6*( (ay1+ay4)+2.*(ay2+ay3) )
     axn=( (axn1+axn4)+2.*(axn2+axn3) )/6. !Alon
     ayn=( (ayn1+ayn4)+2.*(ayn2+ayn3) )/6. !Alon
+    bxn=(((ax1+ax4)+2.*(ax2+ax3) )/6)  - (axn/2)
+    byn=(((ay1+ay4)+2.*(ay2+ay3) )/6)  - (ayn/2)
+
   endif
 
 
