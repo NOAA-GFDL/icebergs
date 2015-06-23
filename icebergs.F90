@@ -115,26 +115,35 @@ end subroutine icebergs_init
 
 ! ##############################################################################
 
-subroutine interactive_force(bergs,berg,IA_x, IA_y) !Calculating interactive force between icebergs. Alon,  Markpoint_4
+subroutine interactive_force(bergs,berg,IA_x, IA_y, u0, v0, u1, v1, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y) !Calculating interactive force between icebergs. Alon,  Markpoint_4
 type(icebergs), pointer :: bergs
 type(iceberg), pointer :: berg
 type(iceberg), pointer :: other_berg
 real :: T1, L1, W1, lon1, lat1, x1, y1, R1, A1   !Current iceberg
 real :: T2, L2, W2, lon2, lat2, x2, y2, R2, A2   !Other iceberg
-real :: L_crit, r_dist_x, r_dist_y, r_dist, A_o, trapped, T_min
+real :: r_dist_x, r_dist_y, r_dist, A_o, trapped, T_min
+real, intent(in) :: u0,v0, u1, v1
+real :: P_11, P_12, P_21, P_22
+real :: u2, v2
 real :: Rearth
-real :: kappa_s, accel_spring
-real, intent(inout) :: IA_x, IA_y 
+real :: kappa_s, accel_spring, p_ia, p_ia_coef, q_ia
+real, intent(out) :: IA_x, IA_y 
+real, intent(out) :: P_ia_11, P_ia_12, P_ia_22, P_ia_21, P_ia_times_u_x, P_ia_times_u_y
 integer :: stderrunit
 
 Rearth=6360.e3
 kappa_s=1.e-4
+p_ia=2.*sqrt(kappa_s)  ! Critical damping  
+q_ia=(2.*sqrt(kappa_s)/5)  ! Critical damping  /5   (just a guess)
 
 ! Get the stderr unit number.  Not sure what this does
   stderrunit = stderr()
 
 IA_x=0.
 IA_y=0.
+P_ia_11=0. ; P_ia_12=0.  ;  P_ia_22=0. 
+P_ia_times_u_x=0. ; P_ia_times_u_y=0.
+
 
 L1=berg%length
 W1=berg%width
@@ -149,9 +158,10 @@ call rotpos_to_tang(lon1,lat1,x1,y1)
        L2=other_berg%length
        W2=other_berg%width
        T2=other_berg%thickness 
+       u2=other_berg%uvel 
+       v2=other_berg%vvel 
        A2=L2*W2
        R2=sqrt(A2/pi) ! Interaction radius of the other iceberg
-       L_crit=(R1+R2)
        lon2=berg%lon; lat2=berg%lat
        call rotpos_to_tang(lon2,lat2,x2,y2)
 
@@ -160,12 +170,45 @@ call rotpos_to_tang(lon1,lat1,x1,y1)
 
       call overlap_area(R1,R2,r_dist,A_o,trapped)
       T_min=min(T1,T2)
-      accel_spring=kappa_s*(T_min/T1)*(A_o/A1)
 
-      if (r_dist>0) then
+      !Calculating spring force  (later this should only be done on the first time around)
+      accel_spring=kappa_s*(T_min/T1)*(A_o/A1)
+      if ((r_dist>0) .AND. (r_dist< (R1+R2)) ) then
           IA_x=IA_x+(accel_spring*(r_dist_x/r_dist))
           IA_y=IA_y+(accel_spring*(r_dist_y/r_dist))
       endif
+
+
+      !Working out the damping
+
+       !Paralel velocity
+       P_11=(r_dist_x*r_dist_x)/(r_dist**2)
+       P_12=(r_dist_x*r_dist_y)/(r_dist**2)
+       P_22=(r_dist_y*r_dist_y)/(r_dist**2)
+     
+       p_ia_coef=p_ia*(T_min/T1)*(A_o/A1)
+       p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2))+sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
+
+       P_ia_11=P_ia_11+p_ia_coef*P_11
+       P_ia_12=P_ia_12+p_ia_coef*P_12
+       P_ia_21=P_ia_21+p_ia_coef*P_21
+       P_ia_22=P_ia_22+p_ia_coef*P_22
+       P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
+       P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
+
+
+       !Normal velocities
+       P_11=1-P_11  ;  P_12=-P_12 ; P_22=1-P_22
+       p_ia_coef=q_ia*(T_min/T1)*(A_o/A1)
+       p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2))+sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
+
+       P_ia_11=P_ia_11+p_ia_coef*P_11
+       P_ia_12=P_ia_12+p_ia_coef*P_12
+       P_ia_21=P_ia_21+p_ia_coef*P_21
+       P_ia_22=P_ia_22+p_ia_coef*P_22
+       P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
+       P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
+
 
        other_berg=>other_berg%next
   enddo ! loop over all bergs
@@ -225,24 +268,11 @@ endif
 
   end subroutine rotpos_to_tang
 
-
-
 end subroutine interactive_force
 
 
 ! ##############################################################################
 
-
-!call Interactive_damping(bergs,berg, P_11, P_12, P_21, P_22, P_times_u_x, P_times_u_y) ! Damping forces, Made by Alon.
-
-
-
-
-
-
-!end subroutine interactive_force
-
-! ##############################################################################
 
 subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, axn, ayn, bxn, byn, Runge_not_Verlet, debug_flag) !Saving  acceleration for Verlet, Adding Verlet flag - Alon
 !subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, debug_flag) !old version commmented out by Alon
@@ -266,7 +296,7 @@ real :: lambda, detA, A11, A12, RHS_x, RHS_y, D_hi
 real :: uveln, vveln, us, vs, speed, loc_dx, new_speed
 real :: u_star, v_star    !Added by Alon
 real :: IA_x, IA_y    !Added by Alon
-real :: P_11, P_12, P_21, P_22, P_time_u_x, P_times_u_y    !Added by Alon
+real :: P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y    !Added by Alon
 logical :: dumpit
 logical, intent(in) :: Runge_not_Verlet  ! Flag to specify whether it is Runge-Kutta or Verlet
 integer :: itloop
@@ -302,11 +332,8 @@ integer :: stderrunit
   byn=0.
 
 ! Interactive spring acceleration - Note: It should be possible to move this to evolve, so that it only needs to be called once. !!!!
-  call Interactive_force(bergs,berg,IA_x, IA_y) ! Spring forces, Made by Alon.
-
-!IA_x=0.
-!IA_y=0.
-
+!P_ia_11=0. ; P_ia_12=0.  ; P_ia_21=0.  ; P_ia22=0.  ; P_times_u_x=0.   P_times_u_y=0. ; IA_x=0.  ;  IA_y=0.
+call Interactive_force(bergs, berg, IA_x, IA_y, uvel0, vvel0, uvel0, vvel0, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y) ! Spring forces, Made by Alon.
 
   hi=min(hi,D)
   D_hi=max(0.,D-hi)
@@ -374,7 +401,9 @@ integer :: stderrunit
     drag_atm=c_atm*0.5*(sqrt( (us-ua)**2+(vs-va)**2 )+sqrt( (uvel0-ua)**2+(vvel0-va)**2 ))
     drag_ice=c_ice*0.5*(sqrt( (us-ui)**2+(vs-vi)**2 )+sqrt( (uvel0-ui)**2+(vvel0-vi)**2 ))
 
-!    call Interactive_damping(bergs,berg, P_11, P_12, P_21, P_22, P_times_u_x, P_times_u_y) ! Damping forces, Made by Alon.
+    if (itloop>1) then
+        call Interactive_force(bergs, berg, IA_x, IA_y, us, vs, uvel0, vvel0, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y) ! Spring forces, Made by Alon.
+    endif
 
      RHS_x=(axn/2) + bxn
      RHS_y=(ayn/2) + byn
