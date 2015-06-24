@@ -303,8 +303,8 @@ logical :: Runge_not_Verlet  ! Flag to specify whether it is Runge-Kutta or Verl
 integer :: itloop
 integer :: stderrunit
 
-interactive_icebergs_on=.true.
 Runge_not_Verlet=bergs%Runge_not_Verlet  ! Loading directly from namelist/default , Alon
+interactive_icebergs_on=bergs%interactive_icebergs_on  ! Loading directly from namelist/default , Alon
 
 !print *, 'axn=',axn,'ayn=',ayn
   u_star=uvel0+(axn*(dt/2.))  !Alon

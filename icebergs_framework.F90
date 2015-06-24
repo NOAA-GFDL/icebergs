@@ -178,6 +178,7 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
   logical :: time_average_weight=.false. ! Time average the weight on the ocean
   logical :: Runge_not_Verlet=.false.  !True=Runge Kuttai, False=Verlet.  - Added by Alon 
+  logical :: interactive_icebergs_on=.false.  !Turn on/off interactions between icebergs  - Added by Alon 
   real :: speed_limit=0. ! CFL speed limit for a berg [m/s]
   real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
   type(buffer), pointer :: obuffer_n=>null(), ibuffer_n=>null()
@@ -268,6 +269,7 @@ logical :: time_average_weight=.false. ! Time average the weight on the ocean
 real :: speed_limit=0. ! CFL speed limit for a berg
 real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
 logical :: Runge_not_Verlet=.false.  !True=Runge Kuttai, False=Verlet.  - Added by Alon 
+logical :: interactive_icebergs_on=.false.  !Turn on/off interactions between icebergs  - Added by Alon 
 logical :: do_unit_tests=.false. ! Conduct some unit tests
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim)
@@ -277,7 +279,7 @@ namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
          distribution, mass_scaling, initial_thickness, verbose_hrs, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, &
-         time_average_weight, generate_test_icebergs, speed_limit, Runge_not_Verlet, fix_restart_dates, use_roundoff_fix, &
+         time_average_weight, generate_test_icebergs, speed_limit, Runge_not_Verlet, interactive_icebergs_on, fix_restart_dates, use_roundoff_fix, &
          old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction
 
 ! Local variables
@@ -511,6 +513,7 @@ integer :: stdlogunit, stderrunit
   bergs%time_average_weight=time_average_weight
   bergs%speed_limit=speed_limit
   bergs%Runge_not_Verlet=Runge_not_Verlet   !Alon
+  bergs%interactive_icebergs_on=interactive_icebergs_on   !Alon
   bergs%grounding_fraction=grounding_fraction
   bergs%add_weight_to_ocean=add_weight_to_ocean
   allocate( bergs%initial_mass(nclasses) ); bergs%initial_mass(:)=initial_mass(:)
