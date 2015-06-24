@@ -126,22 +126,32 @@ real, intent(in) :: u0,v0, u1, v1
 real :: P_11, P_12, P_21, P_22
 real :: u2, v2
 real :: Rearth
-real :: kappa_s, accel_spring, p_ia, p_ia_coef, q_ia
+real :: spring_coef, accel_spring, radial_damping_coef, p_ia_coef, tangental_damping_coef
 real, intent(out) :: IA_x, IA_y 
 real, intent(out) :: P_ia_11, P_ia_12, P_ia_22, P_ia_21, P_ia_times_u_x, P_ia_times_u_y
 integer :: stderrunit
 
 Rearth=6360.e3
-kappa_s=1.e-4
-p_ia=2.*sqrt(kappa_s)  ! Critical damping  
-q_ia=(2.*sqrt(kappa_s)/5)  ! Critical damping  /5   (just a guess)
+!spring_coef=1.e-4
+spring_coef=bergs%spring_coef
+!radial_damping_coef=bergs%radial_damping_coef
+!tangental_damping_coef=bergs%tangental_damping_coef
+
+!Using critical values for damping rather than manually setting the damping.
+radial_damping_coef=2.*sqrt(spring_coef)  ! Critical damping  
+tangental_damping_coef=(2.*sqrt(spring_coef)/5)  ! Critical damping  /5   (just a guess)
+
+!radial_damping_coef=1.e-4
+!tangental_damping_coef=1.e-4
+
+
 
 ! Get the stderr unit number.  Not sure what this does
   stderrunit = stderr()
 
 IA_x=0.
 IA_y=0.
-P_ia_11=0. ; P_ia_12=0.  ;  P_ia_22=0. 
+P_ia_11=0. ; P_ia_12=0. ;  P_ia_21=0.;  P_ia_22=0. 
 P_ia_times_u_x=0. ; P_ia_times_u_y=0.
 
 
@@ -172,43 +182,46 @@ call rotpos_to_tang(lon1,lat1,x1,y1)
       T_min=min(T1,T2)
 
       !Calculating spring force  (later this should only be done on the first time around)
-      accel_spring=kappa_s*(T_min/T1)*(A_o/A1)
-      if ((r_dist>0) .AND. (r_dist< (R1+R2)) ) then
-          IA_x=IA_x+(accel_spring*(r_dist_x/r_dist))
-          IA_y=IA_y+(accel_spring*(r_dist_y/r_dist))
-      endif
+      accel_spring=spring_coef*(T_min/T1)*(A_o/A1)
+      if ((r_dist>0.) .AND. (r_dist< (R1+R2)) ) then
+        IA_x=IA_x+(accel_spring*(r_dist_x/r_dist))
+        IA_y=IA_y+(accel_spring*(r_dist_y/r_dist))
 
 
-      !Working out the damping
+       !Working out the damping
 
        !Paralel velocity
-       P_11=(r_dist_x*r_dist_x)/(r_dist**2)
-       P_12=(r_dist_x*r_dist_y)/(r_dist**2)
-       P_22=(r_dist_y*r_dist_y)/(r_dist**2)
-     
-       p_ia_coef=p_ia*(T_min/T1)*(A_o/A1)
-       p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2))+sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
+        P_11=(r_dist_x*r_dist_x)/(r_dist**2)
+        P_12=(r_dist_x*r_dist_y)/(r_dist**2)
+        P_21=(r_dist_x*r_dist_y)/(r_dist**2)
+        P_22=(r_dist_y*r_dist_y)/(r_dist**2)
+        p_ia_coef=radial_damping_coef*(T_min/T1)*(A_o/A1)
+        p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2))+sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
+        P_ia_11=P_ia_11+p_ia_coef*P_11
+        P_ia_12=P_ia_12+p_ia_coef*P_12
+        P_ia_21=P_ia_21+p_ia_coef*P_21
+        P_ia_22=P_ia_22+p_ia_coef*P_22
+        P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
+        P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
 
-       P_ia_11=P_ia_11+p_ia_coef*P_11
-       P_ia_12=P_ia_12+p_ia_coef*P_12
-       P_ia_21=P_ia_21+p_ia_coef*P_21
-       P_ia_22=P_ia_22+p_ia_coef*P_22
-       P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
-       P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
 
+        !Normal velocities
+        P_11=1-P_11  ;  P_12=-P_12 ; P_22=1-P_22
+        p_ia_coef=tangental_damping_coef*(T_min/T1)*(A_o/A1)
+        p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2))+sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
+        P_ia_11=P_ia_11+p_ia_coef*P_11
+        P_ia_12=P_ia_12+p_ia_coef*P_12
+        P_ia_21=P_ia_21+p_ia_coef*P_21
+        P_ia_22=P_ia_22+p_ia_coef*P_22
+        P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
+        P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
 
-       !Normal velocities
-       P_11=1-P_11  ;  P_12=-P_12 ; P_22=1-P_22
-       p_ia_coef=q_ia*(T_min/T1)*(A_o/A1)
-       p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2))+sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
+!print *, 'P_11',P_11
+!print *, 'P_21',P_21
+!print *, 'P_12',P_12
+!print *, 'P_22',P_22
 
-       P_ia_11=P_ia_11+p_ia_coef*P_11
-       P_ia_12=P_ia_12+p_ia_coef*P_12
-       P_ia_21=P_ia_21+p_ia_coef*P_21
-       P_ia_22=P_ia_22+p_ia_coef*P_22
-       P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
-       P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
-
+    endif
 
        other_berg=>other_berg%next
   enddo ! loop over all bergs
@@ -225,7 +238,7 @@ call rotpos_to_tang(lon1,lat1,x1,y1)
         d_sq=d**2
         Trapped=0.
 
-if (d>0) then
+if (d>0.) then
         if (d<(R1+R2)) then
              if (d>abs(R1-R2)) then
                   A= (R1_sq*acos((d_sq+R1_sq-R2_sq)/(2.*d*R1)))  +  (R2_sq*acos((d_sq+R2_sq-R1_sq)/(2.*d*R2)))  - (0.5*sqrt((-d+R1+R2)*(d+R1-R2)*(d-R1+R2)*(d+R1+R2)))
@@ -292,7 +305,7 @@ real :: drag_ocn, drag_atm, drag_ice, wave_rad
 real :: c_ocn, c_atm, c_ice
 real :: ampl, wmod, Cr, Lwavelength, Lcutoff, Ltop
 real, parameter :: alpha=1.0, beta=1.0, C_N=1.0, accel_lim=1.e-2, Cr0=0.06, vel_lim=15.
-real :: lambda, detA, A11, A12, RHS_x, RHS_y, D_hi 
+real :: lambda, detA, A11, A12, A21, A22, RHS_x, RHS_y, D_hi 
 real :: uveln, vveln, us, vs, speed, loc_dx, new_speed
 real :: u_star, v_star    !Added by Alon
 real :: IA_x, IA_y    !Added by Alon
@@ -390,6 +403,11 @@ if (interactive_icebergs_on) then
                bxn=bxn + IA_x
                byn=byn + IA_y
            endif
+!print *,'IA_x=',IA_x
+!print *,'IA_x=',IA_x,'IA_y',IA_y
+!print *,'P_ia_11',P_ia_11,'P_ia_12',P_ia_12, 'P_ia_21',P_ia_21,'P_ia_22', P_ia_22
+!print *, 'P_ia_times_u_x', P_ia_times_u_x, 'P_ia_times_u_y', P_ia_times_u_y
+
 endif
 
 
@@ -446,14 +464,31 @@ endif
     if (alpha+beta.gt.0.) then
       lambda=drag_ocn+drag_atm+drag_ice
       A11=1.+dt*lambda
-      A12=dt*f_cori  
+      A22=1.+dt*lambda
+      A12=-dt*f_cori  
+      A21=dt*f_cori  
+      !A12=dt*f_cori  !Removed by ALon (in order to have the entire matrix. I hope the sign is correct)
+
       if (C_N>0.) then   !For Crank-Nicolson Coriolis term.   
           A12=A12/2.
+          A21=A21/2.
       endif
 
-      detA=1./(A11**2+A12**2)
-      ax=detA*(A11*RHS_x+A12*RHS_y)
-      ay=detA*(A11*RHS_y-A12*RHS_x)
+      if (interactive_icebergs_on) then
+            A11=A11+P_ia_11
+            A12=A12+P_ia_12
+            A21=A21+P_ia_21
+            A22=A22+P_ia_22
+     endif
+
+      detA=1./((A11*A22)-(A12*A21))
+      ax=detA*(A22*RHS_x-A12*RHS_y)
+      ay=detA*(A11*RHS_y-A21*RHS_x)
+
+!Alistair's version removed by Alon
+!      detA=1./(A11**2+A12**2)
+!      ax=detA*(A11*RHS_x+A12*RHS_y)
+!      ay=detA*(A11*RHS_y-A12*RHS_x)
     else
       ax=RHS_x; ay=RHS_x
     endif

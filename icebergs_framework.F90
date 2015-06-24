@@ -167,6 +167,9 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   integer :: verbose_hrs
   integer :: clock, clock_mom, clock_the, clock_int, clock_cal, clock_com, clock_ini, clock_ior, clock_iow, clock_dia ! ids for fms timers
   real :: rho_bergs ! Density of icebergs [kg/m^3]
+  real :: spring_coef  ! Spring contant for iceberg interactions - Alon
+  real :: radial_damping_coef     ! Coef for relative iceberg motion damping (radial component) -Alon
+  real :: tangental_damping_coef     ! Coef for relative iceberg motion damping (tangental component) -Alon
   real :: LoW_ratio ! Initial ratio L/W for newly calved icebergs
   real :: bergy_bit_erosion_fraction ! Fraction of erosion melt flux to divert to bergy bits
   real :: sicn_shift ! Shift of sea-ice concentration in erosion flux modulation (0<sicn_shift<1)
@@ -259,6 +262,9 @@ integer :: halo=4 ! Width of halo region
 integer :: traj_sample_hrs=24 ! Period between sampling of position for trajectory storage
 integer :: verbose_hrs=24 ! Period between verbose messages
 real :: rho_bergs=850. ! Density of icebergs
+real :: spring_coef=1.e-4  ! Spring contant for iceberg interactions - Alon
+real :: radial_damping_coef=1.e-4     ! Coef for relative iceberg motion damping (radial component) -Alon
+real :: tangental_damping_coef=2.e-5     ! Coef for relative iceberg motion damping (tangental component) -Alon
 real :: LoW_ratio=1.5 ! Initial ratio L/W for newly calved icebergs
 real :: bergy_bit_erosion_fraction=0. ! Fraction of erosion melt flux to divert to bergy bits
 real :: sicn_shift=0. ! Shift of sea-ice concentration in erosion flux modulation (0<sicn_shift<1)
@@ -276,7 +282,7 @@ real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
 real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
 namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
-         distribution, mass_scaling, initial_thickness, verbose_hrs, &
+         distribution, spring_coef, radial_damping_coef, tangental_damping_coef , mass_scaling, initial_thickness, verbose_hrs, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, &
          time_average_weight, generate_test_icebergs, speed_limit, Runge_not_Verlet, interactive_icebergs_on, fix_restart_dates, use_roundoff_fix, &
@@ -505,6 +511,9 @@ integer :: stdlogunit, stderrunit
   bergs%verbose_hrs=verbose_hrs
   bergs%grd%halo=halo
   bergs%rho_bergs=rho_bergs
+  bergs%spring_coef=spring_coef
+  bergs%radial_damping_coef=radial_damping_coef
+  bergs%tangental_damping_coef=tangental_damping_coef
   bergs%LoW_ratio=LoW_ratio
   bergs%use_operator_splitting=use_operator_splitting
   bergs%bergy_bit_erosion_fraction=bergy_bit_erosion_fraction
