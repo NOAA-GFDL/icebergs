@@ -298,9 +298,12 @@ real :: u_star, v_star    !Added by Alon
 real :: IA_x, IA_y    !Added by Alon
 real :: P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y    !Added by Alon
 logical :: dumpit
+logical :: interactive_icebergs_on  ! Flag to decide whether to use forces between icebergs.
 logical, intent(in) :: Runge_not_Verlet  ! Flag to specify whether it is Runge-Kutta or Verlet
 integer :: itloop
 integer :: stderrunit
+
+interactive_icebergs_on=.true.
 
 !print *, 'axn=',axn,'ayn=',ayn
   u_star=uvel0+(axn*(dt/2.))  !Alon
@@ -330,10 +333,6 @@ integer :: stderrunit
   ayn=0.
   bxn=0.
   byn=0.
-
-! Interactive spring acceleration - Note: It should be possible to move this to evolve, so that it only needs to be called once. !!!!
-!P_ia_11=0. ; P_ia_12=0.  ; P_ia_21=0.  ; P_ia22=0.  ; P_times_u_x=0.   P_times_u_y=0. ; IA_x=0.  ;  IA_y=0.
-call Interactive_force(bergs, berg, IA_x, IA_y, uvel0, vvel0, uvel0, vvel0, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y) ! Spring forces, Made by Alon.
 
   hi=min(hi,D)
   D_hi=max(0.,D-hi)
@@ -371,13 +370,27 @@ call Interactive_force(bergs, berg, IA_x, IA_y, uvel0, vvel0, uvel0, vvel0, P_ia
 
     ! Half half accelerations  - axn, ayn
     if (.not.Runge_not_Verlet) then  
-        axn=-gravity*ssh_x +wave_rad*uwave + IA_x
-        ayn=-gravity*ssh_y +wave_rad*vwave + IA_y
+        axn=-gravity*ssh_x +wave_rad*uwave 
+        ayn=-gravity*ssh_y +wave_rad*vwave 
     else
     ! Not half half accelerations  - for RK
-        bxn=-gravity*ssh_x +wave_rad*uwave + IA_x
-        byn=-gravity*ssh_y +wave_rad*vwave + IA_y
+        bxn=-gravity*ssh_x +wave_rad*uwave 
+        byn=-gravity*ssh_y +wave_rad*vwave 
      endif
+
+
+! Interactive spring acceleration - (Does the spring part need to be called twice?)
+if (interactive_icebergs_on) then
+           call Interactive_force(bergs, berg, IA_x, IA_y, uvel0, vvel0, uvel0, vvel0, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y) ! Spring forces, Made by Alon.
+           if (.not.Runge_not_Verlet) then
+               axn=axn + IA_x
+               ayn=ayn + IA_y
+           else
+               bxn=bxn + IA_x
+               byn=byn + IA_y
+           endif
+endif
+
 
   if (alpha>0.) then ! If implicit Coriolis, use u_star rather than RK4 latest  !Alon
         if (C_N>0.) then !  C_N=1 for Crank Nicolson Coriolis, C_N=0 for full implicit Coriolis !Alon  
@@ -401,20 +414,32 @@ call Interactive_force(bergs, berg, IA_x, IA_y, uvel0, vvel0, uvel0, vvel0, P_ia
     drag_atm=c_atm*0.5*(sqrt( (us-ua)**2+(vs-va)**2 )+sqrt( (uvel0-ua)**2+(vvel0-va)**2 ))
     drag_ice=c_ice*0.5*(sqrt( (us-ui)**2+(vs-vi)**2 )+sqrt( (uvel0-ui)**2+(vvel0-vi)**2 ))
 
-    if (itloop>1) then
-        call Interactive_force(bergs, berg, IA_x, IA_y, us, vs, uvel0, vvel0, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y) ! Spring forces, Made by Alon.
-    endif
-
      RHS_x=(axn/2) + bxn
      RHS_y=(ayn/2) + byn
 
      if (beta>0.) then ! If implicit, use u_star, v_star rather than RK4 latest
-         RHS_x=RHS_x - drag_ocn*(u_star-uo) -drag_atm*(u_star-ua) -drag_ice*(u_star-ui)
-         RHS_y=RHS_y - drag_ocn*(v_star-vo) -drag_atm*(v_star-va) -drag_ice*(v_star-vi)
+         RHS_x=RHS_x - drag_ocn*(u_star-uo) -drag_atm*(u_star-ua) -drag_ice*(u_star-ui) 
+         RHS_y=RHS_y - drag_ocn*(v_star-vo) -drag_atm*(v_star-va) -drag_ice*(v_star-vi)  
     else
-         RHS_x=RHS_x - drag_ocn*(uvel-uo) -drag_atm*(uvel-ua) -drag_ice*(uvel-ui)
-         RHS_y=RHS_y - drag_ocn*(vvel-vo) -drag_atm*(vvel-va) -drag_ice*(vvel-vi)
+         RHS_x=RHS_x - drag_ocn*(uvel-uo) -drag_atm*(uvel-ua) -drag_ice*(uvel-ui)  
+         RHS_y=RHS_y - drag_ocn*(vvel-vo) -drag_atm*(vvel-va) -drag_ice*(vvel-vi)  
     endif
+
+if (interactive_icebergs_on) then
+   if (itloop>1) then
+        call Interactive_force(bergs, berg, IA_x, IA_y, us, vs, uvel0, vvel0, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y) ! Spring forces, Made by Alon.
+    endif
+     if (beta>0.) then ! If implicit, use u_star, v_star rather than RK4 latest
+         RHS_x=RHS_x -(((P_ia_11*u_star)+(P_ia_12*v_star))-P_ia_times_u_x) 
+         RHS_y=RHS_y -(((P_ia_21*u_star)+(P_ia_22*v_star))-P_ia_times_u_y) 
+    else
+         RHS_x=RHS_x - (((P_ia_11*uvel)+(P_ia_12*vvel))-P_ia_times_u_x)
+         RHS_y=RHS_y - (((P_ia_21*uvel)+(P_ia_22*vvel))-P_ia_times_u_y)       
+    endif
+endif
+
+
+
 
   ! Solve for implicit accelerations
     if (alpha+beta.gt.0.) then
