@@ -126,6 +126,7 @@ real, intent(in) :: u0,v0, u1, v1
 real :: P_11, P_12, P_21, P_22
 real :: u2, v2
 real :: Rearth
+logical :: critical_interaction_damping_on
 real :: spring_coef, accel_spring, radial_damping_coef, p_ia_coef, tangental_damping_coef
 real, intent(out) :: IA_x, IA_y 
 real, intent(out) :: P_ia_11, P_ia_12, P_ia_22, P_ia_21, P_ia_times_u_x, P_ia_times_u_y
@@ -134,16 +135,15 @@ integer :: stderrunit
 Rearth=6360.e3
 !spring_coef=1.e-4
 spring_coef=bergs%spring_coef
-!radial_damping_coef=bergs%radial_damping_coef
-!tangental_damping_coef=bergs%tangental_damping_coef
+radial_damping_coef=bergs%radial_damping_coef
+tangental_damping_coef=bergs%tangental_damping_coef
+critical_interaction_damping_on=bergs%critical_interaction_damping_on
 
 !Using critical values for damping rather than manually setting the damping.
-radial_damping_coef=2.*sqrt(spring_coef)  ! Critical damping  
-tangental_damping_coef=(2.*sqrt(spring_coef)/5)  ! Critical damping  /5   (just a guess)
-
-!radial_damping_coef=1.e-4
-!tangental_damping_coef=1.e-4
-
+if (critical_interaction_damping_on) then
+     radial_damping_coef=2.*sqrt(spring_coef)  ! Critical damping  
+     tangental_damping_coef=(2.*sqrt(spring_coef)/5)  ! Critical damping  /5   (just a guess)
+endif
 
 
 ! Get the stderr unit number.  Not sure what this does
@@ -164,7 +164,10 @@ lon1=berg%lon; lat1=berg%lat
 call rotpos_to_tang(lon1,lat1,x1,y1)
 
   other_berg=>bergs%first
-  do while (associated(other_berg)) ! loop over all other bergs    - Need to think about which icebergs to loop over
+
+!Note: This summing should be made order invarient. 
+!Note: Need to limit how many icebergs we search over
+  do while (associated(other_berg)) ! loop over all other bergs  
        L2=other_berg%length
        W2=other_berg%width
        T2=other_berg%thickness 
