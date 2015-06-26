@@ -39,12 +39,14 @@ integer, parameter :: delta_buf=25 ! Size by which to increment buffers
 real, parameter :: pi_180=pi/180. ! Converts degrees to radians
 logical :: fix_restart_dates=.true. ! After a restart, check that bergs were created before the current model date
 logical :: do_unit_tests=.false. ! Conduct some unit tests
+logical :: force_all_pes_traj=.false. ! Force all pes write trajectory files regardless of io_layout
+logical :: reverse_traj=.false. ! Force trajectories to be written in reverse order into files to save time
 
 !Public params !Niki: write a subroutine to expose these
 public nclasses,buffer_width,buffer_width_traj
 public verbose, really_debug, debug, restart_input_dir,make_calving_reproduce,old_bug_bilin,use_roundoff_fix
 public ignore_ij_restart, use_slow_find,generate_test_icebergs,old_bug_rotated_weights,budget
-public orig_read
+public orig_read, force_all_pes_traj, reverse_traj
 
 
 !Public types
@@ -165,6 +167,7 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   integer :: traj_sample_hrs
   integer :: verbose_hrs
   integer :: clock, clock_mom, clock_the, clock_int, clock_cal, clock_com, clock_ini, clock_ior, clock_iow, clock_dia ! ids for fms timers
+  integer :: clock_trw, clock_trp
   real :: rho_bergs ! Density of icebergs [kg/m^3]
   real :: LoW_ratio ! Initial ratio L/W for newly calved icebergs
   real :: bergy_bit_erosion_fraction ! Fraction of erosion melt flux to divert to bergy bits
@@ -275,7 +278,8 @@ namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, &
          time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, &
-         old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction
+         old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction,&
+         force_all_pes_traj, reverse_traj
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -324,6 +328,7 @@ integer :: stdlogunit, stderrunit
   bergs%clock_ior=mpp_clock_id( 'Icebergs-I/O read', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
   bergs%clock_iow=mpp_clock_id( 'Icebergs-I/O write', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
   bergs%clock_dia=mpp_clock_id( 'Icebergs-diagnostics', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+
   call mpp_clock_begin(bergs%clock)
   call mpp_clock_begin(bergs%clock_ini)
 

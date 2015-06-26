@@ -16,6 +16,10 @@ use fms_io_mod, only : save_restart, restart_file_type, free_restart_type, set_m
 use fms_io_mod, only : register_restart_axis, register_restart_field, set_domain, nullify_domain
 use fms_io_mod, only : read_unlimited_axis =>read_compressed, field_exist, get_field_size
 
+use mpp_mod,    only : mpp_clock_begin, mpp_clock_end, mpp_clock_id
+use mpp_mod,    only : CLOCK_COMPONENT, CLOCK_SUBCOMPONENT, CLOCK_LOOP
+use fms_mod,    only : clock_flag_default
+
 use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 
 use ice_bergs_framework, only: icebergs_gridded, xyt, iceberg, icebergs, buffer
@@ -30,7 +34,7 @@ use ice_bergs_framework, only: sum_mass,sum_heat,bilin
 use ice_bergs_framework, only: nclasses, buffer_width, buffer_width_traj
 use ice_bergs_framework, only: verbose, really_debug, debug, restart_input_dir,make_calving_reproduce
 use ice_bergs_framework, only: ignore_ij_restart, use_slow_find,generate_test_icebergs,print_berg
-use ice_bergs_framework, only: reverse_list
+use ice_bergs_framework, only: reverse_list, force_all_pes_traj, reverse_traj
 
 implicit none ; private
 
@@ -48,6 +52,8 @@ type(domain2d), pointer, save :: io_domain=>NULL()
 integer, save :: io_tile_id(1), io_tile_root_pe, io_npes
 integer, allocatable,save :: io_tile_pelist(:)
 logical :: is_io_tile_root_pe = .true.
+
+integer :: clock_trw,clock_trp
 
 #ifdef _FILE_VERSION
   character(len=128) :: version = _FILE_VERSION
@@ -81,6 +87,9 @@ integer :: stdlogunit, stderrunit
      call mpp_get_tile_pelist(io_domain,io_tile_pelist)
      io_npes = io_layout(1)*io_layout(2)
   endif
+
+  clock_trw=mpp_clock_id( 'Icebergs-traj write', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+  clock_trp=mpp_clock_id( 'Icebergs-traj prepare', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
 
 end subroutine ice_bergs_io_init
 
@@ -839,9 +848,10 @@ type(buffer), pointer :: obuffer_io=>null(), ibuffer_io=>null()
   stderrunit=stderr()
 
   !Assemble the list of trajectories from all pes in this I/O tile
+  call mpp_clock_begin(clock_trp)
 
   !First add the trajs on the io_tile_root_pe (if any) to the I/O list
-  if(is_io_tile_root_pe) then
+  if(is_io_tile_root_pe .OR. force_all_pes_traj ) then
      if(associated(trajectory)) then
         this=>trajectory
         do while (associated(this))
@@ -851,10 +861,11 @@ type(buffer), pointer :: obuffer_io=>null(), ibuffer_io=>null()
      endif
   endif
 
+  if(.NOT. force_all_pes_traj ) then
+
   !Now gather and append the bergs from all pes in the io_tile to the list on corresponding io_tile_root_pe
   ntrajs_sent_io =0
   ntrajs_rcvd_io =0 
-
 
   if(is_io_tile_root_pe) then
      !Receive trajs from all pes in this I/O tile !FRAGILE!SCARY!
@@ -869,7 +880,7 @@ type(buffer), pointer :: obuffer_io=>null(), ibuffer_io=>null()
            enddo
        endif
      enddo
-     call reverse_list(traj4io)
+!     if(.NOT. reverse_traj .AND. associated(traj4io)) call reverse_list(traj4io)
   else
      !Pack and Send trajs to the root pe for this I/O tile
      if (associated(trajectory)) then
@@ -888,14 +899,25 @@ type(buffer), pointer :: obuffer_io=>null(), ibuffer_io=>null()
      endif
   endif
 
+  endif !.NOT. force_all_pes_traj
+
+  !Here traj4io has all the trajectories in completely reverse order (last position of the last berg first)
+  !If a correct order is prefered in the trajectory file then reverse the linked list
+  !This may increase the the termination time of the model by a lot!!!
+  if(is_io_tile_root_pe .OR. force_all_pes_traj ) then
+    if(.NOT. reverse_traj .AND. associated(traj4io)) call reverse_list(traj4io)
+  endif
+
+  call mpp_clock_end(clock_trp)
 
 
   !Now start writing in the io_tile_root_pe if there are any bergs in the I/O list
+  call mpp_clock_begin(clock_trw)
 
-  if(is_io_tile_root_pe .AND. associated(traj4io)) then
+  if((force_all_pes_traj .OR. is_io_tile_root_pe) .AND. associated(traj4io)) then
  
   call get_instance_filename("iceberg_trajectories.nc", filename)
-    if(io_tile_id(1) .ge. 0) then !io_tile_root_pes write
+    if(io_tile_id(1) .ge. 0 .AND. .NOT. force_all_pes_traj) then !io_tile_root_pes write
        if(io_npes .gt. 1) then !attach tile_id  to filename only if there is more than one I/O pe
           if (io_tile_id(1)<10000) then
              write(filename,'(A,".",I4.4)') trim(filename), io_tile_id(1) 
@@ -1034,6 +1056,7 @@ type(buffer), pointer :: obuffer_io=>null(), ibuffer_io=>null()
   if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_close failed',mpp_pe(),filename
 
   endif !(is_io_tile_root_pe .AND. associated(traj4io))
+  call mpp_clock_end(clock_trw)
 
 end subroutine write_trajectory
 
