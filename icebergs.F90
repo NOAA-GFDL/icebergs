@@ -171,11 +171,11 @@ call rotpos_to_tang(lon1,lat1,x1,y1)
        L2=other_berg%length
        W2=other_berg%width
        T2=other_berg%thickness 
-       u2=other_berg%uvel 
-       v2=other_berg%vvel 
+       u2=other_berg%uvel_old !Old values are used to make it order invariant 
+       v2=other_berg%vvel_old !Old values are used to make it order invariant 
        A2=L2*W2
        R2=sqrt(A2/pi) ! Interaction radius of the other iceberg
-       lon2=berg%lon; lat2=berg%lat
+       lon2=berg%lon_old; lat2=berg%lat_old !Old values are used to make it order invariant
        call rotpos_to_tang(lon2,lat2,x2,y2)
 
        r_dist_x=x1-x2 ; r_dist_y=y1-y2
@@ -1793,6 +1793,7 @@ logical :: bounced, on_tangential_plane, error_flag
 logical :: Runge_not_Verlet  ! Runge_not_Verlet=1 for Runge Kutta, =0 for Verlet method. Added by Alon
 type(iceberg), pointer :: berg
 integer :: stderrunit
+logical :: interactive_icebergs_on  ! Flag to decide whether to use forces between icebergs.
 
   ! 4th order Runge-Kutta to solve:
   !    d/dt X = V,  d/dt V = A
@@ -1812,6 +1813,8 @@ integer :: stderrunit
 
   ! For convenience
   grd=>bergs%grd
+
+  interactive_icebergs_on=bergs%interactive_icebergs_on  ! Loading directly from namelist/default , Alon
 
   ! Common constants
   r180_pi=1./pi_180
@@ -2161,6 +2164,8 @@ lon1=berg%lon; lat1=berg%lat
   axn=berg%axn; ayn=berg%ayn !Alon
   bxn=berg%bxn; byn=berg%byn !Alon
 
+
+
 ! Velocities used to update the position
   uvel2=uvel1+(dt_2*axn)+(dt_2*bxn)                    !Alon
   vvel2=vvel1+(dt_2*ayn)+(dt_2*byn)                    !Alon
@@ -2262,27 +2267,43 @@ if (on_tangential_plane) call rotvec_to_tang(lon1,uvel2,vvel2,xdot2,ydot2)
   endif ! End of the Verlet Stepiing -added by Alon  
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-!print *, 'you are here again!';
-  berg%lon=lonn
-  berg%lat=latn
-  berg%uvel=uveln
-  berg%vvel=vveln
+!Saving all the iceberg variables.
   berg%axn=axn !Alon
   berg%ayn=ayn !Alon
   berg%bxn=bxn !Alon
   berg%byn=byn !Alon
+  berg%lon=lonn
+  berg%lat=latn
+  berg%uvel=uveln
+  berg%vvel=vveln
   berg%ine=i
   berg%jne=j
   berg%xi=xi
   berg%yj=yj
- !call interp_flds(grd, i, j, xi, yj, berg%uo, berg%vo, berg%ui, berg%vi, berg%ua, berg%va, berg%ssh_x, berg%ssh_y, berg%sst)
-
- !if (debug) call print_berg(stderr(), berg, 'evolve_iceberg, final posn.')
+  !call interp_flds(grd, i, j, xi, yj, berg%uo, berg%vo, berg%ui, berg%vi, berg%ua, berg%va, berg%ssh_x, berg%ssh_y, berg%sst)
+  !if (debug) call print_berg(stderr(), berg, 'evolve_iceberg, final posn.')
   if (debug) call check_position(grd, berg, 'evolve_iceberg (bot)')
+
 
   berg=>berg%next
   enddo ! loop over all bergs
 
+! When we are using interactive icebergs, we update the (old) iceberg positions and velocities in a second loop, all together (to make code order invarient)
+ if (interactive_icebergs_on) then
+  berg=>bergs%first
+  do while (associated(berg)) ! loop over all bergs
+
+      !Updating iceberg positions and velocities
+      berg%lon_old=berg%lon
+      berg%lat_old=berg%lat
+      berg%uvel_old=berg%uvel
+      berg%vvel_old=berg%vvel
+
+      berg=>berg%next
+  enddo ! loop over all bergs
+
+
+ endif
   contains
 
   subroutine rotpos_to_tang(lon, lat, x, y)
