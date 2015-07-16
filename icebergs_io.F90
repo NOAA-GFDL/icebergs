@@ -910,7 +910,6 @@ logical :: io_is_in_append_mode
           write(filename,'(A,".",I6.6)') trim(filename), mpp_pe() 
        endif
     endif
-  if (verbose) write(*,'(2a)') 'diamonds, write_trajectory: creating ',filename
 
   io_is_in_append_mode = .false.
   iret = nf_create(filename, NF_NOCLOBBER, ncid)
@@ -918,6 +917,13 @@ logical :: io_is_in_append_mode
     iret = nf_open(filename, NF_WRITE, ncid)
     io_is_in_append_mode = .true.
     if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_open failed'
+  endif
+  if (verbose) then
+    if (io_is_in_append_mode) then
+      write(*,'(2a)') 'diamonds, write_trajectory: appending to ',filename
+    else
+      write(*,'(2a)') 'diamonds, write_trajectory: creating ',filename
+    endif
   endif
 
   if (io_is_in_append_mode) then
