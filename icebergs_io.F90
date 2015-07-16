@@ -829,7 +829,7 @@ type(xyt), pointer :: this, next
 integer :: stderrunit
 
 !I/O vars
-type(xyt), pointer :: traj4io=>NULL()
+type(xyt), pointer :: traj4io=>null()
 integer :: ntrajs_sent_io,ntrajs_rcvd_io
 integer :: from_pe,np
 type(buffer), pointer :: obuffer_io=>null(), ibuffer_io=>null()
@@ -837,6 +837,9 @@ logical :: io_is_in_append_mode
 
   ! Get the stderr unit number
   stderrunit=stderr()
+  traj4io=>null()
+  obuffer_io=>null()
+  ibuffer_io=>null()
 
   !Assemble the list of trajectories from all pes in this I/O tile
 
