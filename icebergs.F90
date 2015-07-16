@@ -29,7 +29,7 @@ use ice_bergs_framework, only: find_cell,find_cell_by_search,count_bergs,is_poin
 use ice_bergs_framework, only: nclasses,old_bug_bilin
 use ice_bergs_framework, only: sum_mass,sum_heat,bilin,yearday,count_bergs,bergs_chksum
 use ice_bergs_framework, only: checksum_gridded,add_new_berg_to_list
-use ice_bergs_framework, only: send_bergs_to_other_pes,move_trajectory
+use ice_bergs_framework, only: send_bergs_to_other_pes,move_trajectory,move_all_trajectories
 use ice_bergs_framework, only: record_posn,check_position,print_berg,print_bergs,print_fld
 use ice_bergs_framework, only: add_new_berg_to_list,delete_iceberg_from_list,destroy_iceberg
 use ice_bergs_framework, only: grd_chksum2,grd_chksum3
@@ -762,7 +762,7 @@ integer,    optional, intent(in) :: stagger, stress_stagger
 ! Local variables
 integer :: iyr, imon, iday, ihr, imin, isec, k
 type(icebergs_gridded), pointer :: grd
-logical :: lerr, sample_traj, lbudget, lverbose
+logical :: lerr, sample_traj, write_traj, lbudget, lverbose
 real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
 integer :: i, j, Iu, ju, iv, Jv, Iu_off, ju_off, iv_off, Jv_off
 real :: mask
@@ -803,6 +803,10 @@ integer :: stderrunit
   sample_traj=.false.
   if (bergs%traj_sample_hrs>0) then
      if (mod(24*iday+ihr,bergs%traj_sample_hrs).eq.0) sample_traj=.true.
+  end if
+  write_traj=.false.
+  if (bergs%traj_write_hrs>0) then
+     if (mod(24*iday+ihr,bergs%traj_write_hrs).eq.0) write_traj=.true.
   end if
   lverbose=.false.
   if (bergs%verbose_hrs>0) then
@@ -961,6 +965,10 @@ integer :: stderrunit
   ! For each berg, record
   call mpp_clock_begin(bergs%clock_dia)
   if (sample_traj.and.associated(bergs%first)) call record_posn(bergs)
+  if (write_traj) then
+    call move_all_trajectories(bergs)
+    call write_trajectory(bergs%trajectories)
+  endif
 
   ! Gridded diagnostics
   if (grd%id_uo>0) &
@@ -2172,13 +2180,7 @@ type(iceberg), pointer :: this, next
 
   call mpp_clock_begin(bergs%clock_ini)
   ! Delete bergs and structures
-  this=>bergs%first
-  do while (associated(this))
-    next=>this%next
-    call move_trajectory(bergs, this)
-    call destroy_iceberg(this)
-    this=>next
-  enddo
+  call move_all_trajectories(bergs, delete_bergs=.true.)
 
   call write_trajectory(bergs%trajectories)
 
