@@ -848,6 +848,7 @@ logical :: io_is_in_append_mode
            call append_posn(traj4io, this)
            this=>this%next
         enddo
+        trajectory => null()
      endif
   endif
 
@@ -869,16 +870,14 @@ logical :: io_is_in_append_mode
        endif
      enddo
   else
-     !Pack and Send trajs to the root pe for this I/O tile
-     if (associated(trajectory)) then
-        this=>trajectory
-        do while (associated(this))
-           ntrajs_sent_io = ntrajs_sent_io +1
-           call pack_traj_into_buffer2(this, obuffer_io, ntrajs_sent_io)
-
-           this=>this%next
-        enddo
-     endif
+     ! Pack and send trajectories to the root PE for this I/O tile
+     do while (associated(trajectory))
+       ntrajs_sent_io = ntrajs_sent_io +1
+       call pack_traj_into_buffer2(trajectory, obuffer_io, ntrajs_sent_io)
+       this => trajectory ! Need to keep pointer in order to free up the links memory
+       trajectory => trajectory%next ! This will eventually result in trajectory => null()
+       deallocate(this) ! Delete the link from memory
+     enddo
         
      call mpp_send(ntrajs_sent_io, plen=1, to_pe=io_tile_root_pe, tag=COMM_TAG_11)
      if (ntrajs_sent_io .gt. 0) then
@@ -1064,8 +1063,7 @@ logical :: io_is_in_append_mode
     deallocate(this)
     this=>next
   enddo
-  trajectory=>null()
-       
+
   ! Finish up
   iret = nf_close(ncid)
   if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_close failed',mpp_pe(),filename
