@@ -59,7 +59,7 @@ public increase_buffer, increase_ibuffer, increase_ibuffer_traj, increase_buffer
 public add_new_berg_to_list, count_out_of_order, check_for_duplicates
 public insert_berg_into_list, create_iceberg, delete_iceberg_from_list, destroy_iceberg
 public print_fld,print_berg, print_bergs,record_posn, push_posn, append_posn, check_position
-public move_trajectory
+public move_trajectory, move_all_trajectories
 public find_cell,find_cell_by_search,count_bergs,is_point_in_cell,pos_within_cell
 public sum_mass,sum_heat,bilin,yearday,bergs_chksum
 public checksum_gridded
@@ -163,7 +163,7 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   real :: dt           ! Time-step between iceberg calls (should make adaptive?)
   integer :: current_year
   real :: current_yearday ! 1.00-365.99
-  integer :: traj_sample_hrs
+  integer :: traj_sample_hrs, traj_write_hrs
   integer :: verbose_hrs
   integer :: clock, clock_mom, clock_the, clock_int, clock_cal, clock_com, clock_ini, clock_ior, clock_iow, clock_dia ! ids for fms timers
   real :: rho_bergs ! Density of icebergs [kg/m^3]
@@ -256,6 +256,7 @@ logical, intent(in), optional :: fractional_area
 ! Namelist parameters (and defaults)
 integer :: halo=4 ! Width of halo region
 integer :: traj_sample_hrs=24 ! Period between sampling of position for trajectory storage
+integer :: traj_write_hrs=480 ! Period between writing sampled trajectories to disk
 integer :: verbose_hrs=24 ! Period between verbose messages
 real :: rho_bergs=850. ! Density of icebergs
 real :: LoW_ratio=1.5 ! Initial ratio L/W for newly calved icebergs
@@ -269,16 +270,17 @@ real :: speed_limit=0. ! CFL speed limit for a berg
 real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
 logical :: Runge_not_Verlet=.false.  !True=Runge Kuttai, False=Verlet.  - Added by Alon 
 logical :: do_unit_tests=.false. ! Conduct some unit tests
+logical :: input_freq_distribution=.false. ! Alon: flag to show if input distribution is freq or mass dist (=1 if input is a freq dist, =0 to use an input mass dist)
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
-real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim)
+real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim) , 
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
 real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
-namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, &
+namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, traj_write_hrs, initial_mass, &
          distribution, mass_scaling, initial_thickness, verbose_hrs, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, &
-         time_average_weight, generate_test_icebergs, speed_limit, Runge_not_Verlet, fix_restart_dates, use_roundoff_fix, &
-         old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction
+         time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, &
+         old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -286,6 +288,7 @@ type(icebergs_gridded), pointer :: grd
 real :: minl
 logical :: lerr
 integer :: stdlogunit, stderrunit
+real :: Total_mass  !Added by Alon 
 
   ! Get the stderr and stdlog unit numbers
   stderrunit=stderr()
@@ -497,9 +500,25 @@ integer :: stdlogunit, stderrunit
  !endif
 
 
+!Added by Alon  - If a freq distribution is input, we have to convert the freq distribution to a mass flux distribution)
+if (input_freq_distribution) then
+     Total_mass=0.
+     do j=1,nclasses
+          Total_mass=Total_mass+(distribution(j)*initial_mass(j))
+     enddo
+     do j=1,nclasses
+           distribution(j)=(distribution(j)*initial_mass(j))/Total_mass
+     enddo
+endif 
+
+
+
+
+>>>>>>> dev/master
  ! Parameters
   bergs%dt=dt
   bergs%traj_sample_hrs=traj_sample_hrs
+  bergs%traj_write_hrs=traj_write_hrs
   bergs%verbose_hrs=verbose_hrs
   bergs%grd%halo=halo
   bergs%rho_bergs=rho_bergs
@@ -1736,6 +1755,28 @@ type(xyt) :: vals
   berg%trajectory=>null()
 
 end subroutine move_trajectory
+
+! ##############################################################################
+
+subroutine move_all_trajectories(bergs, delete_bergs)
+! Arguments
+type(icebergs),    pointer    :: bergs
+logical, optional, intent(in) :: delete_bergs
+! Local variables
+type(iceberg), pointer :: this, next
+logical :: delete_bergs_after_moving_traj
+
+  delete_bergs_after_moving_traj = .false.
+  if (present(delete_bergs)) delete_bergs_after_moving_traj = delete_bergs
+  this=>bergs%first
+  do while (associated(this))
+    next=>this%next
+    call move_trajectory(bergs, this)
+ !  if (delete_bergs_after_moving_traj) call destroy_iceberg(this)
+    this=>next
+  enddo
+
+end subroutine move_all_trajectories
 
 ! ##############################################################################
 
