@@ -512,9 +512,6 @@ if (input_freq_distribution) then
 endif 
 
 
-
-
->>>>>>> dev/master
  ! Parameters
   bergs%dt=dt
   bergs%traj_sample_hrs=traj_sample_hrs
