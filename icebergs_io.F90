@@ -34,7 +34,7 @@ use ice_bergs_framework, only: sum_mass,sum_heat,bilin
 use ice_bergs_framework, only: nclasses, buffer_width, buffer_width_traj
 use ice_bergs_framework, only: verbose, really_debug, debug, restart_input_dir,make_calving_reproduce
 use ice_bergs_framework, only: ignore_ij_restart, use_slow_find,generate_test_icebergs,print_berg
-use ice_bergs_framework, only: reverse_list, force_all_pes_traj, reverse_traj
+use ice_bergs_framework, only: force_all_pes_traj
 
 implicit none ; private
 
@@ -885,7 +885,6 @@ logical :: io_is_in_append_mode
            enddo
        endif
      enddo
-!     if(.NOT. reverse_traj .AND. associated(traj4io)) call reverse_list(traj4io)
   else
      ! Pack and send trajectories to the root PE for this I/O tile
      do while (associated(trajectory))
@@ -904,22 +903,14 @@ logical :: io_is_in_append_mode
 
   endif !.NOT. force_all_pes_traj
 
-  !Here traj4io has all the trajectories in completely reverse order (last position of the last berg first)
-  !If a correct order is prefered in the trajectory file then reverse the linked list
-  !This may increase the the termination time of the model by a lot!!!
-  if(is_io_tile_root_pe .OR. force_all_pes_traj ) then
-    if(.NOT. reverse_traj .AND. associated(traj4io)) call reverse_list(traj4io)
-  endif
-
   call mpp_clock_end(clock_trp)
-
 
   !Now start writing in the io_tile_root_pe if there are any bergs in the I/O list
   call mpp_clock_begin(clock_trw)
 
   if((force_all_pes_traj .OR. is_io_tile_root_pe) .AND. associated(traj4io)) then
  
-  call get_instance_filename("iceberg_trajectories.nc", filename)
+    call get_instance_filename("iceberg_trajectories.nc", filename)
     if(io_tile_id(1) .ge. 0 .AND. .NOT. force_all_pes_traj) then !io_tile_root_pes write
        if(io_npes .gt. 1) then !attach tile_id  to filename only if there is more than one I/O pe
           if (io_tile_id(1)<10000) then
@@ -936,171 +927,171 @@ logical :: io_is_in_append_mode
        endif
     endif
 
-  io_is_in_append_mode = .false.
-  iret = nf_create(filename, NF_NOCLOBBER, ncid)
-  if (iret .ne. NF_NOERR) then
-    iret = nf_open(filename, NF_WRITE, ncid)
-    io_is_in_append_mode = .true.
-    if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_open failed'
-  endif
-  if (verbose) then
-    if (io_is_in_append_mode) then
-      write(*,'(2a)') 'diamonds, write_trajectory: appending to ',filename
-    else
-      write(*,'(2a)') 'diamonds, write_trajectory: creating ',filename
+    io_is_in_append_mode = .false.
+    iret = nf_create(filename, NF_NOCLOBBER, ncid)
+    if (iret .ne. NF_NOERR) then
+      iret = nf_open(filename, NF_WRITE, ncid)
+      io_is_in_append_mode = .true.
+      if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_open failed'
     endif
-  endif
+    if (verbose) then
+      if (io_is_in_append_mode) then
+        write(*,'(2a)') 'diamonds, write_trajectory: appending to ',filename
+      else
+        write(*,'(2a)') 'diamonds, write_trajectory: creating ',filename
+      endif
+    endif
 
-  if (io_is_in_append_mode) then
-    iret = nf_inq_dimid(ncid, 'i', i_dim)
-    if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_inq_dimid i failed'
-    lonid = inq_varid(ncid, 'lon')
-    latid = inq_varid(ncid, 'lat')
-    yearid = inq_varid(ncid, 'year')
-    dayid = inq_varid(ncid, 'day')
-    uvelid = inq_varid(ncid, 'uvel')
-    vvelid = inq_varid(ncid, 'vvel')
-    uoid = inq_varid(ncid, 'uo')
-    void = inq_varid(ncid, 'vo')
-    uiid = inq_varid(ncid, 'ui')
-    viid = inq_varid(ncid, 'vi')
-    uaid = inq_varid(ncid, 'ua')
-    vaid = inq_varid(ncid, 'va')
-    mid = inq_varid(ncid, 'mass')
-    mbid = inq_varid(ncid, 'mass_of_bits')
-    hdid = inq_varid(ncid, 'heat_density')
-    did = inq_varid(ncid, 'thickness')
-    wid = inq_varid(ncid, 'width')
-    lid = inq_varid(ncid, 'length')
-    sshxid = inq_varid(ncid, 'ssh_x')
-    sshyid = inq_varid(ncid, 'ssh_y')
-    sstid = inq_varid(ncid, 'sst')
-    cnid = inq_varid(ncid, 'cn')
-    hiid = inq_varid(ncid, 'hi')
-  else
-    ! Dimensions
-    iret = nf_def_dim(ncid, 'i', NF_UNLIMITED, i_dim)
-    if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_def_dim i failed'
+    if (io_is_in_append_mode) then
+      iret = nf_inq_dimid(ncid, 'i', i_dim)
+      if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_inq_dimid i failed'
+      lonid = inq_varid(ncid, 'lon')
+      latid = inq_varid(ncid, 'lat')
+      yearid = inq_varid(ncid, 'year')
+      dayid = inq_varid(ncid, 'day')
+      uvelid = inq_varid(ncid, 'uvel')
+      vvelid = inq_varid(ncid, 'vvel')
+      uoid = inq_varid(ncid, 'uo')
+      void = inq_varid(ncid, 'vo')
+      uiid = inq_varid(ncid, 'ui')
+      viid = inq_varid(ncid, 'vi')
+      uaid = inq_varid(ncid, 'ua')
+      vaid = inq_varid(ncid, 'va')
+      mid = inq_varid(ncid, 'mass')
+      mbid = inq_varid(ncid, 'mass_of_bits')
+      hdid = inq_varid(ncid, 'heat_density')
+      did = inq_varid(ncid, 'thickness')
+      wid = inq_varid(ncid, 'width')
+      lid = inq_varid(ncid, 'length')
+      sshxid = inq_varid(ncid, 'ssh_x')
+      sshyid = inq_varid(ncid, 'ssh_y')
+      sstid = inq_varid(ncid, 'sst')
+      cnid = inq_varid(ncid, 'cn')
+      hiid = inq_varid(ncid, 'hi')
+    else
+      ! Dimensions
+      iret = nf_def_dim(ncid, 'i', NF_UNLIMITED, i_dim)
+      if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_def_dim i failed'
 
-    ! Variables
-    lonid = def_var(ncid, 'lon', NF_DOUBLE, i_dim)
-    latid = def_var(ncid, 'lat', NF_DOUBLE, i_dim)
-    yearid = def_var(ncid, 'year', NF_INT, i_dim)
-    dayid = def_var(ncid, 'day', NF_DOUBLE, i_dim)
-    uvelid = def_var(ncid, 'uvel', NF_DOUBLE, i_dim)
-    vvelid = def_var(ncid, 'vvel', NF_DOUBLE, i_dim)
-    uoid = def_var(ncid, 'uo', NF_DOUBLE, i_dim)
-    void = def_var(ncid, 'vo', NF_DOUBLE, i_dim)
-    uiid = def_var(ncid, 'ui', NF_DOUBLE, i_dim)
-    viid = def_var(ncid, 'vi', NF_DOUBLE, i_dim)
-    uaid = def_var(ncid, 'ua', NF_DOUBLE, i_dim)
-    vaid = def_var(ncid, 'va', NF_DOUBLE, i_dim)
-    mid = def_var(ncid, 'mass', NF_DOUBLE, i_dim)
-    mbid = def_var(ncid, 'mass_of_bits', NF_DOUBLE, i_dim)
-    hdid = def_var(ncid, 'heat_density', NF_DOUBLE, i_dim)
-    did = def_var(ncid, 'thickness', NF_DOUBLE, i_dim)
-    wid = def_var(ncid, 'width', NF_DOUBLE, i_dim)
-    lid = def_var(ncid, 'length', NF_DOUBLE, i_dim)
-    sshxid = def_var(ncid, 'ssh_x', NF_DOUBLE, i_dim)
-    sshyid = def_var(ncid, 'ssh_y', NF_DOUBLE, i_dim)
-    sstid = def_var(ncid, 'sst', NF_DOUBLE, i_dim)
-    cnid = def_var(ncid, 'cn', NF_DOUBLE, i_dim)
-    hiid = def_var(ncid, 'hi', NF_DOUBLE, i_dim)
+      ! Variables
+      lonid = def_var(ncid, 'lon', NF_DOUBLE, i_dim)
+      latid = def_var(ncid, 'lat', NF_DOUBLE, i_dim)
+      yearid = def_var(ncid, 'year', NF_INT, i_dim)
+      dayid = def_var(ncid, 'day', NF_DOUBLE, i_dim)
+      uvelid = def_var(ncid, 'uvel', NF_DOUBLE, i_dim)
+      vvelid = def_var(ncid, 'vvel', NF_DOUBLE, i_dim)
+      uoid = def_var(ncid, 'uo', NF_DOUBLE, i_dim)
+      void = def_var(ncid, 'vo', NF_DOUBLE, i_dim)
+      uiid = def_var(ncid, 'ui', NF_DOUBLE, i_dim)
+      viid = def_var(ncid, 'vi', NF_DOUBLE, i_dim)
+      uaid = def_var(ncid, 'ua', NF_DOUBLE, i_dim)
+      vaid = def_var(ncid, 'va', NF_DOUBLE, i_dim)
+      mid = def_var(ncid, 'mass', NF_DOUBLE, i_dim)
+      mbid = def_var(ncid, 'mass_of_bits', NF_DOUBLE, i_dim)
+      hdid = def_var(ncid, 'heat_density', NF_DOUBLE, i_dim)
+      did = def_var(ncid, 'thickness', NF_DOUBLE, i_dim)
+      wid = def_var(ncid, 'width', NF_DOUBLE, i_dim)
+      lid = def_var(ncid, 'length', NF_DOUBLE, i_dim)
+      sshxid = def_var(ncid, 'ssh_x', NF_DOUBLE, i_dim)
+      sshyid = def_var(ncid, 'ssh_y', NF_DOUBLE, i_dim)
+      sstid = def_var(ncid, 'sst', NF_DOUBLE, i_dim)
+      cnid = def_var(ncid, 'cn', NF_DOUBLE, i_dim)
+      hiid = def_var(ncid, 'hi', NF_DOUBLE, i_dim)
 
-    ! Attributes
-    iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_major_version', NF_INT, 1, 0)
-    iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_minor_version', NF_INT, 1, 1)
-    call put_att(ncid, lonid, 'long_name', 'longitude')
-    call put_att(ncid, lonid, 'units', 'degrees_E')
-    call put_att(ncid, latid, 'long_name', 'latitude')
-    call put_att(ncid, latid, 'units', 'degrees_N')
-    call put_att(ncid, yearid, 'long_name', 'year')
-    call put_att(ncid, yearid, 'units', 'years')
-    call put_att(ncid, dayid, 'long_name', 'year day')
-    call put_att(ncid, dayid, 'units', 'days')
-    call put_att(ncid, uvelid, 'long_name', 'zonal spped')
-    call put_att(ncid, uvelid, 'units', 'm/s')
-    call put_att(ncid, vvelid, 'long_name', 'meridional spped')
-    call put_att(ncid, vvelid, 'units', 'm/s')
-    call put_att(ncid, uoid, 'long_name', 'ocean zonal spped')
-    call put_att(ncid, uoid, 'units', 'm/s')
-    call put_att(ncid, void, 'long_name', 'ocean meridional spped')
-    call put_att(ncid, void, 'units', 'm/s')
-    call put_att(ncid, uiid, 'long_name', 'ice zonal spped')
-    call put_att(ncid, uiid, 'units', 'm/s')
-    call put_att(ncid, viid, 'long_name', 'ice meridional spped')
-    call put_att(ncid, viid, 'units', 'm/s')
-    call put_att(ncid, uaid, 'long_name', 'atmos zonal spped')
-    call put_att(ncid, uaid, 'units', 'm/s')
-    call put_att(ncid, vaid, 'long_name', 'atmos meridional spped')
-    call put_att(ncid, vaid, 'units', 'm/s')
-    call put_att(ncid, mid, 'long_name', 'mass')
-    call put_att(ncid, mid, 'units', 'kg')
-    call put_att(ncid, mbid, 'long_name', 'mass_of_bits')
-    call put_att(ncid, mbid, 'units', 'kg')
-    call put_att(ncid, hdid, 'long_name', 'heat_density')
-    call put_att(ncid, hdid, 'units', 'J/kg')
-    call put_att(ncid, did, 'long_name', 'thickness')
-    call put_att(ncid, did, 'units', 'm')
-    call put_att(ncid, wid, 'long_name', 'width')
-    call put_att(ncid, wid, 'units', 'm')
-    call put_att(ncid, lid, 'long_name', 'length')
-    call put_att(ncid, lid, 'units', 'm')
-    call put_att(ncid, sshxid, 'long_name', 'sea surface height gradient_x')
-    call put_att(ncid, sshxid, 'units', 'non-dim')
-    call put_att(ncid, sshyid, 'long_name', 'sea surface height gradient_y')
-    call put_att(ncid, sshyid, 'units', 'non-dim')
-    call put_att(ncid, sstid, 'long_name', 'sea surface temperature')
-    call put_att(ncid, sstid, 'units', 'degrees_C')
-    call put_att(ncid, cnid, 'long_name', 'sea ice concentration')
-    call put_att(ncid, cnid, 'units', 'none')
-    call put_att(ncid, hiid, 'long_name', 'sea ice thickness')
-    call put_att(ncid, hiid, 'units', 'm')
-  endif
+      ! Attributes
+      iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_major_version', NF_INT, 1, 0)
+      iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_minor_version', NF_INT, 1, 1)
+      call put_att(ncid, lonid, 'long_name', 'longitude')
+      call put_att(ncid, lonid, 'units', 'degrees_E')
+      call put_att(ncid, latid, 'long_name', 'latitude')
+      call put_att(ncid, latid, 'units', 'degrees_N')
+      call put_att(ncid, yearid, 'long_name', 'year')
+      call put_att(ncid, yearid, 'units', 'years')
+      call put_att(ncid, dayid, 'long_name', 'year day')
+      call put_att(ncid, dayid, 'units', 'days')
+      call put_att(ncid, uvelid, 'long_name', 'zonal spped')
+      call put_att(ncid, uvelid, 'units', 'm/s')
+      call put_att(ncid, vvelid, 'long_name', 'meridional spped')
+      call put_att(ncid, vvelid, 'units', 'm/s')
+      call put_att(ncid, uoid, 'long_name', 'ocean zonal spped')
+      call put_att(ncid, uoid, 'units', 'm/s')
+      call put_att(ncid, void, 'long_name', 'ocean meridional spped')
+      call put_att(ncid, void, 'units', 'm/s')
+      call put_att(ncid, uiid, 'long_name', 'ice zonal spped')
+      call put_att(ncid, uiid, 'units', 'm/s')
+      call put_att(ncid, viid, 'long_name', 'ice meridional spped')
+      call put_att(ncid, viid, 'units', 'm/s')
+      call put_att(ncid, uaid, 'long_name', 'atmos zonal spped')
+      call put_att(ncid, uaid, 'units', 'm/s')
+      call put_att(ncid, vaid, 'long_name', 'atmos meridional spped')
+      call put_att(ncid, vaid, 'units', 'm/s')
+      call put_att(ncid, mid, 'long_name', 'mass')
+      call put_att(ncid, mid, 'units', 'kg')
+      call put_att(ncid, mbid, 'long_name', 'mass_of_bits')
+      call put_att(ncid, mbid, 'units', 'kg')
+      call put_att(ncid, hdid, 'long_name', 'heat_density')
+      call put_att(ncid, hdid, 'units', 'J/kg')
+      call put_att(ncid, did, 'long_name', 'thickness')
+      call put_att(ncid, did, 'units', 'm')
+      call put_att(ncid, wid, 'long_name', 'width')
+      call put_att(ncid, wid, 'units', 'm')
+      call put_att(ncid, lid, 'long_name', 'length')
+      call put_att(ncid, lid, 'units', 'm')
+      call put_att(ncid, sshxid, 'long_name', 'sea surface height gradient_x')
+      call put_att(ncid, sshxid, 'units', 'non-dim')
+      call put_att(ncid, sshyid, 'long_name', 'sea surface height gradient_y')
+      call put_att(ncid, sshyid, 'units', 'non-dim')
+      call put_att(ncid, sstid, 'long_name', 'sea surface temperature')
+      call put_att(ncid, sstid, 'units', 'degrees_C')
+      call put_att(ncid, cnid, 'long_name', 'sea ice concentration')
+      call put_att(ncid, cnid, 'units', 'none')
+      call put_att(ncid, hiid, 'long_name', 'sea ice thickness')
+      call put_att(ncid, hiid, 'units', 'm')
+    endif
 
-  ! End define mode
-  iret = nf_enddef(ncid)
-       
-  ! Write variables
-  this=>traj4io
-  if (io_is_in_append_mode) then
-    iret = nf_inq_dimlen(ncid, i_dim, i)
-    if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_inq_dimlen i failed'
-  else
-    i = 0
-  endif
-  do while (associated(this))
-    i=i+1
-    call put_double(ncid, lonid, i, this%lon)
-    call put_double(ncid, latid, i, this%lat)
-    call put_int(ncid, yearid, i, this%year)
-    call put_double(ncid, dayid, i, this%day)
-    call put_double(ncid, uvelid, i, this%uvel)
-    call put_double(ncid, vvelid, i, this%vvel)
-    call put_double(ncid, uoid, i, this%uo)
-    call put_double(ncid, void, i, this%vo)
-    call put_double(ncid, uiid, i, this%ui)
-    call put_double(ncid, viid, i, this%vi)
-    call put_double(ncid, uaid, i, this%ua)
-    call put_double(ncid, vaid, i, this%va)
-    call put_double(ncid, mid, i, this%mass)
-    call put_double(ncid, hdid, i, this%heat_density)
-    call put_double(ncid, did, i, this%thickness)
-    call put_double(ncid, wid, i, this%width)
-    call put_double(ncid, lid, i, this%length)
-    call put_double(ncid, sshxid, i, this%ssh_x)
-    call put_double(ncid, sshyid, i, this%ssh_y)
-    call put_double(ncid, sstid, i, this%sst)
-    call put_double(ncid, cnid, i, this%cn)
-    call put_double(ncid, hiid, i, this%hi)
-    next=>this%next
-    deallocate(this)
-    this=>next
-  enddo
+    ! End define mode
+    iret = nf_enddef(ncid)
+         
+    ! Write variables
+    this=>traj4io
+    if (io_is_in_append_mode) then
+      iret = nf_inq_dimlen(ncid, i_dim, i)
+      if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_inq_dimlen i failed'
+    else
+      i = 0
+    endif
+    do while (associated(this))
+      i=i+1
+      call put_double(ncid, lonid, i, this%lon)
+      call put_double(ncid, latid, i, this%lat)
+      call put_int(ncid, yearid, i, this%year)
+      call put_double(ncid, dayid, i, this%day)
+      call put_double(ncid, uvelid, i, this%uvel)
+      call put_double(ncid, vvelid, i, this%vvel)
+      call put_double(ncid, uoid, i, this%uo)
+      call put_double(ncid, void, i, this%vo)
+      call put_double(ncid, uiid, i, this%ui)
+      call put_double(ncid, viid, i, this%vi)
+      call put_double(ncid, uaid, i, this%ua)
+      call put_double(ncid, vaid, i, this%va)
+      call put_double(ncid, mid, i, this%mass)
+      call put_double(ncid, hdid, i, this%heat_density)
+      call put_double(ncid, did, i, this%thickness)
+      call put_double(ncid, wid, i, this%width)
+      call put_double(ncid, lid, i, this%length)
+      call put_double(ncid, sshxid, i, this%ssh_x)
+      call put_double(ncid, sshyid, i, this%ssh_y)
+      call put_double(ncid, sstid, i, this%sst)
+      call put_double(ncid, cnid, i, this%cn)
+      call put_double(ncid, hiid, i, this%hi)
+      next=>this%next
+      deallocate(this)
+      this=>next
+    enddo
 
-  ! Finish up
-  iret = nf_close(ncid)
-  if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_close failed',mpp_pe(),filename
+    ! Finish up
+    iret = nf_close(ncid)
+    if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_close failed',mpp_pe(),filename
 
   endif !(is_io_tile_root_pe .AND. associated(traj4io))
   call mpp_clock_end(clock_trw)
