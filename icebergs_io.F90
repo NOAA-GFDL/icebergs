@@ -859,7 +859,7 @@ logical :: io_is_in_append_mode
      if(associated(trajectory)) then
         this=>trajectory
         do while (associated(this))
-           call push_posn(traj4io, this)
+           call append_posn(traj4io, this)
            this=>this%next
         enddo
         trajectory => null()
