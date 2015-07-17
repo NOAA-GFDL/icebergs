@@ -128,6 +128,9 @@ integer, allocatable, dimension(:) :: ine,       &
                                       jne,       &
                                       start_year
 
+  ! Get the stderr unit number
+  stderrunit=stderr()
+
 
   ! For convenience
   grd=>bergs%grd
