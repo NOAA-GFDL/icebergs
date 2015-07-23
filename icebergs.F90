@@ -307,7 +307,8 @@ real :: f_cori, T, D, W, L, M, F
 real :: drag_ocn, drag_atm, drag_ice, wave_rad
 real :: c_ocn, c_atm, c_ice
 real :: ampl, wmod, Cr, Lwavelength, Lcutoff, Ltop
-real, parameter :: alpha=1.0, beta=1.0, C_N=1.0, accel_lim=1.e-2, Cr0=0.06, vel_lim=15.
+real, parameter :: accel_lim=1.e-2, Cr0=0.06, vel_lim=15.
+real :: alpha, beta, C_N
 real :: lambda, detA, A11, A12, A21, A22, RHS_x, RHS_y, D_hi 
 real :: uveln, vveln, us, vs, speed, loc_dx, new_speed
 real :: u_star, v_star    !Added by Alon
@@ -316,11 +317,29 @@ real :: P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y    !A
 logical :: dumpit
 logical :: interactive_icebergs_on  ! Flag to decide whether to use forces between icebergs.
 logical :: Runge_not_Verlet  ! Flag to specify whether it is Runge-Kutta or Verlet
+logical :: use_new_predictive_corrective !Flad to use Bob's predictive corrective scheme. (default off)
 integer :: itloop
 integer :: stderrunit
 
 Runge_not_Verlet=bergs%Runge_not_Verlet  ! Loading directly from namelist/default , Alon
 interactive_icebergs_on=bergs%interactive_icebergs_on  ! Loading directly from namelist/default , Alon
+use_new_predictive_corrective=bergs%use_new_predictive_corrective  ! Loading directly from namelist/default , Alon
+
+!These values are no longer set as parameters, but rather can be changed as variables.
+alpha=0.0
+beta=1.0
+C_N=0.0
+
+
+!Alon: Verlet requires implicit Coriolis and implicit drag. 
+!Alon: Also, I think that the implicit Coriolis with RK gives icebergs which do not complete inertial circles.
+if (.not.Runge_not_Verlet) then
+alpha=1.0 
+C_N=1.0
+beta=1.0
+use_new_predictive_corrective=.True.
+endif
+
 
 !print *, 'axn=',axn,'ayn=',ayn
   u_star=uvel0+(axn*(dt/2.))  !Alon
@@ -426,15 +445,27 @@ endif
            bxn=bxn+f_cori*vvel
            byn=byn-f_cori*uvel
   endif
-
-  us=uvel0; vs=vvel0 ! us, vs are equivolent to u_pred in Alon's code. It is the variable that changes in the loop.
+  
+  if (use_new_predictive_corrective) then
+     uveln=uvel0; vveln=vvel0 ! Discuss this change with Alistair. Alon thinks that it is needed. 
+  else
+     uveln=uvel; vveln=vvel
+  endif
  
   do itloop=1,2 ! Iterate on drag coefficients
 
+  if (use_new_predictive_corrective) then
     !Alon's proposed change - using Bob's improved scheme.
-    drag_ocn=c_ocn*0.5*(sqrt( (us-uo)**2+(vs-vo)**2 )+sqrt( (uvel0-uo)**2+(vvel0-vo)**2 ))
-    drag_atm=c_atm*0.5*(sqrt( (us-ua)**2+(vs-va)**2 )+sqrt( (uvel0-ua)**2+(vvel0-va)**2 ))
-    drag_ice=c_ice*0.5*(sqrt( (us-ui)**2+(vs-vi)**2 )+sqrt( (uvel0-ui)**2+(vvel0-vi)**2 ))
+    drag_ocn=c_ocn*0.5*(sqrt( (uveln-uo)**2+(vveln-vo)**2 )+sqrt( (uvel0-uo)**2+(vvel0-vo)**2 ))
+    drag_atm=c_atm*0.5*(sqrt( (uveln-ua)**2+(vveln-va)**2 )+sqrt( (uvel0-ua)**2+(vvel0-va)**2 ))
+    drag_ice=c_ice*0.5*(sqrt( (uveln-ui)**2+(vveln-vi)**2 )+sqrt( (uvel0-ui)**2+(vvel0-vi)**2 ))
+  else
+    !Original Scheme
+    us=0.5*(uveln+uvel); vs=0.5*(vveln+vvel)
+    drag_ocn=c_ocn*sqrt( (us-uo)**2+(vs-vo)**2 )
+    drag_atm=c_atm*sqrt( (us-ua)**2+(vs-va)**2 )
+    drag_ice=c_ice*sqrt( (us-ui)**2+(vs-vi)**2 )
+  endif
 
      RHS_x=(axn/2) + bxn
      RHS_y=(ayn/2) + byn
@@ -466,10 +497,10 @@ endif
   ! Solve for implicit accelerations
     if (alpha+beta.gt.0.) then
       lambda=drag_ocn+drag_atm+drag_ice
-      A11=1.+dt*lambda
-      A22=1.+dt*lambda
-      A12=-dt*f_cori  
-      A21=dt*f_cori  
+      A11=1.+beta*dt*lambda
+      A22=1.+beta*dt*lambda
+      A12=-alpha*dt*f_cori  
+      A21=alpha*dt*f_cori  
       !A12=dt*f_cori  !Removed by ALon (in order to have the entire matrix. I hope the sign is correct)
 
       if (C_N>0.) then   !For Crank-Nicolson Coriolis term.   
@@ -493,17 +524,14 @@ endif
 !      ax=detA*(A11*RHS_x+A12*RHS_y)
 !      ay=detA*(A11*RHS_y-A12*RHS_x)
     else
-      ax=RHS_x; ay=RHS_x
+      ax=RHS_x; ay=RHS_y
     endif
 
-      us=u_star+dt*ax        ! Alon
-      vs=v_star+dt*ay        ! Alon
+      uveln=u_star+dt*ax        ! Alon
+      vveln=v_star+dt*ay        ! Alon
 
   enddo ! itloop
  
-      uveln=us  !Updated velocities
-      vveln=vs  !Updated velocities
-
 
 !Saving the totally explicit part of the acceleration to use in finding the next position and u_star -Alon
     axn=0.
@@ -1886,8 +1914,8 @@ logical :: interactive_icebergs_on  ! Flag to decide whether to use forces betwe
   uvel1=berg%uvel; vvel1=berg%vvel
   if (on_tangential_plane) call rotvec_to_tang(lon1,uvel1,vvel1,xdot1,ydot1)
   u1=uvel1*dxdl1; v1=vvel1*dydl
-  !call accel(bergs, berg, i, j, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, axn1, ayn1, bxn, byn) !axn,ayn, bxn, byn  - Added by Alon
-  call accel(bergs, berg, i, j, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt, ax1, ay1, axn1, ayn1, bxn, byn) !Note change to dt. Markpoint_1
+  call accel(bergs, berg, i, j, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, axn1, ayn1, bxn, byn) !axn,ayn, bxn, byn  - Added by Alon
+  !call accel(bergs, berg, i, j, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt, ax1, ay1, axn1, ayn1, bxn, byn) !Note change to dt. Markpoint_1
   if (on_tangential_plane) call rotvec_to_tang(lon1,ax1,ay1,xddot1,yddot1)
   if (on_tangential_plane) call rotvec_to_tang(lon1,axn1,ayn1,xddot1n,yddot1n) !Alon
   
@@ -1941,8 +1969,8 @@ logical :: interactive_icebergs_on  ! Flag to decide whether to use forces betwe
   endif
   dxdl2=r180_pi/(Rearth*cos(lat2*pi_180))
   u2=uvel2*dxdl2; v2=vvel2*dydl
-  !call accel(bergs, berg, i, j, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt_2, ax2, ay2, axn2, ayn2, bxn, byn) !axn, ayn, bxn, byn - Added by Alon
-  call accel(bergs, berg, i, j, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt, ax2, ay2, axn2, ayn2, bxn, byn) !Note change to dt. Markpoint_1
+  call accel(bergs, berg, i, j, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt_2, ax2, ay2, axn2, ayn2, bxn, byn) !axn, ayn, bxn, byn - Added by Alon
+  !call accel(bergs, berg, i, j, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt, ax2, ay2, axn2, ayn2, bxn, byn) !Note change to dt. Markpoint_1
   if (on_tangential_plane) call rotvec_to_tang(lon2,ax2,ay2,xddot2,yddot2)
   if (on_tangential_plane) call rotvec_to_tang(lon2,axn2,ayn2,xddot2n,yddot2n) !Alon
   
