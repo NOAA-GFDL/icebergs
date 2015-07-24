@@ -15,8 +15,8 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 
 implicit none ; private
 
-integer, parameter :: buffer_width=20
-integer, parameter :: buffer_width_traj=23
+integer, parameter :: buffer_width=24 !Changed from 20 to 24 by Alon 
+integer, parameter :: buffer_width_traj=27  !Changed from 23 by Alon
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 
 !Local Vars
@@ -130,6 +130,7 @@ end type icebergs_gridded
 type :: xyt
   real :: lon, lat, day
   real :: mass, thickness, width, length, uvel, vvel
+  real :: axn, ayn, bxn, byn  !Explicit and implicit accelerations !Alon 
   real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi
   real :: mass_of_bits, heat_density
   integer :: year
@@ -140,6 +141,7 @@ type :: iceberg
   type(iceberg), pointer :: prev=>null(), next=>null()
   ! State variables (specific to the iceberg, needed for restarts)
   real :: lon, lat, uvel, vvel, mass, thickness, width, length
+  real :: axn, ayn, bxn, byn  !Explicit and implicit accelerations !Alon 
   real :: start_lon, start_lat, start_day, start_mass, mass_scaling
   real :: mass_of_bits, heat_density
   integer :: start_year
@@ -177,6 +179,8 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   logical :: add_weight_to_ocean=.true. ! Add weight of bergs to ocean
   logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
   logical :: time_average_weight=.false. ! Time average the weight on the ocean
+  logical :: Runge_not_Verlet=.True.  !True=Runge Kuttai, False=Verlet.  - Added by Alon 
+  logical :: use_new_predictive_corrective =.False.  !Flag to use Bob's predictive corrective iceberg scheme- Added by Alon 
   real :: speed_limit=0. ! CFL speed limit for a berg [m/s]
   real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
   type(buffer), pointer :: obuffer_n=>null(), ibuffer_n=>null()
@@ -267,6 +271,8 @@ logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
 logical :: time_average_weight=.false. ! Time average the weight on the ocean
 real :: speed_limit=0. ! CFL speed limit for a berg
 real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
+logical :: Runge_not_Verlet=.True.  !True=Runge Kutta, False=Verlet.  - Added by Alon 
+logical :: use_new_predictive_corrective =.False.  !Flag to use Bob's predictive corrective iceberg scheme- Added by Alon 
 logical :: do_unit_tests=.false. ! Conduct some unit tests
 logical :: input_freq_distribution=.false. ! Alon: flag to show if input distribution is freq or mass dist (=1 if input is a freq dist, =0 to use an input mass dist)
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
@@ -277,9 +283,8 @@ namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, traj_write_hrs, 
          distribution, mass_scaling, initial_thickness, verbose_hrs, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, &
-         time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, &
-         old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, &
-         input_freq_distribution, force_all_pes_traj
+         time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, use_new_predictive_corrective, &
+         old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -512,8 +517,6 @@ if (input_freq_distribution) then
 endif 
 
 
-
-
  ! Parameters
   bergs%dt=dt
   bergs%traj_sample_hrs=traj_sample_hrs
@@ -528,6 +531,8 @@ endif
   bergs%passive_mode=passive_mode
   bergs%time_average_weight=time_average_weight
   bergs%speed_limit=speed_limit
+  bergs%Runge_not_Verlet=Runge_not_Verlet   !Alon
+  bergs%use_new_predictive_corrective=use_new_predictive_corrective  !Alon
   bergs%grounding_fraction=grounding_fraction
   bergs%add_weight_to_ocean=add_weight_to_ocean
   allocate( bergs%initial_mass(nclasses) ); bergs%initial_mass(:)=initial_mass(:)
@@ -955,6 +960,10 @@ end subroutine send_bergs_to_other_pes
     buff%data(18,n)=berg%heat_density
     buff%data(19,n)=berg%ine
     buff%data(20,n)=berg%jne
+    buff%data(21,n)=berg%axn  !Alon
+    buff%data(22,n)=berg%ayn  !Alon
+    buff%data(23,n)=berg%bxn  !Alon
+    buff%data(24,n)=berg%byn  !Alon
 
   end subroutine pack_berg_into_buffer2
 
@@ -993,6 +1002,7 @@ end subroutine send_bergs_to_other_pes
   logical, optional :: force_append
  ! Local variables
  !real :: lon, lat, uvel, vvel, xi, yj
+
  !real :: start_lon, start_lat, start_day, start_mass
  !integer :: ine, jne, start_year
   logical :: lres
@@ -1029,7 +1039,12 @@ end subroutine send_bergs_to_other_pes
        call add_new_berg_to_list(first, localberg) 
     else
        
-    lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+    localberg%axn=buff%data(21,n) !Alon
+    localberg%ayn=buff%data(22,n) !Alon
+    localberg%bxn=buff%data(23,n) !Alon
+    localberg%byn=buff%data(24,n) !Alon
+   
+     lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
     if (lres) then
       lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
       call add_new_berg_to_list(first, localberg)
@@ -1043,6 +1058,8 @@ end subroutine send_bergs_to_other_pes
              & mpp_pe(),') Failed to find i,j=',localberg%ine,localberg%jne,' for lon,lat=',localberg%lon,localberg%lat
         write(stderrunit,*) localberg%lon,localberg%lat
         write(stderrunit,*) localberg%uvel,localberg%vvel
+        write(stderrunit,*) localberg%axn,localberg%ayn !Alon
+        write(stderrunit,*) localberg%bxn,localberg%byn !Alon
         write(stderrunit,*) grd%isc,grd%iec,grd%jsc,grd%jec
         write(stderrunit,*) grd%isd,grd%ied,grd%jsd,grd%jed
         write(stderrunit,*) grd%lon(grd%isc-1,grd%jsc-1),grd%lon(grd%iec,grd%jsc)
@@ -1186,6 +1203,10 @@ end subroutine send_bergs_to_other_pes
     buff%data(21,n)=traj%sst
     buff%data(22,n)=traj%cn
     buff%data(23,n)=traj%hi
+    buff%data(24,n)=traj%axn !Alon
+    buff%data(25,n)=traj%ayn !Alon
+    buff%data(26,n)=traj%bxn !Alon
+    buff%data(27,n)=traj%byn !Alon
 
   end subroutine pack_traj_into_buffer2
 
@@ -1223,6 +1244,10 @@ end subroutine send_bergs_to_other_pes
     traj%sst=buff%data(21,n)
     traj%cn=buff%data(22,n)
     traj%hi=buff%data(23,n)
+    traj%axn=buff%data(24,n) !Alon
+    traj%ayn=buff%data(25,n) !Alon
+    traj%bxn=buff%data(26,n) !Alon
+    traj%byn=buff%data(27,n) !Alon
 
     call append_posn(first, traj)
 
@@ -1471,6 +1496,10 @@ type(iceberg), pointer :: berg1, berg2
   if (berg1%thickness.ne.berg2%thickness) return
   if (berg1%width.ne.berg2%width) return
   if (berg1%length.ne.berg2%length) return
+  if (berg1%axn.ne.berg2%axn) return  !Alon
+  if (berg1%ayn.ne.berg2%ayn) return  !Alon
+  if (berg1%bxn.ne.berg2%bxn) return  !Alon
+  if (berg1%byn.ne.berg2%byn) return  !Alon
   sameberg=.true. ! passing the above tests mean that bergs 1 and 2 are identical
 end function sameberg
 
@@ -1556,10 +1585,12 @@ character(len=*) :: label
     ' xi,yj=', berg%xi, berg%yj, &
     ' lon,lat=', berg%lon, berg%lat, &
     ' u,v=', berg%uvel, berg%vvel, &
+    ' axn,ayn=', berg%axn, berg%ayn, &
+    ' bxn,byn=', berg%bxn, berg%byn, &
     ' p,n=', associated(berg%prev), associated(berg%next)
   write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,") ",6(a,2f10.4))') &
     label, mpp_pe(), 'uo,vo=', berg%uo, berg%vo, 'ua,va=', berg%ua, berg%va, 'ui,vi=', berg%ui, berg%vi
-
+!Two lines above added by Alon
 end subroutine print_berg
 
 ! ##############################################################################
@@ -1636,6 +1667,10 @@ type(iceberg), pointer :: this
     posn%sst=this%sst
     posn%cn=this%cn
     posn%hi=this%hi
+    posn%axn=this%axn
+    posn%ayn=this%ayn
+    posn%bxn=this%bxn
+    posn%byn=this%byn
 
     call push_posn(this%trajectory, posn)
 
@@ -2664,8 +2699,8 @@ logical :: check_halo
 
   nbergs=count_bergs(bergs)
   call mpp_max(nbergs)
-  allocate( fld( nbergs, 11 ) )
-  allocate( fld2( nbergs, 11 ) )
+  allocate( fld( nbergs, 15 ) ) !Changed from 11 to 15 by Alon
+  allocate( fld2( nbergs, 15 ) ) !Changed from 11 to 15 by Alon
   allocate( icnt( grd%isd:grd%ied, grd%jsd:grd%jed ) )
   fld(:,:)=0.
   fld2(:,:)=0.
@@ -2685,9 +2720,13 @@ logical :: check_halo
     fld(i,6) = this%thickness
     fld(i,7) = this%width
     fld(i,8) = this%length
-    fld(i,9) = time_hash(this)
-    fld(i,10) = pos_hash(this)
-    fld(i,11) = float(iberg)
+    fld(i,9) = this%axn !added by Alon
+    fld(i,10) = this%ayn !added by Alon
+    fld(i,11) = this%bxn !added by Alon
+    fld(i,12) = this%byn !added by Alon
+    fld(i,13) = time_hash(this) !Changed from 9 to 13 by Alon
+    fld(i,14) = pos_hash(this) !Changed from 10 to 12 by Alon
+    fld(i,15) = float(iberg) !Changed from 11 to 15 by Alon
     icnt(this%ine,this%jne)=icnt(this%ine,this%jne)+1
     fld2(i,:) = fld(i,:)*float( icnt(this%ine,this%jne) ) !*float( i )
     grd%tmp(this%ine,this%jne)=grd%tmp(this%ine,this%jne)+time_hash(this)*pos_hash(this)+log(this%mass)
@@ -2740,8 +2779,8 @@ integer function berg_chksum(berg )
 ! Arguments
 type(iceberg), pointer :: berg
 ! Local variables
-real :: rtmp(28)
-integer :: itmp(28+3), i8=0, ichk1, ichk2, ichk3
+real :: rtmp(32) !Changed from 28 to 32 by Alon
+integer :: itmp(32+3), i8=0, ichk1, ichk2, ichk3 !Changed from 28 to 32 by Alon
 integer :: i
 
   rtmp(:)=0.
@@ -2772,14 +2811,18 @@ integer :: i
   rtmp(26)=berg%ssh_y
   rtmp(27)=berg%cn
   rtmp(28)=berg%hi
+  rtmp(29)=berg%axn !Added by Alon
+  rtmp(30)=berg%ayn !Added by Alon
+  rtmp(31)=berg%bxn !Added by Alon
+  rtmp(32)=berg%byn !Added by Alon
 
-  itmp(1:28)=transfer(rtmp,i8)
-  itmp(29)=berg%start_year
-  itmp(30)=berg%ine
-  itmp(31)=berg%jne
+  itmp(1:32)=transfer(rtmp,i8) !Changed from 28 to 32 by Alon
+  itmp(33)=berg%start_year !Changed from 29 to 33 by Alon
+  itmp(34)=berg%ine !Changed from 30 to 34 by Alon
+  itmp(35)=berg%jne !Changed from 31 to 35 by Alon
 
   ichk1=0; ichk2=0; ichk3=0
-  do i=1,28+3
+  do i=1,32+3 !Changd from 28 to 32 by Alon
    ichk1=ichk1+itmp(i)
    ichk2=ichk2+itmp(i)*i
    ichk3=ichk3+itmp(i)*i*i

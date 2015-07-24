@@ -112,13 +112,15 @@ integer :: stdlogunit, stderrunit
 
 end subroutine icebergs_init
 
-subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, debug_flag)
+subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, axn, ayn, bxn, byn, Runge_not_Verlet, debug_flag) !Saving  acceleration for Verlet, Adding Verlet flag - Alon
+!subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, debug_flag) !old version commmented out by Alon
 ! Arguments
 type(icebergs), pointer :: bergs
 type(iceberg), pointer :: berg
 integer, intent(in) :: i, j
 real, intent(in) :: xi, yj, lat, uvel, vvel, uvel0, vvel0, dt
 real, intent(inout) :: ax, ay
+real, intent(inout) :: axn, ayn, bxn, byn ! Added implicit and explicit accelerations to output -Alon
 logical, optional :: debug_flag
 ! Local variables
 type(icebergs_gridded), pointer :: grd
@@ -127,12 +129,39 @@ real :: f_cori, T, D, W, L, M, F
 real :: drag_ocn, drag_atm, drag_ice, wave_rad
 real :: c_ocn, c_atm, c_ice
 real :: ampl, wmod, Cr, Lwavelength, Lcutoff, Ltop
-real, parameter :: alpha=0.0, beta=1.0, accel_lim=1.e-2, Cr0=0.06, vel_lim=15.
-real :: lambda, detA, A11, A12, axe, aye, D_hi
+real, parameter :: accel_lim=1.e-2, Cr0=0.06, vel_lim=15.
+real :: alpha, beta, C_N
+real :: lambda, detA, A11, A12, RHS_x, RHS_y, D_hi 
 real :: uveln, vveln, us, vs, speed, loc_dx, new_speed
+real :: u_star, v_star    !Added by Alon
 logical :: dumpit
+logical :: use_new_predictive_corrective !Flad to use Bob's predictive corrective scheme. (default off)
+logical, intent(in) :: Runge_not_Verlet  ! Flag to specify whether it is Runge-Kutta or Verlet
 integer :: itloop
 integer :: stderrunit
+
+!These values are no longer set as parameters, but rather can be changed as variables.
+alpha=0.0
+beta=1.0
+C_N=0.0
+use_new_predictive_corrective=bergs%use_new_predictive_corrective  ! Loading directly from namelist/default , Alon
+
+
+!Alon: Verlet requires implicit Coriolis and implicit drag. 
+!Alon: Also, I think that the implicit Coriolis with RK gives icebergs which do not complete inertial circles.
+if (.not.Runge_not_Verlet) then
+alpha=1.0 
+C_N=1.0
+beta=1.0
+use_new_predictive_corrective=.True.
+endif
+
+
+
+
+!print *, 'axn=',axn,'ayn=',ayn
+  u_star=uvel0+(axn*(dt/2.))  !Alon
+  v_star=vvel0+(ayn*(dt/2.))  !Alon
 
   ! Get the stderr unit number.
   stderrunit = stderr()
@@ -143,7 +172,8 @@ integer :: stderrunit
   ! Interpolate gridded fields to berg 
   call interp_flds(grd, i, j, xi, yj, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi)
 
-  f_cori=(2.*omega)*sin(pi_180*lat)
+   f_cori=(2.*omega)*sin(pi_180*lat)
+!  f_cori=0.
 
   M=berg%mass
   T=berg%thickness ! total thickness
@@ -151,6 +181,12 @@ integer :: stderrunit
   F=T-D ! freeboard
   W=berg%width
   L=berg%length
+
+!Initializing accelerations - Alon. (I am not 100% sure this is needed). I'm not sure what is output if variable is not defined in the subroutine.
+  axn=0.
+  ayn=0.
+  bxn=0.
+  byn=0.
 
   hi=min(hi,D)
   D_hi=max(0.,D-hi)
@@ -181,53 +217,103 @@ integer :: stderrunit
   c_ice=rho_ice     /M*(0.5*Cd_iv*W*hi              )
   if (abs(ui)+abs(vi).eq.0.) c_ice=0.
 
-  uveln=uvel; vveln=vvel ! Copy starting uvel, vvel
+!Turning drag off for testing - Alon
+!c_ocn=0.
+!c_atm=0.
+!c_ice=0.
+
+    ! Half half accelerations  - axn, ayn
+    if (.not.Runge_not_Verlet) then  
+        axn=-gravity*ssh_x +wave_rad*uwave
+        ayn=-gravity*ssh_y +wave_rad*vwave
+    else
+    ! Not half half accelerations  - for RK
+        bxn=-gravity*ssh_x +wave_rad*uwave
+        byn=-gravity*ssh_y +wave_rad*vwave
+     endif
+
+  if (alpha>0.) then ! If implicit Coriolis, use u_star rather than RK4 latest  !Alon
+        if (C_N>0.) then !  C_N=1 for Crank Nicolson Coriolis, C_N=0 for full implicit Coriolis !Alon  
+           axn=axn+f_cori*v_star
+           ayn=ayn-f_cori*u_star
+        else
+           bxn=bxn+f_cori*v_star
+           byn=byn-f_cori*u_star
+        endif
+  else
+           bxn=bxn+f_cori*vvel
+           byn=byn-f_cori*uvel
+  endif
+  
+  if (use_new_predictive_corrective) then
+     uveln=uvel0; vveln=vvel0 ! Discuss this change with Alistair. Alon thinks that it is needed. 
+  else
+     uveln=uvel; vveln=vvel
+  endif
+ 
   do itloop=1,2 ! Iterate on drag coefficients
 
+  if (use_new_predictive_corrective) then
+    !Alon's proposed change - using Bob's improved scheme.
+    drag_ocn=c_ocn*0.5*(sqrt( (uveln-uo)**2+(vveln-vo)**2 )+sqrt( (uvel0-uo)**2+(vvel0-vo)**2 ))
+    drag_atm=c_atm*0.5*(sqrt( (uveln-ua)**2+(vveln-va)**2 )+sqrt( (uvel0-ua)**2+(vvel0-va)**2 ))
+    drag_ice=c_ice*0.5*(sqrt( (uveln-ui)**2+(vveln-vi)**2 )+sqrt( (uvel0-ui)**2+(vvel0-vi)**2 ))
+  else
+    !Original Scheme
     us=0.5*(uveln+uvel); vs=0.5*(vveln+vvel)
     drag_ocn=c_ocn*sqrt( (us-uo)**2+(vs-vo)**2 )
     drag_atm=c_atm*sqrt( (us-ua)**2+(vs-va)**2 )
     drag_ice=c_ice*sqrt( (us-ui)**2+(vs-vi)**2 )
+  endif
 
-    ! Explicit accelerations
-   !axe= f_cori*vvel -gravity*ssh_x +wave_rad*uwave &
-   !    -drag_ocn*(uvel-uo) -drag_atm*(uvel-ua) -drag_ice*(uvel-ui)
-   !aye=-f_cori*uvel -gravity*ssh_y +wave_rad*vwave &
-   !    -drag_ocn*(vvel-vo) -drag_atm*(vvel-va) -drag_ice*(vvel-vi)
-    axe=-gravity*ssh_x +wave_rad*uwave
-    aye=-gravity*ssh_y +wave_rad*vwave
-    if (alpha>0.) then ! If implicit, use time-level (n) rather than RK4 latest
-      axe=axe+f_cori*vvel0
-      aye=aye-f_cori*uvel0
+     RHS_x=(axn/2) + bxn
+     RHS_y=(ayn/2) + byn
+
+     if (beta>0.) then ! If implicit, use u_star, v_star rather than RK4 latest
+         RHS_x=RHS_x - drag_ocn*(u_star-uo) -drag_atm*(u_star-ua) -drag_ice*(u_star-ui)
+         RHS_y=RHS_y - drag_ocn*(v_star-vo) -drag_atm*(v_star-va) -drag_ice*(v_star-vi)
     else
-      axe=axe+f_cori*vvel
-      aye=aye-f_cori*uvel
-    endif
-    if (beta>0.) then ! If implicit, use time-level (n) rather than RK4 latest
-      axe=axe-drag_ocn*(uvel0-uo) -drag_atm*(uvel0-ua) -drag_ice*(uvel0-ui)
-      aye=aye-drag_ocn*(vvel0-vo) -drag_atm*(vvel0-va) -drag_ice*(vvel0-vi)
-    else
-      axe=axe-drag_ocn*(uvel-uo) -drag_atm*(uvel-ua) -drag_ice*(uvel-ui)
-      aye=aye-drag_ocn*(vvel-vo) -drag_atm*(vvel-va) -drag_ice*(vvel-vi)
+         RHS_x=RHS_x - drag_ocn*(uvel-uo) -drag_atm*(uvel-ua) -drag_ice*(uvel-ui)
+         RHS_y=RHS_y - drag_ocn*(vvel-vo) -drag_atm*(vvel-va) -drag_ice*(vvel-vi)
     endif
 
-    ! Solve for implicit accelerations
+  ! Solve for implicit accelerations
     if (alpha+beta.gt.0.) then
       lambda=drag_ocn+drag_atm+drag_ice
       A11=1.+beta*dt*lambda
-      A12=alpha*dt*f_cori
+      A12=alpha*dt*f_cori  
+      if (C_N>0.) then   !For Crank-Nicolson Coriolis term.   
+          A12=A12/2.
+      endif
+
       detA=1./(A11**2+A12**2)
-      ax=detA*(A11*axe+A12*aye)
-      ay=detA*(A11*aye-A12*axe)
+      ax=detA*(A11*RHS_x+A12*RHS_y)
+      ay=detA*(A11*RHS_y-A12*RHS_x)
     else
-      ax=axe; ay=aye
+      ax=RHS_x; ay=RHS_x
     endif
 
-    uveln=uvel0+dt*ax
-    vveln=vvel0+dt*ay
+      uveln=u_star+dt*ax        ! Alon
+      vveln=v_star+dt*ay        ! Alon
 
   enddo ! itloop
-  
+ 
+
+!Saving the totally explicit part of the acceleration to use in finding the next position and u_star -Alon
+    axn=0.
+    ayn=0.
+    if (.not.Runge_not_Verlet) then
+        axn=-gravity*ssh_x +wave_rad*uwave
+        ayn=-gravity*ssh_y +wave_rad*vwave
+    endif
+    if (C_N>0.) then !  C_N=1 for Crank Nicolson Coriolis, C_N=0 for full implicit Coriolis !Alon 
+      axn=axn+f_cori*vveln
+      ayn=ayn-f_cori*uveln
+    endif
+    bxn= ax-(axn/2) !Alon
+    byn= ay-(ayn/2) !Alon
+
+ 
   ! Limit speed of bergs based on a CFL criteria
   if (bergs%speed_limit>0.) then
     speed=sqrt(uveln*uveln+vveln*vveln) ! Speed of berg
@@ -275,7 +361,7 @@ integer :: stderrunit
       'd*(u-ua)=',-drag_atm*(uvel-ua), &
       'd*(u-ui)=',-drag_ice*(uvel-ui)
     write(stderrunit,100) mpp_pe(),'U accel.', &
-      'axe=',axe, &
+      'RHS_x=',RHS_x, &
       'ax=',ax, &
       'ax(cori)=',detA*(A11*(f_cori*vvel)+A12*(-f_cori*uvel)), &
       'ax(grav)=',detA*(A11*(-gravity*ssh_x)+A12*(-gravity*ssh_y)), &
@@ -293,7 +379,7 @@ integer :: stderrunit
       'd*(v-va)=',-drag_atm*(vvel-va), &
       'd*(v-vi)=',-drag_ice*(vvel-vi)
     write(stderrunit,100) mpp_pe(),'V accel. pe=', &
-      'aye=',aye, &
+      'RHS_y=',RHS_y, &
       'ay=',ay, &
       'ay(cori)=',detA*(-A12*(f_cori*vvel)+A11*(-f_cori*uvel)), &
       'ay(grav)=',detA*(-A12*(-gravity*ssh_x)+A11*(-gravity*ssh_y)), &
@@ -1439,6 +1525,10 @@ integer :: stderrunit
           newberg%yj=yj
           newberg%uvel=0.
           newberg%vvel=0.
+          newberg%axn=0. !Added by Alon
+          newberg%ayn=0. !Added by Alon
+          newberg%bxn=0. !Added by Alon
+          newberg%byn=0. !Added by Alon
           newberg%mass=bergs%initial_mass(k)
           newberg%thickness=bergs%initial_thickness(k)
           newberg%width=bergs%initial_width(k)
@@ -1485,21 +1575,24 @@ subroutine evolve_icebergs(bergs)
 type(icebergs), pointer :: bergs
 ! Local variables
 type(icebergs_gridded), pointer :: grd
-real :: uvel1, vvel1, lon1, lat1, u1, v1, dxdl1, ax1, ay1
-real :: uvel2, vvel2, lon2, lat2, u2, v2, dxdl2, ax2, ay2
-real :: uvel3, vvel3, lon3, lat3, u3, v3, dxdl3, ax3, ay3
-real :: uvel4, vvel4, lon4, lat4, u4, v4, dxdl4, ax4, ay4
-real :: uveln, vveln, lonn, latn
-real :: x1, xdot1, xddot1, y1, ydot1, yddot1
-real :: x2, xdot2, xddot2, y2, ydot2, yddot2
-real :: x3, xdot3, xddot3, y3, ydot3, yddot3
-real :: x4, xdot4, xddot4, y4, ydot4, yddot4
-real :: xn, xdotn, yn, ydotn
+real :: uvel1, vvel1, lon1, lat1, u1, v1, dxdl1, ax1, ay1, axn1, ayn1 
+real :: uvel2, vvel2, lon2, lat2, u2, v2, dxdl2, ax2, ay2, axn2, ayn2
+real :: uvel3, vvel3, lon3, lat3, u3, v3, dxdl3, ax3, ay3, axn3, ayn3
+real :: uvel4, vvel4, lon4, lat4, u4, v4, dxdl4, ax4, ay4, axn4, ayn4
+real :: uveln, vveln, lonn, latn, un, vn, dxdln
+real :: x1, xdot1, xddot1, y1, ydot1, yddot1, xddot1n, yddot1n 
+real :: x2, xdot2, xddot2, y2, ydot2, yddot2, xddot2n, yddot2n
+real :: x3, xdot3, xddot3, y3, ydot3, yddot3, xddot3n, yddot3n
+real :: x4, xdot4, xddot4, y4, ydot4, yddot4, xddot4n, yddot4n
+real :: xn, xdotn, yn, ydotn, xddotn, yddotn
+real :: bxddot, byddot                                               ! Added by Alon
+real :: axn, ayn, bxn, byn                                           ! Added by Alon - explicit and implicit accelations from the previous step
 real :: r180_pi, dt, dt_2, dt_6, dydl, Rearth
 integer :: i, j
 integer :: i1,j1,i2,j2,i3,j3,i4,j4
 real :: xi, yj
 logical :: bounced, on_tangential_plane, error_flag
+logical :: Runge_not_Verlet  ! Runge_not_Verlet=1 for Runge Kutta, =0 for Verlet method. Added by Alon
 type(iceberg), pointer :: berg
 integer :: stderrunit
 
@@ -1528,6 +1621,10 @@ integer :: stderrunit
   dt_2=0.5*dt
   dt_6=dt/6.
   Rearth=6360.e3
+
+  !Choosing time stepping scheme - Alon
+   !Runge_not_Verlet=.False.    !Loading manually: true=Runge Kutta, False=Verlet   , Alon
+   Runge_not_Verlet=bergs%Runge_not_Verlet  ! Loading directly from namelist/default , Alon
 
   berg=>bergs%first
   do while (associated(berg)) ! loop over all bergs
@@ -1561,7 +1658,18 @@ integer :: stderrunit
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
     call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
 
-  ! A1 = A(X1)
+
+
+  if (Runge_not_Verlet) then !Start of the Runge-Kutta Loop -Added by Alon, MP2
+
+ !Loading past acceleartions - Alon
+  axn=berg%axn; ayn=berg%ayn !Alon
+  axn1=axn; axn2=axn; axn3=axn; axn4=axn
+  ayn1=ayn; ayn2=ayn; ayn3=ayn; ayn4=ayn
+
+
+
+ ! A1 = A(X1)
   lon1=berg%lon; lat1=berg%lat
   if (on_tangential_plane) call rotpos_to_tang(lon1,lat1,x1,y1)
   dxdl1=r180_pi/(Rearth*cos(lat1*pi_180))
@@ -1569,8 +1677,10 @@ integer :: stderrunit
   uvel1=berg%uvel; vvel1=berg%vvel
   if (on_tangential_plane) call rotvec_to_tang(lon1,uvel1,vvel1,xdot1,ydot1)
   u1=uvel1*dxdl1; v1=vvel1*dydl
-  call accel(bergs, berg, i, j, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1)
+  call accel(bergs, berg, i, j, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, axn1, ayn1, bxn, byn, Runge_not_Verlet) !axn,ayn, bxn, byn ,Runge_not_Verlet  - Added by Alon
+  !call accel(bergs, berg, i, j, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt, ax1, ay1, axn1, ayn1, bxn, byn, Runge_not_Verlet) !Note change to dt. Markpoint_1
   if (on_tangential_plane) call rotvec_to_tang(lon1,ax1,ay1,xddot1,yddot1)
+  if (on_tangential_plane) call rotvec_to_tang(lon1,axn1,ayn1,xddot1n,yddot1n) !Alon
   
   !  X2 = X1+dt/2*V1 ; V2 = V1+dt/2*A1; A2=A(X2)
  !if (debug) write(stderr(),*) 'diamonds, evolve: x2=...'
@@ -1613,7 +1723,7 @@ integer :: stderrunit
    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* v1,v2 (deg)=',dt*v1,dt*v2
    write(stderrunit,*) 'Acceleration terms for position 1'
    error_flag=pos_within_cell(grd, lon1, lat1, i1, j1, xi, yj)
-   call accel(bergs, berg, i1, j1, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, debug_flag=.true.)
+   call accel(bergs, berg, i1, j1, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, axn1, ayn1, bxn, byn, Runge_not_Verlet, debug_flag=.true.) !axn, ayn, bxn, byn, Runge_not_Verlet - Added by Alon
     call print_berg(stderrunit, berg, 'evolve_iceberg, out of position at 2')
     write(stderrunit,'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'pos2 i,j,lon,lat,xi,yj=',i,j,lon2,lat2,xi,yj
     write(stderrunit,'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'pos2 box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
@@ -1622,8 +1732,10 @@ integer :: stderrunit
   endif
   dxdl2=r180_pi/(Rearth*cos(lat2*pi_180))
   u2=uvel2*dxdl2; v2=vvel2*dydl
-  call accel(bergs, berg, i, j, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt_2, ax2, ay2)
+  call accel(bergs, berg, i, j, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt_2, ax2, ay2, axn2, ayn2, bxn, byn, Runge_not_Verlet) !axn, ayn, bxn, byn, Runge_not_Verlet - Added by Alon
+  !call accel(bergs, berg, i, j, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt, ax2, ay2, axn2, ayn2, bxn, byn, Runge_not_Verlet) !Note change to dt. Markpoint_1
   if (on_tangential_plane) call rotvec_to_tang(lon2,ax2,ay2,xddot2,yddot2)
+  if (on_tangential_plane) call rotvec_to_tang(lon2,axn2,ayn2,xddot2n,yddot2n) !Alon
   
   !  X3 = X1+dt/2*V2 ; V3 = V1+dt/2*A2; A3=A(X3)
  !if (debug) write(stderr(),*) 'diamonds, evolve: x3=...'
@@ -1666,10 +1778,10 @@ integer :: stderrunit
    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* v1,v2,v3 (deg)=',dt*v1,dt*v2,dt*v3
    write(stderrunit,*) 'Acceleration terms for position 1'
    error_flag=pos_within_cell(grd, lon1, lat1, i1, j1, xi, yj)
-   call accel(bergs, berg, i1, j1, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, debug_flag=.true.)
+   call accel(bergs, berg, i1, j1, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, axn1, ayn1, bxn, byn, Runge_not_Verlet, debug_flag=.true.) !axn, ayn, Runge_not_Verlet- Added by Alon
    write(stderrunit,*) 'Acceleration terms for position 2'
    error_flag=pos_within_cell(grd, lon2, lat2, i2, j2, xi, yj)
-   call accel(bergs, berg, i2, j2, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt_2, ax2, ay2, debug_flag=.true.)
+   call accel(bergs, berg, i2, j2, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt_2, ax2, ay2, axn2, ayn2, bxn, byn, Runge_not_Verlet, debug_flag=.true.) !axn, ayn, bxn, byn, Runge_not_Verlet   - Added by Alon
     call print_berg(stderrunit, berg, 'evolve_iceberg, out of position at 3')
     write(stderrunit,'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'pos3 i,j,lon,lat,xi,yj=',i,j,lon3,lat3,xi,yj
     write(stderrunit,'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'pos3 box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
@@ -1678,8 +1790,9 @@ integer :: stderrunit
   endif
   dxdl3=r180_pi/(Rearth*cos(lat3*pi_180))
   u3=uvel3*dxdl3; v3=vvel3*dydl
-  call accel(bergs, berg, i, j, xi, yj, lat3, uvel3, vvel3, uvel1, vvel1, dt, ax3, ay3)
+  call accel(bergs, berg, i, j, xi, yj, lat3, uvel3, vvel3, uvel1, vvel1, dt, ax3, ay3, axn3, ayn3, bxn, byn, Runge_not_Verlet) !axn, ayn, bxn, byn, Runge_not_Verlet   - Added by Alon
   if (on_tangential_plane) call rotvec_to_tang(lon3,ax3,ay3,xddot3,yddot3)
+  if (on_tangential_plane) call rotvec_to_tang(lon3,axn3,ayn3,xddot3n,yddot3n) !Alon
   
   !  X4 = X1+dt*V3 ; V4 = V1+dt*A3; A4=A(X4)
  !if (debug) write(stderr(),*) 'diamonds, evolve: x4=...'
@@ -1720,13 +1833,13 @@ integer :: stderrunit
    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* v1,v2,v3,v4 (deg)=',dt*v1,dt*v2,dt*v3,dt*v4
    write(stderrunit,*) 'Acceleration terms for position 1'
    error_flag=pos_within_cell(grd, lon1, lat1, i1, j1, xi, yj)
-   call accel(bergs, berg, i1, j1, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, debug_flag=.true.)
+   call accel(bergs, berg, i1, j1, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, axn1, ayn1, bxn, byn, Runge_not_Verlet, debug_flag=.true.) !axn, ayn, bxn, byn, Runge_not_Verlet   - Added by Alon
    write(stderrunit,*) 'Acceleration terms for position 2'
    error_flag=pos_within_cell(grd, lon2, lat2, i2, j2, xi, yj)
-   call accel(bergs, berg, i2, j2, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt_2, ax2, ay2, debug_flag=.true.)
+   call accel(bergs, berg, i2, j2, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt_2, ax2, ay2, axn2, ayn2, bxn, byn, Runge_not_Verlet, debug_flag=.true.) !axn, ayn, bxn, byn, Runge_not_Verlet    - Added by Alon
    write(stderrunit,*) 'Acceleration terms for position 3'
    error_flag=pos_within_cell(grd, lon3, lat3, i3, j3, xi, yj)
-   call accel(bergs, berg, i3, j3, xi, yj, lat3, uvel3, vvel3, uvel1, vvel1, dt, ax3, ay3, debug_flag=.true.)
+   call accel(bergs, berg, i3, j3, xi, yj, lat3, uvel3, vvel3, uvel1, vvel1, dt, ax3, ay3, axn3, ayn3, bxn, byn, Runge_not_Verlet, debug_flag=.true.) !axn, ayn, bxn, byn, Runge_not_Verlet - Added by Alon
     call print_berg(stderrunit, berg, 'evolve_iceberg, out of position at 4')
     write(stderrunit,'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'pos4 i,j,lon,lat,xi,yj=',i,j,lon4,lat4,xi,yj
     write(stderrunit,'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'pos4 box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
@@ -1735,8 +1848,9 @@ integer :: stderrunit
   endif
   dxdl4=r180_pi/(Rearth*cos(lat4*pi_180))
   u4=uvel4*dxdl4; v4=vvel4*dydl
-  call accel(bergs, berg, i, j, xi, yj, lat4, uvel4, vvel4, uvel1, vvel1, dt, ax4, ay4)
+  call accel(bergs, berg, i, j, xi, yj, lat4, uvel4, vvel4, uvel1, vvel1, dt, ax4, ay4, axn4, ayn4, bxn, byn, Runge_not_Verlet) !axn, ayn, bxn, byn, Runge_not_Verlet - Added by Alon
   if (on_tangential_plane) call rotvec_to_tang(lon4,ax4,ay4,xddot4,yddot4)
+  if (on_tangential_plane) call rotvec_to_tang(lon4,axn4,ayn4,xddot4n,yddot4n)
   
   !  Xn = X1+dt*(V1+2*V2+2*V3+V4)/6
   !  Vn = V1+dt*(A1+2*A2+2*A3+A4)/6
@@ -1745,14 +1859,22 @@ integer :: stderrunit
     yn=y1+dt_6*( (ydot1+ydot4)+2.*(ydot2+ydot3) )
     xdotn=xdot1+dt_6*( (xddot1+xddot4)+2.*(xddot2+xddot3) )
     ydotn=ydot1+dt_6*( (yddot1+yddot4)+2.*(yddot2+yddot3) )
+    xddotn=( (xddot1n+xddot4n)+2.*(xddot2n+xddot3n) )/6.  !Alon  
+    yddotn=( (yddot1n+yddot4n)+2.*(yddot2n+yddot3n) )/6.  !Alon  
     call rotpos_from_tang(xn,yn,lonn,latn)
     call rotvec_from_tang(lonn,xdotn,ydotn,uveln,vveln)
+    call rotvec_from_tang(lonn,xddotn,yddotn,axn,ayn) !Alon
   else
     lonn=berg%lon+dt_6*( (u1+u4)+2.*(u2+u3) )
     latn=berg%lat+dt_6*( (v1+v4)+2.*(v2+v3) )
     uveln=berg%uvel+dt_6*( (ax1+ax4)+2.*(ax2+ax3) )
     vveln=berg%vvel+dt_6*( (ay1+ay4)+2.*(ay2+ay3) )
+    axn=( (axn1+axn4)+2.*(axn2+axn3) )/6. !Alon
+    ayn=( (ayn1+ayn4)+2.*(ayn2+ayn3) )/6. !Alon
   endif
+
+
+
   i=i1;j=j1;xi=berg%xi;yj=berg%yj
   call adjust_index_and_ground(grd, lonn, latn, uveln, vveln, i, j, xi, yj, bounced, error_flag)
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
@@ -1789,16 +1911,136 @@ integer :: stderrunit
    write(stderrunit,*) 'diamonds, evolve_iceberg: on_tangential_plane=',on_tangential_plane
    write(stderrunit,*) 'Acceleration terms for position 1'
    error_flag=pos_within_cell(grd, lon1, lat1, i1, j1, xi, yj)
-   call accel(bergs, berg, i1, j1, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, debug_flag=.true.)
+   call accel(bergs, berg, i1, j1, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, axn, ayn, bxn, byn, Runge_not_Verlet, debug_flag=.true.)  !axn, ayn, Runge_not_Verlet   - Added by Alon
    write(stderrunit,*) 'Acceleration terms for position 2'
    error_flag=pos_within_cell(grd, lon2, lat2, i2, j2, xi, yj)
-   call accel(bergs, berg, i2, j2, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt_2, ax2, ay2, debug_flag=.true.)
+   call accel(bergs, berg, i2, j2, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt_2, ax2, ay2, axn, ayn, bxn, byn, Runge_not_Verlet, debug_flag=.true.)  !axn, ayn, Runge_not_Verlet  - Added by Alon
    write(stderrunit,*) 'Acceleration terms for position 3'
    error_flag=pos_within_cell(grd, lon3, lat3, i3, j3, xi, yj)
-   call accel(bergs, berg, i3, j3, xi, yj, lat3, uvel3, vvel3, uvel1, vvel1, dt, ax3, ay3, debug_flag=.true.)
+   call accel(bergs, berg, i3, j3, xi, yj, lat3, uvel3, vvel3, uvel1, vvel1, dt, ax3, ay3, axn, ayn, bxn, byn, Runge_not_Verlet, debug_flag=.true.)  !axn, ayn, Runge_not_Verlet   - Added by Alon
    write(stderrunit,*) 'Acceleration terms for position 4'
    error_flag=pos_within_cell(grd, lon4, lat4, i4, j4, xi, yj)
-   call accel(bergs, berg, i4, j4, xi, yj, lat4, uvel4, vvel4, uvel1, vvel1, dt, ax4, ay4, debug_flag=.true.)
+   call accel(bergs, berg, i4, j4, xi, yj, lat4, uvel4, vvel4, uvel1, vvel1, dt, ax4, ay4, axn, ayn, bxn, byn, Runge_not_Verlet, debug_flag=.true.)  !axn, ayn, Runge_not_Verlet    - Added by Alon
+    write(stderrunit,'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'posn i,j,lon,lat,xi,yj=',i,j,lonn,latn,xi,yj
+    write(stderrunit,'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'posn box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
+    call print_berg(stderrunit, berg, 'evolve_iceberg, out of cell at end!')
+    bounced=is_point_in_cell(bergs%grd, lonn, latn, i, j, explain=.true.)
+    if (debug) call error_mesg('diamonds, evolve_iceberg','berg is out of posn at end!',FATAL)
+    write(stderrunit,'(i4,a4,32i7)') mpp_pe(),'Lon',(i,i=grd%isd,grd%ied)
+    do j=grd%jed,grd%jsd,-1
+      write(stderrunit,'(2i4,32f7.1)') mpp_pe(),j,(grd%lon(i,j),i=grd%isd,grd%ied)
+    enddo
+    write(stderrunit,'(i4,a4,32i7)') mpp_pe(),'Lat',(i,i=grd%isd,grd%ied)
+    do j=grd%jed,grd%jsd,-1
+      write(stderrunit,'(2i4,32f7.1)') mpp_pe(),j,(grd%lat(i,j),i=grd%isd,grd%ied)
+    enddo
+  endif
+ 
+  endif ! End of the Runge-Kutta Loop -added by Alon  
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  if (.not.Runge_not_Verlet) then !Start of the Verlet time_stepping -Whole loop added by Alon
+
+ ! In this scheme a_n and b_n are saved from the previous timestep, giving the explicit and implicit parts of the acceleration, and a_np1, b_np1 are for the next time step
+ ! Note that ax1=a_np1/2 +b_np1, as calculated by the acceleration subrouting
+ ! Positions and velocity is updated by
+ ! X2 = X1+dt*V1+((dt^2)/2)*a_n +((dt^2)/2)*b_n = X1+dt*u_star +((dt^2)/2)*b_n 
+ ! V2 = V1+dt/2*a_n +dt/2*a_np1 +dt*b_n = u_star + dt/2*a_np1 + dt*b_np1 = u_star +dt*ax
+
+!print *, 'you are here!'
+
+lon1=berg%lon; lat1=berg%lat
+  if (on_tangential_plane) call rotpos_to_tang(lon1,lat1,x1,y1)
+  dxdl1=r180_pi/(Rearth*cos(lat1*pi_180))
+  dydl=r180_pi/Rearth
+  uvel1=berg%uvel; vvel1=berg%vvel
+
+!Loading past acceleartions - Alon
+  axn=berg%axn; ayn=berg%ayn !Alon
+  bxn=berg%bxn; byn=berg%byn !Alon
+
+! Velocities used to update the position
+  uvel2=uvel1+(dt_2*axn)+(dt_2*bxn)                    !Alon
+  vvel2=vvel1+(dt_2*ayn)+(dt_2*byn)                    !Alon
+
+if (on_tangential_plane) call rotvec_to_tang(lon1,uvel2,vvel2,xdot2,ydot2)
+  u2=uvel2*dxdl1; v2=vvel2*dydl
+
+
+!Solving for new position
+  if (on_tangential_plane) then
+    xn=x1+(dt*xdot2) ; yn=y1+(dt*ydot2)             !Alon
+    call rotpos_from_tang(xn,yn,lonn,latn)
+  else
+    lonn=lon1+(dt*u2) ; latn=lat1+(dt*v2)  !Alon
+  endif
+  dxdln=r180_pi/(Rearth*cos(latn*pi_180))
+
+! Turn the velocities into u_star, v_star.(uvel3 is v_star) - Alon (not sure how this works with tangent plane)
+  uvel3=uvel1+(dt_2*axn)                  !Alon
+  vvel3=vvel1+(dt_2*ayn)                  !Alon
+
+
+!Adjusting mass...                      Alon decided to move this before calculating the new velocities (so that acceleration can be a fn(r_np1)
+  i=i1;j=j1;xi=berg%xi;yj=berg%yj
+  call adjust_index_and_ground(grd, lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag)  !Alon:"unclear which velocity to use here?"
+!  call adjust_index_and_ground(grd, lonn, latn, uvel1, vvel1, i, j, xi, yj, bounced, error_flag)  !Alon:"unclear which velocity to use here?"
+  i2=i; j2=j
+  if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
+    call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
+
+
+!Calling the acceleration   (note that the velocity is converted to u_star inside the accel script)
+  call accel(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, ax1, ay1, axn, ayn, bxn, byn, Runge_not_Verlet) !axn, ayn, bxn, byn ,Runge_not_Verlet  - Added by Alon
+
+!Solving for the new velocity
+  if (on_tangential_plane) then
+    call rotvec_to_tang(lonn,uvel3,vvel3,xdot3,ydot3)
+    call rotvec_to_tang(lon1,ax1,ay1,xddot1,yddot1)
+    xdotn=xdot3+(dt*xddot1); ydotn=ydot3+(dt*yddot1)                                    !Alon
+    call rotvec_from_tang(lonn,xdotn,ydotn,uveln,vveln)
+  else
+    uvel4=uvel3+(dt*ax1); vvel4=vvel3+(dt*ay1)    !Alon , we call it uvel3, vvel3 until it is put into lat/long co-ordinates, where it becomes uveln, vveln
+  endif
+!  uveln=uvel4*dxdln; vveln=vvel4*dydl    !Converted to degrees.  (Perhaps this should not be here)
+  uveln=uvel4
+  vveln=vvel4 
+
+!Debugging
+  if (.not.error_flag) then
+    if (.not. is_point_in_cell(bergs%grd, lonn, latn, i, j)) error_flag=.true.
+  endif
+  if (error_flag) then
+   call print_fld(grd, grd%msk, 'msk')
+   call print_fld(grd, grd%ssh, 'ssh')
+   call print_fld(grd, grd%sst, 'sst')
+   call print_fld(grd, grd%hi, 'hi')
+   write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
+   write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
+   write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: i1,i2,i=',i1,i2,i
+   write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: j1,j2,j=',j1,j2,j
+   write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: lon1,lonn=',lon1,lonn,berg%lon
+   write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: lat1,latn=',lat1,latn,berg%lat
+   write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: u3,un,u0=',uvel3,uveln,berg%uvel
+   write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: v3,vn,v0=',vvel3,vveln,berg%vvel
+   write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ax1=',&
+        & dt*ax1
+   write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ay1=',&
+        & dt*ay1
+   write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* u3,un,u0=',&
+        & dt*uvel3,dt*uveln,dt*berg%uvel
+   write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* v3,vn,v0=',&
+        & dt*vvel3,dt*vveln,dt*berg%vvel
+   write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* u1,u_n (deg)=',&
+        & dt*u1,dt*uveln
+   write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* v1,v_n (deg)=',&
+        & dt*v1,dt*vveln
+   write(stderrunit,*) 'diamonds, evolve_iceberg: on_tangential_plane=',on_tangential_plane
+   write(stderrunit,*) 'Acceleration terms for position 1'
+   error_flag=pos_within_cell(grd, lon1, lat1, i1, j1, xi, yj)
+   call accel(bergs, berg, i2, j2, xi, yj, latn, uvel3, vvel3, uvel1, vvel1, dt_2, ax1, ay1, axn, ayn, bxn, byn, Runge_not_Verlet, debug_flag=.true.)  !axn, ayn, bxn, byn, Runge_not_Verlet   - Added by Alon
+   
     write(stderrunit,'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'posn i,j,lon,lat,xi,yj=',i,j,lonn,latn,xi,yj
     write(stderrunit,'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'posn box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
     call print_berg(stderrunit, berg, 'evolve_iceberg, out of cell at end!')
@@ -1814,10 +2056,20 @@ integer :: stderrunit
     enddo
   endif
 
+
+
+  endif ! End of the Verlet Stepiing -added by Alon  
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+!print *, 'you are here again!';
   berg%lon=lonn
   berg%lat=latn
   berg%uvel=uveln
   berg%vvel=vveln
+  berg%axn=axn !Alon
+  berg%ayn=ayn !Alon
+  berg%bxn=bxn !Alon
+  berg%byn=byn !Alon
   berg%ine=i
   berg%jne=j
   berg%xi=xi
