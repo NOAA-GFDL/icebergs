@@ -110,11 +110,15 @@ integer :: nbergs
 type(icebergs_gridded), pointer :: grd
 real, allocatable, dimension(:) :: lon,          &
                                    lat,          &
+                                   lon_old,      &
+                                   lat_old,      &
                                    uvel,         &
                                    vvel,         &
                                    mass,         &
                                    axn,          &
                                    ayn,          &
+                                   uvel_old,     &
+                                   vvel_old,     &
                                    bxn,          &
                                    byn,          &
                                    thickness,    &
@@ -131,9 +135,10 @@ real, allocatable, dimension(:) :: lon,          &
 integer, allocatable, dimension(:) :: ine,       &
                                       jne,       &
                                       start_year
-
-  ! Get the stderr unit number
-  stderrunit=stderr()
+!uvel_old, vvel_old, lon_old, lat_old, axn, ayn, bxn, byn added by Alon.
+  
+! Get the stderr unit number
+ stderrunit=stderr()
 
 
   ! For convenience
@@ -154,13 +159,17 @@ integer, allocatable, dimension(:) :: ine,       &
 
    allocate(lon(nbergs))
    allocate(lat(nbergs))
+   allocate(lon_old(nbergs))  !Alon
+   allocate(lat_old(nbergs))  !Alon
    allocate(uvel(nbergs))
    allocate(vvel(nbergs))
    allocate(mass(nbergs))
-   allocate(axn(nbergs))
-   allocate(ayn(nbergs))
-   allocate(bxn(nbergs))
-   allocate(byn(nbergs))
+   allocate(axn(nbergs))    !Alon
+   allocate(ayn(nbergs))    !Alon
+   allocate(uvel_old(nbergs)) !Alon
+   allocate(vvel_old(nbergs)) !Alon
+   allocate(bxn(nbergs)) !Alon
+   allocate(byn(nbergs)) !Alon
    allocate(thickness(nbergs))
    allocate(width(nbergs))
    allocate(length(nbergs))
@@ -188,11 +197,15 @@ integer, allocatable, dimension(:) :: ine,       &
   ! Define Variables
   id = register_restart_field(bergs_restart,filename,'lon',lon,longname='longitude',units='degrees_E')
   id = register_restart_field(bergs_restart,filename,'lat',lat,longname='latitude',units='degrees_N')
+  id = register_restart_field(bergs_restart,filename,'lon_old',lon_old,longname='longitude',units='degrees_E') !Alon
+  id = register_restart_field(bergs_restart,filename,'lat_old',lat_old,longname='latitude',units='degrees_N') !Alon
   id = register_restart_field(bergs_restart,filename,'uvel',uvel,longname='zonal velocity',units='m/s')
   id = register_restart_field(bergs_restart,filename,'vvel',vvel,longname='meridional velocity',units='m/s')
   id = register_restart_field(bergs_restart,filename,'mass',mass,longname='mass',units='kg')
   id = register_restart_field(bergs_restart,filename,'axn',mass,longname='explicit zonal acceleration',units='m/s^2') !Alon
   id = register_restart_field(bergs_restart,filename,'ayn',mass,longname='explicit meridional acceleration',units='m/s^2') !Alon
+  id = register_restart_field(bergs_restart,filename,'uvel_old',mass,longname='old explicit zonal acceleration',units='m/s^2') !Alon
+  id = register_restart_field(bergs_restart,filename,'vvel_old',mass,longname='old explicit meridional acceleration',units='m/s^2') !Alon
   id = register_restart_field(bergs_restart,filename,'bxn',mass,longname='inplicit zonal acceleration',units='m/s^2') !Alon
   id = register_restart_field(bergs_restart,filename,'byn',mass,longname='implicit meridional acceleration',units='m/s^2') !Alon
   id = register_restart_field(bergs_restart,filename,'ine',ine,longname='i index',units='none')
@@ -222,10 +235,12 @@ integer, allocatable, dimension(:) :: ine,       &
   if(associated(bergs%first)) this=>bergs%first
   do i=1,nbergs
     lon(i) = this%lon; lat(i) = this%lat
+    lon_old(i) = this%lon_old; lat_old(i) = this%lat_old  !Alon
     uvel(i) = this%uvel; vvel(i) = this%vvel
     ine(i) = this%ine; jne(i) = this%jne
     mass(i) = this%mass; thickness(i) = this%thickness
     axn(i) = this%axn; ayn(i) = this%ayn !Added by Alon
+    uvel_old(i) = this%uvel_old; vvel_old(i) = this%vvel_old !Added by Alon
     bxn(i) = this%bxn; byn(i) = this%byn !Added by Alon
     width(i) = this%width; length(i) = this%length
     start_lon(i) = this%start_lon; start_lat(i) = this%start_lat
@@ -241,11 +256,15 @@ integer, allocatable, dimension(:) :: ine,       &
   deallocate(              &
              lon,          &
              lat,          &
+             lon_old,      &
+             lat_old,      &
              uvel,         &
              vvel,         &
              mass,         &
              axn,          &
              ayn,          &
+             uvel_old,     &
+             vvel_old,     &
              bxn,          &
              byn,          &
              thickness,    &
@@ -258,7 +277,7 @@ integer, allocatable, dimension(:) :: ine,       &
              mass_scaling, &
              mass_of_bits, &
              heat_density )
-!axn, ayn, bxn, byn above added by Alon
+!axn, ayn, uvel_old, vvel_old, lat_old, lon_old, bxn, byn above added by Alon
 
   deallocate(           &
              ine,       &
@@ -301,8 +320,8 @@ type(time_type), intent(in) :: Time
 ! Local variables
 integer, dimension(:), allocatable :: found_restart_int
 integer :: k, ierr, ncid, dimid, nbergs_in_file
-integer :: lonid, latid, uvelid, vvelid, ineid, jneid
-integer :: axnid, aynid, bxnid, bynid !Added by Alon
+integer :: lonid, latid,  uvelid, vvelid, ineid, jneid
+integer :: axnid, aynid, uvel_oldid, vvel_oldid, bxnid, bynid, lon_oldid, lat_oldid !Added by Alon
 integer :: massid, thicknessid, widthid, lengthid
 integer :: start_lonid, start_latid, start_yearid, start_dayid, start_massid
 integer :: scaling_id, mass_of_bits_id, heat_density_id
@@ -362,11 +381,15 @@ integer :: stderrunit
 
   lonid=inq_var(ncid, 'lon')
   latid=inq_var(ncid, 'lat')
+  lon_oldid=inq_var(ncid, 'lon_old') !Alon
+  lat_oldid=inq_var(ncid, 'lat_old') !Alon
   uvelid=inq_var(ncid, 'uvel')
   vvelid=inq_var(ncid, 'vvel')
   massid=inq_var(ncid, 'mass')
   axnid=inq_var(ncid, 'axn') !Alon
   aynid=inq_var(ncid, 'ayn') !Alon
+  uvel_oldid=inq_var(ncid, 'uvel_old') !Alon
+  vvel_oldid=inq_var(ncid, 'vvel_old') !Alon
   bxnid=inq_var(ncid, 'bxn') !Alon
   bynid=inq_var(ncid, 'byn') !Alon
   thicknessid=inq_var(ncid, 'thickness')
@@ -420,6 +443,10 @@ integer :: stderrunit
       localberg%mass=get_double(ncid, massid, k)
       localberg%axn=get_double(ncid, axnid, k) !Alon
       localberg%ayn=get_double(ncid, aynid, k) !Alon
+      localberg%uvel_old=get_double(ncid, uvel_oldid, k) !Alon
+      localberg%vvel_old=get_double(ncid, vvel_oldid, k) !Alon
+      localberg%lon_old=get_double(ncid, lon_oldid, k) !Alon
+      localberg%lat_old=get_double(ncid, lat_oldid, k) !Alon
       localberg%bxn=get_double(ncid, bxnid, k) !Alon
       localberg%byn=get_double(ncid, bynid, k) !Alon
       localberg%thickness=get_double(ncid, thicknessid, k)
@@ -505,6 +532,8 @@ contains
         localberg%jne=j
         localberg%lon=bilin(grd, grd%lon, i, j, localberg%xi, localberg%yj)
         localberg%lat=bilin(grd, grd%lat, i, j, localberg%xi, localberg%yj)
+        localberg%lon_old=bilin(grd, grd%lon, i, j, localberg%xi, localberg%yj) !Alon
+        localberg%lat_old=bilin(grd, grd%lat, i, j, localberg%xi, localberg%yj) !Alon
         localberg%mass=bergs%initial_mass(1)
         localberg%thickness=bergs%initial_thickness(1)
         localberg%width=bergs%initial_width(1)
@@ -521,6 +550,8 @@ contains
         localberg%vvel=0.
         localberg%axn=0. !Alon
         localberg%ayn=0. !Alon
+        localberg%uvel_old=0. !Alon
+        localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
         call add_new_berg_to_list(bergs%first, localberg)
@@ -528,6 +559,8 @@ contains
         localberg%vvel=0.
         localberg%axn=0. !Alon
         localberg%ayn=0. !Alon
+        localberg%uvel_old=0. !Alon
+        localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
         call add_new_berg_to_list(bergs%first, localberg)
@@ -535,6 +568,8 @@ contains
         localberg%vvel=1.
         localberg%axn=0. !Alon
         localberg%ayn=0. !Alon
+        localberg%uvel_old=0. !Alon
+        localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
         call add_new_berg_to_list(bergs%first, localberg)
@@ -542,6 +577,8 @@ contains
         localberg%vvel=-1.
         localberg%axn=0. !Alon
         localberg%ayn=0. !Alon
+        localberg%uvel_old=0. !Alon
+        localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
         call add_new_berg_to_list(bergs%first, localberg)
@@ -575,11 +612,15 @@ integer :: stderrunit
 
 real, allocatable, dimension(:) :: lon,          &
                                    lat,          &
+                                   lon_old,      &
+                                   lat_old,      &
                                    uvel,         &
                                    vvel,         &
                                    mass,         &
                                    axn,          &
                                    ayn,          &
+                                   uvel_old,     &
+                                   vvel_old,     &
                                    bxn,          &
                                    byn,          &
                                    thickness,    &
@@ -592,7 +633,7 @@ real, allocatable, dimension(:) :: lon,          &
                                    mass_scaling, &
                                    mass_of_bits, &
                                    heat_density
-!axn, ayn, bxn, byn added by Alon
+!axn, ayn, uvel_old, vvel_old, lon_old, lat_old, bxn, byn added by Alon
 integer, allocatable, dimension(:) :: ine,       &
                                       jne,       &
                                       start_year
@@ -618,11 +659,15 @@ integer, allocatable, dimension(:) :: ine,       &
   if(nbergs_in_file > 0) then
      allocate(lon(nbergs_in_file))
      allocate(lat(nbergs_in_file))
+     allocate(lon_old(nbergs_in_file)) !Alon
+     allocate(lat_old(nbergs_in_file)) !Alon
      allocate(uvel(nbergs_in_file))
      allocate(vvel(nbergs_in_file))
      allocate(mass(nbergs_in_file))
      allocate(axn(nbergs_in_file)) !Alon
      allocate(ayn(nbergs_in_file)) !Alon
+     allocate(uvel_old(nbergs_in_file)) !Alon
+     allocate(vvel_old(nbergs_in_file)) !Alon
      allocate(bxn(nbergs_in_file)) !Alon
      allocate(byn(nbergs_in_file)) !Alon
      allocate(thickness(nbergs_in_file))
@@ -642,11 +687,15 @@ integer, allocatable, dimension(:) :: ine,       &
 
      call read_unlimited_axis(filename,'lon',lon,domain=grd%domain)
      call read_unlimited_axis(filename,'lat',lat,domain=grd%domain)
+     call read_unlimited_axis(filename,'lon_old',lon_old,domain=grd%domain) !Alon
+     call read_unlimited_axis(filename,'lat_old',lat_old,domain=grd%domain) !Alon
      call read_unlimited_axis(filename,'uvel',uvel,domain=grd%domain)
      call read_unlimited_axis(filename,'vvel',vvel,domain=grd%domain)
      call read_unlimited_axis(filename,'mass',mass,domain=grd%domain)
      call read_unlimited_axis(filename,'axn',axn,domain=grd%domain) !Alon
      call read_unlimited_axis(filename,'ayn',ayn,domain=grd%domain) !Alon
+     call read_unlimited_axis(filename,'uvel_old',uvel_old,domain=grd%domain) !Alon
+     call read_unlimited_axis(filename,'vvel_old',vvel_old,domain=grd%domain) !Alon
      call read_unlimited_axis(filename,'bxn',bxn,domain=grd%domain) !Alon
      call read_unlimited_axis(filename,'byn',byn,domain=grd%domain) !Alon
      call read_unlimited_axis(filename,'thickness',thickness,domain=grd%domain)
@@ -699,6 +748,10 @@ integer, allocatable, dimension(:) :: ine,       &
          localberg%mass=mass(k)
          localberg%axn=axn(k) !Alon
          localberg%ayn=ayn(k) !Alon
+         localberg%uvel_old=uvel_old(k) !Alon
+         localberg%vvel_old=vvel_old(k) !Alon
+         localberg%lon_old=lon_old(k) !Alon
+         localberg%lat_old=lat_old(k) !Alon
          localberg%bxn=bxn(k) !Alon
          localberg%byn=byn(k) !Alon
          localberg%thickness=thickness(k)
@@ -724,11 +777,15 @@ integer, allocatable, dimension(:) :: ine,       &
      deallocate(              &
                 lon,          &
                 lat,          &
+                lon_old,      &
+                lat_old,      &
                 uvel,         &
                 vvel,         &
                 mass,         &
                 axn,          &
                 ayn,          &
+                uvel_old,     &
+                vvel_old,     &
                 bxn,          &
                 byn,          &
                 thickness,    &
@@ -741,7 +798,7 @@ integer, allocatable, dimension(:) :: ine,       &
                 mass_scaling, &
                 mass_of_bits, &
                 heat_density )
-!axn, ayn, bxn, byn above added by Alon.
+!axn, ayn, uvel_old, vvel_old, lat_old, lon_old, bxn, byn above added by Alon.
      deallocate(           &
                 ine,       &
                 jne,       &
@@ -782,6 +839,8 @@ contains
         localberg%jne=j
         localberg%lon=bilin(grd, grd%lon, i, j, localberg%xi, localberg%yj)
         localberg%lat=bilin(grd, grd%lat, i, j, localberg%xi, localberg%yj)
+        localberg%lon_old=bilin(grd, grd%lon, i, j, localberg%xi, localberg%yj) !Alon
+        localberg%lat_old=bilin(grd, grd%lat, i, j, localberg%xi, localberg%yj) !Alon
         localberg%mass=bergs%initial_mass(1)
         localberg%thickness=bergs%initial_thickness(1)
         localberg%width=bergs%initial_width(1)
@@ -798,6 +857,8 @@ contains
         localberg%vvel=0.
         localberg%axn=0. !Alon
         localberg%ayn=0. !Alon
+        localberg%uvel_old=0. !Alon
+        localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
         call add_new_berg_to_list(bergs%first, localberg)
@@ -805,6 +866,8 @@ contains
         localberg%vvel=0.
         localberg%axn=0. !Alon
         localberg%ayn=0. !Alon
+        localberg%uvel_old=0. !Alon
+        localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
         call add_new_berg_to_list(bergs%first, localberg)
@@ -812,6 +875,8 @@ contains
         localberg%vvel=1.
         localberg%axn=0. !Alon
         localberg%ayn=0. !Alon
+        localberg%uvel_old=0. !Alon
+        localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
         call add_new_berg_to_list(bergs%first, localberg)
@@ -819,6 +884,8 @@ contains
         localberg%vvel=-1.
         localberg%axn=0. !Alon
         localberg%ayn=0. !Alon
+        localberg%uvel_old=0. !Alon
+        localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
         call add_new_berg_to_list(bergs%first, localberg)
@@ -913,7 +980,7 @@ type(xyt), pointer :: trajectory
 ! Local variables
 integer :: iret, ncid, i_dim, i
 integer :: lonid, latid, yearid, dayid, uvelid, vvelid
-!integer :: axnid, aynid, bxnid, bynid !Added by Alon 
+!integer :: axnid, aynid, uvel_oldid, vvel_oldid, lat_oldid, lon_oldid, bxnid, bynid !Added by Alon 
 integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid
 integer :: cnid, hiid
 integer :: mid, did, wid, lid, mbid, hdid
