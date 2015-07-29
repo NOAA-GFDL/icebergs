@@ -199,12 +199,12 @@ integer :: grdi, grdj
   id = register_restart_field(bergs_restart,filename,'uvel',uvel,longname='zonal velocity',units='m/s')
   id = register_restart_field(bergs_restart,filename,'vvel',vvel,longname='meridional velocity',units='m/s')
   id = register_restart_field(bergs_restart,filename,'mass',mass,longname='mass',units='kg')
-  id = register_restart_field(bergs_restart,filename,'axn',mass,longname='explicit zonal acceleration',units='m/s^2') !Alon
-  id = register_restart_field(bergs_restart,filename,'ayn',mass,longname='explicit meridional acceleration',units='m/s^2') !Alon
-  id = register_restart_field(bergs_restart,filename,'uvel_old',mass,longname='old explicit zonal acceleration',units='m/s^2') !Alon
-  id = register_restart_field(bergs_restart,filename,'vvel_old',mass,longname='old explicit meridional acceleration',units='m/s^2') !Alon
-  id = register_restart_field(bergs_restart,filename,'bxn',mass,longname='inplicit zonal acceleration',units='m/s^2') !Alon
-  id = register_restart_field(bergs_restart,filename,'byn',mass,longname='implicit meridional acceleration',units='m/s^2') !Alon
+  id = register_restart_field(bergs_restart,filename,'axn',axn,longname='explicit zonal acceleration',units='m/s^2') !Alon
+  id = register_restart_field(bergs_restart,filename,'ayn',ayn,longname='explicit meridional acceleration',units='m/s^2') !Alon
+  id = register_restart_field(bergs_restart,filename,'uvel_old',uvel_old,longname='old explicit zonal acceleration',units='m/s^2') !Alon
+  id = register_restart_field(bergs_restart,filename,'vvel_old',vvel_old,longname='old explicit meridional acceleration',units='m/s^2') !Alon
+  id = register_restart_field(bergs_restart,filename,'bxn',bxn,longname='inplicit zonal acceleration',units='m/s^2') !Alon
+  id = register_restart_field(bergs_restart,filename,'byn',byn,longname='implicit meridional acceleration',units='m/s^2') !Alon
   id = register_restart_field(bergs_restart,filename,'ine',ine,longname='i index',units='none')
   id = register_restart_field(bergs_restart,filename,'jne',jne,longname='j index',units='none')
   id = register_restart_field(bergs_restart,filename,'thickness',thickness,longname='thickness',units='m')
