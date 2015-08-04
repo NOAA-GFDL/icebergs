@@ -823,7 +823,7 @@ integer :: grdi, grdj
   !  here to accomodate diagonal transfer of bergs between PEs -AJA)
   nbergs_to_send_n=0
   nbergs_to_send_s=0
-  do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
+  do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
       if (this%jne.gt.bergs%grd%jec) then
