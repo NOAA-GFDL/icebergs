@@ -66,6 +66,7 @@ public sum_mass,sum_heat,bilin,yearday,bergs_chksum
 public checksum_gridded
 public grd_chksum2,grd_chksum3
 public fix_restart_dates, offset_berg_dates
+public move_berg_between_cells
 
 type :: icebergs_gridded
   type(domain2D), pointer :: domain ! MPP domain
@@ -712,6 +713,32 @@ integer :: grdi, grdj
   call bergs_chksum(bergs, 'after adjusting start dates')
 
 end subroutine offset_berg_dates
+
+! #############################################################################
+
+subroutine move_berg_between_cells(bergs)  !Move icebergs onto the correct lists if they have moved from cell to cell.
+! Arguments
+type(icebergs), pointer :: bergs
+type(icebergs_gridded), pointer :: grd
+type(iceberg), pointer :: moving_berg, this
+integer :: grdi, grdj
+
+do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+      if ((this%ine.ne.grdi) .or. (this%jne.ne.grdj))  then
+        moving_berg=>this
+        this=>this%next
+        !call move_trajectory(bergs, kick_the_bucket)
+        call add_new_berg_to_list(bergs%list(moving_berg%ine,moving_berg%jne)%first,moving_berg)
+        call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,moving_berg)
+      else
+        this=>this%next
+      endif
+    enddo
+enddo ; enddo
+
+end subroutine move_berg_between_cells
 
 ! #############################################################################
 
