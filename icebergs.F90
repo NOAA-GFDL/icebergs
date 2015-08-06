@@ -1271,7 +1271,7 @@ integer :: stderrunit
   ! For each berg, evolve
   call mpp_clock_begin(bergs%clock_mom)
   call evolve_icebergs(bergs)
-  !call move_berg_between_cells(bergs)  !Markpoint6
+  call move_berg_between_cells(bergs)  !Markpoint6
   if (debug) call bergs_chksum(bergs, 'run bergs (evolved)',ignore_halo_violation=.true.)
   if (debug) call checksum_gridded(bergs%grd, 's/r run after evolve')
   call mpp_clock_end(bergs%clock_mom)

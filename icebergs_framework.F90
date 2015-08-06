@@ -719,9 +719,12 @@ end subroutine offset_berg_dates
 subroutine move_berg_between_cells(bergs)  !Move icebergs onto the correct lists if they have moved from cell to cell.
 ! Arguments
 type(icebergs), pointer :: bergs
-type(icebergs_gridded), pointer :: grd
-type(iceberg), pointer :: moving_berg, this
+type(icebergs_gridded), pointer :: grd => null()
+type(iceberg), pointer :: moving_berg => null(), this => null()
 integer :: grdi, grdj
+logical :: quick
+! For convenience
+grd=>bergs%grd
 
 do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
     this=>bergs%list(grdi,grdj)%first
@@ -729,9 +732,23 @@ do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
       if ((this%ine.ne.grdi) .or. (this%jne.ne.grdj))  then
         moving_berg=>this
         this=>this%next
-        !call move_trajectory(bergs, kick_the_bucket)
-        call add_new_berg_to_list(bergs%list(moving_berg%ine,moving_berg%jne)%first,moving_berg)
-        call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,moving_berg)
+        
+        !Removing the iceberg from the old list
+        if (associated(moving_berg%prev)) then
+           moving_berg%prev%next=>moving_berg%next
+        else
+            bergs%list(grdi,grdj)%first=>moving_berg%next
+        endif
+        if (associated(moving_berg%next)) moving_berg%next%prev=>moving_berg%prev
+
+        !Inserting the iceberg into the new list 
+!        call insert_berg_into_list(bergs%list(moving_berg%ine,moving_berg%jne)%first,moving_berg,quick=.true.)
+!        call insert_berg_into_list(bergs%list(grdi,grdj)%first,moving_berg)
+        call insert_berg_into_list(bergs%list(moving_berg%ine,moving_berg%jne)%first,moving_berg)
+
+        !Clear moving_berg
+        moving_berg=>null()
+
       else
         this=>this%next
       endif
