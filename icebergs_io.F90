@@ -105,7 +105,6 @@ type(iceberg), pointer :: this=>NULL()
 integer :: stderrunit
 !I/O vars
 type(restart_file_type) :: bergs_restart
-type(iceberg), pointer :: bergs4io=>NULL()
 integer :: nbergs
 type(icebergs_gridded), pointer :: grd
 real, allocatable, dimension(:) :: lon,          &
@@ -136,6 +135,7 @@ integer, allocatable, dimension(:) :: ine,       &
                                       jne,       &
                                       start_year
 !uvel_old, vvel_old, lon_old, lat_old, axn, ayn, bxn, byn added by Alon.
+integer :: grdi, grdj
   
 ! Get the stderr unit number
  stderrunit=stderr()
@@ -145,17 +145,14 @@ integer, allocatable, dimension(:) :: ine,       &
   grd=>bergs%grd
  
   !First add the bergs on the io_tile_root_pe (if any) to the I/O list
-   nbergs = 0
-   if(associated(bergs%first)) then
-        !bergs4io => bergs%first !This would modify the bergs and cause them to grow to include all bergs in the tile.
-        !Alternatively, create a new list, slow
-        this=>bergs%first
-        do while (associated(this))
-           nbergs = nbergs +1
-           call add_new_berg_to_list(bergs4io, this)
-           this=>this%next
-        enddo
-   endif
+  nbergs = 0
+  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+      nbergs = nbergs +1
+      this=>this%next
+    enddo
+  enddo ; enddo
 
    allocate(lon(nbergs))
    allocate(lat(nbergs))
@@ -232,24 +229,28 @@ integer, allocatable, dimension(:) :: ine,       &
 
   ! Write variables
 
-  if(associated(bergs%first)) this=>bergs%first
-  do i=1,nbergs
-    lon(i) = this%lon; lat(i) = this%lat
-    lon_old(i) = this%lon_old; lat_old(i) = this%lat_old  !Alon
-    uvel(i) = this%uvel; vvel(i) = this%vvel
-    ine(i) = this%ine; jne(i) = this%jne
-    mass(i) = this%mass; thickness(i) = this%thickness
-    axn(i) = this%axn; ayn(i) = this%ayn !Added by Alon
-    uvel_old(i) = this%uvel_old; vvel_old(i) = this%vvel_old !Added by Alon
-    bxn(i) = this%bxn; byn(i) = this%byn !Added by Alon
-    width(i) = this%width; length(i) = this%length
-    start_lon(i) = this%start_lon; start_lat(i) = this%start_lat
-    start_year(i) = this%start_year; start_day(i) = this%start_day
-    start_mass(i) = this%start_mass; mass_scaling(i) = this%mass_scaling
-    mass_of_bits(i) = this%mass_of_bits; heat_density(i) = this%heat_density
-    this=>this%next
-  enddo
-    
+  i = 0
+  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+    this=>bergs%list(grdi,grdj)%first
+    do while(associated(this))
+      i = i + 1
+      lon(i) = this%lon; lat(i) = this%lat
+      lon_old(i) = this%lon_old; lat_old(i) = this%lat_old  !Alon
+      uvel(i) = this%uvel; vvel(i) = this%vvel
+      ine(i) = this%ine; jne(i) = this%jne
+      mass(i) = this%mass; thickness(i) = this%thickness
+      axn(i) = this%axn; ayn(i) = this%ayn !Added by Alon
+      uvel_old(i) = this%uvel_old; vvel_old(i) = this%vvel_old !Added by Alon
+      bxn(i) = this%bxn; byn(i) = this%byn !Added by Alon
+      width(i) = this%width; length(i) = this%length
+      start_lon(i) = this%start_lon; start_lat(i) = this%start_lat
+      start_year(i) = this%start_year; start_day(i) = this%start_day
+      start_mass(i) = this%start_mass; mass_scaling(i) = this%mass_scaling
+      mass_of_bits(i) = this%mass_of_bits; heat_density(i) = this%heat_density
+      this=>this%next
+    enddo
+  enddo ; enddo
+
   call save_restart(bergs_restart)
   call free_restart_type(bergs_restart)
 
@@ -471,8 +472,8 @@ integer :: stderrunit
       if (really_debug) lres=is_point_in_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, explain=.true.)
       lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
      !call add_new_berg_to_list(bergs%first, localberg, quick=.true.)
-      call add_new_berg_to_list(bergs%first, localberg)
-      if (really_debug) call print_berg(stderrunit, bergs%first, 'read_restart_bergs, add_new_berg_to_list')
+      call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg)
+      if (really_debug) call print_berg(stderrunit, bergs%list(localberg%ine,localberg%jne)%first, 'read_restart_bergs, add_new_berg_to_list')
     elseif (multiPErestart .and. io_tile_id(1) .lt. 0) then
       call error_mesg('diamonds, read_restart_bergs', 'berg in PE file was not on PE!', FATAL)
     endif
@@ -500,11 +501,11 @@ integer :: stderrunit
 
   if (.not. found_restart .and. bergs%nbergs_start==0 .and. generate_test_icebergs) call generate_bergs(bergs,Time)
 
-  bergs%floating_mass_start=sum_mass(bergs%first)
+  bergs%floating_mass_start=sum_mass(bergs)
   call mpp_sum( bergs%floating_mass_start )
-  bergs%icebergs_mass_start=sum_mass(bergs%first,justbergs=.true.)
+  bergs%icebergs_mass_start=sum_mass(bergs,justbergs=.true.)
   call mpp_sum( bergs%icebergs_mass_start )
-  bergs%bergy_mass_start=sum_mass(bergs%first,justbits=.true.)
+  bergs%bergy_mass_start=sum_mass(bergs,justbits=.true.)
   call mpp_sum( bergs%bergy_mass_start )
   if (mpp_pe().eq.mpp_root_pe().and.verbose) write(*,'(a)') 'diamonds, read_restart_bergs: completed'
 
@@ -554,7 +555,7 @@ contains
         localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
-        call add_new_berg_to_list(bergs%first, localberg)
+        call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
         localberg%uvel=-1.
         localberg%vvel=0.
         localberg%axn=0. !Alon
@@ -563,7 +564,7 @@ contains
         localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
-        call add_new_berg_to_list(bergs%first, localberg)
+        call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
         localberg%uvel=0.
         localberg%vvel=1.
         localberg%axn=0. !Alon
@@ -572,7 +573,7 @@ contains
         localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
-        call add_new_berg_to_list(bergs%first, localberg)
+        call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
         localberg%uvel=0.
         localberg%vvel=-1.
         localberg%axn=0. !Alon
@@ -581,7 +582,7 @@ contains
         localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
-        call add_new_berg_to_list(bergs%first, localberg)
+        call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
       endif
     enddo; enddo
 
@@ -768,8 +769,8 @@ integer, allocatable, dimension(:) :: ine,       &
          if (really_debug) lres=is_point_in_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, explain=.true.)
          lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
         !call add_new_berg_to_list(bergs%first, localberg, quick=.true.)
-         call add_new_berg_to_list(bergs%first, localberg)
-         if (really_debug) call print_berg(stderrunit, bergs%first, 'read_restart_bergs, add_new_berg_to_list')
+         call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg)
+         if (really_debug) call print_berg(stderrunit, bergs%list(localberg%ine,localberg%jne)%first, 'read_restart_bergs, add_new_berg_to_list')
        elseif (multiPErestart .and. io_tile_id(1) .lt. 0) then
          call error_mesg('diamonds, read_restart_bergs', 'berg in PE file was not on PE!', FATAL)
        endif
@@ -807,11 +808,11 @@ integer, allocatable, dimension(:) :: ine,       &
      call generate_bergs(bergs,Time)
   endif
 
-  bergs%floating_mass_start=sum_mass(bergs%first)
+  bergs%floating_mass_start=sum_mass(bergs)
   call mpp_sum( bergs%floating_mass_start )
-  bergs%icebergs_mass_start=sum_mass(bergs%first,justbergs=.true.)
+  bergs%icebergs_mass_start=sum_mass(bergs,justbergs=.true.)
   call mpp_sum( bergs%icebergs_mass_start )
-  bergs%bergy_mass_start=sum_mass(bergs%first,justbits=.true.)
+  bergs%bergy_mass_start=sum_mass(bergs,justbits=.true.)
   call mpp_sum( bergs%bergy_mass_start )
   if (mpp_pe().eq.mpp_root_pe().and.verbose) write(*,'(a)') 'diamonds, read_restart_bergs: completed'
 
@@ -861,7 +862,7 @@ contains
         localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
-        call add_new_berg_to_list(bergs%first, localberg)
+        call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
         localberg%uvel=-1.
         localberg%vvel=0.
         localberg%axn=0. !Alon
@@ -870,7 +871,7 @@ contains
         localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
-        call add_new_berg_to_list(bergs%first, localberg)
+        call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
         localberg%uvel=0.
         localberg%vvel=1.
         localberg%axn=0. !Alon
@@ -879,7 +880,7 @@ contains
         localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
-        call add_new_berg_to_list(bergs%first, localberg)
+        call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
         localberg%uvel=0.
         localberg%vvel=-1.
         localberg%axn=0. !Alon
@@ -888,7 +889,7 @@ contains
         localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
-        call add_new_berg_to_list(bergs%first, localberg)
+        call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
       endif
     enddo; enddo
 
@@ -967,7 +968,7 @@ type(randomNumberStream) :: rns
   call mpp_sum( bergs%stored_start )
   bergs%stored_heat_start=sum( grd%stored_heat(grd%isc:grd%iec,grd%jsc:grd%jec) )
   call mpp_sum( bergs%stored_heat_start )
-  bergs%floating_heat_start=sum_heat(bergs%first)
+  bergs%floating_heat_start=sum_heat(bergs)
   call mpp_sum( bergs%floating_heat_start )
 
 end subroutine read_restart_calving

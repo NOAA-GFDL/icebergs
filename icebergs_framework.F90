@@ -66,6 +66,7 @@ public sum_mass,sum_heat,bilin,yearday,bergs_chksum
 public checksum_gridded
 public grd_chksum2,grd_chksum3
 public fix_restart_dates, offset_berg_dates
+public move_berg_between_cells
 
 type :: icebergs_gridded
   type(domain2D), pointer :: domain ! MPP domain
@@ -157,9 +158,13 @@ type :: buffer
   real, dimension(:,:), pointer :: data
 end type buffer
 
+type :: linked_list
+  type(iceberg), pointer :: first=>null()
+end type linked_list
+
 type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io cannot compile if this is private!
   type(icebergs_gridded), pointer :: grd
-  type(iceberg), pointer :: first=>null()
+  type(linked_list), dimension(:,:), allocatable :: list
   type(xyt), pointer :: trajectories=>null()
   real :: dt           ! Time-step between iceberg calls (should make adaptive?)
   integer :: current_year
@@ -375,6 +380,11 @@ real :: Total_mass  !Added by Alon
  !     ' [lon|lat][min|max]=', minval(ice_lon),maxval(ice_lon),minval(ice_lat),maxval(ice_lat)
  !write(stderrunit,*) 'diamonds, int args = ', mpp_pe(),gni, gnj, layout, axes
 
+ ! Allocate grid of pointers
+  allocate( bergs%list(grd%isd:grd%ied, grd%jsd:grd%jed) )
+  do j = grd%jsd,grd%jed ; do i = grd%isd,grd%ied
+    bergs%list(i,j)%first => null()
+  enddo ; enddo
 
  !write(stderrunit,*) 'diamonds: allocating grid'
   allocate( grd%lon(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%lon(:,:)=999.
@@ -672,19 +682,19 @@ type(time_type), intent(in) :: Time
 type(iceberg), pointer :: this
 integer :: iyr, imon, iday, ihr, imin, isec, yr_offset
 real :: latest_start_year, berg_start_year
+integer :: grdi, grdj
 
   call get_date(Time, iyr, imon, iday, ihr, imin, isec)
-  latest_start_year=iyr-99999
+  latest_start_year=iyr-999999.
 
-  this=>bergs%first
-  if (associated(this)) then
-   latest_start_year=float(this%start_year)+this%start_day/367.
-  endif
-  do while (associated(this))
-    berg_start_year=float(this%start_year)+this%start_day/367.
-    if (berg_start_year>latest_start_year) latest_start_year=berg_start_year
-    this=>this%next
-  enddo
+  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+      berg_start_year=float(this%start_year)+this%start_day/367.
+      if (berg_start_year>latest_start_year) latest_start_year=berg_start_year
+      this=>this%next
+    enddo
+  enddo ; enddo
   call mpp_max(latest_start_year)
 
   if (latest_start_year<=float(iyr)+yearday(imon, iday, ihr, imin, isec)/367.) return ! No conflicts!
@@ -693,14 +703,58 @@ real :: latest_start_year, berg_start_year
   if (mpp_pe().eq.mpp_root_pe()) write(*,'(a,i8,a)') &
     'diamonds: Bergs found with creation dates after model date! Adjusting berg dates by ',yr_offset,' years'
   call bergs_chksum(bergs, 'before adjusting start dates')
-  this=>bergs%first
-  do while (associated(this))
-    this%start_year=this%start_year-yr_offset
-    this=>this%next
-  enddo
+  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+      this%start_year=this%start_year-yr_offset
+      this=>this%next
+    enddo
+  enddo ; enddo
   call bergs_chksum(bergs, 'after adjusting start dates')
 
 end subroutine offset_berg_dates
+
+! #############################################################################
+
+subroutine move_berg_between_cells(bergs)  !Move icebergs onto the correct lists if they have moved from cell to cell.
+! Arguments
+type(icebergs), pointer :: bergs
+type(icebergs_gridded), pointer :: grd => null()
+type(iceberg), pointer :: moving_berg => null(), this => null()
+integer :: grdi, grdj
+logical :: quick
+! For convenience
+grd=>bergs%grd
+
+do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+
+      if ((this%ine.ne.grdi) .or. (this%jne.ne.grdj))  then
+        moving_berg=>this
+        this=>this%next
+        
+        !Removing the iceberg from the old list
+        if (associated(moving_berg%prev)) then
+          moving_berg%prev%next=>moving_berg%next
+        else
+          bergs%list(grdi,grdj)%first=>moving_berg%next
+        endif
+        if (associated(moving_berg%next)) moving_berg%next%prev=>moving_berg%prev
+
+        !Inserting the iceberg into the new list 
+        call insert_berg_into_list(bergs%list(moving_berg%ine,moving_berg%jne)%first,moving_berg)
+
+        !Clear moving_berg
+        moving_berg=>null()
+
+      else
+        this=>this%next
+      endif
+    enddo
+enddo ; enddo
+
+end subroutine move_berg_between_cells
 
 ! #############################################################################
 
@@ -716,6 +770,7 @@ integer :: nbergs_rcvd_from_n, nbergs_rcvd_from_s
 type(icebergs_gridded), pointer :: grd
 integer :: i, nbergs_start, nbergs_end
 integer :: stderrunit
+integer :: grdi, grdj
 
   ! Get the stderr unit number
   stderrunit = stderr()
@@ -730,8 +785,8 @@ integer :: stderrunit
   ! Find number of bergs that headed east/west
   nbergs_to_send_e=0
   nbergs_to_send_w=0
-  if (associated(bergs%first)) then
-    this=>bergs%first
+  do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
+    this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
       if (this%ine.gt.bergs%grd%iec) then
         kick_the_bucket=>this
@@ -739,19 +794,19 @@ integer :: stderrunit
         nbergs_to_send_e=nbergs_to_send_e+1
         call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_e, nbergs_to_send_e)
         call move_trajectory(bergs, kick_the_bucket)
-        call delete_iceberg_from_list(bergs%first,kick_the_bucket)
+        call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
       elseif (this%ine.lt.bergs%grd%isc) then
         kick_the_bucket=>this
         this=>this%next
         nbergs_to_send_w=nbergs_to_send_w+1
         call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_w, nbergs_to_send_w)
         call move_trajectory(bergs, kick_the_bucket)
-        call delete_iceberg_from_list(bergs%first,kick_the_bucket)
+        call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
       else
         this=>this%next
       endif
     enddo
-  endif
+  enddo ; enddo
 
   ! Send bergs east
   if (grd%pe_E.ne.NULL_PE) then
@@ -780,7 +835,7 @@ integer :: stderrunit
       call increase_ibuffer(bergs%ibuffer_w, nbergs_rcvd_from_w)
       call mpp_recv(bergs%ibuffer_w%data, nbergs_rcvd_from_w*buffer_width, grd%pe_W, tag=COMM_TAG_2)
       do i=1, nbergs_rcvd_from_w
-        call unpack_berg_from_buffer2(bergs%first, bergs%ibuffer_w, i, grd)
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_w, i, grd)
       enddo
     endif
   else
@@ -798,7 +853,7 @@ integer :: stderrunit
       call increase_ibuffer(bergs%ibuffer_e, nbergs_rcvd_from_e)
       call mpp_recv(bergs%ibuffer_e%data, nbergs_rcvd_from_e*buffer_width, grd%pe_E, tag=COMM_TAG_4)
       do i=1, nbergs_rcvd_from_e
-        call unpack_berg_from_buffer2(bergs%first, bergs%ibuffer_e, i, grd)
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_e, i, grd)
       enddo
     endif
   else
@@ -811,8 +866,8 @@ integer :: stderrunit
   !  here to accomodate diagonal transfer of bergs between PEs -AJA)
   nbergs_to_send_n=0
   nbergs_to_send_s=0
-  if (associated(bergs%first)) then
-    this=>bergs%first
+  do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
+    this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
       if (this%jne.gt.bergs%grd%jec) then
         kick_the_bucket=>this
@@ -820,19 +875,19 @@ integer :: stderrunit
         nbergs_to_send_n=nbergs_to_send_n+1
         call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_n, nbergs_to_send_n)
         call move_trajectory(bergs, kick_the_bucket)
-        call delete_iceberg_from_list(bergs%first,kick_the_bucket)
+        call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
       elseif (this%jne.lt.bergs%grd%jsc) then
         kick_the_bucket=>this
         this=>this%next
         nbergs_to_send_s=nbergs_to_send_s+1
         call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_s, nbergs_to_send_s)
         call move_trajectory(bergs, kick_the_bucket)
-        call delete_iceberg_from_list(bergs%first,kick_the_bucket)
+        call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
       else
         this=>this%next
       endif
     enddo
-  endif
+  enddo ; enddo
 
   ! Send bergs north
   if (grd%pe_N.ne.NULL_PE) then
@@ -869,7 +924,7 @@ integer :: stderrunit
       call increase_ibuffer(bergs%ibuffer_s, nbergs_rcvd_from_s)
       call mpp_recv(bergs%ibuffer_s%data, nbergs_rcvd_from_s*buffer_width, grd%pe_S, tag=COMM_TAG_6)
       do i=1, nbergs_rcvd_from_s
-        call unpack_berg_from_buffer2(bergs%first, bergs%ibuffer_s, i, grd) 
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_s, i, grd) 
       enddo
     endif
   else
@@ -895,7 +950,7 @@ integer :: stderrunit
          call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_8)
       endif
       do i=1, nbergs_rcvd_from_n
-        call unpack_berg_from_buffer2(bergs%first, bergs%ibuffer_n, i, grd)
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_n, i, grd)
       enddo
     endif
   else
@@ -925,15 +980,17 @@ integer :: stderrunit
 
   if (debug) then
     i=0
-    this=>bergs%first
-    do while (associated(this))
-      call check_position(grd, this, 'exchange (bot)')
-      if (this%ine.lt.bergs%grd%isc .or. &
-          this%ine.gt.bergs%grd%iec .or. &
-          this%jne.lt.bergs%grd%jsc .or. &
-          this%jne.gt.bergs%grd%jec) i=i+1
-      this=>this%next
-    enddo ! while
+    do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
+      this=>bergs%list(grdi,grdj)%first
+      do while (associated(this))
+        call check_position(grd, this, 'exchange (bot)')
+        if (this%ine.lt.bergs%grd%isc .or. &
+            this%ine.gt.bergs%grd%iec .or. &
+            this%jne.lt.bergs%grd%jsc .or. &
+            this%jne.gt.bergs%grd%jec) i=i+1
+        this=>this%next
+      enddo ! while
+    enddo ; enddo
     call mpp_sum(i)
     if (i>0 .and. mpp_pe()==mpp_root_pe()) then
       write(stderrunit,'(a,i4)') 'diamonds, send_bergs_to_other_pes: # of bergs outside computational domain = ',i
@@ -1012,13 +1069,12 @@ end subroutine send_bergs_to_other_pes
 
   end subroutine increase_buffer
 
-  subroutine unpack_berg_from_buffer2(first, buff, n,grd, force_append)
+  subroutine unpack_berg_from_buffer2(bergs, buff, n,grd)
   ! Arguments
-  type(iceberg), pointer :: first
+  type(icebergs), pointer :: bergs
   type(buffer), pointer :: buff
   integer, intent(in) :: n
   type(icebergs_gridded), pointer :: grd  
-  logical, optional :: force_append
  ! Local variables
  !real :: lon, lat, uvel, vvel, xi, yj
 
@@ -1031,71 +1087,63 @@ end subroutine send_bergs_to_other_pes
   ! Get the stderr unit number
   stderrunit = stderr()
 
-  if(present(force_append)) force_app = force_append
-     
-    localberg%lon=buff%data(1,n)
-    localberg%lat=buff%data(2,n)
-    localberg%uvel=buff%data(3,n)
-    localberg%vvel=buff%data(4,n)
-    localberg%xi=buff%data(5,n)
-    localberg%yj=buff%data(6,n)
-    localberg%start_lon=buff%data(7,n)
-    localberg%start_lat=buff%data(8,n)
-    localberg%start_year=nint(buff%data(9,n))
-    localberg%start_day=buff%data(10,n)
-    localberg%start_mass=buff%data(11,n)
-    localberg%mass=buff%data(12,n)
-    localberg%thickness=buff%data(13,n)
-    localberg%width=buff%data(14,n)
-    localberg%length=buff%data(15,n)
-    localberg%mass_scaling=buff%data(16,n)
-    localberg%mass_of_bits=buff%data(17,n)
-    localberg%heat_density=buff%data(18,n)
-
-    if(force_app) then !force append with origin ine,jne (for I/O)
-       localberg%ine=buff%data(19,n) 
-       localberg%jne=buff%data(20,n) 
-       call add_new_berg_to_list(first, localberg) 
-    else
-       
-    localberg%axn=buff%data(21,n) !Alon
-    localberg%ayn=buff%data(22,n) !Alon
-    localberg%bxn=buff%data(23,n) !Alon
-    localberg%byn=buff%data(24,n) !Alon
-    localberg%uvel_old=buff%data(25,n) !Alon
-    localberg%vvel_old=buff%data(26,n) !Alon
-    localberg%lon_old=buff%data(27,n) !Alon
-    localberg%lat_old=buff%data(28,n) !Alon
-   
-     lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+  localberg%lon=buff%data(1,n)
+  localberg%lat=buff%data(2,n)
+  localberg%uvel=buff%data(3,n)
+  localberg%vvel=buff%data(4,n)
+  localberg%xi=buff%data(5,n)
+  localberg%yj=buff%data(6,n)
+  localberg%start_lon=buff%data(7,n)
+  localberg%start_lat=buff%data(8,n)
+  localberg%start_year=nint(buff%data(9,n))
+  localberg%start_day=buff%data(10,n)
+  localberg%start_mass=buff%data(11,n)
+  localberg%mass=buff%data(12,n)
+  localberg%thickness=buff%data(13,n)
+  localberg%width=buff%data(14,n)
+  localberg%length=buff%data(15,n)
+  localberg%mass_scaling=buff%data(16,n)
+  localberg%mass_of_bits=buff%data(17,n)
+  localberg%heat_density=buff%data(18,n)
+  localberg%ine=buff%data(19,n) 
+  localberg%jne=buff%data(20,n) 
+  localberg%axn=buff%data(21,n) !Alon
+  localberg%ayn=buff%data(22,n) !Alon
+  localberg%bxn=buff%data(23,n) !Alon
+  localberg%byn=buff%data(24,n) !Alon
+  localberg%uvel_old=buff%data(25,n) !Alon
+  localberg%vvel_old=buff%data(26,n) !Alon
+  localberg%lon_old=buff%data(27,n) !Alon
+  localberg%lat_old=buff%data(28,n) !Alon
+ 
+  lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+  if (lres) then
+    lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
+    call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg)
+  else
+    lres=find_cell_wide(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
     if (lres) then
       lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
-      call add_new_berg_to_list(first, localberg)
+      call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg)
     else
-      lres=find_cell_wide(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
-      if (lres) then
-        lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
-        call add_new_berg_to_list(first, localberg)
-      else
-        write(stderrunit,'("diamonds, unpack_berg_from_buffer pe=(",i3,a,2i4,a,2f8.2)')&
-             & mpp_pe(),') Failed to find i,j=',localberg%ine,localberg%jne,' for lon,lat=',localberg%lon,localberg%lat
-        write(stderrunit,*) localberg%lon,localberg%lat
-        write(stderrunit,*) localberg%uvel,localberg%vvel
-        write(stderrunit,*) localberg%axn,localberg%ayn !Alon
-        write(stderrunit,*) localberg%bxn,localberg%byn !Alon
-        write(stderrunit,*) localberg%uvel_old,localberg%vvel_old !Alon
-        write(stderrunit,*) localberg%lon_old,localberg%lat_old !Alon
-        write(stderrunit,*) grd%isc,grd%iec,grd%jsc,grd%jec
-        write(stderrunit,*) grd%isd,grd%ied,grd%jsd,grd%jed
-        write(stderrunit,*) grd%lon(grd%isc-1,grd%jsc-1),grd%lon(grd%iec,grd%jsc)
-        write(stderrunit,*) grd%lat(grd%isc-1,grd%jsc-1),grd%lat(grd%iec,grd%jec)
-        write(stderrunit,*) grd%lon(grd%isd,grd%jsd),grd%lon(grd%ied,grd%jsd)
-        write(stderrunit,*) grd%lat(grd%isd,grd%jsd),grd%lat(grd%ied,grd%jed)
-        write(stderrunit,*) lres
-        call error_mesg('diamonds, unpack_berg_from_buffer', 'can not find a cell to place berg in!', FATAL)
-      endif
+      write(stderrunit,'("diamonds, unpack_berg_from_buffer pe=(",i3,a,2i4,a,2f8.2)')&
+           & mpp_pe(),') Failed to find i,j=',localberg%ine,localberg%jne,' for lon,lat=',localberg%lon,localberg%lat
+      write(stderrunit,*) localberg%lon,localberg%lat
+      write(stderrunit,*) localberg%uvel,localberg%vvel
+      write(stderrunit,*) localberg%axn,localberg%ayn !Alon
+      write(stderrunit,*) localberg%bxn,localberg%byn !Alon
+      write(stderrunit,*) localberg%uvel_old,localberg%vvel_old !Alon
+      write(stderrunit,*) localberg%lon_old,localberg%lat_old !Alon
+      write(stderrunit,*) grd%isc,grd%iec,grd%jsc,grd%jec
+      write(stderrunit,*) grd%isd,grd%ied,grd%jsd,grd%jed
+      write(stderrunit,*) grd%lon(grd%isc-1,grd%jsc-1),grd%lon(grd%iec,grd%jsc)
+      write(stderrunit,*) grd%lat(grd%isc-1,grd%jsc-1),grd%lat(grd%iec,grd%jec)
+      write(stderrunit,*) grd%lon(grd%isd,grd%jsd),grd%lon(grd%ied,grd%jsd)
+      write(stderrunit,*) grd%lat(grd%isd,grd%jsd),grd%lat(grd%ied,grd%jed)
+      write(stderrunit,*) lres
+      call error_mesg('diamonds, unpack_berg_from_buffer', 'can not find a cell to place berg in!', FATAL)
     endif
-    endif
+  endif
 
   end subroutine unpack_berg_from_buffer2
 
@@ -1320,35 +1368,40 @@ character(len=*) :: label
 ! Local variables
 type(iceberg), pointer :: this, next
 integer :: i, icnt1, icnt2, icnt3
+integer :: grdi, grdj
 
   icnt1=0; icnt3=0
-  this=>bergs%first
-  next=>null()
-  if (associated(this)) then
-    if (associated(this%next)) next=>this%next
-  endif
-  do while (associated(next))
-    if (.not. inorder(this,next)) icnt1=icnt1+1
-    if (inorder(this,next).and.inorder(next,this)) icnt3=icnt3+1
-    this=>next
-    next=>next%next
-  enddo
+  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+    this=>bergs%list(grdi,grdj)%first
+    next=>null()
+    if (associated(this)) then
+      if (associated(this%next)) next=>this%next
+    endif
+    do while (associated(next))
+      if (.not. inorder(this,next)) icnt1=icnt1+1
+      if (inorder(this,next).and.inorder(next,this)) icnt3=icnt3+1
+      this=>next
+      next=>next%next
+    enddo
+  enddo;enddo
   call mpp_sum(icnt1)
 
   i=0;
   icnt2=0
-  this=>bergs%first
-  do while (associated(this))
-    i=1
-    if (this%ine<bergs%grd%isc .or. &
-        this%ine>bergs%grd%iec .or. &
-        this%jne<bergs%grd%jsc .or. &
-        this%jne>bergs%grd%jec) icnt2=icnt2+1
-    this=>this%next
-    if (i>1.and..not.associated(this%prev)) then
-      call error_mesg('diamonds, count_out_of_order', 'Pointer %prev is unassociated. This should not happen!', FATAL)
-    endif
-  enddo
+  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+      i=1
+      if (this%ine<bergs%grd%isc .or. &
+          this%ine>bergs%grd%iec .or. &
+          this%jne<bergs%grd%jsc .or. &
+          this%jne>bergs%grd%jec) icnt2=icnt2+1
+      this=>this%next
+      if (i>1.and..not.associated(this%prev)) then
+        call error_mesg('diamonds, count_out_of_order', 'Pointer %prev is unassociated. This should not happen!', FATAL)
+      endif
+    enddo
+  enddo; enddo
   call mpp_sum(icnt2)
 
   if ((debug.or.icnt1.ne.0).and.mpp_pe().eq.mpp_root_pe()) then
@@ -1369,19 +1422,31 @@ character(len=*) :: label
 ! Local variables
 type(iceberg), pointer :: this1, next1, this2, next2
 integer :: icnt_id, icnt_same
+integer :: grdi, grdj
+integer :: grdi_inner, grdj_inner
 
   icnt_id=0
   icnt_same=0
-  this1=>bergs%first
-  do while (associated(this1))
-    this2=>this1%next
-    do while (associated(this2))
-      if (sameid(this1,this2)) icnt_id=icnt_id+1
-      if (sameberg(this1,this2)) icnt_same=icnt_same+1
-      this2=>this2%next
+  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+    this1=>bergs%list(grdi,grdj)%first
+    do while (associated(this1))
+      do grdj_inner = grdj,bergs%grd%jec ; do grdi_inner = bergs%grd%isc,bergs%grd%iec
+        if ( .not.(grdj_inner==grdj .and. grdi_inner<grdi) ) then
+          if (grdj_inner==grdj .and. grdi_inner==grdi ) then
+            this2=>this1%next
+          else
+            this2=>bergs%list(grdi_inner,grdj_inner)%first
+          endif
+          do while (associated(this2))
+            if (sameid(this1,this2)) icnt_id=icnt_id+1
+            if (sameberg(this1,this2)) icnt_same=icnt_same+1
+            this2=>this2%next
+          enddo
+        endif
+      enddo ; enddo
+      this1=>this1%next
     enddo
-    this1=>this1%next
-  enddo
+  enddo ; enddo
   call mpp_sum(icnt_id)
   call mpp_sum(icnt_same)
 
@@ -1402,17 +1467,18 @@ logical, intent(in), optional :: quick
 type(iceberg), pointer :: this, prev
 logical :: quickly = .false.
 
-if(present(quick)) quickly = quick
 
   if (associated(first)) then
     if (.not. parallel_reprod .or. quickly) then
       newberg%next=>first
+      newberg%prev=>null()
       first%prev=>newberg
       first=>newberg
     else
       if (inorder(newberg,first)) then
         ! Insert at front of list
         newberg%next=>first
+        newberg%prev=>null()
         first%prev=>newberg
         first=>newberg
       else
@@ -1434,6 +1500,8 @@ if(present(quick)) quickly = quick
   else
     ! list is empty so create it
     first=>newberg
+    first%next=>null()
+    first%prev=>null()
   endif
 
 end subroutine insert_berg_into_list
@@ -1642,12 +1710,15 @@ character(len=*) :: label
 ! Local variables
 integer :: nbergs, nnbergs
 type(iceberg), pointer :: this
+integer :: grdi, grdj
 
-  this=>bergs%first
-  do while(associated(this))
-    call print_berg(iochan, this, label)
-    this=>this%next
-  enddo
+  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+    this=>bergs%list(grdi,grdj)%first
+    do while(associated(this))
+      call print_berg(iochan, this, label)
+      this=>this%next
+    enddo
+  enddo ; enddo
   nbergs=count_bergs(bergs)
   nnbergs=nbergs
   call mpp_sum(nnbergs)
@@ -1657,18 +1728,31 @@ end subroutine print_bergs
 
 ! ##############################################################################
 
-integer function count_bergs(bergs)
+integer function count_bergs(bergs, with_halos)
 ! Arguments
 type(icebergs), pointer :: bergs
+logical, optional :: with_halos
 ! Local variables
 type(iceberg), pointer :: this
+integer :: grdi, grdj, is, ie, js, je
+logical :: include_halos
+
+  include_halos = .false.
+  if (present(with_halos)) include_halos = with_halos
+  if (include_halos) then
+   is = bergs%grd%isd ; ie = bergs%grd%ied ; js = bergs%grd%jsd ; je = bergs%grd%jed
+  else
+   is = bergs%grd%isc ; ie = bergs%grd%iec ; js = bergs%grd%jsc ; je = bergs%grd%jec
+  endif
 
   count_bergs=0
-  this=>bergs%first
-  do while(associated(this))
-    count_bergs=count_bergs+1
-    this=>this%next
-  enddo
+  do grdj = js,je ; do grdi = is,ie
+    this=>bergs%list(grdi,grdj)%first
+    do while(associated(this))
+      count_bergs=count_bergs+1
+      this=>this%next
+    enddo
+  enddo ; enddo
 
 end function count_bergs
 
@@ -1680,45 +1764,48 @@ type(icebergs), pointer :: bergs
 ! Local variables
 type(xyt) :: posn
 type(iceberg), pointer :: this
+integer :: grdi, grdj
 
-  this=>bergs%first
-  do while (associated(this))
-    posn%lon=this%lon
-    posn%lat=this%lat
-    posn%year=bergs%current_year
-    posn%day=bergs%current_yearday
-    posn%uvel=this%uvel
-    posn%vvel=this%vvel
-    posn%mass=this%mass
-    posn%mass_of_bits=this%mass_of_bits
-    posn%heat_density=this%heat_density
-    posn%thickness=this%thickness
-    posn%width=this%width
-    posn%length=this%length
-    posn%uo=this%uo
-    posn%vo=this%vo
-    posn%ui=this%ui
-    posn%vi=this%vi
-    posn%ua=this%ua
-    posn%va=this%va
-    posn%ssh_x=this%ssh_x
-    posn%ssh_y=this%ssh_y
-    posn%sst=this%sst
-    posn%cn=this%cn
-    posn%hi=this%hi
-    posn%axn=this%axn
-    posn%ayn=this%ayn
-    posn%bxn=this%bxn
-    posn%byn=this%byn
-    posn%uvel_old=this%uvel_old
-    posn%vvel_old=this%vvel_old
-    posn%lon_old=this%lon_old
-    posn%lat_old=this%lat_old
-
-    call push_posn(this%trajectory, posn)
-
-    this=>this%next
-  enddo
+  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+      posn%lon=this%lon
+      posn%lat=this%lat
+      posn%year=bergs%current_year
+      posn%day=bergs%current_yearday
+      posn%uvel=this%uvel
+      posn%vvel=this%vvel
+      posn%mass=this%mass
+      posn%mass_of_bits=this%mass_of_bits
+      posn%heat_density=this%heat_density
+      posn%thickness=this%thickness
+      posn%width=this%width
+      posn%length=this%length
+      posn%uo=this%uo
+      posn%vo=this%vo
+      posn%ui=this%ui
+      posn%vi=this%vi
+      posn%ua=this%ua
+      posn%va=this%va
+      posn%ssh_x=this%ssh_x
+      posn%ssh_y=this%ssh_y
+      posn%sst=this%sst
+      posn%cn=this%cn
+      posn%hi=this%hi
+      posn%axn=this%axn
+      posn%ayn=this%ayn
+      posn%bxn=this%bxn
+      posn%byn=this%byn
+      posn%uvel_old=this%uvel_old
+      posn%vvel_old=this%vvel_old
+      posn%lon_old=this%lon_old
+      posn%lat_old=this%lat_old
+  
+      call push_posn(this%trajectory, posn)
+  
+      this=>this%next
+    enddo
+  enddo ; enddo
 
 end subroutine record_posn
 
@@ -1811,16 +1898,19 @@ logical, optional, intent(in) :: delete_bergs
 ! Local variables
 type(iceberg), pointer :: this, next
 logical :: delete_bergs_after_moving_traj
+integer :: grdi, grdj
 
   delete_bergs_after_moving_traj = .false.
   if (present(delete_bergs)) delete_bergs_after_moving_traj = delete_bergs
-  this=>bergs%first
-  do while (associated(this))
-    next=>this%next
-    call move_trajectory(bergs, this)
- !  if (delete_bergs_after_moving_traj) call destroy_iceberg(this)
-    this=>next
-  enddo
+  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+      next=>this%next
+      call move_trajectory(bergs, this)
+   !  if (delete_bergs_after_moving_traj) call destroy_iceberg(this)
+      this=>next
+    enddo
+  enddo ; enddo
 
 end subroutine move_all_trajectories
 
@@ -2468,52 +2558,58 @@ end subroutine check_position
 
 ! ##############################################################################
 
-real function sum_mass(first,justbits,justbergs)
+real function sum_mass(bergs,justbits,justbergs)
 ! Arguments
-type(iceberg), pointer :: first
+type(icebergs), pointer :: bergs
 logical, intent(in), optional :: justbits, justbergs
 ! Local variables
 type(iceberg), pointer :: this
+integer :: grdi, grdj
 
   sum_mass=0.
-  this=>first
-  do while(associated(this))
-    if (present(justbergs)) then
-      sum_mass=sum_mass+this%mass*this%mass_scaling
-    elseif (present(justbits)) then
-      sum_mass=sum_mass+this%mass_of_bits*this%mass_scaling
-    else
-      sum_mass=sum_mass+(this%mass+this%mass_of_bits)*this%mass_scaling
-    endif
-    this=>this%next
-  enddo
+  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+    this=>bergs%list(grdi,grdj)%first
+    do while(associated(this))
+      if (present(justbergs)) then
+        sum_mass=sum_mass+this%mass*this%mass_scaling
+      elseif (present(justbits)) then
+        sum_mass=sum_mass+this%mass_of_bits*this%mass_scaling
+      else
+        sum_mass=sum_mass+(this%mass+this%mass_of_bits)*this%mass_scaling
+      endif
+      this=>this%next
+    enddo
+  enddo ; enddo
 
 end function sum_mass
 
 ! ##############################################################################
 
-real function sum_heat(first,justbits,justbergs)
+real function sum_heat(bergs,justbits,justbergs)
 ! Arguments
-type(iceberg), pointer :: first
+type(icebergs), pointer :: bergs
 logical, intent(in), optional :: justbits, justbergs
 ! Local variables
 type(iceberg), pointer :: this
 real :: dm
+integer :: grdi, grdj
 
   sum_heat=0.
-  this=>first
-  do while(associated(this))
-    dm=0.
-    if (present(justbergs)) then
-      dm=this%mass*this%mass_scaling
-    elseif (present(justbits)) then
-      dm=this%mass_of_bits*this%mass_scaling
-    else
-      dm=(this%mass+this%mass_of_bits)*this%mass_scaling
-    endif
-    sum_heat=sum_heat+dm*this%heat_density
-    this=>this%next
-  enddo
+  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+    this=>bergs%list(grdi,grdj)%first
+    do while(associated(this))
+      dm=0.
+      if (present(justbergs)) then
+        dm=this%mass*this%mass_scaling
+      elseif (present(justbits)) then
+        dm=this%mass_of_bits*this%mass_scaling
+      else
+        dm=(this%mass+this%mass_of_bits)*this%mass_scaling
+      endif
+      sum_heat=sum_heat+dm*this%heat_density
+      this=>this%next
+    enddo
+  enddo ; enddo
 
 end function sum_heat
 
@@ -2736,6 +2832,7 @@ integer, allocatable :: icnt(:,:)
 type(iceberg), pointer :: this
 type(icebergs_gridded), pointer :: grd
 logical :: check_halo
+integer :: grdi, grdj
 
 ! For convenience
   grd=>bergs%grd
@@ -2750,36 +2847,38 @@ logical :: check_halo
   icnt(:,:)=0
   grd%tmp(:,:)=0.
 
-  this=>bergs%first
-  i=0; ichk5=0
-  do while(associated(this))
-    i=i+1
-    iberg=berg_chksum(this)
-    fld(i,1) = this%lon
-    fld(i,2) = this%lat
-    fld(i,3) = this%uvel
-    fld(i,4) = this%vvel
-    fld(i,5) = this%mass
-    fld(i,6) = this%thickness
-    fld(i,7) = this%width
-    fld(i,8) = this%length
-    fld(i,9) = this%axn !added by Alon
-    fld(i,10) = this%ayn !added by Alon
-    fld(i,11) = this%bxn !added by Alon
-    fld(i,12) = this%byn !added by Alon
-    fld(i,13) = this%uvel_old !added by Alon
-    fld(i,14) = this%vvel_old !added by Alon
-    fld(i,15) = this%lon_old !added by Alon
-    fld(i,16) = this%lat_old !added by Alon
-    fld(i,17) = time_hash(this) !Changed from 9 to 17 by Alon
-    fld(i,18) = pos_hash(this) !Changed from 10 to 18 by Alon
-    fld(i,19) = float(iberg) !Changed from 11 to 19 by Alon
-    icnt(this%ine,this%jne)=icnt(this%ine,this%jne)+1
-    fld2(i,:) = fld(i,:)*float( icnt(this%ine,this%jne) ) !*float( i )
-    grd%tmp(this%ine,this%jne)=grd%tmp(this%ine,this%jne)+time_hash(this)*pos_hash(this)+log(this%mass)
-    ichk5=ichk5+iberg
-    this=>this%next
-  enddo
+  do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
+    this=>bergs%list(grdi,grdj)%first
+    i=0; ichk5=0
+    do while(associated(this))
+      i=i+1
+      iberg=berg_chksum(this)
+      fld(i,1) = this%lon
+      fld(i,2) = this%lat
+      fld(i,3) = this%uvel
+      fld(i,4) = this%vvel
+      fld(i,5) = this%mass
+      fld(i,6) = this%thickness
+      fld(i,7) = this%width
+      fld(i,8) = this%length
+      fld(i,9) = this%axn !added by Alon
+      fld(i,10) = this%ayn !added by Alon
+      fld(i,11) = this%bxn !added by Alon
+      fld(i,12) = this%byn !added by Alon
+      fld(i,13) = this%uvel_old !added by Alon
+      fld(i,14) = this%vvel_old !added by Alon
+      fld(i,15) = this%lon_old !added by Alon
+      fld(i,16) = this%lat_old !added by Alon
+      fld(i,17) = time_hash(this) !Changed from 9 to 17 by Alon
+      fld(i,18) = pos_hash(this) !Changed from 10 to 18 by Alon
+      fld(i,19) = float(iberg) !Changed from 11 to 19 by Alon
+      icnt(this%ine,this%jne)=icnt(this%ine,this%jne)+1
+      fld2(i,:) = fld(i,:)*float( icnt(this%ine,this%jne) ) !*float( i )
+      grd%tmp(this%ine,this%jne)=grd%tmp(this%ine,this%jne)+time_hash(this)*pos_hash(this)+log(this%mass)
+      ichk5=ichk5+iberg
+      this=>this%next
+    enddo
+  enddo ; enddo
 
   ichk1=mpp_chksum( fld )
   ichk2=mpp_chksum( fld2 )
