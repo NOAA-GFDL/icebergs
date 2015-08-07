@@ -66,6 +66,7 @@ public sum_mass,sum_heat,bilin,yearday,bergs_chksum
 public checksum_gridded
 public grd_chksum2,grd_chksum3
 public fix_restart_dates, offset_berg_dates
+public move_berg_between_cells
 
 type :: icebergs_gridded
   type(domain2D), pointer :: domain ! MPP domain
@@ -715,6 +716,48 @@ end subroutine offset_berg_dates
 
 ! #############################################################################
 
+subroutine move_berg_between_cells(bergs)  !Move icebergs onto the correct lists if they have moved from cell to cell.
+! Arguments
+type(icebergs), pointer :: bergs
+type(icebergs_gridded), pointer :: grd => null()
+type(iceberg), pointer :: moving_berg => null(), this => null()
+integer :: grdi, grdj
+logical :: quick
+! For convenience
+grd=>bergs%grd
+
+do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+
+      if ((this%ine.ne.grdi) .or. (this%jne.ne.grdj))  then
+        moving_berg=>this
+        this=>this%next
+        
+        !Removing the iceberg from the old list
+        if (associated(moving_berg%prev)) then
+          moving_berg%prev%next=>moving_berg%next
+        else
+          bergs%list(grdi,grdj)%first=>moving_berg%next
+        endif
+        if (associated(moving_berg%next)) moving_berg%next%prev=>moving_berg%prev
+
+        !Inserting the iceberg into the new list 
+        call insert_berg_into_list(bergs%list(moving_berg%ine,moving_berg%jne)%first,moving_berg)
+
+        !Clear moving_berg
+        moving_berg=>null()
+
+      else
+        this=>this%next
+      endif
+    enddo
+enddo ; enddo
+
+end subroutine move_berg_between_cells
+
+! #############################################################################
+
 subroutine send_bergs_to_other_pes(bergs)
 ! Arguments
 type(icebergs), pointer :: bergs
@@ -823,7 +866,7 @@ integer :: grdi, grdj
   !  here to accomodate diagonal transfer of bergs between PEs -AJA)
   nbergs_to_send_n=0
   nbergs_to_send_s=0
-  do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
+  do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
       if (this%jne.gt.bergs%grd%jec) then
@@ -1424,17 +1467,18 @@ logical, intent(in), optional :: quick
 type(iceberg), pointer :: this, prev
 logical :: quickly = .false.
 
-if(present(quick)) quickly = quick
 
   if (associated(first)) then
     if (.not. parallel_reprod .or. quickly) then
       newberg%next=>first
+      newberg%prev=>null()
       first%prev=>newberg
       first=>newberg
     else
       if (inorder(newberg,first)) then
         ! Insert at front of list
         newberg%next=>first
+        newberg%prev=>null()
         first%prev=>newberg
         first=>newberg
       else
@@ -1456,6 +1500,8 @@ if(present(quick)) quickly = quick
   else
     ! list is empty so create it
     first=>newberg
+    first%next=>null()
+    first%prev=>null()
   endif
 
 end subroutine insert_berg_into_list
