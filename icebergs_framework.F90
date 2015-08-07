@@ -729,21 +729,20 @@ grd=>bergs%grd
 do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
+
       if ((this%ine.ne.grdi) .or. (this%jne.ne.grdj))  then
         moving_berg=>this
         this=>this%next
         
         !Removing the iceberg from the old list
         if (associated(moving_berg%prev)) then
-           moving_berg%prev%next=>moving_berg%next
+          moving_berg%prev%next=>moving_berg%next
         else
-            bergs%list(grdi,grdj)%first=>moving_berg%next
+          bergs%list(grdi,grdj)%first=>moving_berg%next
         endif
         if (associated(moving_berg%next)) moving_berg%next%prev=>moving_berg%prev
 
         !Inserting the iceberg into the new list 
-!        call insert_berg_into_list(bergs%list(moving_berg%ine,moving_berg%jne)%first,moving_berg,quick=.true.)
-!        call insert_berg_into_list(bergs%list(grdi,grdj)%first,moving_berg)
         call insert_berg_into_list(bergs%list(moving_berg%ine,moving_berg%jne)%first,moving_berg)
 
         !Clear moving_berg
@@ -1468,17 +1467,18 @@ logical, intent(in), optional :: quick
 type(iceberg), pointer :: this, prev
 logical :: quickly = .false.
 
-if(present(quick)) quickly = quick
 
   if (associated(first)) then
     if (.not. parallel_reprod .or. quickly) then
       newberg%next=>first
+      newberg%prev=>null()
       first%prev=>newberg
       first=>newberg
     else
       if (inorder(newberg,first)) then
         ! Insert at front of list
         newberg%next=>first
+        newberg%prev=>null()
         first%prev=>newberg
         first=>newberg
       else
@@ -1500,6 +1500,8 @@ if(present(quick)) quickly = quick
   else
     ! list is empty so create it
     first=>newberg
+    first%next=>null()
+    first%prev=>null()
   endif
 
 end subroutine insert_berg_into_list
