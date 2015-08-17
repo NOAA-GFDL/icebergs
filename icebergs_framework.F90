@@ -62,7 +62,7 @@ public insert_berg_into_list, create_iceberg, delete_iceberg_from_list, destroy_
 public print_fld,print_berg, print_bergs,record_posn, push_posn, append_posn, check_position
 public move_trajectory, move_all_trajectories
 public find_cell,find_cell_by_search,count_bergs,is_point_in_cell,pos_within_cell
-public sum_mass,sum_heat,bilin,yearday,bergs_chksum
+public sum_mass,sum_heat,bilin,yearday,bergs_chksum,list_chksum,count_bergs_in_list
 public checksum_gridded
 public grd_chksum2,grd_chksum3
 public fix_restart_dates, offset_berg_dates
@@ -123,6 +123,7 @@ type :: icebergs_gridded
   integer :: id_mass=-1, id_ui=-1, id_vi=-1, id_ua=-1, id_va=-1, id_sst=-1, id_cn=-1, id_hi=-1
   integer :: id_bergy_src=-1, id_bergy_melt=-1, id_bergy_mass=-1, id_berg_melt=-1
   integer :: id_mass_on_ocn=-1, id_ssh=-1, id_fax=-1, id_fay=-1
+  integer :: id_count=-1, id_chksum=-1
 
   real :: clipping_depth=0. ! The effective depth at which to clip the weight felt by the ocean [m].
 
@@ -608,6 +609,10 @@ endif
      'Accumulated ice mass by class', 'kg')
   grd%id_real_calving=register_diag_field('icebergs', 'real_calving', axes3d, Time, &
      'Calving into iceberg class', 'kg/s')
+  grd%id_count=register_diag_field('icebergs', 'bergs_per_cell', axes, Time, &
+     'Number of bergs per cell', '#')
+  grd%id_chksum=register_diag_field('icebergs', 'list_chksum', axes, Time, &
+     'mpp_chksum on bergs in each cell', '#')
   grd%id_uo=register_diag_field('icebergs', 'uo', axes, Time, &
      'Ocean zonal component of velocity', 'm s^-1')
   grd%id_vo=register_diag_field('icebergs', 'vo', axes, Time, &
@@ -1733,7 +1738,6 @@ integer function count_bergs(bergs, with_halos)
 type(icebergs), pointer :: bergs
 logical, optional :: with_halos
 ! Local variables
-type(iceberg), pointer :: this
 integer :: grdi, grdj, is, ie, js, je
 logical :: include_halos
 
@@ -1747,14 +1751,27 @@ logical :: include_halos
 
   count_bergs=0
   do grdj = js,je ; do grdi = is,ie
-    this=>bergs%list(grdi,grdj)%first
-    do while(associated(this))
-      count_bergs=count_bergs+1
-      this=>this%next
-    enddo
+    count_bergs=count_bergs+count_bergs_in_list(bergs%list(grdi,grdj)%first)
   enddo ; enddo
 
 end function count_bergs
+
+! ##############################################################################
+
+integer function count_bergs_in_list(first)
+! Arguments
+type(iceberg), pointer :: first
+! Local variables
+type(iceberg), pointer :: this
+
+  count_bergs_in_list=0
+  this=>first
+  do while(associated(this))
+    count_bergs_in_list=count_bergs_in_list+1
+    this=>this%next
+  enddo
+
+end function count_bergs_in_list
 
 ! ##############################################################################
 
@@ -2921,7 +2938,26 @@ end subroutine bergs_chksum
 
 ! ##############################################################################
 
-integer function berg_chksum(berg )
+integer function list_chksum(first)
+! Arguments
+type(iceberg), pointer :: first
+! Local variables
+integer :: i
+type(iceberg), pointer :: this
+
+  this=>first
+  i=0; list_chksum=0
+  do while(associated(this))
+    i=i+1
+    list_chksum=list_chksum+berg_chksum(this)*i
+    this=>this%next
+  enddo
+
+end function list_chksum
+
+! ##############################################################################
+
+integer function berg_chksum(berg)
 ! Arguments
 type(iceberg), pointer :: berg
 ! Local variables

@@ -27,8 +27,8 @@ use ice_bergs_framework, only: icebergs_gridded, xyt, iceberg, icebergs, buffer
 use ice_bergs_framework, only: verbose, really_debug,debug,old_bug_rotated_weights,budget,use_roundoff_fix
 use ice_bergs_framework, only: find_cell,find_cell_by_search,count_bergs,is_point_in_cell,pos_within_cell
 use ice_bergs_framework, only: nclasses,old_bug_bilin
-use ice_bergs_framework, only: sum_mass,sum_heat,bilin,yearday,count_bergs,bergs_chksum
-use ice_bergs_framework, only: checksum_gridded,add_new_berg_to_list
+use ice_bergs_framework, only: sum_mass,sum_heat,bilin,yearday,count_bergs,bergs_chksum,count_bergs_in_list
+use ice_bergs_framework, only: checksum_gridded,add_new_berg_to_list,list_chksum
 use ice_bergs_framework, only: send_bergs_to_other_pes,move_trajectory,move_all_trajectories
 use ice_bergs_framework, only: move_berg_between_cells
 use ice_bergs_framework, only: record_posn,check_position,print_berg,print_bergs,print_fld
@@ -1095,6 +1095,7 @@ integer :: i, j, Iu, ju, iv, Jv, Iu_off, ju_off, iv_off, Jv_off
 real :: mask
 real, dimension(:,:), allocatable :: uC_tmp, vC_tmp
 integer :: vel_stagger, str_stagger
+real, dimension(:,:), allocatable :: iCount
 
 integer :: stderrunit
 
@@ -1347,7 +1348,22 @@ integer :: stderrunit
     lerr=send_data(grd%id_fax, tauxa(:,:), Time)
   if (grd%id_fay>0) &
     lerr=send_data(grd%id_fay, tauya(:,:), Time)
-
+  if (grd%id_count>0) then
+    allocate( iCount(grd%isc:grd%iec,grd%jsc:grd%jec) ); iCount(:,:)=0
+    do j = grd%jsc, grd%jec ; do i = grd%isc, grd%iec
+      iCount(i,j) = count_bergs_in_list(bergs%list(i,j)%first)
+    enddo ; enddo
+    lerr=send_data(grd%id_count, iCount(:,:), Time)
+    deallocate( iCount )
+  endif
+  if (grd%id_chksum>0) then
+    allocate( iCount(grd%isc:grd%iec,grd%jsc:grd%jec) ); iCount(:,:)=0
+    do j = grd%jsc, grd%jec ; do i = grd%isc, grd%iec
+      iCount(i,j) = list_chksum(bergs%list(i,j)%first)
+    enddo ; enddo
+    lerr=send_data(grd%id_chksum, iCount(:,:), Time)
+    deallocate( iCount )
+  endif
 
   ! Dump icebergs to screen
   if (really_debug) call print_bergs(stderrunit,bergs,'icebergs_run, status')
