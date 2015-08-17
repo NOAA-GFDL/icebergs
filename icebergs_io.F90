@@ -863,6 +863,7 @@ contains
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
         call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
+        localberg%start_lon=localberg%lon-0.001
         localberg%uvel=-1.
         localberg%vvel=0.
         localberg%axn=0. !Alon
@@ -872,6 +873,7 @@ contains
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
         call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
+        localberg%start_lat=localberg%lat+0.001
         localberg%uvel=0.
         localberg%vvel=1.
         localberg%axn=0. !Alon
@@ -881,6 +883,7 @@ contains
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
         call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
+        localberg%start_lat=localberg%lat-0.001
         localberg%uvel=0.
         localberg%vvel=-1.
         localberg%axn=0. !Alon
