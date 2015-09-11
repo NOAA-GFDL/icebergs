@@ -165,11 +165,10 @@ R1=sqrt(A1/pi) ! Interaction radius of the iceberg (assuming circular icebergs)
 lon1=berg%lon; lat1=berg%lat
 call rotpos_to_tang(lon1,lat1,x1,y1)
 
-  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+  do grdj = berg%jne-1,berg%jne+1 ; do grdi = berg%ine-1,berg%ine+1
   other_berg=>bergs%list(grdi,grdj)%first
 
 !Note: This summing should be made order invarient. 
-!Note: Need to limit how many icebergs we search over
   do while (associated(other_berg)) ! loop over all other bergs  
        L2=other_berg%length
        W2=other_berg%width
