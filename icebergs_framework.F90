@@ -54,6 +54,7 @@ public icebergs_gridded, xyt, iceberg, icebergs, buffer
 !Public subs
 public ice_bergs_framework_init
 public send_bergs_to_other_pes
+public update_halo
 public pack_berg_into_buffer2, unpack_berg_from_buffer2
 public pack_traj_into_buffer2, unpack_traj_from_buffer2
 public increase_buffer, increase_ibuffer, increase_ibuffer_traj, increase_buffer_traj
@@ -755,6 +756,248 @@ do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
 enddo ; enddo
 
 end subroutine move_berg_between_cells
+
+
+! #############################################################################
+
+subroutine update_halo(bergs)
+! Arguments
+type(icebergs), pointer :: bergs
+! Local variables
+type(iceberg), pointer :: kick_the_bucket, this
+integer :: nbergs_to_send_e, nbergs_to_send_w
+integer :: nbergs_to_send_n, nbergs_to_send_s
+integer :: nbergs_rcvd_from_e, nbergs_rcvd_from_w
+integer :: nbergs_rcvd_from_n, nbergs_rcvd_from_s
+type(icebergs_gridded), pointer :: grd
+integer :: i, nbergs_start, nbergs_end
+integer :: stderrunit
+integer :: grdi, grdj
+integer :: halo_width
+
+  halo_width=2  ! Must be less than current halo value used for updating weight.
+
+! Step 1: Clear the current halos
+  do grdj = grd%jsd,grd%jsc-1 ;  do grdi = grd%isd,grd%ied
+    call delete_all_bergs_in_list(bergs, grdj, grdi)
+  enddo ; enddo
+
+  do grdj = grd%jec+1,grd%jed ;  do grdi = grd%isd,grd%ied
+    call delete_all_bergs_in_list(bergs,grdj,grdi)
+  enddo ; enddo
+
+  do grdj = grd%jsd,grd%jed ;    do grdi = grd%isd,grd%isc-1
+    call delete_all_bergs_in_list(bergs,grdj,grdi)
+  enddo ; enddo
+
+  do grdj = grd%jsd,grd%jed ;    do grdi = grd%iec+1,grd%ied
+    call delete_all_bergs_in_list(bergs,grdj,grdi)
+  enddo ; enddo
+
+
+! Step 2: Updating the halos  - This code is mostly copied from send_to_other_pes
+
+  ! Get the stderr unit number
+  stderrunit = stderr()
+
+  ! For convenience
+  grd=>bergs%grd
+
+  if (debug) then
+    nbergs_start=count_bergs(bergs)
+  endif
+
+  ! Find number of bergs that headed east/west
+  nbergs_to_send_e=0
+  nbergs_to_send_w=0
+
+  !Bergs on eastern side of the processor
+  do grdj = grd%jsc,grd%jec ; do grdi = grd%iec+1,grd%iec+halo_width  
+    this=>bergs%list(grdi,grdj)%first
+    kick_the_bucket=>this
+    this=>this%next
+    nbergs_to_send_e=nbergs_to_send_e+1
+    call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_e, nbergs_to_send_e)
+  enddo; enddo
+
+  !Bergs on the western side of the processor
+  do grdj = grd%jsc,grd%jec ; do grdi = grd%isc-halo_width,grd%isc-1 
+    kick_the_bucket=>this
+    this=>this%next
+    nbergs_to_send_w=nbergs_to_send_w+1
+    call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_w, nbergs_to_send_w) 
+  enddo; enddo
+
+
+
+  ! Send bergs east
+  if (grd%pe_E.ne.NULL_PE) then
+    call mpp_send(nbergs_to_send_e, plen=1, to_pe=grd%pe_E, tag=COMM_TAG_1)
+    if (nbergs_to_send_e.gt.0) then
+      call mpp_send(bergs%obuffer_e%data, nbergs_to_send_e*buffer_width, grd%pe_E, tag=COMM_TAG_2)
+    endif
+  endif
+
+  ! Send bergs west
+  if (grd%pe_W.ne.NULL_PE) then
+    call mpp_send(nbergs_to_send_w, plen=1, to_pe=grd%pe_W, tag=COMM_TAG_3)
+    if (nbergs_to_send_w.gt.0) then
+      call mpp_send(bergs%obuffer_w%data, nbergs_to_send_w*buffer_width, grd%pe_W, tag=COMM_TAG_4)
+    endif
+  endif
+
+  ! Receive bergs from west
+  if (grd%pe_W.ne.NULL_PE) then
+    nbergs_rcvd_from_w=-999
+    call mpp_recv(nbergs_rcvd_from_w, glen=1, from_pe=grd%pe_W, tag=COMM_TAG_1)
+    if (nbergs_rcvd_from_w.lt.0) then
+      write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_w,' from',grd%pe_W,' (W) !!!!!!!!!!!!!!!!!!!!!!'
+    endif
+    if (nbergs_rcvd_from_w.gt.0) then
+      call increase_ibuffer(bergs%ibuffer_w, nbergs_rcvd_from_w)
+      call mpp_recv(bergs%ibuffer_w%data, nbergs_rcvd_from_w*buffer_width, grd%pe_W, tag=COMM_TAG_2)
+      do i=1, nbergs_rcvd_from_w
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_w, i, grd)
+      enddo
+    endif
+  else
+    nbergs_rcvd_from_w=0
+  endif
+
+  ! Receive bergs from east
+  if (grd%pe_E.ne.NULL_PE) then
+    nbergs_rcvd_from_e=-999
+    call mpp_recv(nbergs_rcvd_from_e, glen=1, from_pe=grd%pe_E, tag=COMM_TAG_3)
+    if (nbergs_rcvd_from_e.lt.0) then
+      write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_e,' from',grd%pe_E,' (E) !!!!!!!!!!!!!!!!!!!!!!'
+    endif
+    if (nbergs_rcvd_from_e.gt.0) then
+      call increase_ibuffer(bergs%ibuffer_e, nbergs_rcvd_from_e)
+      call mpp_recv(bergs%ibuffer_e%data, nbergs_rcvd_from_e*buffer_width, grd%pe_E, tag=COMM_TAG_4)
+      do i=1, nbergs_rcvd_from_e
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_e, i, grd)
+      enddo
+    endif
+  else
+    nbergs_rcvd_from_e=0
+  endif
+
+
+
+ ! Find number of bergs that headed north/south
+  nbergs_to_send_n=0
+  nbergs_to_send_s=0
+  
+
+  !Bergs on north side of the processor
+  do grdj = grd%jec-halo_width,grd%jec-1 ; do grdi = grd%isd,grd%ied
+    kick_the_bucket=>this
+    this=>this%next
+    nbergs_to_send_n=nbergs_to_send_n+1
+    call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_n, nbergs_to_send_n)
+  enddo; enddo
+
+
+  !Bergs on south side of the processor
+  do grdj = grd%jsc+1,grd%jsc+halo_width ; do grdi = grd%isd,grd%ied
+    kick_the_bucket=>this
+    this=>this%next
+    nbergs_to_send_s=nbergs_to_send_s+1
+    call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_s, nbergs_to_send_s)
+   enddo; enddo
+
+
+ ! Send bergs north
+  if (grd%pe_N.ne.NULL_PE) then
+    if(folded_north_on_pe) then
+       call mpp_send(nbergs_to_send_n, plen=1, to_pe=grd%pe_N, tag=COMM_TAG_9)
+    else
+       call mpp_send(nbergs_to_send_n, plen=1, to_pe=grd%pe_N, tag=COMM_TAG_5)
+    endif
+    if (nbergs_to_send_n.gt.0) then
+       if(folded_north_on_pe) then
+          call mpp_send(bergs%obuffer_n%data, nbergs_to_send_n*buffer_width, grd%pe_N, tag=COMM_TAG_10)
+       else
+          call mpp_send(bergs%obuffer_n%data, nbergs_to_send_n*buffer_width, grd%pe_N, tag=COMM_TAG_6)
+       endif
+    endif
+  endif
+
+  ! Send bergs south
+  if (grd%pe_S.ne.NULL_PE) then
+    call mpp_send(nbergs_to_send_s, plen=1, to_pe=grd%pe_S, tag=COMM_TAG_7)
+    if (nbergs_to_send_s.gt.0) then
+      call mpp_send(bergs%obuffer_s%data, nbergs_to_send_s*buffer_width, grd%pe_S, tag=COMM_TAG_8)
+    endif
+  endif
+
+
+  ! Receive bergs from south
+  if (grd%pe_S.ne.NULL_PE) then
+    nbergs_rcvd_from_s=-999
+    call mpp_recv(nbergs_rcvd_from_s, glen=1, from_pe=grd%pe_S, tag=COMM_TAG_5)
+    if (nbergs_rcvd_from_s.lt.0) then
+      write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_s,' from',grd%pe_S,' (S) !!!!!!!!!!!!!!!!!!!!!!'
+    endif
+    if (nbergs_rcvd_from_s.gt.0) then
+      call increase_ibuffer(bergs%ibuffer_s, nbergs_rcvd_from_s)
+      call mpp_recv(bergs%ibuffer_s%data, nbergs_rcvd_from_s*buffer_width, grd%pe_S, tag=COMM_TAG_6)
+      do i=1, nbergs_rcvd_from_s
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_s, i, grd)
+      enddo
+    endif
+  else
+    nbergs_rcvd_from_s=0
+  endif
+
+  ! Receive bergs from north
+  if (grd%pe_N.ne.NULL_PE) then
+    nbergs_rcvd_from_n=-999
+    if(folded_north_on_pe) then
+       call mpp_recv(nbergs_rcvd_from_n, glen=1, from_pe=grd%pe_N, tag=COMM_TAG_9)
+    else
+       call mpp_recv(nbergs_rcvd_from_n, glen=1, from_pe=grd%pe_N, tag=COMM_TAG_7)
+    endif
+    if (nbergs_rcvd_from_n.lt.0) then
+      write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_n,' from',grd%pe_N,' (N) !!!!!!!!!!!!!!!!!!!!!!'
+    endif
+    if (nbergs_rcvd_from_n.gt.0) then
+      call increase_ibuffer(bergs%ibuffer_n, nbergs_rcvd_from_n)
+      if(folded_north_on_pe) then
+         call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_10)
+      else
+         call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_8)
+      endif
+      do i=1, nbergs_rcvd_from_n
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_n, i, grd)
+      enddo
+    endif
+  else
+    nbergs_rcvd_from_n=0
+  endif
+
+
+
+  call mpp_sync_self()
+
+
+contains
+  subroutine delete_all_bergs_in_list(bergs,grdj,grdi)
+  type(icebergs), pointer :: bergs
+  ! Local variables
+  type(iceberg), pointer :: kick_the_bucket, this
+  integer :: grdi, grdj
+  this=>bergs%list(grdi,grdj)%first
+  do while (associated(this))
+    kick_the_bucket=>this
+    this=>this%next
+    call destroy_iceberg(kick_the_bucket)
+!    call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
+  enddo
+  end  subroutine delete_all_bergs_in_list
+
+end subroutine update_halo
+
 
 ! #############################################################################
 
