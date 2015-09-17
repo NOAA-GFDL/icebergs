@@ -774,10 +774,21 @@ integer :: i, nbergs_start, nbergs_end
 integer :: stderrunit
 integer :: grdi, grdj
 integer :: halo_width
+integer :: temp1, temp2
+  
+halo_width=2  ! Must be less than current halo value used for updating weight.
 
-  halo_width=2  ! Must be less than current halo value used for updating weight.
+ ! Get the stderr unit number
+   stderrunit = stderr()
+
+ ! For convenience
+   grd=>bergs%grd
+
+
 
 ! Step 1: Clear the current halos
+
+
   do grdj = grd%jsd,grd%jsc-1 ;  do grdi = grd%isd,grd%ied
     call delete_all_bergs_in_list(bergs, grdj, grdi)
   enddo ; enddo
@@ -797,11 +808,9 @@ integer :: halo_width
 
 ! Step 2: Updating the halos  - This code is mostly copied from send_to_other_pes
 
-  ! Get the stderr unit number
-  stderrunit = stderr()
-
-  ! For convenience
-  grd=>bergs%grd
+!  ! Get the stderr unit number
+!  stderrunit = stderr()
+!
 
   if (debug) then
     nbergs_start=count_bergs(bergs)
@@ -814,18 +823,22 @@ integer :: halo_width
   !Bergs on eastern side of the processor
   do grdj = grd%jsc,grd%jec ; do grdi = grd%iec+1,grd%iec+halo_width  
     this=>bergs%list(grdi,grdj)%first
-    kick_the_bucket=>this
-    this=>this%next
-    nbergs_to_send_e=nbergs_to_send_e+1
-    call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_e, nbergs_to_send_e)
+    do while (associated(this))
+        kick_the_bucket=>this
+        this=>this%next
+        nbergs_to_send_e=nbergs_to_send_e+1
+        call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_e, nbergs_to_send_e)
+    enddo
   enddo; enddo
 
   !Bergs on the western side of the processor
   do grdj = grd%jsc,grd%jec ; do grdi = grd%isc-halo_width,grd%isc-1 
-    kick_the_bucket=>this
-    this=>this%next
-    nbergs_to_send_w=nbergs_to_send_w+1
-    call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_w, nbergs_to_send_w) 
+    do while (associated(this))
+      kick_the_bucket=>this
+      this=>this%next
+      nbergs_to_send_w=nbergs_to_send_w+1
+    call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_w, nbergs_to_send_w)
+    enddo 
   enddo; enddo
 
 
@@ -891,20 +904,24 @@ integer :: halo_width
 
   !Bergs on north side of the processor
   do grdj = grd%jec-halo_width,grd%jec-1 ; do grdi = grd%isd,grd%ied
-    kick_the_bucket=>this
-    this=>this%next
-    nbergs_to_send_n=nbergs_to_send_n+1
-    call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_n, nbergs_to_send_n)
+    do while (associated(this))
+      kick_the_bucket=>this
+      this=>this%next
+      nbergs_to_send_n=nbergs_to_send_n+1
+      call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_n, nbergs_to_send_n)
+    enddo
   enddo; enddo
 
 
   !Bergs on south side of the processor
   do grdj = grd%jsc+1,grd%jsc+halo_width ; do grdi = grd%isd,grd%ied
-    kick_the_bucket=>this
-    this=>this%next
-    nbergs_to_send_s=nbergs_to_send_s+1
-    call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_s, nbergs_to_send_s)
-   enddo; enddo
+    do while (associated(this))
+      kick_the_bucket=>this
+      this=>this%next
+      nbergs_to_send_s=nbergs_to_send_s+1
+      call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_s, nbergs_to_send_s)
+    enddo
+  enddo; enddo
 
 
  ! Send bergs north
@@ -981,8 +998,13 @@ integer :: halo_width
   call mpp_sync_self()
 
 
-contains
-  subroutine delete_all_bergs_in_list(bergs,grdj,grdi)
+end subroutine update_halo
+
+
+
+
+!contains
+subroutine delete_all_bergs_in_list(bergs,grdj,grdi)
   type(icebergs), pointer :: bergs
   ! Local variables
   type(iceberg), pointer :: kick_the_bucket, this
@@ -994,9 +1016,8 @@ contains
     call destroy_iceberg(kick_the_bucket)
 !    call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
   enddo
-  end  subroutine delete_all_bergs_in_list
+end  subroutine delete_all_bergs_in_list
 
-end subroutine update_halo
 
 
 ! #############################################################################
