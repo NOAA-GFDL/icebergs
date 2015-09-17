@@ -72,6 +72,7 @@ public move_berg_between_cells
 type :: icebergs_gridded
   type(domain2D), pointer :: domain ! MPP domain
   integer :: halo ! Nominal halo width
+  integer :: iceberg_halo ! halo width used by icebergs (must be lt halo)
   integer :: isc, iec, jsc, jec ! Indices of computational domain
   integer :: isd, ied, jsd, jed ! Indices of data domain
   integer :: my_pe, pe_N, pe_S, pe_E, pe_W ! MPI PE identifiers
@@ -269,6 +270,7 @@ logical, intent(in), optional :: fractional_area
 
 ! Namelist parameters (and defaults)
 integer :: halo=4 ! Width of halo region
+integer :: iceberg_halo=2 ! Width of halo region for icebergs  (must be lt halo)
 integer :: traj_sample_hrs=24 ! Period between sampling of position for trajectory storage
 integer :: traj_write_hrs=480 ! Period between writing sampled trajectories to disk
 integer :: verbose_hrs=24 ! Period between verbose messages
@@ -295,7 +297,7 @@ real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10,
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim) , 
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
 real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
-namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, traj_write_hrs, &
+namelist /icebergs_nml/ verbose, budget, halo, iceberg_halo, traj_sample_hrs, initial_mass, traj_write_hrs, &
          distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef, radial_damping_coef, tangental_damping_coef, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, &
@@ -537,6 +539,10 @@ if (input_freq_distribution) then
      enddo
 endif 
 
+if (iceberg_halo .gt. halo) then
+    iceberg_halo=halo
+endif
+
 
  ! Parameters
   bergs%dt=dt
@@ -544,6 +550,7 @@ endif
   bergs%traj_write_hrs=traj_write_hrs
   bergs%verbose_hrs=verbose_hrs
   bergs%grd%halo=halo
+  bergs%grd%iceberg_halo=iceberg_halo
   bergs%rho_bergs=rho_bergs
   bergs%spring_coef=spring_coef
   bergs%radial_damping_coef=radial_damping_coef
@@ -776,7 +783,7 @@ integer :: grdi, grdj
 integer :: halo_width
 integer :: temp1, temp2
   
-halo_width=2  ! Must be less than current halo value used for updating weight.
+halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used for updating weight.
 
  ! Get the stderr unit number
    stderrunit = stderr()
