@@ -167,7 +167,6 @@ call rotpos_to_tang(lon1,lat1,x1,y1)
 
   do grdj = berg%jne-1,berg%jne+1 ; do grdi = berg%ine-1,berg%ine+1
   other_berg=>bergs%list(grdi,grdj)%first
-
 !Note: This summing should be made order invarient. 
   do while (associated(other_berg)) ! loop over all other bergs  
        L2=other_berg%length
@@ -342,7 +341,6 @@ C_N=1.0
 beta=1.0
 use_new_predictive_corrective=.True.
 endif
-
 
 !print *, 'axn=',axn,'ayn=',ayn
   u_star=uvel0+(axn*(dt/2.))  !Alon

@@ -543,6 +543,9 @@ if (iceberg_halo .gt. halo) then
     iceberg_halo=halo
 endif
 
+if (Runge_not_Verlet) then
+  interactive_icebergs_on=.false.  ! Iceberg interactions only with Verlet
+endif
 
  ! Parameters
   bergs%dt=dt
