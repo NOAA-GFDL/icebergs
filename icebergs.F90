@@ -582,7 +582,7 @@ endif
     write(stderrunit,200) mpp_pe(),'Starting pars:', &
       'yr0=',berg%start_year, 'day0=',berg%start_day, &
       'lon0=',berg%start_lon, 'lat0=',berg%start_lat, 'mass0=',berg%start_mass, &
-      'sclng=',berg%mass_scaling
+      'sclng=',berg%mass_scaling, 'num0=',berg%iceberg_num
     write(stderrunit,100) mpp_pe(),'Geometry:', &
       'M=',M, 'T=',T, 'D=',D, 'F=',F, 'W=',W, 'L=',L
     write(stderrunit,100) mpp_pe(),'delta U:', &
@@ -1770,6 +1770,7 @@ integer :: stderrunit
           newberg%start_lon=newberg%lon
           newberg%start_lat=newberg%lat
           newberg%start_year=bergs%current_year
+          newberg%iceberg_num=bergs%current_year !!!! ALon: MP: Change this!!
           newberg%start_day=bergs%current_yearday+ddt/86400.
           newberg%start_mass=bergs%initial_mass(k)
           newberg%mass_scaling=bergs%mass_scaling(k)
@@ -1789,6 +1790,7 @@ integer :: stderrunit
           icnt=icnt+1
           bergs%nbergs_calved=bergs%nbergs_calved+1
           bergs%nbergs_calved_by_class(k)=bergs%nbergs_calved_by_class(k)+1
+          grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
         enddo
         icntmax=max(icntmax,icnt)
       enddo

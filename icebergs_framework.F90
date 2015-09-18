@@ -15,7 +15,7 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 
 implicit none ; private
 
-integer, parameter :: buffer_width=28 !Changed from 20 to 28 by Alon 
+integer, parameter :: buffer_width=29 !Changed from 20 to 29 by Alon 
 integer, parameter :: buffer_width_traj=31  !Changed from 23 by Alon
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 
@@ -115,6 +115,7 @@ type :: icebergs_gridded
   real, dimension(:,:), pointer :: iceberg_heat_content=>null() ! Distributed heat content of bergs (J/m^2)
   real, dimension(:,:), pointer :: parity_x=>null() ! X component of vector point from i,j to i+1,j+1 (for detecting tri-polar fold)
   real, dimension(:,:), pointer :: parity_y=>null() ! Y component of vector point from i,j to i+1,j+1 (for detecting tri-polar fold)
+  integer, dimension(:,:), pointer :: iceberg_counter_grd=>null() ! Counts icebergs created for naming purposes
   ! Diagnostics handles
   integer :: id_uo=-1, id_vo=-1, id_calving=-1, id_stored_ice=-1, id_accum=-1, id_unused=-1, id_floating_melt=-1
   integer :: id_melt_buoy=-1, id_melt_eros=-1, id_melt_conv=-1, id_virtual_area=-1, id_real_calving=-1
@@ -133,7 +134,7 @@ type :: xyt
   real :: axn, ayn, bxn, byn, uvel_old, vvel_old, lat_old, lon_old  !Explicit and implicit accelerations !Alon 
   real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi
   real :: mass_of_bits, heat_density
-  integer :: year
+  integer :: year, iceberg_num
   type(xyt), pointer :: next=>null()
 end type xyt
 
@@ -145,6 +146,7 @@ type :: iceberg
   real :: start_lon, start_lat, start_day, start_mass, mass_scaling
   real :: mass_of_bits, heat_density
   integer :: start_year
+  integer :: iceberg_num
   integer :: ine, jne ! nearest index in NE direction (for convenience)
   real :: xi, yj ! Non-dimensional coords within current cell (0..1)
   ! Environment variables (as seen by the iceberg)
@@ -419,6 +421,7 @@ real :: Total_mass  !Added by Alon
   allocate( bergs%nbergs_calved_by_class(nclasses) ); bergs%nbergs_calved_by_class(:)=0
   allocate( grd%parity_x(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_x(:,:)=1.
   allocate( grd%parity_y(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_y(:,:)=1.
+  allocate( grd%iceberg_counter_grd(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%iceberg_counter_grd(:,:)=0
 
  !write(stderrunit,*) 'diamonds: copying grid'
   ! Copy data declared on ice model computational domain
@@ -983,6 +986,7 @@ end subroutine send_bergs_to_other_pes
     buff%data(26,n)=berg%vvel_old  !Alon
     buff%data(27,n)=berg%lon_old  !Alon
     buff%data(28,n)=berg%lat_old  !Alon
+    buff%data(29,n)=float(berg%iceberg_num)
 
   end subroutine pack_berg_into_buffer2
 
@@ -1066,6 +1070,7 @@ end subroutine send_bergs_to_other_pes
     localberg%vvel_old=buff%data(26,n) !Alon
     localberg%lon_old=buff%data(27,n) !Alon
     localberg%lat_old=buff%data(28,n) !Alon
+    localberg%iceberg_num=nint(buff%data(29,n))
    
      lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
     if (lres) then
@@ -1440,7 +1445,7 @@ end subroutine insert_berg_into_list
 
 ! ##############################################################################
 
-logical function inorder(berg1, berg2)
+logical function inorder(berg1, berg2)  !MP Alon - Change to include iceberg_num
 ! Arguments
 type(iceberg), pointer :: berg1, berg2
 ! Local variables
@@ -1484,7 +1489,7 @@ end function inorder
 
 ! ##############################################################################
 
-  real function time_hash(berg)
+  real function time_hash(berg)!  Alon: Think about removing this.
   ! Arguments
   type(iceberg), pointer :: berg
     time_hash=berg%start_day+366.*float(berg%start_year)
@@ -1500,7 +1505,7 @@ end function inorder
 
 ! ##############################################################################
 
-logical function sameid(berg1, berg2)
+logical function sameid(berg1, berg2) !  Alon: MP updat this.
 ! Arguments
 type(iceberg), pointer :: berg1, berg2
 ! Local variables
@@ -1616,7 +1621,7 @@ character(len=*) :: label
 
   write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,") start lon,lat,yr,day,mass=",2f10.4,i5,f7.2,es12.4)') &
     label, mpp_pe(), berg%start_lon, berg%start_lat, &
-    berg%start_year, berg%start_day, berg%start_mass
+    berg%start_year, berg%iceberg_num, berg%start_day, berg%start_mass
   write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,a,2i5,3(a,2f10.4),a,2l2)') &
     label, mpp_pe(), ') i,j=',berg%ine, berg%jne, &
     ' xi,yj=', berg%xi, berg%yj, &
@@ -1779,6 +1784,7 @@ type(xyt) :: vals
   vals%lon=berg%start_lon
   vals%lat=berg%start_lat
   vals%year=berg%start_year
+  vals%iceberg_num=berg%iceberg_num
   vals%day=berg%start_day
   vals%mass=berg%start_mass
   call push_posn(berg%trajectory, vals)
@@ -2871,9 +2877,10 @@ integer :: i
   itmp(37)=berg%start_year !Changed from 29 to 37 by Alon
   itmp(38)=berg%ine !Changed from 30 to 38 by Alon
   itmp(39)=berg%jne !Changed from 31 to 39 by Alon
+  itmp(40)=berg%iceberg_num !added  by Alon
 
   ichk1=0; ichk2=0; ichk3=0
-  do i=1,36+3 !Changd from 28 to 36 by Alon
+  do i=1,37+3 !Changd from 28 to 37 by Alon
    ichk1=ichk1+itmp(i)
    ichk2=ichk2+itmp(i)*i
    ichk3=ichk3+itmp(i)*i*i

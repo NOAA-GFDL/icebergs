@@ -99,7 +99,7 @@ subroutine write_restart(bergs)
 ! Arguments
 type(icebergs), pointer :: bergs
 ! Local variables
-integer :: i,id
+integer :: i,j,id
 character(len=35) :: filename
 type(iceberg), pointer :: this=>NULL()
 integer :: stderrunit
@@ -134,7 +134,10 @@ real, allocatable, dimension(:) :: lon,          &
 
 integer, allocatable, dimension(:) :: ine,       &
                                       jne,       &
+                                      iceberg_num,       &
                                       start_year
+
+
 !uvel_old, vvel_old, lon_old, lat_old, axn, ayn, bxn, byn added by Alon.
   
 ! Get the stderr unit number
@@ -184,6 +187,7 @@ integer, allocatable, dimension(:) :: ine,       &
    allocate(ine(nbergs))
    allocate(jne(nbergs))
    allocate(start_year(nbergs))
+   allocate(iceberg_num(nbergs))
 
   call get_instance_filename("icebergs.res.nc", filename)
   call set_domain(bergs%grd%domain)
@@ -219,6 +223,8 @@ integer, allocatable, dimension(:) :: ine,       &
                                             longname='latitude of calving location',units='degrees_N')
   id = register_restart_field(bergs_restart,filename,'start_year',start_year, &
                                             longname='calendar year of calving event', units='years')
+  id = register_restart_field(bergs_restart,filename,'iceberg_num',iceberg_num, &
+                                            longname='identification of the iceberg', units='years')
   id = register_restart_field(bergs_restart,filename,'start_day',start_day, &
                                             longname='year day of calving event',units='days')
   id = register_restart_field(bergs_restart,filename,'start_mass',start_mass, &
@@ -245,11 +251,13 @@ integer, allocatable, dimension(:) :: ine,       &
     width(i) = this%width; length(i) = this%length
     start_lon(i) = this%start_lon; start_lat(i) = this%start_lat
     start_year(i) = this%start_year; start_day(i) = this%start_day
+    iceberg_num(i) = this%iceberg_num; 
     start_mass(i) = this%start_mass; mass_scaling(i) = this%mass_scaling
     mass_of_bits(i) = this%mass_of_bits; heat_density(i) = this%heat_density
     this=>this%next
   enddo
-    
+   
+
   call save_restart(bergs_restart)
   call free_restart_type(bergs_restart)
 
@@ -282,7 +290,9 @@ integer, allocatable, dimension(:) :: ine,       &
   deallocate(           &
              ine,       &
              jne,       &
+             iceberg_num,       &
              start_year )
+
 
   call nullify_domain()
 
@@ -294,7 +304,8 @@ integer, allocatable, dimension(:) :: ine,       &
   call write_data(filename, 'stored_ice', bergs%grd%stored_ice, bergs%grd%domain)
   call grd_chksum2(bergs%grd, bergs%grd%stored_heat, 'write stored_heat')
   call write_data(filename, 'stored_heat', bergs%grd%stored_heat, bergs%grd%domain)
-
+  !call grd_chksum2(bergs%grd, bergs%grd%iceberg_counter_grd, 'write iceberg_counter_grd')
+  call write_data(filename, 'iceberg_counter_grd', bergs%grd%iceberg_counter_grd, bergs%grd%domain)
   contains
 
   function last_berg(berg)
@@ -323,7 +334,7 @@ integer :: k, ierr, ncid, dimid, nbergs_in_file
 integer :: lonid, latid,  uvelid, vvelid, ineid, jneid
 integer :: axnid, aynid, uvel_oldid, vvel_oldid, bxnid, bynid, lon_oldid, lat_oldid !Added by Alon
 integer :: massid, thicknessid, widthid, lengthid
-integer :: start_lonid, start_latid, start_yearid, start_dayid, start_massid
+integer :: start_lonid, start_latid, start_yearid, iceberg_numid, start_dayid, start_massid
 integer :: scaling_id, mass_of_bits_id, heat_density_id
 logical :: lres, found_restart, multiPErestart
 real :: lon0, lon1, lat0, lat1
@@ -398,6 +409,7 @@ integer :: stderrunit
   start_lonid=inq_var(ncid, 'start_lon')
   start_latid=inq_var(ncid, 'start_lat')
   start_yearid=inq_var(ncid, 'start_year')
+  iceberg_numid=inq_var(ncid, 'icberg_num')
   start_dayid=inq_var(ncid, 'start_day')
   start_massid=inq_var(ncid, 'start_mass')
   scaling_id=inq_var(ncid, 'mass_scaling')
@@ -455,6 +467,7 @@ integer :: stderrunit
       localberg%start_lon=get_double(ncid, start_lonid, k)
       localberg%start_lat=get_double(ncid, start_latid, k)
       localberg%start_year=get_int(ncid, start_yearid, k)
+      localberg%iceberg_num=get_int(ncid, iceberg_numid, k)
       localberg%start_day=get_double(ncid, start_dayid, k)
       localberg%start_mass=get_double(ncid, start_massid, k)
       localberg%mass_scaling=get_double(ncid, scaling_id, k)
@@ -541,6 +554,7 @@ contains
         localberg%start_lon=localberg%lon
         localberg%start_lat=localberg%lat
         localberg%start_year=iyr
+        localberg%iceberg_num=iyr   !MP1!!!!Insert complex formulae here! Alon
         localberg%start_day=float(iday)+(float(ihr)+float(imin)/60.)/24.
         localberg%start_mass=localberg%mass
         localberg%mass_scaling=bergs%mass_scaling(1)
@@ -636,7 +650,10 @@ real, allocatable, dimension(:) :: lon,          &
 !axn, ayn, uvel_old, vvel_old, lon_old, lat_old, bxn, byn added by Alon
 integer, allocatable, dimension(:) :: ine,       &
                                       jne,       &
+                                      iceberg_num,       &
                                       start_year
+
+!integer, allocatable, dimension(:,:) :: iceberg_counter_gre
 
   ! Get the stderr unit number
   stderrunit=stderr()
@@ -684,6 +701,7 @@ integer, allocatable, dimension(:) :: ine,       &
      allocate(ine(nbergs_in_file))
      allocate(jne(nbergs_in_file))
      allocate(start_year(nbergs_in_file))
+     allocate(iceberg_num(nbergs_in_file))
 
      call read_unlimited_axis(filename,'lon',lon,domain=grd%domain)
      call read_unlimited_axis(filename,'lat',lat,domain=grd%domain)
@@ -712,6 +730,7 @@ integer, allocatable, dimension(:) :: ine,       &
      call read_unlimited_axis(filename,'ine',ine,domain=grd%domain)
      call read_unlimited_axis(filename,'jne',jne,domain=grd%domain)
      call read_unlimited_axis(filename,'start_year',start_year,domain=grd%domain)
+     call read_unlimited_axis(filename,'iceberg_num',iceberg_num,domain=grd%domain)
 
      ! Find approx outer bounds for tile
      lon0=minval( grd%lon(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
@@ -760,6 +779,7 @@ integer, allocatable, dimension(:) :: ine,       &
          localberg%start_lon=start_lon(k)
          localberg%start_lat=start_lat(k)
          localberg%start_year=start_year(k)
+         localberg%iceberg_num=iceberg_num(k)
          localberg%start_day=start_day(k)
          localberg%start_mass=start_mass(k)
          localberg%mass_scaling=mass_scaling(k)
@@ -802,6 +822,7 @@ integer, allocatable, dimension(:) :: ine,       &
      deallocate(           &
                 ine,       &
                 jne,       &
+                iceberg_num,       &
                 start_year )
   elseif(.not. found_restart .and. bergs%nbergs_start==0 .and. generate_test_icebergs) then
      call generate_bergs(bergs,Time)
@@ -848,6 +869,7 @@ contains
         localberg%start_lon=localberg%lon
         localberg%start_lat=localberg%lat
         localberg%start_year=iyr
+        localberg%iceberg_num=iyr !Alon: MP2: insert complex formulae here!!
         localberg%start_day=float(iday)+(float(ihr)+float(imin)/60.)/24.
         localberg%start_mass=localberg%mass
         localberg%mass_scaling=bergs%mass_scaling(1)
@@ -926,10 +948,15 @@ type(randomNumberStream) :: rns
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
        'diamonds, read_restart_calving: reading stored_heat from restart file.'
       call read_data(filename, 'stored_heat', grd%stored_heat, grd%domain)
+                if (field_exist(filename, 'iceberg_counting_grd')) then
+                        print *, 'field exitst!!!'
+                    !call read_data(filename, 'iceberg_counting_grd', grd%iceberg_counting_grd, grd%domain) ! - why does this not work???
+                endif
     else
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
      'diamonds, read_restart_calving: stored_heat WAS NOT FOUND in the file. Setting to 0.'
       grd%stored_heat(:,:)=0.
+      grd%iceberg_counter_grd(:,:)=0
     endif
     bergs%restarted=.true.
   else
