@@ -54,7 +54,7 @@ public icebergs_gridded, xyt, iceberg, icebergs, buffer
 !Public subs
 public ice_bergs_framework_init
 public send_bergs_to_other_pes
-public update_halo
+public update_halo_icebergs
 public pack_berg_into_buffer2, unpack_berg_from_buffer2
 public pack_traj_into_buffer2, unpack_traj_from_buffer2
 public increase_buffer, increase_ibuffer, increase_ibuffer_traj, increase_buffer_traj
@@ -770,7 +770,7 @@ end subroutine move_berg_between_cells
 
 ! #############################################################################
 
-subroutine update_halo(bergs)
+subroutine update_halo_icebergs(bergs)
 ! Arguments
 type(icebergs), pointer :: bergs
 ! Local variables
@@ -831,7 +831,7 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
   nbergs_to_send_w=0
 
   !Bergs on eastern side of the processor
-  do grdj = grd%jsc,grd%jec ; do grdi = grd%iec+1,grd%iec+halo_width  
+  do grdj = grd%jsc,grd%jec ; do grdi = grd%iec-halo_width+1,grd%iec  
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
         kick_the_bucket=>this
@@ -842,7 +842,7 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
   enddo; enddo
 
   !Bergs on the western side of the processor
-  do grdj = grd%jsc,grd%jec ; do grdi = grd%isc-halo_width,grd%isc-1 
+  do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%isc+halo_width-1 
     do while (associated(this))
       kick_the_bucket=>this
       this=>this%next
@@ -913,7 +913,7 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
   
 
   !Bergs on north side of the processor
-  do grdj = grd%jec-halo_width,grd%jec-1 ; do grdi = grd%isd,grd%ied
+  do grdj = grd%jec-halo_width+1,grd%jec ; do grdi = grd%isd,grd%ied
     do while (associated(this))
       kick_the_bucket=>this
       this=>this%next
@@ -924,7 +924,7 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
 
 
   !Bergs on south side of the processor
-  do grdj = grd%jsc+1,grd%jsc+halo_width ; do grdi = grd%isd,grd%ied
+  do grdj = grd%jsc,grd%jsc+halo_width-1 ; do grdi = grd%isd,grd%ied
     do while (associated(this))
       kick_the_bucket=>this
       this=>this%next
@@ -1008,7 +1008,7 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
   call mpp_sync_self()
 
 
-end subroutine update_halo
+end subroutine update_halo_icebergs
 
 
 

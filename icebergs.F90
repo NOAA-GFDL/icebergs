@@ -30,7 +30,7 @@ use ice_bergs_framework, only: nclasses,old_bug_bilin
 use ice_bergs_framework, only: sum_mass,sum_heat,bilin,yearday,count_bergs,bergs_chksum
 use ice_bergs_framework, only: checksum_gridded,add_new_berg_to_list
 use ice_bergs_framework, only: send_bergs_to_other_pes,move_trajectory,move_all_trajectories
-use ice_bergs_framework, only: move_berg_between_cells, update_halo
+use ice_bergs_framework, only: move_berg_between_cells, update_halo_icebergs
 use ice_bergs_framework, only: record_posn,check_position,print_berg,print_bergs,print_fld
 use ice_bergs_framework, only: add_new_berg_to_list,delete_iceberg_from_list,destroy_iceberg
 use ice_bergs_framework, only: grd_chksum2,grd_chksum3
@@ -1276,7 +1276,7 @@ integer :: stderrunit
   ! Send bergs to other PEs
   call mpp_clock_begin(bergs%clock_com)
   call send_bergs_to_other_pes(bergs)
-  call update_halo(bergs)
+  call update_halo_icebergs(bergs)
   if (debug) call bergs_chksum(bergs, 'run bergs (exchanged)')
   if (debug) call checksum_gridded(bergs%grd, 's/r run after exchange')
   call mpp_clock_end(bergs%clock_com)
