@@ -529,11 +529,14 @@ contains
   type(time_type), intent(in) :: Time
   ! Local variables
   integer :: i,j
+  integer :: iNg, jNg  !Total number of points gloablly in i and j direction
   type(iceberg) :: localberg ! NOT a pointer but an actual local variable
   integer :: iyr, imon, iday, ihr, imin, isec
 
     ! For convenience
     grd=>bergs%grd
+    iNg=(grd%ieg-grd%isg+1) ! Total number of points globally in i direction
+    jNg=(grd%jeg-grd%jsg+1) ! Total number of points globally in j direction
 
     call get_date(Time, iyr, imon, iday, ihr, imin, isec)
 
@@ -554,7 +557,6 @@ contains
         localberg%start_lon=localberg%lon
         localberg%start_lat=localberg%lat
         localberg%start_year=iyr
-        localberg%iceberg_num=iyr   !MP1!!!!Insert complex formulae here! Alon
         localberg%start_day=float(iday)+(float(ihr)+float(imin)/60.)/24.
         localberg%start_mass=localberg%mass
         localberg%mass_scaling=bergs%mass_scaling(1)
@@ -568,6 +570,8 @@ contains
         localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
+        localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
+        grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
         call add_new_berg_to_list(bergs%first, localberg)
         localberg%uvel=-1.
         localberg%vvel=0.
@@ -577,6 +581,8 @@ contains
         localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
+        localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
+        grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
         call add_new_berg_to_list(bergs%first, localberg)
         localberg%uvel=0.
         localberg%vvel=1.
@@ -586,6 +592,8 @@ contains
         localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
+        localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
+        grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
         call add_new_berg_to_list(bergs%first, localberg)
         localberg%uvel=0.
         localberg%vvel=-1.
@@ -595,6 +603,8 @@ contains
         localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
+        localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
+        grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
         call add_new_berg_to_list(bergs%first, localberg)
       endif
     enddo; enddo
@@ -653,7 +663,7 @@ integer, allocatable, dimension(:) :: ine,       &
                                       iceberg_num,       &
                                       start_year
 
-!integer, allocatable, dimension(:,:) :: iceberg_counter_gre
+!integer, allocatable, dimension(:,:) :: iceberg_counter_grd
 
   ! Get the stderr unit number
   stderrunit=stderr()
@@ -844,11 +854,14 @@ contains
   type(time_type), intent(in) :: Time
   ! Local variables
   integer :: i,j
+  integer :: iNg, jNg  !Total number of points gloablly in i and j direction
   type(iceberg) :: localberg ! NOT a pointer but an actual local variable
   integer :: iyr, imon, iday, ihr, imin, isec
 
     ! For convenience
     grd=>bergs%grd
+    iNg=(grd%ieg-grd%isg+1) ! Total number of points globally in i direction
+    jNg=(grd%jeg-grd%jsg+1) ! Total number of points globally in j direction
 
     call get_date(Time, iyr, imon, iday, ihr, imin, isec)
 
@@ -869,7 +882,6 @@ contains
         localberg%start_lon=localberg%lon
         localberg%start_lat=localberg%lat
         localberg%start_year=iyr
-        localberg%iceberg_num=iyr !Alon: MP2: insert complex formulae here!!
         localberg%start_day=float(iday)+(float(ihr)+float(imin)/60.)/24.
         localberg%start_mass=localberg%mass
         localberg%mass_scaling=bergs%mass_scaling(1)
@@ -883,6 +895,8 @@ contains
         localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
+        localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
+        grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
         call add_new_berg_to_list(bergs%first, localberg)
         localberg%uvel=-1.
         localberg%vvel=0.
@@ -892,6 +906,8 @@ contains
         localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
+        localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
+        grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
         call add_new_berg_to_list(bergs%first, localberg)
         localberg%uvel=0.
         localberg%vvel=1.
@@ -901,6 +917,8 @@ contains
         localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
+        localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
+        grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
         call add_new_berg_to_list(bergs%first, localberg)
         localberg%uvel=0.
         localberg%vvel=-1.
@@ -910,6 +928,8 @@ contains
         localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
+        localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
+        grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
         call add_new_berg_to_list(bergs%first, localberg)
       endif
     enddo; enddo
@@ -948,14 +968,18 @@ type(randomNumberStream) :: rns
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
        'diamonds, read_restart_calving: reading stored_heat from restart file.'
       call read_data(filename, 'stored_heat', grd%stored_heat, grd%domain)
-                if (field_exist(filename, 'iceberg_counting_grd')) then
-                        print *, 'field exitst!!!'
-                    !call read_data(filename, 'iceberg_counting_grd', grd%iceberg_counting_grd, grd%domain) ! - why does this not work???
-                endif
     else
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
      'diamonds, read_restart_calving: stored_heat WAS NOT FOUND in the file. Setting to 0.'
       grd%stored_heat(:,:)=0.
+    endif
+    if (field_exist(filename, 'iceberg_counter_grd')) then
+      if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
+       'diamonds, read_restart_calving: reading iceberg_counter_grd from restart file.'
+      call read_data(filename, 'iceberg_counter_grd', grd%iceberg_counter_grd, grd%domain) 
+    else
+      if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
+     'diamonds, read_restart_calving: iceberg_counter_grd WAS NOT FOUND in the file. Setting to 0.'
       grd%iceberg_counter_grd(:,:)=0
     endif
     bergs%restarted=.true.

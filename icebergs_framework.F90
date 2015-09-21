@@ -72,6 +72,7 @@ type :: icebergs_gridded
   integer :: halo ! Nominal halo width
   integer :: isc, iec, jsc, jec ! Indices of computational domain
   integer :: isd, ied, jsd, jed ! Indices of data domain
+  integer :: isg, ieg, jsg, jeg ! Indices of global domain
   integer :: my_pe, pe_N, pe_S, pe_E, pe_W ! MPI PE identifiers
   real, dimension(:,:), pointer :: lon=>null() ! Longitude of cell corners
   real, dimension(:,:), pointer :: lat=>null() ! Latitude of cell corners
@@ -236,7 +237,7 @@ subroutine ice_bergs_framework_init(bergs, &
 
 use mpp_parameter_mod, only: SCALAR_PAIR, CGRID_NE, BGRID_NE, CORNER, AGRID
 use mpp_domains_mod, only: mpp_update_domains, mpp_define_domains
-use mpp_domains_mod, only: mpp_get_compute_domain, mpp_get_data_domain
+use mpp_domains_mod, only: mpp_get_compute_domain, mpp_get_data_domain, mpp_get_global_domain
 use mpp_domains_mod, only: CYCLIC_GLOBAL_DOMAIN, FOLD_NORTH_EDGE
 use mpp_domains_mod, only: mpp_get_neighbor_pe, NORTH, SOUTH, EAST, WEST
 use mpp_domains_mod, only: mpp_define_io_domain
@@ -362,11 +363,13 @@ real :: Total_mass  !Added by Alon
  !write(stderrunit,*) 'diamond: get compute domain'
   call mpp_get_compute_domain( grd%domain, grd%isc, grd%iec, grd%jsc, grd%jec )
   call mpp_get_data_domain( grd%domain, grd%isd, grd%ied, grd%jsd, grd%jed )
+  call mpp_get_global_domain( grd%domain, grd%isg, grd%ieg, grd%jsg, grd%jeg )
 
   call mpp_get_neighbor_pe(grd%domain, NORTH, grd%pe_N)
   call mpp_get_neighbor_pe(grd%domain, SOUTH, grd%pe_S)
   call mpp_get_neighbor_pe(grd%domain, EAST, grd%pe_E)
   call mpp_get_neighbor_pe(grd%domain, WEST, grd%pe_W)
+
 
   folded_north_on_pe = ((dom_y_flags == FOLD_NORTH_EDGE) .and. (grd%jec == gnj)) 
  !write(stderrunit,'(a,6i4)') 'diamonds, icebergs_init: pe,n,s,e,w =',mpp_pe(),grd%pe_N,grd%pe_S,grd%pe_E,grd%pe_W, NULL_PE
@@ -662,6 +665,10 @@ endif
  !write(stderrunit,*) 'diamonds: done'
   call mpp_clock_end(bergs%clock_ini)
   call mpp_clock_end(bergs%clock)
+
+!print *, mpp_pe(), 'Alon: global', grd%isg, grd%ieg, grd%jsg, grd%jeg
+!print *, mpp_pe(), 'Alon: comp', grd%isc, grd%iec, grd%jsc, grd%jec
+!print *, mpp_pe(), 'Alon: data', grd%isd, grd%ied, grd%jsd, grd%jed
 
 end subroutine ice_bergs_framework_init
 
@@ -1577,6 +1584,7 @@ integer :: stderrunit
   berg%next=>null()
 
 end subroutine create_iceberg
+
 
 ! ##############################################################################
 
