@@ -224,7 +224,7 @@ integer, allocatable, dimension(:) :: ine,       &
   id = register_restart_field(bergs_restart,filename,'start_year',start_year, &
                                             longname='calendar year of calving event', units='years')
   id = register_restart_field(bergs_restart,filename,'iceberg_num',iceberg_num, &
-                                            longname='identification of the iceberg', units='years')
+                                            longname='identification of the iceberg', units='dimensionless')
   id = register_restart_field(bergs_restart,filename,'start_day',start_day, &
                                             longname='year day of calving event',units='days')
   id = register_restart_field(bergs_restart,filename,'start_mass',start_mass, &
@@ -1030,7 +1030,7 @@ subroutine write_trajectory(trajectory)
 type(xyt), pointer :: trajectory
 ! Local variables
 integer :: iret, ncid, i_dim, i
-integer :: lonid, latid, yearid, dayid, uvelid, vvelid
+integer :: lonid, latid, yearid, dayid, uvelid, vvelid, iceberg_numid
 !integer :: axnid, aynid, uvel_oldid, vvel_oldid, lat_oldid, lon_oldid, bxnid, bynid !Added by Alon 
 integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid
 integer :: cnid, hiid
@@ -1170,6 +1170,7 @@ logical :: io_is_in_append_mode
       sstid = inq_varid(ncid, 'sst')
       cnid = inq_varid(ncid, 'cn')
       hiid = inq_varid(ncid, 'hi')
+      iceberg_numid = inq_varid(ncid, 'iceberg_num')
     else
       ! Dimensions
       iret = nf_def_dim(ncid, 'i', NF_UNLIMITED, i_dim)
@@ -1199,6 +1200,7 @@ logical :: io_is_in_append_mode
       sstid = def_var(ncid, 'sst', NF_DOUBLE, i_dim)
       cnid = def_var(ncid, 'cn', NF_DOUBLE, i_dim)
       hiid = def_var(ncid, 'hi', NF_DOUBLE, i_dim)
+      iceberg_numid = def_var(ncid, 'iceberg_num', NF_INT, i_dim)
 
       ! Attributes
       iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_major_version', NF_INT, 1, 0)
@@ -1249,6 +1251,8 @@ logical :: io_is_in_append_mode
       call put_att(ncid, cnid, 'units', 'none')
       call put_att(ncid, hiid, 'long_name', 'sea ice thickness')
       call put_att(ncid, hiid, 'units', 'm')
+      call put_att(ncid, iceberg_numid, 'long_name', 'iceberg id number')
+      call put_att(ncid, iceberg_numid, 'units', 'dimensionless')
     endif
 
     ! End define mode
@@ -1286,6 +1290,7 @@ logical :: io_is_in_append_mode
       call put_double(ncid, sstid, i, this%sst)
       call put_double(ncid, cnid, i, this%cn)
       call put_double(ncid, hiid, i, this%hi)
+      call put_int(ncid, iceberg_numid, i, this%iceberg_num)
       next=>this%next
       deallocate(this)
       this=>next

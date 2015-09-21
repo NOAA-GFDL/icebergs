@@ -16,7 +16,7 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 implicit none ; private
 
 integer, parameter :: buffer_width=29 !Changed from 20 to 29 by Alon 
-integer, parameter :: buffer_width_traj=31  !Changed from 23 by Alon
+integer, parameter :: buffer_width_traj=32  !Changed from 23 by Alon
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 
 !Local Vars
@@ -424,7 +424,7 @@ real :: Total_mass  !Added by Alon
   allocate( bergs%nbergs_calved_by_class(nclasses) ); bergs%nbergs_calved_by_class(:)=0
   allocate( grd%parity_x(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_x(:,:)=1.
   allocate( grd%parity_y(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_y(:,:)=1.
-  allocate( grd%iceberg_counter_grd(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%iceberg_counter_grd(:,:)=0
+  allocate( grd%iceberg_counter_grd(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%iceberg_counter_grd(:,:)=1
 
  !write(stderrunit,*) 'diamonds: copying grid'
   ! Copy data declared on ice model computational domain
@@ -1248,6 +1248,7 @@ end subroutine send_bergs_to_other_pes
     buff%data(29,n)=traj%vvel_old !Alon
     buff%data(30,n)=traj%lon_old !Alon
     buff%data(31,n)=traj%lat_old !Alon
+    buff%data(32,n)=float(traj%iceberg_num)
 
   end subroutine pack_traj_into_buffer2
 
@@ -1293,6 +1294,7 @@ end subroutine send_bergs_to_other_pes
     traj%vvel_old=buff%data(29,n) !Alon
     traj%lon_old=buff%data(30,n) !Alon
     traj%lat_old=buff%data(31,n) !Alon
+    traj%iceberg_num=nint(buff%data(32,n))
 
     call append_posn(first, traj)
 
