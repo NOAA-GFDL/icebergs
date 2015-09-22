@@ -15,8 +15,8 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 
 implicit none ; private
 
-integer, parameter :: buffer_width=28 !Changed from 20 to 28 by Alon 
-integer, parameter :: buffer_width_traj=31  !Changed from 23 by Alon
+integer, parameter :: buffer_width=29 !Changed from 20 to 29 by Alon 
+integer, parameter :: buffer_width_traj=32  !Changed from 23 by Alon
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 
 !Local Vars
@@ -134,7 +134,7 @@ type :: xyt
   real :: lon, lat, day
   real :: mass, thickness, width, length, uvel, vvel
   real :: axn, ayn, bxn, byn, uvel_old, vvel_old, lat_old, lon_old  !Explicit and implicit accelerations !Alon 
-  real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi
+  real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi, halo_berg
   real :: mass_of_bits, heat_density
   integer :: year
   type(xyt), pointer :: next=>null()
@@ -147,6 +147,7 @@ type :: iceberg
   real :: axn, ayn, bxn, byn, uvel_old, vvel_old, lon_old, lat_old !Explicit and implicit accelerations !Alon 
   real :: start_lon, start_lat, start_day, start_mass, mass_scaling
   real :: mass_of_bits, heat_density
+  real :: halo_berg  ! Equal to zero for bergs on computational domain, and =1 for bergs on the halo
   integer :: start_year
   integer :: ine, jne ! nearest index in NE direction (for convenience)
   real :: xi, yj ! Non-dimensional coords within current cell (0..1)
@@ -785,6 +786,7 @@ integer :: stderrunit
 integer :: grdi, grdj
 integer :: halo_width
 integer :: temp1, temp2
+real :: current_halo_status
   
 halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used for updating weight.
 
@@ -837,7 +839,10 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
         kick_the_bucket=>this
         this=>this%next
         nbergs_to_send_e=nbergs_to_send_e+1
+        current_halo_status=kick_the_bucket%halo_berg
+        kick_the_bucket%halo_berg=1.
         call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_e, nbergs_to_send_e)
+        kick_the_bucket%halo_berg=current_halo_status
     enddo
   enddo; enddo
 
@@ -847,7 +852,10 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
       kick_the_bucket=>this
       this=>this%next
       nbergs_to_send_w=nbergs_to_send_w+1
-    call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_w, nbergs_to_send_w)
+       current_halo_status=kick_the_bucket%halo_berg
+       kick_the_bucket%halo_berg=1.
+       call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_w, nbergs_to_send_w)
+       kick_the_bucket%halo_berg=current_halo_status
     enddo 
   enddo; enddo
 
@@ -918,7 +926,10 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
       kick_the_bucket=>this
       this=>this%next
       nbergs_to_send_n=nbergs_to_send_n+1
+      current_halo_status=kick_the_bucket%halo_berg
+      kick_the_bucket%halo_berg=1.
       call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_n, nbergs_to_send_n)
+      kick_the_bucket%halo_berg=current_halo_status
     enddo
   enddo; enddo
 
@@ -929,7 +940,10 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
       kick_the_bucket=>this
       this=>this%next
       nbergs_to_send_s=nbergs_to_send_s+1
-      call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_s, nbergs_to_send_s)
+       current_halo_status=kick_the_bucket%halo_berg
+       kick_the_bucket%halo_berg=1.
+       call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_s, nbergs_to_send_s)
+       kick_the_bucket%halo_berg=current_halo_status
     enddo
   enddo; enddo
 
@@ -1026,6 +1040,7 @@ subroutine delete_all_bergs_in_list(bergs,grdj,grdi)
     call destroy_iceberg(kick_the_bucket)
 !    call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
   enddo
+  bergs%list(grdi,grdj)%first=>null()
 end  subroutine delete_all_bergs_in_list
 
 
@@ -1062,22 +1077,26 @@ integer :: grdi, grdj
   do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
-      if (this%ine.gt.bergs%grd%iec) then
-        kick_the_bucket=>this
-        this=>this%next
-        nbergs_to_send_e=nbergs_to_send_e+1
-        call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_e, nbergs_to_send_e)
-        call move_trajectory(bergs, kick_the_bucket)
-        call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
-      elseif (this%ine.lt.bergs%grd%isc) then
-        kick_the_bucket=>this
-        this=>this%next
-        nbergs_to_send_w=nbergs_to_send_w+1
-        call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_w, nbergs_to_send_w)
-        call move_trajectory(bergs, kick_the_bucket)
-        call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
+      if (this%halo_berg .lt. 0.5) then
+        if (this%ine.gt.bergs%grd%iec) then
+          kick_the_bucket=>this
+          this=>this%next
+          nbergs_to_send_e=nbergs_to_send_e+1
+          call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_e, nbergs_to_send_e)
+          call move_trajectory(bergs, kick_the_bucket)
+          call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
+        elseif (this%ine.lt.bergs%grd%isc) then
+          kick_the_bucket=>this
+          this=>this%next
+          nbergs_to_send_w=nbergs_to_send_w+1
+          call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_w, nbergs_to_send_w)
+          call move_trajectory(bergs, kick_the_bucket)
+          call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
+        else
+          this=>this%next
+        endif
       else
-        this=>this%next
+         this=>this%next
       endif
     enddo
   enddo ; enddo
@@ -1143,22 +1162,26 @@ integer :: grdi, grdj
   do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
-      if (this%jne.gt.bergs%grd%jec) then
-        kick_the_bucket=>this
-        this=>this%next
-        nbergs_to_send_n=nbergs_to_send_n+1
-        call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_n, nbergs_to_send_n)
-        call move_trajectory(bergs, kick_the_bucket)
-        call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
-      elseif (this%jne.lt.bergs%grd%jsc) then
-        kick_the_bucket=>this
-        this=>this%next
-        nbergs_to_send_s=nbergs_to_send_s+1
-        call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_s, nbergs_to_send_s)
-        call move_trajectory(bergs, kick_the_bucket)
-        call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
+      if (this%halo_berg .lt. 0.5) then
+        if (this%jne.gt.bergs%grd%jec) then
+          kick_the_bucket=>this
+          this=>this%next
+          nbergs_to_send_n=nbergs_to_send_n+1
+          call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_n, nbergs_to_send_n)
+          call move_trajectory(bergs, kick_the_bucket)
+          call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
+        elseif (this%jne.lt.bergs%grd%jsc) then
+          kick_the_bucket=>this
+          this=>this%next
+          nbergs_to_send_s=nbergs_to_send_s+1
+          call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_s, nbergs_to_send_s)
+          call move_trajectory(bergs, kick_the_bucket)
+          call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
+        else
+          this=>this%next
+        endif
       else
-        this=>this%next
+          this=>this%next
       endif
     enddo
   enddo ; enddo
@@ -1314,6 +1337,7 @@ end subroutine send_bergs_to_other_pes
     buff%data(26,n)=berg%vvel_old  !Alon
     buff%data(27,n)=berg%lon_old  !Alon
     buff%data(28,n)=berg%lat_old  !Alon
+    buff%data(29,n)=berg%halo_berg  
 
   end subroutine pack_berg_into_buffer2
 
@@ -1389,6 +1413,7 @@ end subroutine send_bergs_to_other_pes
   localberg%vvel_old=buff%data(26,n) !Alon
   localberg%lon_old=buff%data(27,n) !Alon
   localberg%lat_old=buff%data(28,n) !Alon
+  localberg%halo_berg=buff%data(29,n) !Alon
  
   lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
   if (lres) then
@@ -1558,6 +1583,7 @@ end subroutine send_bergs_to_other_pes
     buff%data(29,n)=traj%vvel_old !Alon
     buff%data(30,n)=traj%lon_old !Alon
     buff%data(31,n)=traj%lat_old !Alon
+    buff%data(32,n)=traj%halo_berg !Alon
 
   end subroutine pack_traj_into_buffer2
 
@@ -1603,6 +1629,7 @@ end subroutine send_bergs_to_other_pes
     traj%vvel_old=buff%data(29,n) !Alon
     traj%lon_old=buff%data(30,n) !Alon
     traj%lat_old=buff%data(31,n) !Alon
+    traj%halo_berg=buff%data(32,n) !Alon
 
     call append_posn(first, traj)
 
@@ -2074,6 +2101,7 @@ integer :: grdi, grdj
       posn%vvel_old=this%vvel_old
       posn%lon_old=this%lon_old
       posn%lat_old=this%lat_old
+      posn%halo_berg=this%halo_berg
   
       call push_posn(this%trajectory, posn)
   
@@ -3199,8 +3227,8 @@ integer function berg_chksum(berg )
 ! Arguments
 type(iceberg), pointer :: berg
 ! Local variables
-real :: rtmp(36) !Changed from 28 to 34 by Alon
-integer :: itmp(36+3), i8=0, ichk1, ichk2, ichk3 !Changed from 28 to 34 by Alon
+real :: rtmp(37) !Changed from 28 to 34 by Alon
+integer :: itmp(37+3), i8=0, ichk1, ichk2, ichk3 !Changed from 28 to 34 by Alon
 integer :: i
 
   rtmp(:)=0.
@@ -3239,14 +3267,15 @@ integer :: i
   rtmp(34)=berg%vvel_old !Added by Alon
   rtmp(35)=berg%lat_old !Added by Alon
   rtmp(36)=berg%lon_old !Added by Alon
+  itmp(37)=berg%halo_berg !Changed from 31 to 40 by Alon
 
-  itmp(1:36)=transfer(rtmp,i8) !Changed from 28 to 36 by Alon
-  itmp(37)=berg%start_year !Changed from 29 to 37 by Alon
-  itmp(38)=berg%ine !Changed from 30 to 38 by Alon
-  itmp(39)=berg%jne !Changed from 31 to 39 by Alon
+  itmp(1:37)=transfer(rtmp,i8) !Changed from 28 to 37 by Alon
+  itmp(38)=berg%start_year !Changed from 29 to 38 by Alon
+  itmp(39)=berg%ine !Changed from 30 to 39 by Alon
+  itmp(40)=berg%jne !Changed from 31 to 40 by Alon
 
   ichk1=0; ichk2=0; ichk3=0
-  do i=1,36+3 !Changd from 28 to 36 by Alon
+  do i=1,37+3 !Changd from 28 to 36 by Alon
    ichk1=ichk1+itmp(i)
    ichk2=ichk2+itmp(i)*i
    ichk3=ichk3+itmp(i)*i*i

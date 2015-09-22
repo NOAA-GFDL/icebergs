@@ -1780,6 +1780,7 @@ integer :: stderrunit
           newberg%start_mass=bergs%initial_mass(k)
           newberg%mass_scaling=bergs%mass_scaling(k)
           newberg%mass_of_bits=0.
+          newberg%halo_berg=0.
           newberg%heat_density=grd%stored_heat(i,j)/grd%stored_ice(i,j,k) ! This is in J/kg
           call add_new_berg_to_list(bergs%list(i,j)%first, newberg)
           calved_to_berg=bergs%initial_mass(k)*bergs%mass_scaling(k) ! Units of kg
