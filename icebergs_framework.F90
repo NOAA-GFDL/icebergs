@@ -1039,6 +1039,7 @@ subroutine delete_all_bergs_in_list(bergs,grdj,grdi)
     this=>this%next
     call destroy_iceberg(kick_the_bucket)
 !    call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
+    bergs%list(grdi,grdj)%first=>null()
   enddo
 end  subroutine delete_all_bergs_in_list
 
