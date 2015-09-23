@@ -49,7 +49,7 @@ public orig_read, force_all_pes_traj
 
 
 !Public types
-public icebergs_gridded, xyt, iceberg, icebergs, buffer 
+public icebergs_gridded, xyt, iceberg, icebergs, buffer, bond 
 
 !Public subs
 public ice_bergs_framework_init
@@ -157,7 +157,14 @@ type :: iceberg
   ! Environment variables (as seen by the iceberg)
   real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi
   type(xyt), pointer :: trajectory=>null()
+  type(bond), pointer :: first_bond=>null()  !First element of bond list.
 end type iceberg
+
+type :: bond
+  type(bond), pointer :: prev_bond=>null(), next_bond=>null()
+  type(iceberg), pointer :: berg_in_current_bond=>null()
+  integer :: berg_num_of_current_bond
+end type bond
 
 type :: buffer
   integer :: size=0
@@ -194,6 +201,7 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
   logical :: time_average_weight=.false. ! Time average the weight on the ocean
   logical :: Runge_not_Verlet=.True.  !True=Runge Kuttai, False=Verlet.  - Added by Alon 
+  logical :: iceberg_bonds_on=.False.  !True=Allow icebergs to have bonds, False=don't allow. 
   logical :: use_new_predictive_corrective =.False.  !Flag to use Bob's predictive corrective iceberg scheme- Added by Alon 
   logical :: interactive_icebergs_on=.false.  !Turn on/off interactions between icebergs  - Added by Alon 
   logical :: critical_interaction_damping_on=.true.  !Sets the damping on relative iceberg velocity to critical value - Added by Alon 
@@ -292,6 +300,7 @@ logical :: time_average_weight=.false. ! Time average the weight on the ocean
 real :: speed_limit=0. ! CFL speed limit for a berg
 real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
 logical :: Runge_not_Verlet=.True.  !True=Runge Kutta, False=Verlet.  - Added by Alon 
+logical :: iceberg_bonds_on=.False.  !True=Allow icebergs to have bonds, False=don't allow. 
 logical :: use_new_predictive_corrective =.False.  !Flag to use Bob's predictive corrective iceberg scheme- Added by Alon 
 logical :: interactive_icebergs_on=.false.  !Turn on/off interactions between icebergs  - Added by Alon 
 logical :: critical_interaction_damping_on=.true.  !Sets the damping on relative iceberg velocity to critical value - Added by Alon 
@@ -303,7 +312,7 @@ real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1
 real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
 namelist /icebergs_nml/ verbose, budget, halo, iceberg_halo, traj_sample_hrs, initial_mass, traj_write_hrs, &
          distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef, radial_damping_coef, tangental_damping_coef, &
-         rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
+         rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, iceberg_bonds_on, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, &
          time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_icebergs_on, critical_interaction_damping_on, &
          old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj
@@ -553,6 +562,10 @@ endif
 if (Runge_not_Verlet) then
   interactive_icebergs_on=.false.  ! Iceberg interactions only with Verlet
 endif
+if (.not.interactive_icebergs_on) then
+  !iceberg_bonds_on=.false.  ! This line needs to included later, but is omitted for testing
+endif
+
 
  ! Parameters
   bergs%dt=dt
@@ -573,6 +586,7 @@ endif
   bergs%time_average_weight=time_average_weight
   bergs%speed_limit=speed_limit
   bergs%Runge_not_Verlet=Runge_not_Verlet   !Alon
+  bergs%iceberg_bonds_on=iceberg_bonds_on   !Alon
   bergs%critical_interaction_damping_on=critical_interaction_damping_on   !Alon
   bergs%interactive_icebergs_on=interactive_icebergs_on   !Alon
   bergs%use_new_predictive_corrective=use_new_predictive_corrective  !Alon

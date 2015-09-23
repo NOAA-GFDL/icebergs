@@ -23,7 +23,7 @@ use diag_manager_mod, only: register_diag_field, register_static_field, send_dat
 use diag_manager_mod, only: diag_axis_init
 
 use ice_bergs_framework, only: ice_bergs_framework_init
-use ice_bergs_framework, only: icebergs_gridded, xyt, iceberg, icebergs, buffer
+use ice_bergs_framework, only: icebergs_gridded, xyt, iceberg, icebergs, buffer, bond
 use ice_bergs_framework, only: verbose, really_debug,debug,old_bug_rotated_weights,budget,use_roundoff_fix
 use ice_bergs_framework, only: find_cell,find_cell_by_search,count_bergs,is_point_in_cell,pos_within_cell
 use ice_bergs_framework, only: nclasses,old_bug_bilin
@@ -111,9 +111,154 @@ integer :: stdlogunit, stderrunit
 
   if (really_debug) call print_bergs(stderrunit,bergs,'icebergs_init, initial status')
 
+  if (bergs%iceberg_bonds_on)  call initialize_iceberg_bonds(bergs)
+
 
 end subroutine icebergs_init
 
+
+! ##############################################################################
+
+subroutine initialize_iceberg_bonds(bergs)
+
+type(icebergs), pointer :: bergs
+type(iceberg), pointer :: berg
+type(iceberg), pointer :: other_berg
+type(icebergs_gridded), pointer :: grd
+    
+
+
+real :: T1, L1, W1, lon1, lat1, x1, y1, R1, A1   !Current iceberg
+real :: T2, L2, W2, lon2, lat2, x2, y2, R2, A2   !Other iceberg
+real :: r_dist_x, r_dist_y, r_dist
+integer :: grdi_outer, grdj_outer
+integer :: grdi_inner, grdj_inner
+
+  ! For convenience
+    grd=>bergs%grd
+    !Should update halos before doing this 
+  do grdj_outer = grd%jsc,grd%jec ; do grdi_outer = grd%isc,grd%iec  !Should you be on the data domain??
+    berg=>bergs%list(grdi_outer,grdj_outer)%first
+    do while (associated(berg)) ! loop over all bergs
+    
+      lon1=berg%lon; lat1=berg%lat
+      call rotpos_to_tang(lon1,lat1,x1,y1)
+
+      do grdj_inner = berg%jne-1,berg%jne+1 ; do grdi_inner = berg%ine-1,berg%ine+1   !Only looping through adjacent cells.
+        other_berg=>bergs%list(grdi_inner,grdj_inner)%first
+        do while (associated(other_berg)) ! loop over all other bergs  
+          
+          if (berg%iceberg_num .ne. other_berg%iceberg_num) then
+            lon2=other_berg%lon; lat2=other_berg%lat
+            call rotpos_to_tang(lon2,lat2,x2,y2)
+            r_dist_x=x1-x2 ; r_dist_y=y1-y2
+            r_dist=sqrt( ((x1-x2)**2) + ((y1-y2)**2) )
+        
+            !if (r_dist.gt.1000.) then  ! If the bergs are close together, then form a bond
+              call form_a_bond(berg, other_berg)
+            !endif       
+            other_berg=>other_berg%next
+          endif
+        enddo  ! End of looping through all other bergs in the inner list
+      enddo ; enddo;  !End of inner loop
+      berg=>berg%next
+    enddo ! End of looping through all bergs in the outer list
+  enddo ; enddo; !End of outer loop.
+
+  call check_if_all_bonds_are_present(bergs)
+
+
+
+end subroutine initialize_iceberg_bonds
+
+! ##############################################################################
+
+subroutine form_a_bond(berg, other_berg)
+
+type(iceberg), pointer :: berg
+type(iceberg), pointer :: other_berg
+type(bond) , pointer :: new_bond, first_bond
+print *, 'Forming a bond!!!'
+    
+
+! Step 1: Create a new bond
+allocate(new_bond)
+new_bond%berg_num_of_current_bond=other_berg%iceberg_num
+new_bond%berg_in_current_bond=>other_berg
+
+! Step 2: Put this new bond at the start of the bond list
+   first_bond=>berg%first_bond
+   if (associated(first_bond)) then
+        new_bond%next_bond=>first_bond
+        new_bond%prev_bond=>null()  !This should not be needed
+        first_bond%prev_bond=>new_bond
+        berg%first_bond=>new_bond
+   else
+       new_bond%next_bond=>null()  !This should not be needed
+       new_bond%prev_bond=>null()  !This should not be needed
+       berg%first_bond=>new_bond
+   endif
+
+end subroutine form_a_bond
+
+! #############################################################################
+
+subroutine check_if_all_bonds_are_present(bergs)
+
+type(icebergs), pointer :: bergs
+type(iceberg), pointer :: berg
+type(iceberg), pointer :: other_berg
+type(icebergs_gridded), pointer :: grd
+type(bond) , pointer :: current_bond, other_berg_bond
+integer :: grdi, grdj
+logical :: bond_is_good
+
+print *, "starting bond_check"
+
+ ! For convenience
+  grd=>bergs%grd
+
+  do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
+    berg=>bergs%list(grdi,grdj)%first
+    do while (associated(berg)) ! loop over all bergs
+      current_bond=>berg%first_bond
+      do while (associated(current_bond)) ! loop over all bonds
+        bond_is_good=.False.
+        other_berg=>current_bond%berg_in_current_bond
+        if (associated(other_berg)) then
+          other_berg_bond=>other_berg%first_bond
+          
+          do while (associated(other_berg_bond))  !loops over the icebergs in the other icebergs bond list            
+            if (associated(other_berg_bond%berg_in_current_bond)) then
+              if (other_berg_bond%berg_in_current_bond%iceberg_num==berg%iceberg_num) then
+                bond_is_good=.True.  !Bond_is_good becomes true when the corresponding bond is found
+              endif
+            endif                 
+            if (bond_is_good) then
+              other_berg_bond=>null()
+            else
+              other_berg_bond=>other_berg_bond%next_bond
+            endif
+          enddo  ! End of loop over the other berg's bonds.
+
+          ! Now we assess how we did
+
+          if (bond_is_good) then
+            print*, 'Perfect quality Bond:', berg%iceberg_num, current_bond%berg_num_of_current_bond
+          else
+            print*, 'Non-matching bond...:', berg%iceberg_num, current_bond%berg_num_of_current_bond
+          endif
+        
+        else
+           print *, 'Opposite berg is not assosiated:', berg%iceberg_num, current_bond%berg_in_current_bond%iceberg_num    
+        endif
+        current_bond=>current_bond%next_bond
+      enddo !End of loop over current bonds
+    enddo ! End of loop over all bergs
+  enddo; enddo !End of loop over all grid cells
+
+print *, "starting bond_check"
+end subroutine check_if_all_bonds_are_present
 
 ! ##############################################################################
 
@@ -167,28 +312,29 @@ lon1=berg%lon; lat1=berg%lat
 call rotpos_to_tang(lon1,lat1,x1,y1)
 
   do grdj = berg%jne-1,berg%jne+1 ; do grdi = berg%ine-1,berg%ine+1
-  other_berg=>bergs%list(grdi,grdj)%first
-!Note: This summing should be made order invarient. 
-  do while (associated(other_berg)) ! loop over all other bergs  
-       L2=other_berg%length
-       W2=other_berg%width
-       T2=other_berg%thickness 
-       u2=other_berg%uvel_old !Old values are used to make it order invariant 
-       v2=other_berg%vvel_old !Old values are used to make it order invariant 
-       A2=L2*W2
-       R2=sqrt(A2/pi) ! Interaction radius of the other iceberg
-       lon2=berg%lon_old; lat2=berg%lat_old !Old values are used to make it order invariant
-       call rotpos_to_tang(lon2,lat2,x2,y2)
+    other_berg=>bergs%list(grdi,grdj)%first
+    !Note: This summing should be made order invarient. 
+    do while (associated(other_berg)) ! loop over all other bergs  
+      if (berg%iceberg_num .ne. other_berg%iceberg_num) then
+        L2=other_berg%length
+        W2=other_berg%width
+        T2=other_berg%thickness 
+        u2=other_berg%uvel_old !Old values are used to make it order invariant 
+        v2=other_berg%vvel_old !Old values are used to make it order invariant 
+        A2=L2*W2
+        R2=sqrt(A2/pi) ! Interaction radius of the other iceberg
+        lon2=other_berg%lon_old; lat2=other_berg%lat_old !Old values are used to make it order invariant
+        call rotpos_to_tang(lon2,lat2,x2,y2)
 
-       r_dist_x=x1-x2 ; r_dist_y=y1-y2
-       r_dist=sqrt( ((x1-x2)**2) + ((y1-y2)**2) )
+        r_dist_x=x1-x2 ; r_dist_y=y1-y2
+        r_dist=sqrt( ((x1-x2)**2) + ((y1-y2)**2) )
 
-      call overlap_area(R1,R2,r_dist,A_o,trapped)
-      T_min=min(T1,T2)
+       call overlap_area(R1,R2,r_dist,A_o,trapped)
+       T_min=min(T1,T2)
 
-      !Calculating spring force  (later this should only be done on the first time around)
-      accel_spring=spring_coef*(T_min/T1)*(A_o/A1)
-      if ((r_dist>0.) .AND. (r_dist< (R1+R2)) ) then
+       !Calculating spring force  (later this should only be done on the first time around)
+       accel_spring=spring_coef*(T_min/T1)*(A_o/A1)
+       if ((r_dist>0.) .AND. (r_dist< (R1+R2)) ) then
         IA_x=IA_x+(accel_spring*(r_dist_x/r_dist))
         IA_y=IA_y+(accel_spring*(r_dist_y/r_dist))
 
@@ -225,12 +371,11 @@ call rotpos_to_tang(lon1,lat1,x1,y1)
 !print *, 'P_21',P_21
 !print *, 'P_12',P_12
 !print *, 'P_22',P_22
-
+      endif
     endif
-
-       other_berg=>other_berg%next
+    other_berg=>other_berg%next
   enddo ! loop over all bergs
-  enddo ; enddo
+enddo ; enddo
 
   contains
 
@@ -262,30 +407,6 @@ endif
    end subroutine overlap_area
 
 
-  subroutine rotpos_to_tang(lon, lat, x, y)
-  ! Arguments
-  real, intent(in) :: lon, lat
-  real, intent(out) :: x, y
-  ! Local variables
-  real :: r,colat,clon,slon
-
-    if (lat>90.) then
-      write(stderrunit,*) 'diamonds, rotpos_to_tang: lat>90 already!',lat
-      call error_mesg('diamonds, rotpos_to_tang','Something went very wrong!',FATAL)
-    endif
-    if (lat==90.) then
-      write(stderrunit,*) 'diamonds, rotpos_to_tang: lat==90 already!',lat
-      call error_mesg('diamonds, rotpos_to_tang','Something went wrong!',FATAL)
-    endif
-
-    colat=90.-lat
-    r=Rearth*(colat*pi_180)
-    clon=cos(lon*pi_180)
-    slon=sin(lon*pi_180)
-    x=r*clon
-    y=r*slon
-
-  end subroutine rotpos_to_tang
 
 end subroutine interactive_force
 
@@ -2358,31 +2479,6 @@ integer :: grdi, grdj
 
 contains
 
-  subroutine rotpos_to_tang(lon, lat, x, y)
-  ! Arguments
-  real, intent(in) :: lon, lat
-  real, intent(out) :: x, y
-  ! Local variables
-  real :: r,colat,clon,slon
-
-    if (lat>90.) then
-      write(stderrunit,*) 'diamonds, rotpos_to_tang: lat>90 already!',lat
-      call error_mesg('diamonds, rotpos_to_tang','Something went very wrong!',FATAL)
-    endif
-    if (lat==90.) then
-      write(stderrunit,*) 'diamonds, rotpos_to_tang: lat==90 already!',lat
-      call error_mesg('diamonds, rotpos_to_tang','Something went wrong!',FATAL)
-    endif
-
-    colat=90.-lat
-    r=Rearth*(colat*pi_180)
-    clon=cos(lon*pi_180)
-    slon=sin(lon*pi_180)
-    x=r*clon
-    y=r*slon
-
-  end subroutine rotpos_to_tang
-
   subroutine rotpos_from_tang(x, y, lon, lat)
   ! Arguments
   real, intent(in) :: x, y
@@ -2631,11 +2727,41 @@ real :: xi0, yj0, lon0, lat0
     if (debug) error=.true.
   endif
 
-end subroutine adjust_index_and_ground
+ end subroutine adjust_index_and_ground
 
 end subroutine evolve_icebergs
 
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+subroutine rotpos_to_tang(lon, lat, x, y)
+  ! Arguments
+  real, intent(in) :: lon, lat
+  real, intent(out) :: x, y
+  ! Local variables
+  real :: r,colat,clon,slon
+  real :: Rearth
+  integer :: stderrunit
+
+  stderrunit = stderr()
+  Rearth=6360.e3
+
+  if (lat>90.) then
+      write(stderrunit,*) 'diamonds, rotpos_to_tang: lat>90 already!',lat
+      call error_mesg('diamonds, rotpos_to_tang','Something went very wrong!',FATAL)
+    endif
+    if (lat==90.) then
+      write(stderrunit,*) 'diamonds, rotpos_to_tang: lat==90 already!',lat
+      call error_mesg('diamonds, rotpos_to_tang','Something went wrong!',FATAL)
+    endif
+
+    colat=90.-lat
+    r=Rearth*(colat*pi_180)
+    clon=cos(lon*pi_180)
+    slon=sin(lon*pi_180)
+    x=r*clon
+    y=r*slon
+
+  end subroutine rotpos_to_tang
 
 ! ##############################################################################
 
