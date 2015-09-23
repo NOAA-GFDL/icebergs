@@ -157,8 +157,8 @@ integer :: grdi_inner, grdj_inner
             !if (r_dist.gt.1000.) then  ! If the bergs are close together, then form a bond
               call form_a_bond(berg, other_berg)
             !endif       
-            other_berg=>other_berg%next
           endif
+          other_berg=>other_berg%next
         enddo  ! End of looping through all other bergs in the inner list
       enddo ; enddo;  !End of inner loop
       berg=>berg%next
@@ -213,7 +213,7 @@ type(bond) , pointer :: current_bond, other_berg_bond
 integer :: grdi, grdj
 logical :: bond_is_good
 
-print *, "starting bond_check"
+!print *, "starting bond_check"
 
  ! For convenience
   grd=>bergs%grd
@@ -254,10 +254,11 @@ print *, "starting bond_check"
         endif
         current_bond=>current_bond%next_bond
       enddo !End of loop over current bonds
+      berg=>berg%next
     enddo ! End of loop over all bergs
   enddo; enddo !End of loop over all grid cells
 
-print *, "starting bond_check"
+!  print *, "ending bond_check"
 end subroutine check_if_all_bonds_are_present
 
 ! ##############################################################################
