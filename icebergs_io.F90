@@ -22,10 +22,11 @@ use fms_mod,    only : clock_flag_default
 
 use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 
-use ice_bergs_framework, only: icebergs_gridded, xyt, iceberg, icebergs, buffer
+use ice_bergs_framework, only: icebergs_gridded, xyt, iceberg, icebergs, buffer, bond
 use ice_bergs_framework, only: pack_berg_into_buffer2,unpack_berg_from_buffer2
 use ice_bergs_framework, only: pack_traj_into_buffer2,unpack_traj_from_buffer2
 use ice_bergs_framework, only: find_cell,find_cell_by_search,count_bergs,is_point_in_cell,pos_within_cell,append_posn
+use ice_bergs_framework, only: count_bonds, form_a_bond
 use ice_bergs_framework, only: push_posn
 use ice_bergs_framework, only: add_new_berg_to_list,destroy_iceberg
 use ice_bergs_framework, only: increase_ibuffer,increase_ibuffer_traj,grd_chksum2,grd_chksum3
@@ -42,7 +43,7 @@ include 'netcdf.inc'
 
 public ice_bergs_io_init
 public read_restart_bergs,read_restart_bergs_orig,write_restart,write_trajectory
-public read_restart_calving
+public read_restart_calving, read_restart_bonds
 
 !Local Vars
 integer, parameter :: file_format_major_version=0
@@ -98,14 +99,17 @@ end subroutine ice_bergs_io_init
 subroutine write_restart(bergs)
 ! Arguments
 type(icebergs), pointer :: bergs
+type(bond), pointer :: current_bond
 ! Local variables
 integer :: i,j,id
 character(len=35) :: filename
+character(len=35) :: filename_bonds
 type(iceberg), pointer :: this=>NULL()
 integer :: stderrunit
 !I/O vars
 type(restart_file_type) :: bergs_restart
-integer :: nbergs
+type(restart_file_type) :: bergs_bond_restart
+integer :: nbergs, nbonds
 type(icebergs_gridded), pointer :: grd
 real, allocatable, dimension(:) :: lon,          &
                                    lat,          &
@@ -132,10 +136,16 @@ real, allocatable, dimension(:) :: lon,          &
                                    halo_berg,    &
                                    heat_density
 
-integer, allocatable, dimension(:) :: ine,       &
-                                      jne,       &
-                                      iceberg_num,       &
-                                      start_year
+integer, allocatable, dimension(:) :: ine,              &
+                                      jne,              &
+                                      iceberg_num,      &
+                                      start_year,       &
+                                      bond_first_num,   &
+                                      bond_second_num,  &
+                                      bond_first_jne,         &
+                                      bond_first_ine,         &
+                                      bond_second_jne,         &
+                                      bond_second_ine
 
 
 !uvel_old, vvel_old, lon_old, lat_old, axn, ayn, bxn, byn added by Alon.
@@ -188,6 +198,7 @@ integer :: grdi, grdj
    allocate(start_year(nbergs))
    allocate(iceberg_num(nbergs))
 
+
   call get_instance_filename("icebergs.res.nc", filename)
   call set_domain(bergs%grd%domain)
   call register_restart_axis(bergs_restart,filename,'i',nbergs)
@@ -237,6 +248,7 @@ integer :: grdi, grdj
   id = register_restart_field(bergs_restart,filename,'halo_berg',halo_berg, &
                                             longname='halo_berg',units='dimensionless')
 
+
   ! Write variables
    
   i = 0
@@ -262,6 +274,7 @@ integer :: grdi, grdj
       this=>this%next
     enddo
   enddo ; enddo
+
 
   call save_restart(bergs_restart)
   call free_restart_type(bergs_restart)
@@ -299,8 +312,78 @@ integer :: grdi, grdj
              iceberg_num,       &
              start_year )
 
+  call nullify_domain()
+
+!########## Creating bond restart file ######################
+
+   !Allocating restart memory for bond related variables.
+   nbonds=0
+   if (bergs%iceberg_bonds_on) then
+     call count_bonds(bergs, nbonds)
+   endif
+
+   allocate(bond_first_num(nbonds))
+   allocate(bond_second_num(nbonds))
+   allocate(bond_first_ine(nbonds))
+   allocate(bond_first_jne(nbonds))
+   allocate(bond_second_ine(nbonds))
+   allocate(bond_second_jne(nbonds))
+
+  call get_instance_filename("bonds_iceberg.res.nc", filename_bonds)
+  call set_domain(bergs%grd%domain)
+  call register_restart_axis(bergs_bond_restart,filename,'i',nbonds)
+  call set_meta_global(bergs_bond_restart,'file_format_major_version',ival=(/file_format_major_version/))
+  call set_meta_global(bergs_bond_restart,'file_format_minor_version',ival=(/file_format_minor_version/))
+  call set_meta_global(bergs_bond_restart,'time_axis',ival=(/0/))
+
+  !Now start writing in the io_tile_root_pe if there are any bergs in the I/O list
+
+  id = register_restart_field(bergs_bond_restart,filename_bonds,'bond_first_ine',bond_first_ine,longname='iceberg ine of first berg in bond',units='dimensionless')
+  id = register_restart_field(bergs_bond_restart,filename_bonds,'bond_first_jne',bond_first_jne,longname='iceberg jne of first berg in bond',units='dimensionless')
+  id = register_restart_field(bergs_bond_restart,filename_bonds,'bond_second_ine',bond_second_ine,longname='iceberg ine of second berg in bond',units='dimensionless')
+  id = register_restart_field(bergs_bond_restart,filename_bonds,'bond_second_jne',bond_second_jne,longname='iceberg jne of second berg in bond',units='dimensionless')
+  id = register_restart_field(bergs_bond_restart,filename_bonds,'bond_first_num',bond_first_num,longname='iceberg id first berg in bond',units='dimensionless')
+  id = register_restart_field(bergs_bond_restart,filename_bonds,'bond_second_num',bond_second_num,longname='iceberg id second berg in bond',units='dimensionless')
+  
+  
+  ! Write variables
+   
+  i = 0
+  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+    this=>bergs%list(grdi,grdj)%first
+    do while(associated(this)) !Loops over all bergs
+      current_bond=>this%first_bond
+      do while (associated(current_bond)) ! loop over all bonds
+        i = i + 1
+        bond_first_ine(i)=this%ine
+        bond_first_jne(i)=this%jne
+        bond_first_num(i)= this%iceberg_num
+        bond_second_num(i)=current_bond%berg_num_of_current_bond
+        bond_second_ine(i)=current_bond%berg_in_current_bond%ine
+        bond_second_jne(i)=current_bond%berg_in_current_bond%jne
+
+        current_bond=>current_bond%next_bond
+      enddo !End of loop over bonds
+      this=>this%next
+    enddo!End of loop over bergs
+  enddo; enddo !End of loop over grid
+
+  call save_restart(bergs_bond_restart)
+  call free_restart_type(bergs_bond_restart)
+
+
+  deallocate(                 &
+             bond_first_num,  &
+             bond_second_num, &
+             bond_first_ine,        &
+             bond_first_jne,        &
+             bond_second_ine,        &
+             bond_second_jne )
+
 
   call nullify_domain()
+
+!#############################################################################################
 
   ! Write stored ice
   filename='RESTART/calving.res.nc'
@@ -960,6 +1043,124 @@ contains
   end subroutine generate_bergs
   
 end subroutine read_restart_bergs
+
+
+! ##############################################################################
+subroutine read_restart_bonds(bergs,Time)
+! Arguments
+type(icebergs), pointer :: bergs
+type(time_type), intent(in) :: Time
+! Local variables
+integer :: k, siz(4), nbonds_in_file
+logical :: lres, found_restart, found
+logical :: first_berg_found, second_berg_found
+logical :: multiPErestart  ! Not needed with new restart read; currently kept for compatibility
+real :: lon0, lon1, lat0, lat1
+character(len=33) :: filename, filename_base
+type(icebergs_gridded), pointer :: grd
+type(iceberg) :: localberg ! NOT a pointer but an actual local variable
+type(iceberg) , pointer :: this, first_berg, second_berg
+type(bond) , pointer :: current_bond
+integer :: stderrunit
+
+integer, allocatable, dimension(:) :: bond_first_num,   &
+                                      bond_second_num,  &
+                                      bond_first_jne,   &
+                                      bond_first_ine,   &
+                                      bond_second_jne,   &
+                                      bond_second_ine
+!integer, allocatable, dimension(:,:) :: iceberg_counter_grd
+
+  ! Get the stderr unit number
+  stderrunit=stderr()
+
+  ! For convenience
+  grd=>bergs%grd
+
+  ! Zero out nbergs_in_file
+  nbonds_in_file = 0
+
+  filename_base=trim(restart_input_dir)//'bonds_iceberg.res.nc'
+
+  found_restart = find_restart_file(filename_base, filename, multiPErestart, io_tile_id(1))
+  call error_mesg('read_restart_bonds_bergs_new', 'Using new icebergs restart read', NOTE)
+
+  filename = filename_base
+  call get_field_size(filename,'i',siz, field_found=found, domain=bergs%grd%domain)
+  nbonds_in_file = siz(1)
+
+  if (nbonds_in_file .gt. 0) then
+
+     allocate(bond_first_num(nbonds_in_file))
+     allocate(bond_second_num(nbonds_in_file))
+     allocate(bond_first_jne(nbonds_in_file))
+     allocate(bond_first_ine(nbonds_in_file))
+     allocate(bond_second_ine(nbonds_in_file))
+     allocate(bond_second_jne(nbonds_in_file))
+
+
+     call read_unlimited_axis(filename,'bond_first_num',bond_first_num,domain=grd%domain)
+     call read_unlimited_axis(filename,'bond_second_num',bond_second_num,domain=grd%domain)
+     call read_unlimited_axis(filename,'bond_first_jne',bond_first_jne,domain=grd%domain)
+     call read_unlimited_axis(filename,'bond_first_ine',bond_first_ine,domain=grd%domain)
+     call read_unlimited_axis(filename,'bond_second_jne',bond_second_jne,domain=grd%domain)
+     call read_unlimited_axis(filename,'bond_second_ine',bond_second_ine,domain=grd%domain)
+
+     ! Find approx outer bounds for tile
+     lon0=minval( grd%lon(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
+     lon1=maxval( grd%lon(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
+     lat0=minval( grd%lat(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
+     lat1=maxval( grd%lat(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
+     do k=1, nbonds_in_file
+        
+     
+       ! Search for the first berg, which the bond belongs to
+       first_berg_found=.false.
+       first_berg=>null()
+       this=>bergs%list(bond_first_ine(k),bond_first_jne(k))%first
+       do while(associated(this))
+         if (this%iceberg_num == bond_first_num(k)) then
+           first_berg_found=.true.
+           first_berg=>this
+           this=>null()
+         else  
+           this=>this%next
+         endif
+       enddo
+      
+       ! Search for the second berg, which the bond belongs to
+       second_berg_found=.false.
+       second_berg=>null()
+       this=>bergs%list(bond_second_ine(k),bond_second_jne(k))%first
+       do while(associated(this))
+         if (this%iceberg_num == bond_second_num(k)) then
+           second_berg_found=.true.
+           second_berg=>this
+           this=>null()
+         else  
+           this=>this%next
+         endif
+       enddo
+      
+       if (first_berg_found .and. second_berg_found) then
+           call form_a_bond(first_berg, bond_second_num(k),second_berg)
+               
+       else
+            !I need to create an option to slowly search for the icebergs
+           print *, 'The bergs and bonds do not match!!!', k, nbonds_in_file
+           call error_mesg('read_restart_bonds_bergs_new', 'Failure with reading bonds: bergs and bonds do not match', FATAL)
+       endif
+     enddo
+
+     deallocate(               &
+             bond_first_num,   &
+             bond_second_num,  &
+             bond_first_ine,   &
+             bond_first_jne,   &
+             bond_second_ine,  &
+             bond_second_jne )
+   endif
+end subroutine read_restart_bonds
 ! ##############################################################################
 
 subroutine read_restart_calving(bergs)

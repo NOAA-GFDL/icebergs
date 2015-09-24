@@ -62,7 +62,8 @@ public add_new_berg_to_list, count_out_of_order, check_for_duplicates
 public insert_berg_into_list, create_iceberg, delete_iceberg_from_list, destroy_iceberg
 public print_fld,print_berg, print_bergs,record_posn, push_posn, append_posn, check_position
 public move_trajectory, move_all_trajectories
-public find_cell,find_cell_by_search,count_bergs,is_point_in_cell,pos_within_cell
+public form_a_bond
+public find_cell,find_cell_by_search,count_bergs,is_point_in_cell,pos_within_cell, count_bonds
 public sum_mass,sum_heat,bilin,yearday,bergs_chksum
 public checksum_gridded
 public grd_chksum2,grd_chksum3
@@ -202,6 +203,7 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   logical :: time_average_weight=.false. ! Time average the weight on the ocean
   logical :: Runge_not_Verlet=.True.  !True=Runge Kuttai, False=Verlet.  - Added by Alon 
   logical :: iceberg_bonds_on=.False.  !True=Allow icebergs to have bonds, False=don't allow. 
+  logical :: manually_initialize_bonds=.False.  !True= Bonds are initialize manually. 
   logical :: use_new_predictive_corrective =.False.  !Flag to use Bob's predictive corrective iceberg scheme- Added by Alon 
   logical :: interactive_icebergs_on=.false.  !Turn on/off interactions between icebergs  - Added by Alon 
   logical :: critical_interaction_damping_on=.true.  !Sets the damping on relative iceberg velocity to critical value - Added by Alon 
@@ -302,6 +304,7 @@ real :: speed_limit=0. ! CFL speed limit for a berg
 real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
 logical :: Runge_not_Verlet=.True.  !True=Runge Kutta, False=Verlet.  - Added by Alon 
 logical :: iceberg_bonds_on=.False.  !True=Allow icebergs to have bonds, False=don't allow. 
+logical :: manually_initialize_bonds=.False.  !True= Bonds are initialize manually. 
 logical :: use_new_predictive_corrective =.False.  !Flag to use Bob's predictive corrective iceberg scheme- Added by Alon 
 logical :: interactive_icebergs_on=.false.  !Turn on/off interactions between icebergs  - Added by Alon 
 logical :: critical_interaction_damping_on=.true.  !Sets the damping on relative iceberg velocity to critical value - Added by Alon 
@@ -313,7 +316,7 @@ real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1
 real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
 namelist /icebergs_nml/ verbose, budget, halo, iceberg_halo, traj_sample_hrs, initial_mass, traj_write_hrs, &
          distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef, radial_damping_coef, tangental_damping_coef, &
-         rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, iceberg_bonds_on, &
+         rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, iceberg_bonds_on, manually_initialize_bonds, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, &
          time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_icebergs_on, critical_interaction_damping_on, &
          old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj
@@ -588,6 +591,7 @@ endif
   bergs%speed_limit=speed_limit
   bergs%Runge_not_Verlet=Runge_not_Verlet   !Alon
   bergs%iceberg_bonds_on=iceberg_bonds_on   !Alon
+  bergs%manually_initialize_bonds=manually_initialize_bonds   !Alon
   bergs%critical_interaction_damping_on=critical_interaction_damping_on   !Alon
   bergs%interactive_icebergs_on=interactive_icebergs_on   !Alon
   bergs%use_new_predictive_corrective=use_new_predictive_corrective  !Alon
@@ -2064,6 +2068,140 @@ integer :: grdi, grdj
   if (nbergs.gt.0) write(iochan,'("diamonds, ",a," there are",i5," bergs out of",i6," on PE ",i4)') label, nbergs, nnbergs, mpp_pe()
 
 end subroutine print_bergs
+
+
+! ##############################################################################
+
+subroutine form_a_bond(berg, other_berg_num, other_berg)
+
+type(iceberg), pointer :: berg
+type(iceberg), optional,  pointer :: other_berg
+type(bond) , pointer :: new_bond, first_bond
+integer, intent(in) :: other_berg_num
+print *, 'Forming a bond!!!'
+    
+
+! Step 1: Create a new bond
+allocate(new_bond)
+new_bond%berg_num_of_current_bond=other_berg_num
+if(present(other_berg)) then
+  new_bond%berg_in_current_bond=>other_berg
+else
+  new_bond%berg_in_current_bond=>null()
+endif
+
+! Step 2: Put this new bond at the start of the bond list
+   first_bond=>berg%first_bond
+   if (associated(first_bond)) then
+        new_bond%next_bond=>first_bond
+        new_bond%prev_bond=>null()  !This should not be needed
+        first_bond%prev_bond=>new_bond
+        berg%first_bond=>new_bond
+   else
+       new_bond%next_bond=>null()  !This should not be needed
+       new_bond%prev_bond=>null()  !This should not be needed
+       berg%first_bond=>new_bond
+   endif
+
+end subroutine form_a_bond
+
+! #############################################################################
+! #############################################################################
+subroutine count_bonds(bergs, number_of_bonds, check_bond_quality)
+
+type(icebergs), pointer :: bergs
+type(iceberg), pointer :: berg
+type(iceberg), pointer :: other_berg
+type(icebergs_gridded), pointer :: grd
+type(bond) , pointer :: current_bond, other_berg_bond
+!integer, intent(out) :: number_of_bonds 
+integer, intent(out) :: number_of_bonds
+integer :: number_of_bonds_all_pe
+integer :: grdi, grdj
+logical :: bond_is_good
+logical, optional :: check_bond_quality
+logical :: quality_check
+logical :: all_bonds_matching
+integer :: stderrunit
+
+ print *, "starting bond_check"
+ quality_check=.false.
+ all_bonds_matching=.True.
+ if(present(check_bond_quality)) quality_check = check_bond_quality
+
+ ! For convenience
+  grd=>bergs%grd
+
+  number_of_bonds=0  ! This is a bond counter.
+
+  do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
+    berg=>bergs%list(grdi,grdj)%first
+    do while (associated(berg)) ! loop over all bergs
+      current_bond=>berg%first_bond
+      do while (associated(current_bond)) ! loop over all bonds
+        number_of_bonds=number_of_bonds+1
+
+        ! ##### Beginning Quality Check on Bonds ######
+        if (quality_check) then
+          all_bonds_matching=.True.
+          bond_is_good=.False.
+          other_berg=>current_bond%berg_in_current_bond
+          if (associated(other_berg)) then
+            other_berg_bond=>other_berg%first_bond
+          
+            do while (associated(other_berg_bond))  !loops over the icebergs in the other icebergs bond list            
+              if (associated(other_berg_bond%berg_in_current_bond)) then
+                if (other_berg_bond%berg_in_current_bond%iceberg_num==berg%iceberg_num) then
+                  bond_is_good=.True.  !Bond_is_good becomes true when the corresponding bond is found
+                endif
+              endif                 
+              if (bond_is_good) then
+                other_berg_bond=>null()
+              else
+                other_berg_bond=>other_berg_bond%next_bond
+              endif
+            enddo  ! End of loop over the other berg's bonds.
+
+            if (bond_is_good) then
+              print*, 'Perfect quality Bond:', berg%iceberg_num, current_bond%berg_num_of_current_bond
+            else  
+              print*, 'Non-matching bond...:', berg%iceberg_num, current_bond%berg_num_of_current_bond
+              all_bonds_matching=.false.
+            endif
+          else
+            print *, 'Opposite berg is not assosiated:', berg%iceberg_num, current_bond%berg_in_current_bond%iceberg_num    
+            all_bonds_matching=.false.
+          endif
+        endif
+        ! ##### Ending Quality Check on Bonds ######
+
+        current_bond=>current_bond%next_bond
+        enddo !End of loop over current bonds
+        berg=>berg%next
+      enddo ! End of loop over all bergs
+    enddo; enddo !End of loop over all grid cells
+
+    number_of_bonds_all_pe=number_of_bonds
+    call mpp_sum(number_of_bonds_all_pe)
+
+    bergs%nbonds=number_of_bonds_all_pe !Total number of bonds across all pe's
+    if (number_of_bonds .gt. 0) then
+      print *, "Number of bonds on pe, out of a total of: ", number_of_bonds, number_of_bonds_all_pe
+    endif
+
+    if (quality_check) then
+      if (.not.all_bonds_matching) then
+        stderrunit = stderr()
+        write(stderrunit,*) 'diamonds, Bonds are not matching!!!! PE=',mpp_pe()
+        call error_mesg('diamonds, bonds', 'Bonds are not matching!', FATAL)
+      endif
+    endif
+
+    print *, "ending bond_check"
+
+end subroutine count_bonds
+
+
 
 ! ##############################################################################
 

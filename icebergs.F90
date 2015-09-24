@@ -26,6 +26,7 @@ use ice_bergs_framework, only: ice_bergs_framework_init
 use ice_bergs_framework, only: icebergs_gridded, xyt, iceberg, icebergs, buffer, bond
 use ice_bergs_framework, only: verbose, really_debug,debug,old_bug_rotated_weights,budget,use_roundoff_fix
 use ice_bergs_framework, only: find_cell,find_cell_by_search,count_bergs,is_point_in_cell,pos_within_cell
+use ice_bergs_framework, only: count_bonds, form_a_bond
 use ice_bergs_framework, only: nclasses,old_bug_bilin
 use ice_bergs_framework, only: sum_mass,sum_heat,bilin,yearday,count_bergs,bergs_chksum
 use ice_bergs_framework, only: checksum_gridded,add_new_berg_to_list
@@ -39,6 +40,7 @@ use ice_bergs_framework, only: orig_read  ! Remove when backward compatibility n
 
 use ice_bergs_io,        only: ice_bergs_io_init,write_restart,write_trajectory
 use ice_bergs_io,        only: read_restart_bergs,read_restart_bergs_orig,read_restart_calving
+use ice_bergs_io,        only: read_restart_bonds
 
 implicit none ; private
 
@@ -111,8 +113,13 @@ integer :: stdlogunit, stderrunit
 
   if (really_debug) call print_bergs(stderrunit,bergs,'icebergs_init, initial status')
 
-  if (bergs%iceberg_bonds_on)  call initialize_iceberg_bonds(bergs)
-
+  if (bergs%iceberg_bonds_on) then
+    if (bergs%manually_initialize_bonds) then
+      call initialize_iceberg_bonds(bergs)
+    else
+      call read_restart_bonds(bergs,Time)
+    endif
+  endif
 
 end subroutine icebergs_init
 
@@ -125,7 +132,7 @@ type(icebergs), pointer :: bergs
 type(iceberg), pointer :: berg
 type(iceberg), pointer :: other_berg
 type(icebergs_gridded), pointer :: grd
-    
+   
 
 
 real :: T1, L1, W1, lon1, lat1, x1, y1, R1, A1   !Current iceberg
@@ -133,6 +140,7 @@ real :: T2, L2, W2, lon2, lat2, x2, y2, R2, A2   !Other iceberg
 real :: r_dist_x, r_dist_y, r_dist
 integer :: grdi_outer, grdj_outer
 integer :: grdi_inner, grdj_inner
+integer :: nbonds
 logical :: check_bond_quality
 
 
@@ -158,7 +166,7 @@ logical :: check_bond_quality
             r_dist=sqrt( ((x1-x2)**2) + ((y1-y2)**2) )
         
             !if (r_dist.gt.1000.) then  ! If the bergs are close together, then form a bond
-              call form_a_bond(berg, other_berg)
+              call form_a_bond(berg, other_berg%iceberg_num, other_berg)
             !endif       
           endif
           other_berg=>other_berg%next
@@ -170,134 +178,11 @@ logical :: check_bond_quality
 
 
   check_bond_quality=.True.
-  call check_if_all_bonds_are_present(bergs,check_bond_quality)
+  call count_bonds(bergs, nbonds,check_bond_quality)
 
 
 
 end subroutine initialize_iceberg_bonds
-
-! ##############################################################################
-
-subroutine form_a_bond(berg, other_berg)
-
-type(iceberg), pointer :: berg
-type(iceberg), pointer :: other_berg
-type(bond) , pointer :: new_bond, first_bond
-print *, 'Forming a bond!!!'
-    
-
-! Step 1: Create a new bond
-allocate(new_bond)
-new_bond%berg_num_of_current_bond=other_berg%iceberg_num
-new_bond%berg_in_current_bond=>other_berg
-
-! Step 2: Put this new bond at the start of the bond list
-   first_bond=>berg%first_bond
-   if (associated(first_bond)) then
-        new_bond%next_bond=>first_bond
-        new_bond%prev_bond=>null()  !This should not be needed
-        first_bond%prev_bond=>new_bond
-        berg%first_bond=>new_bond
-   else
-       new_bond%next_bond=>null()  !This should not be needed
-       new_bond%prev_bond=>null()  !This should not be needed
-       berg%first_bond=>new_bond
-   endif
-
-end subroutine form_a_bond
-
-! #############################################################################
-
-subroutine check_if_all_bonds_are_present(bergs, check_bond_quality)
-
-type(icebergs), pointer :: bergs
-type(iceberg), pointer :: berg
-type(iceberg), pointer :: other_berg
-type(icebergs_gridded), pointer :: grd
-type(bond) , pointer :: current_bond, other_berg_bond
-!integer, intent(out) :: number_of_bonds 
-integer :: number_of_bonds, number_of_bonds_all_pe
-integer :: grdi, grdj
-logical :: bond_is_good
-logical, optional :: check_bond_quality
-logical :: quality_check
-logical :: all_bonds_matching
-integer :: stderrunit
-
- print *, "starting bond_check"
- quality_check=.false.
- if(present(check_bond_quality)) quality_check = check_bond_quality
-
- ! For convenience
-  grd=>bergs%grd
-
-  number_of_bonds=0  ! This is a bond counter.
-
-  do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
-    berg=>bergs%list(grdi,grdj)%first
-    do while (associated(berg)) ! loop over all bergs
-      current_bond=>berg%first_bond
-      do while (associated(current_bond)) ! loop over all bonds
-        number_of_bonds=number_of_bonds+1
-
-        ! ##### Beginning Quality Check on Bonds ######
-        if (quality_check) then
-          all_bonds_matching=.True.
-          bond_is_good=.False.
-          other_berg=>current_bond%berg_in_current_bond
-          if (associated(other_berg)) then
-            other_berg_bond=>other_berg%first_bond
-          
-            do while (associated(other_berg_bond))  !loops over the icebergs in the other icebergs bond list            
-              if (associated(other_berg_bond%berg_in_current_bond)) then
-                if (other_berg_bond%berg_in_current_bond%iceberg_num==berg%iceberg_num) then
-                  bond_is_good=.True.  !Bond_is_good becomes true when the corresponding bond is found
-                endif
-              endif                 
-              if (bond_is_good) then
-                other_berg_bond=>null()
-              else
-                other_berg_bond=>other_berg_bond%next_bond
-              endif
-            enddo  ! End of loop over the other berg's bonds.
-
-            if (bond_is_good) then
-              print*, 'Perfect quality Bond:', berg%iceberg_num, current_bond%berg_num_of_current_bond
-            else
-              print*, 'Non-matching bond...:', berg%iceberg_num, current_bond%berg_num_of_current_bond
-              all_bonds_matching=.false.
-            endif
-          else
-             print *, 'Opposite berg is not assosiated:', berg%iceberg_num, current_bond%berg_in_current_bond%iceberg_num    
-             all_bonds_matching=.false.
-          endif
-        endif
-        ! ##### Ending Quality Check on Bonds ######
-
-        current_bond=>current_bond%next_bond
-      enddo !End of loop over current bonds
-      berg=>berg%next
-    enddo ! End of loop over all bergs
-  enddo; enddo !End of loop over all grid cells
-
-   number_of_bonds_all_pe=number_of_bonds
-   call mpp_sum(number_of_bonds_all_pe)
-   
-  bergs%nbonds=number_of_bonds_all_pe  !Total number of bonds across all pe's
-  if (number_of_bonds .gt. 0) then
-    print *, "Number of bonds on pe, out of a total of: ", number_of_bonds, number_of_bonds_all_pe
-  endif
-
-  if (quality_check) then
-    if (.not. all_bonds_matching) then
-        stderrunit = stderr()
-        write(stderrunit,*) 'diamonds, Bonds are not matching!!!! PE=',mpp_pe()
-        call error_mesg('diamonds, bonds', 'Bonds are not matching!', FATAL)
-    endif
-  endif
-
-  print *, "ending bond_check"
-end subroutine check_if_all_bonds_are_present
 
 ! ##############################################################################
 
