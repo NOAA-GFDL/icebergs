@@ -133,6 +133,8 @@ real :: T2, L2, W2, lon2, lat2, x2, y2, R2, A2   !Other iceberg
 real :: r_dist_x, r_dist_y, r_dist
 integer :: grdi_outer, grdj_outer
 integer :: grdi_inner, grdj_inner
+logical :: check_bond_quality
+
 
   ! For convenience
     grd=>bergs%grd
@@ -144,7 +146,8 @@ integer :: grdi_inner, grdj_inner
       lon1=berg%lon; lat1=berg%lat
       call rotpos_to_tang(lon1,lat1,x1,y1)
 
-      do grdj_inner = berg%jne-1,berg%jne+1 ; do grdi_inner = berg%ine-1,berg%ine+1   !Only looping through adjacent cells.
+      do grdj_inner = grd%jsc,grd%jec ; do grdi_inner = grd%isc,grd%iec  !This line uses n^2 steps
+!     do grdj_inner = berg%jne-1,berg%jne+1 ; do grdi_inner = berg%ine-1,berg%ine+1   !Only looping through adjacent cells.
         other_berg=>bergs%list(grdi_inner,grdj_inner)%first
         do while (associated(other_berg)) ! loop over all other bergs  
           
@@ -165,7 +168,9 @@ integer :: grdi_inner, grdj_inner
     enddo ! End of looping through all bergs in the outer list
   enddo ; enddo; !End of outer loop.
 
-  call check_if_all_bonds_are_present(bergs)
+
+  check_bond_quality=.True.
+  call check_if_all_bonds_are_present(bergs,check_bond_quality)
 
 
 
@@ -203,62 +208,95 @@ end subroutine form_a_bond
 
 ! #############################################################################
 
-subroutine check_if_all_bonds_are_present(bergs)
+subroutine check_if_all_bonds_are_present(bergs, check_bond_quality)
 
 type(icebergs), pointer :: bergs
 type(iceberg), pointer :: berg
 type(iceberg), pointer :: other_berg
 type(icebergs_gridded), pointer :: grd
 type(bond) , pointer :: current_bond, other_berg_bond
+!integer, intent(out) :: number_of_bonds 
+integer :: number_of_bonds, number_of_bonds_all_pe
 integer :: grdi, grdj
 logical :: bond_is_good
+logical, optional :: check_bond_quality
+logical :: quality_check
+logical :: all_bonds_matching
+integer :: stderrunit
 
-!print *, "starting bond_check"
+ print *, "starting bond_check"
+ quality_check=.false.
+ if(present(check_bond_quality)) quality_check = check_bond_quality
 
  ! For convenience
   grd=>bergs%grd
+
+  number_of_bonds=0  ! This is a bond counter.
 
   do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
     berg=>bergs%list(grdi,grdj)%first
     do while (associated(berg)) ! loop over all bergs
       current_bond=>berg%first_bond
       do while (associated(current_bond)) ! loop over all bonds
-        bond_is_good=.False.
-        other_berg=>current_bond%berg_in_current_bond
-        if (associated(other_berg)) then
-          other_berg_bond=>other_berg%first_bond
+        number_of_bonds=number_of_bonds+1
+
+        ! ##### Beginning Quality Check on Bonds ######
+        if (quality_check) then
+          all_bonds_matching=.True.
+          bond_is_good=.False.
+          other_berg=>current_bond%berg_in_current_bond
+          if (associated(other_berg)) then
+            other_berg_bond=>other_berg%first_bond
           
-          do while (associated(other_berg_bond))  !loops over the icebergs in the other icebergs bond list            
-            if (associated(other_berg_bond%berg_in_current_bond)) then
-              if (other_berg_bond%berg_in_current_bond%iceberg_num==berg%iceberg_num) then
-                bond_is_good=.True.  !Bond_is_good becomes true when the corresponding bond is found
+            do while (associated(other_berg_bond))  !loops over the icebergs in the other icebergs bond list            
+              if (associated(other_berg_bond%berg_in_current_bond)) then
+                if (other_berg_bond%berg_in_current_bond%iceberg_num==berg%iceberg_num) then
+                  bond_is_good=.True.  !Bond_is_good becomes true when the corresponding bond is found
+                endif
+              endif                 
+              if (bond_is_good) then
+                other_berg_bond=>null()
+              else
+                other_berg_bond=>other_berg_bond%next_bond
               endif
-            endif                 
+            enddo  ! End of loop over the other berg's bonds.
+
             if (bond_is_good) then
-              other_berg_bond=>null()
+              print*, 'Perfect quality Bond:', berg%iceberg_num, current_bond%berg_num_of_current_bond
             else
-              other_berg_bond=>other_berg_bond%next_bond
+              print*, 'Non-matching bond...:', berg%iceberg_num, current_bond%berg_num_of_current_bond
+              all_bonds_matching=.false.
             endif
-          enddo  ! End of loop over the other berg's bonds.
-
-          ! Now we assess how we did
-
-          if (bond_is_good) then
-            print*, 'Perfect quality Bond:', berg%iceberg_num, current_bond%berg_num_of_current_bond
           else
-            print*, 'Non-matching bond...:', berg%iceberg_num, current_bond%berg_num_of_current_bond
+             print *, 'Opposite berg is not assosiated:', berg%iceberg_num, current_bond%berg_in_current_bond%iceberg_num    
+             all_bonds_matching=.false.
           endif
-        
-        else
-           print *, 'Opposite berg is not assosiated:', berg%iceberg_num, current_bond%berg_in_current_bond%iceberg_num    
         endif
+        ! ##### Ending Quality Check on Bonds ######
+
         current_bond=>current_bond%next_bond
       enddo !End of loop over current bonds
       berg=>berg%next
     enddo ! End of loop over all bergs
   enddo; enddo !End of loop over all grid cells
 
-!  print *, "ending bond_check"
+   number_of_bonds_all_pe=number_of_bonds
+   call mpp_sum(number_of_bonds_all_pe)
+   
+  bergs%nbonds=number_of_bonds_all_pe  !Total number of bonds across all pe's
+  if (number_of_bonds .gt. 0) then
+    print *, "Number of bonds on pe, out of a total of: ", number_of_bonds, number_of_bonds_all_pe
+  endif
+
+  if (quality_check) then
+    if (.not. all_bonds_matching) then
+        stderrunit = stderr()
+        write(stderrunit,*) 'diamonds, Bonds are not matching!!!! PE=',mpp_pe()
+        call error_mesg('diamonds, bonds', 'Bonds are not matching!', FATAL)
+    endif
+  endif
+
+  print *, "ending bond_check"
 end subroutine check_if_all_bonds_are_present
 
 ! ##############################################################################

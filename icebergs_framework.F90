@@ -228,6 +228,7 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   real :: net_melt=0., berg_melt=0., bergy_src=0., bergy_melt=0.
   integer :: nbergs_calved=0, nbergs_melted=0, nbergs_start=0, nbergs_end=0
   integer :: nspeeding_tickets=0
+  integer :: nbonds=0
   integer, dimension(:), pointer :: nbergs_calved_by_class=>null()
 end type icebergs
 
