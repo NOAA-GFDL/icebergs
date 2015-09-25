@@ -166,7 +166,7 @@ logical :: check_bond_quality
             r_dist=sqrt( ((x1-x2)**2) + ((y1-y2)**2) )
         
             !if (r_dist.gt.1000.) then  ! If the bergs are close together, then form a bond
-              call form_a_bond(berg, other_berg%iceberg_num, other_berg)
+              call form_a_bond(berg, other_berg%iceberg_num, other_berg%ine, other_berg%jne, other_berg)
             !endif       
           endif
           other_berg=>other_berg%next

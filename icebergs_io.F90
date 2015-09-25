@@ -140,12 +140,12 @@ integer, allocatable, dimension(:) :: ine,              &
                                       jne,              &
                                       iceberg_num,      &
                                       start_year,       &
-                                      bond_first_num,   &
-                                      bond_second_num,  &
-                                      bond_first_jne,         &
-                                      bond_first_ine,         &
-                                      bond_second_jne,         &
-                                      bond_second_ine
+                                      first_berg_num,   &
+                                      other_berg_num,   &
+                                      first_berg_jne,         &
+                                      first_berg_ine,         &
+                                      other_berg_jne,         &
+                                      other_berg_ine
 
 
 !uvel_old, vvel_old, lon_old, lat_old, axn, ayn, bxn, byn added by Alon.
@@ -322,12 +322,12 @@ integer :: grdi, grdj
      call count_bonds(bergs, nbonds)
    endif
 
-   allocate(bond_first_num(nbonds))
-   allocate(bond_second_num(nbonds))
-   allocate(bond_first_ine(nbonds))
-   allocate(bond_first_jne(nbonds))
-   allocate(bond_second_ine(nbonds))
-   allocate(bond_second_jne(nbonds))
+   allocate(first_berg_num(nbonds))
+   allocate(other_berg_num(nbonds))
+   allocate(first_berg_ine(nbonds))
+   allocate(first_berg_jne(nbonds))
+   allocate(other_berg_ine(nbonds))
+   allocate(other_berg_jne(nbonds))
 
   call get_instance_filename("bonds_iceberg.res.nc", filename_bonds)
   call set_domain(bergs%grd%domain)
@@ -338,12 +338,12 @@ integer :: grdi, grdj
 
   !Now start writing in the io_tile_root_pe if there are any bergs in the I/O list
 
-  id = register_restart_field(bergs_bond_restart,filename_bonds,'bond_first_ine',bond_first_ine,longname='iceberg ine of first berg in bond',units='dimensionless')
-  id = register_restart_field(bergs_bond_restart,filename_bonds,'bond_first_jne',bond_first_jne,longname='iceberg jne of first berg in bond',units='dimensionless')
-  id = register_restart_field(bergs_bond_restart,filename_bonds,'bond_second_ine',bond_second_ine,longname='iceberg ine of second berg in bond',units='dimensionless')
-  id = register_restart_field(bergs_bond_restart,filename_bonds,'bond_second_jne',bond_second_jne,longname='iceberg jne of second berg in bond',units='dimensionless')
-  id = register_restart_field(bergs_bond_restart,filename_bonds,'bond_first_num',bond_first_num,longname='iceberg id first berg in bond',units='dimensionless')
-  id = register_restart_field(bergs_bond_restart,filename_bonds,'bond_second_num',bond_second_num,longname='iceberg id second berg in bond',units='dimensionless')
+  id = register_restart_field(bergs_bond_restart,filename_bonds,'first_berg_ine',first_berg_ine,longname='iceberg ine of first berg in bond',units='dimensionless')
+  id = register_restart_field(bergs_bond_restart,filename_bonds,'first_berg_jne',first_berg_jne,longname='iceberg jne of first berg in bond',units='dimensionless')
+  id = register_restart_field(bergs_bond_restart,filename_bonds,'first_berg_num',first_berg_num,longname='iceberg id first berg in bond',units='dimensionless')
+  id = register_restart_field(bergs_bond_restart,filename_bonds,'other_berg_ine',other_berg_ine,longname='iceberg ine of second berg in bond',units='dimensionless')
+  id = register_restart_field(bergs_bond_restart,filename_bonds,'other_berg_jne',other_berg_jne,longname='iceberg jne of second berg in bond',units='dimensionless')
+  id = register_restart_field(bergs_bond_restart,filename_bonds,'other_berg_num',other_berg_num,longname='iceberg id second berg in bond',units='dimensionless')
   
   
   ! Write variables
@@ -355,12 +355,12 @@ integer :: grdi, grdj
       current_bond=>this%first_bond
       do while (associated(current_bond)) ! loop over all bonds
         i = i + 1
-        bond_first_ine(i)=this%ine
-        bond_first_jne(i)=this%jne
-        bond_first_num(i)= this%iceberg_num
-        bond_second_num(i)=current_bond%berg_num_of_current_bond
-        bond_second_ine(i)=current_bond%berg_in_current_bond%ine
-        bond_second_jne(i)=current_bond%berg_in_current_bond%jne
+        first_berg_ine(i)=this%ine
+        first_berg_jne(i)=this%jne
+        first_berg_num(i)= this%iceberg_num
+        other_berg_num(i)=current_bond%other_berg_num
+        other_berg_ine(i)=current_bond%other_berg%ine
+        other_berg_jne(i)=current_bond%other_berg%jne
 
         current_bond=>current_bond%next_bond
       enddo !End of loop over bonds
@@ -373,12 +373,12 @@ integer :: grdi, grdj
 
 
   deallocate(                 &
-             bond_first_num,  &
-             bond_second_num, &
-             bond_first_ine,        &
-             bond_first_jne,        &
-             bond_second_ine,        &
-             bond_second_jne )
+             first_berg_num,  &
+             other_berg_num, &
+             first_berg_ine,        &
+             first_berg_jne,        &
+             other_berg_ine,        &
+             other_berg_jne )
 
 
   call nullify_domain()
@@ -1068,12 +1068,12 @@ integer :: number_perfect_bonds ! How many complete bonds formed
 integer :: number_partial_bonds ! How many either complete/partial bonds formed.
 integer :: all_pe_number_perfect_bonds, all_pe_number_partial_bonds
 integer :: all_pe_number_first_bonds_matched, all_pe_number_second_bonds_matched
-integer, allocatable, dimension(:) :: bond_first_num,   &
-                                      bond_second_num,  &
-                                      bond_first_jne,   &
-                                      bond_first_ine,   &
-                                      bond_second_jne,   &
-                                      bond_second_ine
+integer, allocatable, dimension(:) :: first_berg_num,   &
+                                      other_berg_num,  &
+                                      first_berg_jne,   &
+                                      first_berg_ine,   &
+                                      other_berg_jne,   &
+                                      other_berg_ine
 !integer, allocatable, dimension(:,:) :: iceberg_counter_grd
 
   ! Get the stderr unit number
@@ -1088,7 +1088,7 @@ integer, allocatable, dimension(:) :: bond_first_num,   &
   filename_base=trim(restart_input_dir)//'bonds_iceberg.res.nc'
 
   found_restart = find_restart_file(filename_base, filename, multiPErestart, io_tile_id(1))
-  call error_mesg('read_restart_bonds_bergs_new', 'Using new icebergs restart read', NOTE)
+  call error_mesg('read_restart_bonds_bergs_new', 'Using new icebergs bond restart read', NOTE)
 
   filename = filename_base
   call get_field_size(filename,'i',siz, field_found=found, domain=bergs%grd%domain)
@@ -1096,20 +1096,20 @@ integer, allocatable, dimension(:) :: bond_first_num,   &
 
   if (nbonds_in_file .gt. 0) then
 
-    allocate(bond_first_num(nbonds_in_file))
-    allocate(bond_second_num(nbonds_in_file))
-    allocate(bond_first_jne(nbonds_in_file))
-    allocate(bond_first_ine(nbonds_in_file))
-    allocate(bond_second_ine(nbonds_in_file))
-    allocate(bond_second_jne(nbonds_in_file))
+    allocate(first_berg_num(nbonds_in_file))
+    allocate(other_berg_num(nbonds_in_file))
+    allocate(first_berg_jne(nbonds_in_file))
+    allocate(first_berg_ine(nbonds_in_file))
+    allocate(other_berg_ine(nbonds_in_file))
+    allocate(other_berg_jne(nbonds_in_file))
 
 
-    call read_unlimited_axis(filename,'bond_first_num',bond_first_num,domain=grd%domain)
-    call read_unlimited_axis(filename,'bond_second_num',bond_second_num,domain=grd%domain)
-    call read_unlimited_axis(filename,'bond_first_jne',bond_first_jne,domain=grd%domain)
-    call read_unlimited_axis(filename,'bond_first_ine',bond_first_ine,domain=grd%domain)
-    call read_unlimited_axis(filename,'bond_second_jne',bond_second_jne,domain=grd%domain)
-    call read_unlimited_axis(filename,'bond_second_ine',bond_second_ine,domain=grd%domain)
+    call read_unlimited_axis(filename,'first_berg_num',first_berg_num,domain=grd%domain)
+    call read_unlimited_axis(filename,'other_berg_num',other_berg_num,domain=grd%domain)
+    call read_unlimited_axis(filename,'first_berg_jne',first_berg_jne,domain=grd%domain)
+    call read_unlimited_axis(filename,'first_berg_ine',first_berg_ine,domain=grd%domain)
+    call read_unlimited_axis(filename,'other_berg_jne',other_berg_jne,domain=grd%domain)
+    call read_unlimited_axis(filename,'other_berg_ine',other_berg_ine,domain=grd%domain)
 
     number_first_bonds_matched=0
     number_second_bonds_matched=0
@@ -1118,16 +1118,16 @@ integer, allocatable, dimension(:) :: bond_first_num,   &
     do k=1, nbonds_in_file
        
       ! Decide whether the first iceberg is on the processeor
-      if ( bond_first_ine(k)>=grd%isc .and. bond_first_ine(k)<=grd%iec .and. &
-        bond_first_jne(k)>=grd%jsc .and.bond_first_jne(k)<=grd%jec ) then
+      if ( first_berg_ine(k)>=grd%isc .and. first_berg_ine(k)<=grd%iec .and. &
+        first_berg_jne(k)>=grd%jsc .and.first_berg_jne(k)<=grd%jec ) then
         number_first_bonds_matched=number_first_bonds_matched+1
      
         ! Search for the first berg, which the bond belongs to
         first_berg_found=.false.
         first_berg=>null()
-        this=>bergs%list(bond_first_ine(k),bond_first_jne(k))%first
+        this=>bergs%list(first_berg_ine(k),first_berg_jne(k))%first
         do while(associated(this))
-          if (this%iceberg_num == bond_first_num(k)) then
+          if (this%iceberg_num == first_berg_num(k)) then
             first_berg_found=.true.
             first_berg=>this
             this=>null()
@@ -1138,15 +1138,15 @@ integer, allocatable, dimension(:) :: bond_first_num,   &
       
         ! Decide whether the second iceberg is on the processeor (data domain)
         second_berg_found=.false.
-        if ( bond_second_ine(k)>=grd%isd .and. bond_second_ine(k)<=grd%ied .and. &
-          bond_second_jne(k)>=grd%jsd .and.bond_second_jne(k)<=grd%jed ) then
+        if ( other_berg_ine(k)>=grd%isd .and. other_berg_ine(k)<=grd%ied .and. &
+          other_berg_jne(k)>=grd%jsd .and.other_berg_jne(k)<=grd%jed ) then
           number_second_bonds_matched=number_second_bonds_matched+1
 
           ! Search for the second berg, which the bond belongs to
           second_berg=>null()
-          this=>bergs%list(bond_second_ine(k),bond_second_jne(k))%first
+          this=>bergs%list(other_berg_ine(k),other_berg_jne(k))%first
           do while(associated(this))
-            if (this%iceberg_num == bond_second_num(k)) then
+            if (this%iceberg_num == other_berg_num(k)) then
               second_berg_found=.true.
               second_berg=>this
               this=>null()
@@ -1159,10 +1159,10 @@ integer, allocatable, dimension(:) :: bond_first_num,   &
         if (first_berg_found) then
           number_partial_bonds=number_partial_bonds+1
           if (second_berg_found) then
-            call form_a_bond(first_berg, bond_second_num(k),second_berg)
+            call form_a_bond(first_berg, other_berg_num(k), other_berg_ine(k), other_berg_jne(k),  second_berg)
             number_perfect_bonds=number_perfect_bonds+1
           else
-            call form_a_bond(first_berg, bond_second_num(k))
+            call form_a_bond(first_berg, other_berg_num(k),other_berg_ine(k),other_berg_jne(k))
           endif
         else
           write(*,'(a,i8,a)') 'diamonds, bond read restart : ','Not enough partial bonds formed', k, mpp_pe(), nbonds_in_file
@@ -1178,8 +1178,6 @@ integer, allocatable, dimension(:) :: bond_first_num,   &
     all_pe_number_second_bonds_matched=number_second_bonds_matched
     call mpp_sum(all_pe_number_perfect_bonds)
     call mpp_sum(all_pe_number_partial_bonds)
-    call mpp_sum(all_pe_number_first_bonds_matched)
-    call mpp_sum(all_pe_number_second_bonds_matched)
 
     if (all_pe_number_partial_bonds .lt. nbonds_in_file) then
       write(*,'(a,i8,a)') 'diamonds, bond read restart : ','Not enough partial bonds formed', all_pe_number_partial_bonds , nbonds_in_file
@@ -1187,17 +1185,20 @@ integer, allocatable, dimension(:) :: bond_first_num,   &
     endif
     
     if (all_pe_number_perfect_bonds .lt. nbonds_in_file) then
-      write(*,'(a,i8,a)') 'diamonds, bond read restart : ','Warning, some bonds are not fully formed', all_pe_number_perfect_bonds , nbonds_in_file
+      call mpp_sum(all_pe_number_first_bonds_matched)
+      call mpp_sum(all_pe_number_second_bonds_matched)
+      write(*,'(a,i8,a)') 'diamonds, bond read restart : ','Warning, some bonds are not fully formed',  all_pe_number_first_bonds_matched , nbonds_in_file
+      write(*,'(a,i8,a)') 'diamonds, bond read restart : ','Number of first and second bonds matched:', all_pe_number_second_bonds_matched , nbonds_in_file
       call error_mesg('read_restart_bonds_bergs_new', 'Not enough perfect bonds formed', NOTE)
     endif
 
     deallocate(               &
-            bond_first_num,   &
-            bond_second_num,  &
-            bond_first_ine,   &
-            bond_first_jne,   &
-            bond_second_ine,  &
-            bond_second_jne )
+            first_berg_num,   &
+            other_berg_num,  &
+            first_berg_ine,   &
+            first_berg_jne,   &
+            other_berg_ine,  &
+            other_berg_jne )
   endif
 end subroutine read_restart_bonds
 ! ##############################################################################

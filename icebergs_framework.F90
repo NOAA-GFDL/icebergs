@@ -163,8 +163,8 @@ end type iceberg
 
 type :: bond
   type(bond), pointer :: prev_bond=>null(), next_bond=>null()
-  type(iceberg), pointer :: berg_in_current_bond=>null()
-  integer :: berg_num_of_current_bond
+  type(iceberg), pointer :: other_berg=>null()
+  integer :: other_berg_num, other_berg_ine, other_berg_jne 
 end type bond
 
 type :: buffer
@@ -185,6 +185,7 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   real :: current_yearday ! 1.00-365.99
   integer :: traj_sample_hrs, traj_write_hrs
   integer :: verbose_hrs
+  integer :: max_bonds
   integer :: clock, clock_mom, clock_the, clock_int, clock_cal, clock_com, clock_ini, clock_ior, clock_iow, clock_dia ! ids for fms timers
   integer :: clock_trw, clock_trp
   real :: rho_bergs ! Density of icebergs [kg/m^3]
@@ -289,6 +290,7 @@ integer :: iceberg_halo=2 ! Width of halo region for icebergs  (must be lt halo)
 integer :: traj_sample_hrs=24 ! Period between sampling of position for trajectory storage
 integer :: traj_write_hrs=480 ! Period between writing sampled trajectories to disk
 integer :: verbose_hrs=24 ! Period between verbose messages
+integer :: max_bonds=6 ! Maximum number of iceberg bond passed between processors
 real :: rho_bergs=850. ! Density of icebergs
 real :: spring_coef=1.e-4  ! Spring contant for iceberg interactions - Alon
 real :: radial_damping_coef=1.e-4     ! Coef for relative iceberg motion damping (radial component) -Alon
@@ -314,7 +316,7 @@ real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10,
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim) , 
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
 real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
-namelist /icebergs_nml/ verbose, budget, halo, iceberg_halo, traj_sample_hrs, initial_mass, traj_write_hrs, &
+namelist /icebergs_nml/ verbose, budget, halo, iceberg_halo, traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, &
          distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef, radial_damping_coef, tangental_damping_coef, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, iceberg_bonds_on, manually_initialize_bonds, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, &
@@ -569,6 +571,9 @@ endif
 if (.not.interactive_icebergs_on) then
   !iceberg_bonds_on=.false.  ! This line needs to included later, but is omitted for testing
 endif
+if (.not. iceberg_bonds_on) then
+   max_bonds=0
+endif
 
 
  ! Parameters
@@ -577,6 +582,7 @@ endif
   bergs%traj_write_hrs=traj_write_hrs
   bergs%verbose_hrs=verbose_hrs
   bergs%grd%halo=halo
+  bergs%max_bonds=max_bonds
   bergs%grd%iceberg_halo=iceberg_halo
   bergs%rho_bergs=rho_bergs
   bergs%spring_coef=spring_coef
@@ -816,7 +822,9 @@ integer :: grdi, grdj
 integer :: halo_width
 integer :: temp1, temp2
 real :: current_halo_status
-  
+logical :: force_app
+
+force_app =.false.
 halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used for updating weight.
 
  ! Get the stderr unit number
@@ -870,7 +878,7 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
         nbergs_to_send_e=nbergs_to_send_e+1
         current_halo_status=kick_the_bucket%halo_berg
         kick_the_bucket%halo_berg=1.
-        call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_e, nbergs_to_send_e)
+        call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_e, nbergs_to_send_e, bergs%max_bonds)
         kick_the_bucket%halo_berg=current_halo_status
     enddo
   enddo; enddo
@@ -883,7 +891,7 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
       nbergs_to_send_w=nbergs_to_send_w+1
        current_halo_status=kick_the_bucket%halo_berg
        kick_the_bucket%halo_berg=1.
-       call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_w, nbergs_to_send_w)
+       call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_w, nbergs_to_send_w, bergs%max_bonds)
        kick_the_bucket%halo_berg=current_halo_status
     enddo 
   enddo; enddo
@@ -917,7 +925,7 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
       call increase_ibuffer(bergs%ibuffer_w, nbergs_rcvd_from_w)
       call mpp_recv(bergs%ibuffer_w%data, nbergs_rcvd_from_w*buffer_width, grd%pe_W, tag=COMM_TAG_2)
       do i=1, nbergs_rcvd_from_w
-        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_w, i, grd)
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_w, i, grd, force_app, bergs%max_bonds )
       enddo
     endif
   else
@@ -935,7 +943,7 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
       call increase_ibuffer(bergs%ibuffer_e, nbergs_rcvd_from_e)
       call mpp_recv(bergs%ibuffer_e%data, nbergs_rcvd_from_e*buffer_width, grd%pe_E, tag=COMM_TAG_4)
       do i=1, nbergs_rcvd_from_e
-        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_e, i, grd)
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_e, i, grd, force_app, bergs%max_bonds )
       enddo
     endif
   else
@@ -957,7 +965,7 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
       nbergs_to_send_n=nbergs_to_send_n+1
       current_halo_status=kick_the_bucket%halo_berg
       kick_the_bucket%halo_berg=1.
-      call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_n, nbergs_to_send_n)
+      call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_n, nbergs_to_send_n, bergs%max_bonds )
       kick_the_bucket%halo_berg=current_halo_status
     enddo
   enddo; enddo
@@ -971,7 +979,7 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
       nbergs_to_send_s=nbergs_to_send_s+1
        current_halo_status=kick_the_bucket%halo_berg
        kick_the_bucket%halo_berg=1.
-       call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_s, nbergs_to_send_s)
+       call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_s, nbergs_to_send_s,bergs%max_bonds )
        kick_the_bucket%halo_berg=current_halo_status
     enddo
   enddo; enddo
@@ -1013,7 +1021,7 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
       call increase_ibuffer(bergs%ibuffer_s, nbergs_rcvd_from_s)
       call mpp_recv(bergs%ibuffer_s%data, nbergs_rcvd_from_s*buffer_width, grd%pe_S, tag=COMM_TAG_6)
       do i=1, nbergs_rcvd_from_s
-        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_s, i, grd)
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_s, i, grd,force_app, bergs%max_bonds  )
       enddo
     endif
   else
@@ -1039,7 +1047,7 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
          call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_8)
       endif
       do i=1, nbergs_rcvd_from_n
-        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_n, i, grd)
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_n, i, grd, force_app, bergs%max_bonds )
       enddo
     endif
   else
@@ -1089,6 +1097,9 @@ type(icebergs_gridded), pointer :: grd
 integer :: i, nbergs_start, nbergs_end
 integer :: stderrunit
 integer :: grdi, grdj
+logical :: force_app
+
+force_app=.false.
 
   ! Get the stderr unit number
   stderrunit = stderr()
@@ -1111,14 +1122,14 @@ integer :: grdi, grdj
           kick_the_bucket=>this
           this=>this%next
           nbergs_to_send_e=nbergs_to_send_e+1
-          call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_e, nbergs_to_send_e)
+          call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_e, nbergs_to_send_e, bergs%max_bonds  )
           call move_trajectory(bergs, kick_the_bucket)
           call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
         elseif (this%ine.lt.bergs%grd%isc) then
           kick_the_bucket=>this
           this=>this%next
           nbergs_to_send_w=nbergs_to_send_w+1
-          call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_w, nbergs_to_send_w)
+          call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_w, nbergs_to_send_w, bergs%max_bonds  )
           call move_trajectory(bergs, kick_the_bucket)
           call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
         else
@@ -1157,7 +1168,7 @@ integer :: grdi, grdj
       call increase_ibuffer(bergs%ibuffer_w, nbergs_rcvd_from_w)
       call mpp_recv(bergs%ibuffer_w%data, nbergs_rcvd_from_w*buffer_width, grd%pe_W, tag=COMM_TAG_2)
       do i=1, nbergs_rcvd_from_w
-        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_w, i, grd)
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_w, i, grd, force_app, bergs%max_bonds  )
       enddo
     endif
   else
@@ -1175,7 +1186,7 @@ integer :: grdi, grdj
       call increase_ibuffer(bergs%ibuffer_e, nbergs_rcvd_from_e)
       call mpp_recv(bergs%ibuffer_e%data, nbergs_rcvd_from_e*buffer_width, grd%pe_E, tag=COMM_TAG_4)
       do i=1, nbergs_rcvd_from_e
-        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_e, i, grd)
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_e, i, grd, force_app,  bergs%max_bonds)
       enddo
     endif
   else
@@ -1196,14 +1207,14 @@ integer :: grdi, grdj
           kick_the_bucket=>this
           this=>this%next
           nbergs_to_send_n=nbergs_to_send_n+1
-          call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_n, nbergs_to_send_n)
+          call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_n, nbergs_to_send_n,bergs%max_bonds)
           call move_trajectory(bergs, kick_the_bucket)
           call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
         elseif (this%jne.lt.bergs%grd%jsc) then
           kick_the_bucket=>this
           this=>this%next
           nbergs_to_send_s=nbergs_to_send_s+1
-          call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_s, nbergs_to_send_s)
+          call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_s, nbergs_to_send_s,bergs%max_bonds)
           call move_trajectory(bergs, kick_the_bucket)
           call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
         else
@@ -1250,7 +1261,7 @@ integer :: grdi, grdj
       call increase_ibuffer(bergs%ibuffer_s, nbergs_rcvd_from_s)
       call mpp_recv(bergs%ibuffer_s%data, nbergs_rcvd_from_s*buffer_width, grd%pe_S, tag=COMM_TAG_6)
       do i=1, nbergs_rcvd_from_s
-        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_s, i, grd) 
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_s, i, grd, force_app, bergs%max_bonds ) 
       enddo
     endif
   else
@@ -1276,7 +1287,7 @@ integer :: grdi, grdj
          call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_8)
       endif
       do i=1, nbergs_rcvd_from_n
-        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_n, i, grd)
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_n, i, grd,force_app, bergs%max_bonds)
       enddo
     endif
   else
@@ -1328,12 +1339,20 @@ integer :: grdi, grdj
 
 end subroutine send_bergs_to_other_pes
 
-  subroutine pack_berg_into_buffer2(berg, buff, n)
+  subroutine pack_berg_into_buffer2(berg, buff, n, max_bonds_in)
   ! Arguments
   type(iceberg), pointer :: berg
   type(buffer), pointer :: buff
   integer, intent(in) :: n
+  integer, optional :: max_bonds_in
+  !integer, intent(in) :: max_bonds  ! Change this later
   ! Local variables
+  integer :: counter, k, max_bonds
+  type(bond), pointer :: current_bond
+ 
+    max_bonds=0
+    if (present(max_bonds_in)) max_bonds=max_bonds_in
+
 
     if (.not.associated(buff)) call increase_buffer(buff,delta_buf)
     if (n>buff%size) call increase_buffer(buff,delta_buf)
@@ -1362,12 +1381,30 @@ end subroutine send_bergs_to_other_pes
     buff%data(22,n)=berg%ayn  !Alon
     buff%data(23,n)=berg%bxn  !Alon
     buff%data(24,n)=berg%byn  !Alon
-    buff%data(25,n)=berg%uvel_old  !Alon
+    buff%data(25,n)=berg%uvel_old  !Alon  
     buff%data(26,n)=berg%vvel_old  !Alon
     buff%data(27,n)=berg%lon_old  !Alon
     buff%data(28,n)=berg%lat_old  !Alon
     buff%data(29,n)=float(berg%iceberg_num)
-    buff%data(30,n)=berg%halo_berg  
+    buff%data(30,n)=berg%halo_berg 
+
+    if (max_bonds .gt. 0) then
+      counter=30 !how many data points being passed so far (must match above)
+      do k = 1,max_bonds
+        current_bond=>berg%first_bond
+        if (associated(current_bond)) then
+          buff%data(counter+(3*(k-1)+1),n)=float(current_bond%other_berg_num) 
+          buff%data(counter+(3*(k-1)+2),n)=float(current_bond%other_berg_ine)
+          buff%data(counter+(3*(k-1)+3),n)=float(current_bond%other_berg_jne)
+          current_bond=>current_bond%next_bond
+        else
+          buff%data(counter+(3*(k-1)+1),n)=0. 
+          buff%data(counter+(3*(k-1)+2),n)=0.
+          buff%data(counter+(3*(k-1)+3),n)=0.
+        endif
+      enddo
+    endif
+
 
   end subroutine pack_berg_into_buffer2
 
@@ -1397,13 +1434,14 @@ end subroutine send_bergs_to_other_pes
 
   end subroutine increase_buffer
 
-  subroutine unpack_berg_from_buffer2(bergs, buff, n,grd, force_append)
+  subroutine unpack_berg_from_buffer2(bergs, buff, n,grd, force_append, max_bonds_in)
   ! Arguments
   type(icebergs), pointer :: bergs
   type(buffer), pointer :: buff
   integer, intent(in) :: n
   type(icebergs_gridded), pointer :: grd  
   logical, optional :: force_append
+  integer, optional :: max_bonds_in
  ! Local variables
  !real :: lon, lat, uvel, vvel, xi, yj
 
@@ -1411,11 +1449,19 @@ end subroutine send_bergs_to_other_pes
  !integer :: ine, jne, start_year
   logical :: lres
   type(iceberg) :: localberg
+  type(iceberg), pointer :: this
+  integer :: other_berg_num, other_berg_ine, other_berg_jne
+  integer :: counter, k, max_bonds
   integer :: stderrunit
   logical :: force_app = .false.
+  logical :: quick
+
   ! Get the stderr unit number
   stderrunit = stderr()
-
+ 
+  quick=.false.
+  max_bonds=0
+  if (present(max_bonds_in)) max_bonds=max_bonds_in
   if(present(force_append)) force_app = force_append
      
     localberg%lon=buff%data(1,n)
@@ -1449,19 +1495,20 @@ end subroutine send_bergs_to_other_pes
     localberg%halo_berg=buff%data(30,n) 
    
     if(force_app) then !force append with origin ine,jne (for I/O)
+
       localberg%ine=buff%data(19,n) 
       localberg%jne=buff%data(20,n) 
-      call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg) 
+      call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg,quick,this) 
     else
       lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
       if (lres) then
         lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
-        call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg)
+        call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg,quick,this)
       else
         lres=find_cell_wide(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
         if (lres) then
           lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
-          call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg)
+          call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg,quick,this)
         else
           write(stderrunit,'("diamonds, unpack_berg_from_buffer pe=(",i3,a,2i4,a,2f8.2)')&
            & mpp_pe(),') Failed to find i,j=',localberg%ine,localberg%jne,' for lon,lat=',localberg%lon,localberg%lat
@@ -1481,8 +1528,24 @@ end subroutine send_bergs_to_other_pes
           call error_mesg('diamonds, unpack_berg_from_buffer', 'can not find a cell to place berg in!', FATAL)
         endif
       endif
-  
-  endif
+    endif
+
+    !#  Do stuff to do with bonds here MP1
+
+    if (max_bonds .gt. 0) then
+      counter=30 !how many data points being passed so far (must match above)
+      do k = 1,max_bonds
+        other_berg_num=nint(buff%data(counter+(3*(k-1)+1),n))
+        other_berg_ine=nint(buff%data(counter+(3*(k-1)+2),n))
+        other_berg_jne=nint(buff%data(counter+(3*(k-1)+3),n))
+        if (other_berg_num .gt. 0) then
+          call form_a_bond(this, other_berg_num, other_berg_ine, other_berg_jne)
+        endif
+      enddo
+    endif
+
+    !##############################
+
   end subroutine unpack_berg_from_buffer2
 
   subroutine increase_ibuffer(old,delta)
@@ -1679,10 +1742,11 @@ end subroutine send_bergs_to_other_pes
 
 ! ##############################################################################
 
-subroutine add_new_berg_to_list(first, bergvals, quick)
+subroutine add_new_berg_to_list(first, bergvals, quick, newberg_return)
 ! Arguments
 type(iceberg), pointer :: first
 type(iceberg), intent(in) :: bergvals
+type(iceberg), intent(out), pointer, optional :: newberg_return
 logical, intent(in), optional :: quick
 ! Local variables
 type(iceberg), pointer :: new=>null()
@@ -1690,11 +1754,17 @@ type(iceberg), pointer :: new=>null()
   new=>null()
   call create_iceberg(new, bergvals)
 
+  if (present(newberg_return)) then
+    newberg_return=>new
+    !newberg_return=>null()
+  endif
+
   if (present(quick)) then
     if(quick) call insert_berg_into_list(first, new, quick=.true.)
   else
     call insert_berg_into_list(first, new)
   endif
+
 
   !Clear new
   new=>null()
@@ -2072,22 +2142,30 @@ end subroutine print_bergs
 
 ! ##############################################################################
 
-subroutine form_a_bond(berg, other_berg_num, other_berg)
+subroutine form_a_bond(berg, other_berg_num, other_berg_ine, other_berg_jne, other_berg)
 
 type(iceberg), pointer :: berg
 type(iceberg), optional,  pointer :: other_berg
 type(bond) , pointer :: new_bond, first_bond
 integer, intent(in) :: other_berg_num
+integer, optional  :: other_berg_ine, other_berg_jne
+
 print *, 'Forming a bond!!!'
     
 
 ! Step 1: Create a new bond
 allocate(new_bond)
-new_bond%berg_num_of_current_bond=other_berg_num
+new_bond%other_berg_num=other_berg_num
 if(present(other_berg)) then
-  new_bond%berg_in_current_bond=>other_berg
+  new_bond%other_berg=>other_berg
+  new_bond%other_berg_ine=other_berg%ine
+  new_bond%other_berg_jne=other_berg%jne
 else
-  new_bond%berg_in_current_bond=>null()
+  new_bond%other_berg=>null()
+  if (present(other_berg_ine)) then
+    new_bond%other_berg_ine=other_berg_ine
+    new_bond%other_berg_jne=other_berg_jne
+  endif
 endif
 
 ! Step 2: Put this new bond at the start of the bond list
@@ -2145,13 +2223,13 @@ integer :: stderrunit
         if (quality_check) then
           all_bonds_matching=.True.
           bond_is_good=.False.
-          other_berg=>current_bond%berg_in_current_bond
+          other_berg=>current_bond%other_berg
           if (associated(other_berg)) then
             other_berg_bond=>other_berg%first_bond
           
             do while (associated(other_berg_bond))  !loops over the icebergs in the other icebergs bond list            
-              if (associated(other_berg_bond%berg_in_current_bond)) then
-                if (other_berg_bond%berg_in_current_bond%iceberg_num==berg%iceberg_num) then
+              if (associated(other_berg_bond%other_berg)) then
+                if (other_berg_bond%other_berg%iceberg_num==berg%iceberg_num) then
                   bond_is_good=.True.  !Bond_is_good becomes true when the corresponding bond is found
                 endif
               endif                 
@@ -2163,13 +2241,13 @@ integer :: stderrunit
             enddo  ! End of loop over the other berg's bonds.
 
             if (bond_is_good) then
-              print*, 'Perfect quality Bond:', berg%iceberg_num, current_bond%berg_num_of_current_bond
+              print*, 'Perfect quality Bond:', berg%iceberg_num, current_bond%other_berg_num
             else  
-              print*, 'Non-matching bond...:', berg%iceberg_num, current_bond%berg_num_of_current_bond
+              print*, 'Non-matching bond...:', berg%iceberg_num, current_bond%other_berg_num
               all_bonds_matching=.false.
             endif
           else
-            print *, 'Opposite berg is not assosiated:', berg%iceberg_num, current_bond%berg_in_current_bond%iceberg_num    
+            print *, 'Opposite berg is not assosiated:', berg%iceberg_num, current_bond%other_berg%iceberg_num    
             all_bonds_matching=.false.
           endif
         endif
