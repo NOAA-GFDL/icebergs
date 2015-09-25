@@ -26,7 +26,7 @@ use ice_bergs_framework, only: ice_bergs_framework_init
 use ice_bergs_framework, only: icebergs_gridded, xyt, iceberg, icebergs, buffer, bond
 use ice_bergs_framework, only: verbose, really_debug,debug,old_bug_rotated_weights,budget,use_roundoff_fix
 use ice_bergs_framework, only: find_cell,find_cell_by_search,count_bergs,is_point_in_cell,pos_within_cell
-use ice_bergs_framework, only: count_bonds, form_a_bond
+use ice_bergs_framework, only: count_bonds, form_a_bond,connect_all_bonds
 use ice_bergs_framework, only: nclasses,old_bug_bilin
 use ice_bergs_framework, only: sum_mass,sum_heat,bilin,yearday,count_bergs,bergs_chksum
 use ice_bergs_framework, only: checksum_gridded,add_new_berg_to_list
@@ -1322,7 +1322,9 @@ integer :: stderrunit
   ! Send bergs to other PEs
   call mpp_clock_begin(bergs%clock_com)
   call send_bergs_to_other_pes(bergs)
+  call connect_all_bonds(bergs)
   call update_halo_icebergs(bergs)
+  call connect_all_bonds(bergs)
   if (debug) call bergs_chksum(bergs, 'run bergs (exchanged)')
   if (debug) call checksum_gridded(bergs%grd, 's/r run after exchange')
   call mpp_clock_end(bergs%clock_com)

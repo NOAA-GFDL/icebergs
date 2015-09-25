@@ -62,7 +62,7 @@ public add_new_berg_to_list, count_out_of_order, check_for_duplicates
 public insert_berg_into_list, create_iceberg, delete_iceberg_from_list, destroy_iceberg
 public print_fld,print_berg, print_bergs,record_posn, push_posn, append_posn, check_position
 public move_trajectory, move_all_trajectories
-public form_a_bond
+public form_a_bond, connect_all_bonds
 public find_cell,find_cell_by_search,count_bergs,is_point_in_cell,pos_within_cell, count_bonds
 public sum_mass,sum_heat,bilin,yearday,bergs_chksum
 public checksum_gridded
@@ -2184,6 +2184,57 @@ endif
 end subroutine form_a_bond
 
 ! #############################################################################
+
+subroutine connect_all_bonds(bergs)
+type(icebergs), pointer :: bergs
+type(iceberg), pointer :: other_berg, berg
+type(icebergs_gridded), pointer :: grd
+integer :: grdi, grdj
+type(bond) , pointer :: current_bond, other_berg_bond
+logical :: bond_matched, missing_bond
+
+missing_bond=.false.
+
+ ! For convenience
+  grd=>bergs%grd
+
+  do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
+    berg=>bergs%list(grdi,grdj)%first
+    do while (associated(berg)) ! loop over all bergs
+      current_bond=>berg%first_bond
+      do while (associated(current_bond)) ! loop over all bonds
+
+        !code to find parter bond goes here
+        if (.not.associated(current_bond%other_berg)) then
+          other_berg=>bergs%list(current_bond%other_berg_ine,current_bond%other_berg_jne)%first
+          do while (associated(current_bond)) ! loop over all bonds
+            bond_matched=.false.
+            if (other_berg%iceberg_num == current_bond%other_berg_num) then
+              current_bond%other_berg=>other_berg
+              other_berg=>null()
+              bond_matched=.true.  
+            else
+              other_berg=>other_berg%next
+            endif 
+          enddo
+          if (.not.bond_matched) then
+             if (berg%halo_berg .lt. 0.5) then
+                missing_bond=.true.     
+                call error_mesg('diamonds, connect_all_bonds', 'A non halo bond is missing!!!', WARNING)
+             endif
+          endif
+        endif
+
+        current_bond=>current_bond%next_bond
+      enddo
+      berg=>berg%next
+    enddo
+  enddo;enddo
+
+
+end subroutine connect_all_bonds
+
+
 ! #############################################################################
 subroutine count_bonds(bergs, number_of_bonds, check_bond_quality)
 
