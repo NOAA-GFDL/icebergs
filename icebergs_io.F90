@@ -1062,7 +1062,12 @@ type(iceberg) :: localberg ! NOT a pointer but an actual local variable
 type(iceberg) , pointer :: this, first_berg, second_berg
 type(bond) , pointer :: current_bond
 integer :: stderrunit
-
+integer :: number_first_bonds_matched !How many first bond bergs found on pe
+integer :: number_second_bonds_matched !How many second bond bergs found on pe
+integer :: number_perfect_bonds ! How many complete bonds formed
+integer :: number_partial_bonds ! How many either complete/partial bonds formed.
+integer :: all_pe_number_perfect_bonds, all_pe_number_partial_bonds
+integer :: all_pe_number_first_bonds_matched, all_pe_number_second_bonds_matched
 integer, allocatable, dimension(:) :: bond_first_num,   &
                                       bond_second_num,  &
                                       bond_first_jne,   &
@@ -1091,75 +1096,109 @@ integer, allocatable, dimension(:) :: bond_first_num,   &
 
   if (nbonds_in_file .gt. 0) then
 
-     allocate(bond_first_num(nbonds_in_file))
-     allocate(bond_second_num(nbonds_in_file))
-     allocate(bond_first_jne(nbonds_in_file))
-     allocate(bond_first_ine(nbonds_in_file))
-     allocate(bond_second_ine(nbonds_in_file))
-     allocate(bond_second_jne(nbonds_in_file))
+    allocate(bond_first_num(nbonds_in_file))
+    allocate(bond_second_num(nbonds_in_file))
+    allocate(bond_first_jne(nbonds_in_file))
+    allocate(bond_first_ine(nbonds_in_file))
+    allocate(bond_second_ine(nbonds_in_file))
+    allocate(bond_second_jne(nbonds_in_file))
 
 
-     call read_unlimited_axis(filename,'bond_first_num',bond_first_num,domain=grd%domain)
-     call read_unlimited_axis(filename,'bond_second_num',bond_second_num,domain=grd%domain)
-     call read_unlimited_axis(filename,'bond_first_jne',bond_first_jne,domain=grd%domain)
-     call read_unlimited_axis(filename,'bond_first_ine',bond_first_ine,domain=grd%domain)
-     call read_unlimited_axis(filename,'bond_second_jne',bond_second_jne,domain=grd%domain)
-     call read_unlimited_axis(filename,'bond_second_ine',bond_second_ine,domain=grd%domain)
+    call read_unlimited_axis(filename,'bond_first_num',bond_first_num,domain=grd%domain)
+    call read_unlimited_axis(filename,'bond_second_num',bond_second_num,domain=grd%domain)
+    call read_unlimited_axis(filename,'bond_first_jne',bond_first_jne,domain=grd%domain)
+    call read_unlimited_axis(filename,'bond_first_ine',bond_first_ine,domain=grd%domain)
+    call read_unlimited_axis(filename,'bond_second_jne',bond_second_jne,domain=grd%domain)
+    call read_unlimited_axis(filename,'bond_second_ine',bond_second_ine,domain=grd%domain)
 
-     ! Find approx outer bounds for tile
-     lon0=minval( grd%lon(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
-     lon1=maxval( grd%lon(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
-     lat0=minval( grd%lat(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
-     lat1=maxval( grd%lat(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
-     do k=1, nbonds_in_file
-        
+    number_first_bonds_matched=0
+    number_second_bonds_matched=0
+    number_perfect_bonds=0
+    number_partial_bonds=0
+    do k=1, nbonds_in_file
+       
+      ! Decide whether the first iceberg is on the processeor
+      if ( bond_first_ine(k)>=grd%isc .and. bond_first_ine(k)<=grd%iec .and. &
+        bond_first_jne(k)>=grd%jsc .and.bond_first_jne(k)<=grd%jec ) then
+        number_first_bonds_matched=number_first_bonds_matched+1
      
-       ! Search for the first berg, which the bond belongs to
-       first_berg_found=.false.
-       first_berg=>null()
-       this=>bergs%list(bond_first_ine(k),bond_first_jne(k))%first
-       do while(associated(this))
-         if (this%iceberg_num == bond_first_num(k)) then
-           first_berg_found=.true.
-           first_berg=>this
-           this=>null()
-         else  
-           this=>this%next
-         endif
-       enddo
+        ! Search for the first berg, which the bond belongs to
+        first_berg_found=.false.
+        first_berg=>null()
+        this=>bergs%list(bond_first_ine(k),bond_first_jne(k))%first
+        do while(associated(this))
+          if (this%iceberg_num == bond_first_num(k)) then
+            first_berg_found=.true.
+            first_berg=>this
+            this=>null()
+          else  
+            this=>this%next
+          endif
+        enddo
       
-       ! Search for the second berg, which the bond belongs to
-       second_berg_found=.false.
-       second_berg=>null()
-       this=>bergs%list(bond_second_ine(k),bond_second_jne(k))%first
-       do while(associated(this))
-         if (this%iceberg_num == bond_second_num(k)) then
-           second_berg_found=.true.
-           second_berg=>this
-           this=>null()
-         else  
-           this=>this%next
-         endif
-       enddo
-      
-       if (first_berg_found .and. second_berg_found) then
-           call form_a_bond(first_berg, bond_second_num(k),second_berg)
-               
-       else
-            !I need to create an option to slowly search for the icebergs
-           print *, 'The bergs and bonds do not match!!!', k, nbonds_in_file
-           call error_mesg('read_restart_bonds_bergs_new', 'Failure with reading bonds: bergs and bonds do not match', FATAL)
-       endif
-     enddo
+        ! Decide whether the second iceberg is on the processeor (data domain)
+        second_berg_found=.false.
+        if ( bond_second_ine(k)>=grd%isd .and. bond_second_ine(k)<=grd%ied .and. &
+          bond_second_jne(k)>=grd%jsd .and.bond_second_jne(k)<=grd%jed ) then
+          number_second_bonds_matched=number_second_bonds_matched+1
 
-     deallocate(               &
-             bond_first_num,   &
-             bond_second_num,  &
-             bond_first_ine,   &
-             bond_first_jne,   &
-             bond_second_ine,  &
-             bond_second_jne )
-   endif
+          ! Search for the second berg, which the bond belongs to
+          second_berg=>null()
+          this=>bergs%list(bond_second_ine(k),bond_second_jne(k))%first
+          do while(associated(this))
+            if (this%iceberg_num == bond_second_num(k)) then
+              second_berg_found=.true.
+              second_berg=>this
+              this=>null()
+            else  
+              this=>this%next
+            endif
+          enddo
+        endif
+         
+        if (first_berg_found) then
+          number_partial_bonds=number_partial_bonds+1
+          if (second_berg_found) then
+            call form_a_bond(first_berg, bond_second_num(k),second_berg)
+            number_perfect_bonds=number_perfect_bonds+1
+          else
+            call form_a_bond(first_berg, bond_second_num(k))
+          endif
+        else
+          write(*,'(a,i8,a)') 'diamonds, bond read restart : ','Not enough partial bonds formed', k, mpp_pe(), nbonds_in_file
+          call error_mesg('read_restart_bonds_bergs_new', 'Failure with reading bonds: First bond not found on pe', FATAL)
+        endif
+      endif
+    enddo
+
+    !Analyse how many bonds were created and take appropriate action
+    all_pe_number_perfect_bonds=number_perfect_bonds
+    all_pe_number_partial_bonds=number_partial_bonds
+    all_pe_number_first_bonds_matched=number_first_bonds_matched
+    all_pe_number_second_bonds_matched=number_second_bonds_matched
+    call mpp_sum(all_pe_number_perfect_bonds)
+    call mpp_sum(all_pe_number_partial_bonds)
+    call mpp_sum(all_pe_number_first_bonds_matched)
+    call mpp_sum(all_pe_number_second_bonds_matched)
+
+    if (all_pe_number_partial_bonds .lt. nbonds_in_file) then
+      write(*,'(a,i8,a)') 'diamonds, bond read restart : ','Not enough partial bonds formed', all_pe_number_partial_bonds , nbonds_in_file
+      call error_mesg('read_restart_bonds_bergs_new', 'Not enough partial bonds formed', FATAL)
+    endif
+    
+    if (all_pe_number_perfect_bonds .lt. nbonds_in_file) then
+      write(*,'(a,i8,a)') 'diamonds, bond read restart : ','Warning, some bonds are not fully formed', all_pe_number_perfect_bonds , nbonds_in_file
+      call error_mesg('read_restart_bonds_bergs_new', 'Not enough perfect bonds formed', NOTE)
+    endif
+
+    deallocate(               &
+            bond_first_num,   &
+            bond_second_num,  &
+            bond_first_ine,   &
+            bond_first_jne,   &
+            bond_second_ine,  &
+            bond_second_jne )
+  endif
 end subroutine read_restart_bonds
 ! ##############################################################################
 
