@@ -30,7 +30,7 @@ use ice_bergs_framework, only: nclasses,old_bug_bilin
 use ice_bergs_framework, only: sum_mass,sum_heat,bilin,yearday,count_bergs,bergs_chksum,count_bergs_in_list
 use ice_bergs_framework, only: checksum_gridded,add_new_berg_to_list,list_chksum
 use ice_bergs_framework, only: send_bergs_to_other_pes,move_trajectory,move_all_trajectories
-use ice_bergs_framework, only: move_berg_between_cells
+use ice_bergs_framework, only: move_berg_between_cells, update_halo_icebergs
 use ice_bergs_framework, only: record_posn,check_position,print_berg,print_bergs,print_fld
 use ice_bergs_framework, only: add_new_berg_to_list,delete_iceberg_from_list,destroy_iceberg
 use ice_bergs_framework, only: grd_chksum2,grd_chksum3
@@ -165,11 +165,9 @@ R1=sqrt(A1/pi) ! Interaction radius of the iceberg (assuming circular icebergs)
 lon1=berg%lon; lat1=berg%lat
 call rotpos_to_tang(lon1,lat1,x1,y1)
 
-  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+  do grdj = berg%jne-1,berg%jne+1 ; do grdi = berg%ine-1,berg%ine+1
   other_berg=>bergs%list(grdi,grdj)%first
-
 !Note: This summing should be made order invarient. 
-!Note: Need to limit how many icebergs we search over
   do while (associated(other_berg)) ! loop over all other bergs  
        L2=other_berg%length
        W2=other_berg%width
@@ -343,7 +341,6 @@ C_N=1.0
 beta=1.0
 use_new_predictive_corrective=.True.
 endif
-
 
 !print *, 'axn=',axn,'ayn=',ayn
   u_star=uvel0+(axn*(dt/2.))  !Alon
@@ -1280,6 +1277,7 @@ integer :: stderrunit
   ! Send bergs to other PEs
   call mpp_clock_begin(bergs%clock_com)
   call send_bergs_to_other_pes(bergs)
+  call update_halo_icebergs(bergs)
   if (debug) call bergs_chksum(bergs, 'run bergs (exchanged)')
   if (debug) call checksum_gridded(bergs%grd, 's/r run after exchange')
   call mpp_clock_end(bergs%clock_com)
@@ -1798,6 +1796,7 @@ integer :: stderrunit
           newberg%start_mass=bergs%initial_mass(k)
           newberg%mass_scaling=bergs%mass_scaling(k)
           newberg%mass_of_bits=0.
+          newberg%halo_berg=0.
           newberg%heat_density=grd%stored_heat(i,j)/grd%stored_ice(i,j,k) ! This is in J/kg
           call add_new_berg_to_list(bergs%list(i,j)%first, newberg)
           calved_to_berg=bergs%initial_mass(k)*bergs%mass_scaling(k) ! Units of kg
