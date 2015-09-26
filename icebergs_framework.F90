@@ -15,8 +15,8 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 
 implicit none ; private
 
-integer, parameter :: buffer_width=28 !Changed from 20 to 28 by Alon 
-integer, parameter :: buffer_width_traj=31  !Changed from 23 by Alon
+integer, parameter :: buffer_width=29 !Changed from 20 to 29 by Alon 
+integer, parameter :: buffer_width_traj=32  !Changed from 23 by Alon
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 
 !Local Vars
@@ -54,6 +54,7 @@ public icebergs_gridded, xyt, iceberg, icebergs, buffer
 !Public subs
 public ice_bergs_framework_init
 public send_bergs_to_other_pes
+public update_halo_icebergs
 public pack_berg_into_buffer2, unpack_berg_from_buffer2
 public pack_traj_into_buffer2, unpack_traj_from_buffer2
 public increase_buffer, increase_ibuffer, increase_ibuffer_traj, increase_buffer_traj
@@ -71,6 +72,7 @@ public move_berg_between_cells
 type :: icebergs_gridded
   type(domain2D), pointer :: domain ! MPP domain
   integer :: halo ! Nominal halo width
+  integer :: iceberg_halo ! halo width used by icebergs (must be lt halo)
   integer :: isc, iec, jsc, jec ! Indices of computational domain
   integer :: isd, ied, jsd, jed ! Indices of data domain
   integer :: my_pe, pe_N, pe_S, pe_E, pe_W ! MPI PE identifiers
@@ -133,7 +135,7 @@ type :: xyt
   real :: lon, lat, day
   real :: mass, thickness, width, length, uvel, vvel
   real :: axn, ayn, bxn, byn, uvel_old, vvel_old, lat_old, lon_old  !Explicit and implicit accelerations !Alon 
-  real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi
+  real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi, halo_berg
   real :: mass_of_bits, heat_density
   integer :: year
   type(xyt), pointer :: next=>null()
@@ -146,6 +148,7 @@ type :: iceberg
   real :: axn, ayn, bxn, byn, uvel_old, vvel_old, lon_old, lat_old !Explicit and implicit accelerations !Alon 
   real :: start_lon, start_lat, start_day, start_mass, mass_scaling
   real :: mass_of_bits, heat_density
+  real :: halo_berg  ! Equal to zero for bergs on computational domain, and =1 for bergs on the halo
   integer :: start_year
   integer :: ine, jne ! nearest index in NE direction (for convenience)
   real :: xi, yj ! Non-dimensional coords within current cell (0..1)
@@ -269,6 +272,7 @@ logical, intent(in), optional :: fractional_area
 
 ! Namelist parameters (and defaults)
 integer :: halo=4 ! Width of halo region
+integer :: iceberg_halo=2 ! Width of halo region for icebergs  (must be lt halo)
 integer :: traj_sample_hrs=24 ! Period between sampling of position for trajectory storage
 integer :: traj_write_hrs=480 ! Period between writing sampled trajectories to disk
 integer :: verbose_hrs=24 ! Period between verbose messages
@@ -295,7 +299,7 @@ real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10,
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim) , 
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
 real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
-namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, traj_write_hrs, &
+namelist /icebergs_nml/ verbose, budget, halo, iceberg_halo, traj_sample_hrs, initial_mass, traj_write_hrs, &
          distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef, radial_damping_coef, tangental_damping_coef, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, &
@@ -537,6 +541,13 @@ if (input_freq_distribution) then
      enddo
 endif 
 
+if (iceberg_halo .gt. halo) then
+    iceberg_halo=halo
+endif
+
+if (Runge_not_Verlet) then
+  interactive_icebergs_on=.false.  ! Iceberg interactions only with Verlet
+endif
 
  ! Parameters
   bergs%dt=dt
@@ -544,6 +555,7 @@ endif
   bergs%traj_write_hrs=traj_write_hrs
   bergs%verbose_hrs=verbose_hrs
   bergs%grd%halo=halo
+  bergs%grd%iceberg_halo=iceberg_halo
   bergs%rho_bergs=rho_bergs
   bergs%spring_coef=spring_coef
   bergs%radial_damping_coef=radial_damping_coef
@@ -761,6 +773,283 @@ enddo ; enddo
 
 end subroutine move_berg_between_cells
 
+
+! #############################################################################
+
+subroutine update_halo_icebergs(bergs)
+! Arguments
+type(icebergs), pointer :: bergs
+! Local variables
+type(iceberg), pointer :: kick_the_bucket, this
+integer :: nbergs_to_send_e, nbergs_to_send_w
+integer :: nbergs_to_send_n, nbergs_to_send_s
+integer :: nbergs_rcvd_from_e, nbergs_rcvd_from_w
+integer :: nbergs_rcvd_from_n, nbergs_rcvd_from_s
+type(icebergs_gridded), pointer :: grd
+integer :: i, nbergs_start, nbergs_end
+integer :: stderrunit
+integer :: grdi, grdj
+integer :: halo_width
+integer :: temp1, temp2
+real :: current_halo_status
+  
+halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used for updating weight.
+
+ ! Get the stderr unit number
+   stderrunit = stderr()
+
+ ! For convenience
+   grd=>bergs%grd
+
+
+
+! Step 1: Clear the current halos
+
+
+  do grdj = grd%jsd,grd%jsc-1 ;  do grdi = grd%isd,grd%ied
+    call delete_all_bergs_in_list(bergs, grdj, grdi)
+  enddo ; enddo
+
+  do grdj = grd%jec+1,grd%jed ;  do grdi = grd%isd,grd%ied
+    call delete_all_bergs_in_list(bergs,grdj,grdi)
+  enddo ; enddo
+
+  do grdj = grd%jsd,grd%jed ;    do grdi = grd%isd,grd%isc-1
+    call delete_all_bergs_in_list(bergs,grdj,grdi)
+  enddo ; enddo
+
+  do grdj = grd%jsd,grd%jed ;    do grdi = grd%iec+1,grd%ied
+    call delete_all_bergs_in_list(bergs,grdj,grdi)
+  enddo ; enddo
+
+
+! Step 2: Updating the halos  - This code is mostly copied from send_to_other_pes
+
+!  ! Get the stderr unit number
+!  stderrunit = stderr()
+!
+
+  if (debug) then
+    nbergs_start=count_bergs(bergs)
+  endif
+
+  ! Find number of bergs that headed east/west
+  nbergs_to_send_e=0
+  nbergs_to_send_w=0
+
+  !Bergs on eastern side of the processor
+  do grdj = grd%jsc,grd%jec ; do grdi = grd%iec-halo_width+1,grd%iec  
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+        kick_the_bucket=>this
+        this=>this%next
+        nbergs_to_send_e=nbergs_to_send_e+1
+        current_halo_status=kick_the_bucket%halo_berg
+        kick_the_bucket%halo_berg=1.
+        call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_e, nbergs_to_send_e)
+        kick_the_bucket%halo_berg=current_halo_status
+    enddo
+  enddo; enddo
+
+  !Bergs on the western side of the processor
+  do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%isc+halo_width-1 
+    do while (associated(this))
+      kick_the_bucket=>this
+      this=>this%next
+      nbergs_to_send_w=nbergs_to_send_w+1
+       current_halo_status=kick_the_bucket%halo_berg
+       kick_the_bucket%halo_berg=1.
+       call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_w, nbergs_to_send_w)
+       kick_the_bucket%halo_berg=current_halo_status
+    enddo 
+  enddo; enddo
+
+
+
+  ! Send bergs east
+  if (grd%pe_E.ne.NULL_PE) then
+    call mpp_send(nbergs_to_send_e, plen=1, to_pe=grd%pe_E, tag=COMM_TAG_1)
+    if (nbergs_to_send_e.gt.0) then
+      call mpp_send(bergs%obuffer_e%data, nbergs_to_send_e*buffer_width, grd%pe_E, tag=COMM_TAG_2)
+    endif
+  endif
+
+  ! Send bergs west
+  if (grd%pe_W.ne.NULL_PE) then
+    call mpp_send(nbergs_to_send_w, plen=1, to_pe=grd%pe_W, tag=COMM_TAG_3)
+    if (nbergs_to_send_w.gt.0) then
+      call mpp_send(bergs%obuffer_w%data, nbergs_to_send_w*buffer_width, grd%pe_W, tag=COMM_TAG_4)
+    endif
+  endif
+
+  ! Receive bergs from west
+  if (grd%pe_W.ne.NULL_PE) then
+    nbergs_rcvd_from_w=-999
+    call mpp_recv(nbergs_rcvd_from_w, glen=1, from_pe=grd%pe_W, tag=COMM_TAG_1)
+    if (nbergs_rcvd_from_w.lt.0) then
+      write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_w,' from',grd%pe_W,' (W) !!!!!!!!!!!!!!!!!!!!!!'
+    endif
+    if (nbergs_rcvd_from_w.gt.0) then
+      call increase_ibuffer(bergs%ibuffer_w, nbergs_rcvd_from_w)
+      call mpp_recv(bergs%ibuffer_w%data, nbergs_rcvd_from_w*buffer_width, grd%pe_W, tag=COMM_TAG_2)
+      do i=1, nbergs_rcvd_from_w
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_w, i, grd)
+      enddo
+    endif
+  else
+    nbergs_rcvd_from_w=0
+  endif
+
+  ! Receive bergs from east
+  if (grd%pe_E.ne.NULL_PE) then
+    nbergs_rcvd_from_e=-999
+    call mpp_recv(nbergs_rcvd_from_e, glen=1, from_pe=grd%pe_E, tag=COMM_TAG_3)
+    if (nbergs_rcvd_from_e.lt.0) then
+      write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_e,' from',grd%pe_E,' (E) !!!!!!!!!!!!!!!!!!!!!!'
+    endif
+    if (nbergs_rcvd_from_e.gt.0) then
+      call increase_ibuffer(bergs%ibuffer_e, nbergs_rcvd_from_e)
+      call mpp_recv(bergs%ibuffer_e%data, nbergs_rcvd_from_e*buffer_width, grd%pe_E, tag=COMM_TAG_4)
+      do i=1, nbergs_rcvd_from_e
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_e, i, grd)
+      enddo
+    endif
+  else
+    nbergs_rcvd_from_e=0
+  endif
+
+
+
+ ! Find number of bergs that headed north/south
+  nbergs_to_send_n=0
+  nbergs_to_send_s=0
+  
+
+  !Bergs on north side of the processor
+  do grdj = grd%jec-halo_width+1,grd%jec ; do grdi = grd%isd,grd%ied
+    do while (associated(this))
+      kick_the_bucket=>this
+      this=>this%next
+      nbergs_to_send_n=nbergs_to_send_n+1
+      current_halo_status=kick_the_bucket%halo_berg
+      kick_the_bucket%halo_berg=1.
+      call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_n, nbergs_to_send_n)
+      kick_the_bucket%halo_berg=current_halo_status
+    enddo
+  enddo; enddo
+
+
+  !Bergs on south side of the processor
+  do grdj = grd%jsc,grd%jsc+halo_width-1 ; do grdi = grd%isd,grd%ied
+    do while (associated(this))
+      kick_the_bucket=>this
+      this=>this%next
+      nbergs_to_send_s=nbergs_to_send_s+1
+       current_halo_status=kick_the_bucket%halo_berg
+       kick_the_bucket%halo_berg=1.
+       call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_s, nbergs_to_send_s)
+       kick_the_bucket%halo_berg=current_halo_status
+    enddo
+  enddo; enddo
+
+
+ ! Send bergs north
+  if (grd%pe_N.ne.NULL_PE) then
+    if(folded_north_on_pe) then
+       call mpp_send(nbergs_to_send_n, plen=1, to_pe=grd%pe_N, tag=COMM_TAG_9)
+    else
+       call mpp_send(nbergs_to_send_n, plen=1, to_pe=grd%pe_N, tag=COMM_TAG_5)
+    endif
+    if (nbergs_to_send_n.gt.0) then
+       if(folded_north_on_pe) then
+          call mpp_send(bergs%obuffer_n%data, nbergs_to_send_n*buffer_width, grd%pe_N, tag=COMM_TAG_10)
+       else
+          call mpp_send(bergs%obuffer_n%data, nbergs_to_send_n*buffer_width, grd%pe_N, tag=COMM_TAG_6)
+       endif
+    endif
+  endif
+
+  ! Send bergs south
+  if (grd%pe_S.ne.NULL_PE) then
+    call mpp_send(nbergs_to_send_s, plen=1, to_pe=grd%pe_S, tag=COMM_TAG_7)
+    if (nbergs_to_send_s.gt.0) then
+      call mpp_send(bergs%obuffer_s%data, nbergs_to_send_s*buffer_width, grd%pe_S, tag=COMM_TAG_8)
+    endif
+  endif
+
+
+  ! Receive bergs from south
+  if (grd%pe_S.ne.NULL_PE) then
+    nbergs_rcvd_from_s=-999
+    call mpp_recv(nbergs_rcvd_from_s, glen=1, from_pe=grd%pe_S, tag=COMM_TAG_5)
+    if (nbergs_rcvd_from_s.lt.0) then
+      write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_s,' from',grd%pe_S,' (S) !!!!!!!!!!!!!!!!!!!!!!'
+    endif
+    if (nbergs_rcvd_from_s.gt.0) then
+      call increase_ibuffer(bergs%ibuffer_s, nbergs_rcvd_from_s)
+      call mpp_recv(bergs%ibuffer_s%data, nbergs_rcvd_from_s*buffer_width, grd%pe_S, tag=COMM_TAG_6)
+      do i=1, nbergs_rcvd_from_s
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_s, i, grd)
+      enddo
+    endif
+  else
+    nbergs_rcvd_from_s=0
+  endif
+
+  ! Receive bergs from north
+  if (grd%pe_N.ne.NULL_PE) then
+    nbergs_rcvd_from_n=-999
+    if(folded_north_on_pe) then
+       call mpp_recv(nbergs_rcvd_from_n, glen=1, from_pe=grd%pe_N, tag=COMM_TAG_9)
+    else
+       call mpp_recv(nbergs_rcvd_from_n, glen=1, from_pe=grd%pe_N, tag=COMM_TAG_7)
+    endif
+    if (nbergs_rcvd_from_n.lt.0) then
+      write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_n,' from',grd%pe_N,' (N) !!!!!!!!!!!!!!!!!!!!!!'
+    endif
+    if (nbergs_rcvd_from_n.gt.0) then
+      call increase_ibuffer(bergs%ibuffer_n, nbergs_rcvd_from_n)
+      if(folded_north_on_pe) then
+         call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_10)
+      else
+         call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_8)
+      endif
+      do i=1, nbergs_rcvd_from_n
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_n, i, grd)
+      enddo
+    endif
+  else
+    nbergs_rcvd_from_n=0
+  endif
+
+
+
+  call mpp_sync_self()
+
+
+end subroutine update_halo_icebergs
+
+
+
+
+!contains
+subroutine delete_all_bergs_in_list(bergs,grdj,grdi)
+  type(icebergs), pointer :: bergs
+  ! Local variables
+  type(iceberg), pointer :: kick_the_bucket, this
+  integer :: grdi, grdj
+  this=>bergs%list(grdi,grdj)%first
+  do while (associated(this))
+    kick_the_bucket=>this
+    this=>this%next
+    call destroy_iceberg(kick_the_bucket)
+!    call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
+    bergs%list(grdi,grdj)%first=>null()
+  enddo
+end  subroutine delete_all_bergs_in_list
+
+
+
 ! #############################################################################
 
 subroutine send_bergs_to_other_pes(bergs)
@@ -793,22 +1082,26 @@ integer :: grdi, grdj
   do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
-      if (this%ine.gt.bergs%grd%iec) then
-        kick_the_bucket=>this
-        this=>this%next
-        nbergs_to_send_e=nbergs_to_send_e+1
-        call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_e, nbergs_to_send_e)
-        call move_trajectory(bergs, kick_the_bucket)
-        call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
-      elseif (this%ine.lt.bergs%grd%isc) then
-        kick_the_bucket=>this
-        this=>this%next
-        nbergs_to_send_w=nbergs_to_send_w+1
-        call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_w, nbergs_to_send_w)
-        call move_trajectory(bergs, kick_the_bucket)
-        call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
+      if (this%halo_berg .lt. 0.5) then
+        if (this%ine.gt.bergs%grd%iec) then
+          kick_the_bucket=>this
+          this=>this%next
+          nbergs_to_send_e=nbergs_to_send_e+1
+          call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_e, nbergs_to_send_e)
+          call move_trajectory(bergs, kick_the_bucket)
+          call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
+        elseif (this%ine.lt.bergs%grd%isc) then
+          kick_the_bucket=>this
+          this=>this%next
+          nbergs_to_send_w=nbergs_to_send_w+1
+          call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_w, nbergs_to_send_w)
+          call move_trajectory(bergs, kick_the_bucket)
+          call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
+        else
+          this=>this%next
+        endif
       else
-        this=>this%next
+         this=>this%next
       endif
     enddo
   enddo ; enddo
@@ -874,22 +1167,26 @@ integer :: grdi, grdj
   do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
-      if (this%jne.gt.bergs%grd%jec) then
-        kick_the_bucket=>this
-        this=>this%next
-        nbergs_to_send_n=nbergs_to_send_n+1
-        call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_n, nbergs_to_send_n)
-        call move_trajectory(bergs, kick_the_bucket)
-        call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
-      elseif (this%jne.lt.bergs%grd%jsc) then
-        kick_the_bucket=>this
-        this=>this%next
-        nbergs_to_send_s=nbergs_to_send_s+1
-        call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_s, nbergs_to_send_s)
-        call move_trajectory(bergs, kick_the_bucket)
-        call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
+      if (this%halo_berg .lt. 0.5) then
+        if (this%jne.gt.bergs%grd%jec) then
+          kick_the_bucket=>this
+          this=>this%next
+          nbergs_to_send_n=nbergs_to_send_n+1
+          call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_n, nbergs_to_send_n)
+          call move_trajectory(bergs, kick_the_bucket)
+          call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
+        elseif (this%jne.lt.bergs%grd%jsc) then
+          kick_the_bucket=>this
+          this=>this%next
+          nbergs_to_send_s=nbergs_to_send_s+1
+          call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_s, nbergs_to_send_s)
+          call move_trajectory(bergs, kick_the_bucket)
+          call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
+        else
+          this=>this%next
+        endif
       else
-        this=>this%next
+          this=>this%next
       endif
     enddo
   enddo ; enddo
@@ -1045,6 +1342,7 @@ end subroutine send_bergs_to_other_pes
     buff%data(26,n)=berg%vvel_old  !Alon
     buff%data(27,n)=berg%lon_old  !Alon
     buff%data(28,n)=berg%lat_old  !Alon
+    buff%data(29,n)=berg%halo_berg  
 
   end subroutine pack_berg_into_buffer2
 
@@ -1120,6 +1418,7 @@ end subroutine send_bergs_to_other_pes
   localberg%vvel_old=buff%data(26,n) !Alon
   localberg%lon_old=buff%data(27,n) !Alon
   localberg%lat_old=buff%data(28,n) !Alon
+  localberg%halo_berg=buff%data(29,n) !Alon
  
   lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
   if (lres) then
@@ -1289,6 +1588,7 @@ end subroutine send_bergs_to_other_pes
     buff%data(29,n)=traj%vvel_old !Alon
     buff%data(30,n)=traj%lon_old !Alon
     buff%data(31,n)=traj%lat_old !Alon
+    buff%data(32,n)=traj%halo_berg !Alon
 
   end subroutine pack_traj_into_buffer2
 
@@ -1334,6 +1634,7 @@ end subroutine send_bergs_to_other_pes
     traj%vvel_old=buff%data(29,n) !Alon
     traj%lon_old=buff%data(30,n) !Alon
     traj%lat_old=buff%data(31,n) !Alon
+    traj%halo_berg=buff%data(32,n) !Alon
 
     call append_posn(first, traj)
 
@@ -1817,6 +2118,7 @@ integer :: grdi, grdj
       posn%vvel_old=this%vvel_old
       posn%lon_old=this%lon_old
       posn%lat_old=this%lat_old
+      posn%halo_berg=this%halo_berg
   
       call push_posn(this%trajectory, posn)
   
@@ -2961,8 +3263,8 @@ integer function berg_chksum(berg)
 ! Arguments
 type(iceberg), pointer :: berg
 ! Local variables
-real :: rtmp(36) !Changed from 28 to 34 by Alon
-integer :: itmp(36+3), i8=0, ichk1, ichk2, ichk3 !Changed from 28 to 34 by Alon
+real :: rtmp(37) !Changed from 28 to 34 by Alon
+integer :: itmp(37+3), i8=0, ichk1, ichk2, ichk3 !Changed from 28 to 34 by Alon
 integer :: i
 
   rtmp(:)=0.
@@ -3001,14 +3303,15 @@ integer :: i
   rtmp(34)=berg%vvel_old !Added by Alon
   rtmp(35)=berg%lat_old !Added by Alon
   rtmp(36)=berg%lon_old !Added by Alon
+  itmp(37)=berg%halo_berg !Changed from 31 to 40 by Alon
 
-  itmp(1:36)=transfer(rtmp,i8) !Changed from 28 to 36 by Alon
-  itmp(37)=berg%start_year !Changed from 29 to 37 by Alon
-  itmp(38)=berg%ine !Changed from 30 to 38 by Alon
-  itmp(39)=berg%jne !Changed from 31 to 39 by Alon
+  itmp(1:37)=transfer(rtmp,i8) !Changed from 28 to 37 by Alon
+  itmp(38)=berg%start_year !Changed from 29 to 38 by Alon
+  itmp(39)=berg%ine !Changed from 30 to 39 by Alon
+  itmp(40)=berg%jne !Changed from 31 to 40 by Alon
 
   ichk1=0; ichk2=0; ichk3=0
-  do i=1,36+3 !Changd from 28 to 36 by Alon
+  do i=1,37+3 !Changd from 28 to 36 by Alon
    ichk1=ichk1+itmp(i)
    ichk2=ichk2+itmp(i)*i
    ichk3=ichk3+itmp(i)*i*i
