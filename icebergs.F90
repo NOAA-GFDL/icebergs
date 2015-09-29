@@ -186,6 +186,7 @@ subroutine interactive_force(bergs,berg,IA_x, IA_y, u0, v0, u1, v1, P_ia_11, P_i
 type(icebergs), pointer :: bergs
 type(iceberg), pointer :: berg
 type(iceberg), pointer :: other_berg
+type(bond), pointer :: current_bond
 real :: T1, L1, W1, lon1, lat1, x1, y1, R1, A1   !Current iceberg
 real :: T2, L2, W2, lon2, lat2, x2, y2, R2, A2   !Other iceberg
 real :: r_dist_x, r_dist_y, r_dist, A_o, trapped, T_min
@@ -194,18 +195,21 @@ real :: P_11, P_12, P_21, P_22
 real :: u2, v2
 real :: Rearth
 logical :: critical_interaction_damping_on
-real :: spring_coef, accel_spring, radial_damping_coef, p_ia_coef, tangental_damping_coef
+real :: spring_coef, accel_spring, radial_damping_coef, p_ia_coef, tangental_damping_coef, bond_coef
 real, intent(out) :: IA_x, IA_y 
 real, intent(out) :: P_ia_11, P_ia_12, P_ia_22, P_ia_21, P_ia_times_u_x, P_ia_times_u_y
 integer :: stderrunit
 integer :: grdi, grdj
-
+logical :: iceberg_bonds_on
 Rearth=6360.e3
 !spring_coef=1.e-4
 spring_coef=bergs%spring_coef
+bond_coef=bergs%bond_coef 
 radial_damping_coef=bergs%radial_damping_coef
 tangental_damping_coef=bergs%tangental_damping_coef
 critical_interaction_damping_on=bergs%critical_interaction_damping_on
+iceberg_bonds_on=bergs%iceberg_bonds_on
+
 
 !Using critical values for damping rather than manually setting the damping.
 if (critical_interaction_damping_on) then
@@ -255,78 +259,109 @@ call rotpos_to_tang(lon1,lat1,x1,y1)
        !Calculating spring force  (later this should only be done on the first time around)
        accel_spring=spring_coef*(T_min/T1)*(A_o/A1)
        if ((r_dist>0.) .AND. (r_dist< (R1+R2)) ) then
-        IA_x=IA_x+(accel_spring*(r_dist_x/r_dist))
-        IA_y=IA_y+(accel_spring*(r_dist_y/r_dist))
+         IA_x=IA_x+(accel_spring*(r_dist_x/r_dist))
+         IA_y=IA_y+(accel_spring*(r_dist_y/r_dist))
 
 
-       !Working out the damping
+         !Working out the damping
 
-       !Paralel velocity
-        P_11=(r_dist_x*r_dist_x)/(r_dist**2)
-        P_12=(r_dist_x*r_dist_y)/(r_dist**2)
-        P_21=(r_dist_x*r_dist_y)/(r_dist**2)
-        P_22=(r_dist_y*r_dist_y)/(r_dist**2)
-        p_ia_coef=radial_damping_coef*(T_min/T1)*(A_o/A1)
-        p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2))+sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
-        P_ia_11=P_ia_11+p_ia_coef*P_11
-        P_ia_12=P_ia_12+p_ia_coef*P_12
-        P_ia_21=P_ia_21+p_ia_coef*P_21
-        P_ia_22=P_ia_22+p_ia_coef*P_22
-        P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
-        P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
+         !Paralel velocity
+          P_11=(r_dist_x*r_dist_x)/(r_dist**2)
+          P_12=(r_dist_x*r_dist_y)/(r_dist**2)
+          P_21=(r_dist_x*r_dist_y)/(r_dist**2)
+          P_22=(r_dist_y*r_dist_y)/(r_dist**2)
+          p_ia_coef=radial_damping_coef*(T_min/T1)*(A_o/A1)
+          p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2)) &
+          + sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
+          P_ia_11=P_ia_11+p_ia_coef*P_11
+          P_ia_12=P_ia_12+p_ia_coef*P_12
+          P_ia_21=P_ia_21+p_ia_coef*P_21
+          P_ia_22=P_ia_22+p_ia_coef*P_22
+          P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
+          P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
 
 
-        !Normal velocities
-        P_11=1-P_11  ;  P_12=-P_12 ; P_22=1-P_22
-        p_ia_coef=tangental_damping_coef*(T_min/T1)*(A_o/A1)
-        p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2))+sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
-        P_ia_11=P_ia_11+p_ia_coef*P_11
-        P_ia_12=P_ia_12+p_ia_coef*P_12
-        P_ia_21=P_ia_21+p_ia_coef*P_21
-        P_ia_22=P_ia_22+p_ia_coef*P_22
-        P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
-        P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
+          !Normal velocities
+          P_11=1-P_11  ;  P_12=-P_12 ; P_22=1-P_22
+          p_ia_coef=tangental_damping_coef*(T_min/T1)*(A_o/A1)
+          p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2))  &
+          + sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
+          P_ia_11=P_ia_11+p_ia_coef*P_11
+          P_ia_12=P_ia_12+p_ia_coef*P_12
+          P_ia_21=P_ia_21+p_ia_coef*P_21
+          P_ia_22=P_ia_22+p_ia_coef*P_22
+          P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
+          P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
 
-!print *, 'P_11',P_11
-!print *, 'P_21',P_21
-!print *, 'P_12',P_12
-!print *, 'P_22',P_22
+          !print *, 'P_11',P_11
+          !print *, 'P_21',P_21
+          !print *, 'P_12',P_12
+          !print *, 'P_22',P_22
+        endif
       endif
-    endif
-    other_berg=>other_berg%next
-  enddo ! loop over all bergs
-enddo ; enddo
+      other_berg=>other_berg%next
+    enddo ! loop over all bergs
+  enddo ; enddo
+
+  !Interactions due to iceberg bonds
+  if (iceberg_bonds_on) then ! MP1  
+    current_bond=>berg%first_bond
+    do while (associated(current_bond)) ! loop over all bonds
+      other_berg=>current_bond%other_berg
+      if (.not. associated(current_bond)) then
+        call error_mesg('diamonds,bond interactions', 'Trying to do Bond interactions with unassosiated bond!' ,FATAL)
+      else
+        L2=other_berg%length
+        W2=other_berg%width
+        !T2=other_berg%thickness ! Note, that it is not dependent on thickness This means that it might go unstable for small icebergs
+        !u2=other_berg%uvel_old
+        !v2=other_berg%vvel_old 
+        A2=L2*W2
+        R2=sqrt(A2/pi) ! Interaction radius of the other iceberg
+        lon2=other_berg%lon_old; lat2=other_berg%lat_old 
+        call rotpos_to_tang(lon2,lat2,x2,y2)
+
+        r_dist_x=x1-x2 ; r_dist_y=y1-y2
+        r_dist=sqrt( ((x1-x2)**2) + ((y1-y2)**2) )
+
+        ! Think about doing bonds using an "inverse overlap area, or some type"
+        if ((r_dist>0.) .AND. (r_dist> (R1+R2)) ) then  
+          accel_spring=bond_coef*(r_dist-(R1+R2)) 
+          IA_x=IA_x+(accel_spring*(r_dist_x/r_dist))
+          IA_y=IA_y+(accel_spring*(r_dist_y/r_dist))
+        endif  !Note, no damping on bond force has been added yet    
+      endif
+      current_bond=>current_bond%next_bond
+    enddo
+  endif
 
   contains
 
+  subroutine overlap_area(R1,R2,d,A,trapped)
+    real, intent(in) :: R1, R2, d
+    real, intent(out) :: A, Trapped
+    real :: R1_sq, R2_sq, d_sq  
+    R1_sq=R1**2
+    R2_sq=R2**2
+    d_sq=d**2
+    Trapped=0.
 
-   subroutine overlap_area(R1,R2,d,A,trapped)
-        real, intent(in) :: R1, R2, d
-        real, intent(out) :: A, Trapped
-        real :: R1_sq, R2_sq, d_sq  
-        R1_sq=R1**2
-        R2_sq=R2**2
-        d_sq=d**2
-        Trapped=0.
-
-if (d>0.) then
-        if (d<(R1+R2)) then
-             if (d>abs(R1-R2)) then
-                  A= (R1_sq*acos((d_sq+R1_sq-R2_sq)/(2.*d*R1)))  +  (R2_sq*acos((d_sq+R2_sq-R1_sq)/(2.*d*R2)))  - (0.5*sqrt((-d+R1+R2)*(d+R1-R2)*(d-R1+R2)*(d+R1+R2)))
-             else
-                  A=min(pi*R1_sq,pi*R2_sq) 
-                  Trapped=1.
-             endif
-       else
-             A=0.
-       endif
-else
-       A=0.     ! No area of perfectly overlapping bergs (ie: a berg interacting with itself)
-endif
+    if (d>0.) then
+      if (d<(R1+R2)) then
+        if (d>abs(R1-R2)) then
+          A= (R1_sq*acos((d_sq+R1_sq-R2_sq)/(2.*d*R1)))  +  (R2_sq*acos((d_sq+R2_sq-R1_sq)/(2.*d*R2)))  - (0.5*sqrt((-d+R1+R2)*(d+R1-R2)*(d-R1+R2)*(d+R1+R2)))
+        else
+          A=min(pi*R1_sq,pi*R2_sq) 
+          Trapped=1.
+        endif
+      else
+        A=0.
+      endif
+    else
+      A=0.     ! No area of perfectly overlapping bergs (ie: a berg interacting with itself)
+    endif
 
    end subroutine overlap_area
-
-
 
 end subroutine interactive_force
 

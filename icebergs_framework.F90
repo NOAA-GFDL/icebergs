@@ -189,7 +189,8 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   integer :: clock, clock_mom, clock_the, clock_int, clock_cal, clock_com, clock_ini, clock_ior, clock_iow, clock_dia ! ids for fms timers
   integer :: clock_trw, clock_trp
   real :: rho_bergs ! Density of icebergs [kg/m^3]
-  real :: spring_coef  ! Spring contant for iceberg interactions - Alon
+  real :: spring_coef  ! Spring contant for iceberg interactions 
+  real :: bond_coef  ! Spring contant for iceberg bonds 
   real :: radial_damping_coef     ! Coef for relative iceberg motion damping (radial component) -Alon
   real :: tangental_damping_coef     ! Coef for relative iceberg motion damping (tangental component) -Alon
   real :: LoW_ratio ! Initial ratio L/W for newly calved icebergs
@@ -293,6 +294,7 @@ integer :: verbose_hrs=24 ! Period between verbose messages
 integer :: max_bonds=6 ! Maximum number of iceberg bond passed between processors
 real :: rho_bergs=850. ! Density of icebergs
 real :: spring_coef=1.e-4  ! Spring contant for iceberg interactions - Alon
+real :: bond_coef=100000.0  ! Spring contant for iceberg bonds - Alon
 real :: radial_damping_coef=1.e-4     ! Coef for relative iceberg motion damping (radial component) -Alon
 real :: tangental_damping_coef=2.e-5     ! Coef for relative iceberg motion damping (tangental component) -Alon
 real :: LoW_ratio=1.5 ! Initial ratio L/W for newly calved icebergs
@@ -317,7 +319,7 @@ real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
 real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
 namelist /icebergs_nml/ verbose, budget, halo, iceberg_halo, traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, &
-         distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef, radial_damping_coef, tangental_damping_coef, &
+         distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef, radial_damping_coef, tangental_damping_coef, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, iceberg_bonds_on, manually_initialize_bonds, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, &
          time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_icebergs_on, critical_interaction_damping_on, &
@@ -586,6 +588,7 @@ endif
   bergs%grd%iceberg_halo=iceberg_halo
   bergs%rho_bergs=rho_bergs
   bergs%spring_coef=spring_coef
+  bergs%bond_coef=bond_coef
   bergs%radial_damping_coef=radial_damping_coef
   bergs%tangental_damping_coef=tangental_damping_coef
   bergs%LoW_ratio=LoW_ratio
