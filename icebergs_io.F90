@@ -110,6 +110,7 @@ integer :: stderrunit
 type(restart_file_type) :: bergs_restart
 type(restart_file_type) :: bergs_bond_restart
 integer :: nbergs, nbonds
+logical :: check_bond_quality 
 type(icebergs_gridded), pointer :: grd
 real, allocatable, dimension(:) :: lon,          &
                                    lat,          &
@@ -319,7 +320,8 @@ integer :: grdi, grdj
    !Allocating restart memory for bond related variables.
    nbonds=0
    if (bergs%iceberg_bonds_on) then
-     call count_bonds(bergs, nbonds)
+     check_bond_quality=.true.
+     call count_bonds(bergs, nbonds,check_bond_quality)
    endif
 
    allocate(first_berg_num(nbonds))

@@ -2191,7 +2191,8 @@ type(iceberg), pointer :: other_berg, berg
 type(icebergs_gridded), pointer :: grd
 integer :: grdi, grdj
 type(bond) , pointer :: current_bond, other_berg_bond
-logical :: bond_matched, missing_bond
+logical :: bond_matched, missing_bond, check_bond_quality
+integer nbonds
 
 missing_bond=.false.
 
@@ -2207,7 +2208,7 @@ missing_bond=.false.
         !code to find parter bond goes here
         if (.not.associated(current_bond%other_berg)) then
           other_berg=>bergs%list(current_bond%other_berg_ine,current_bond%other_berg_jne)%first
-          do while (associated(current_bond)) ! loop over all bonds
+          do while (associated(other_berg)) ! loop over all other bergs
             bond_matched=.false.
             if (other_berg%iceberg_num == current_bond%other_berg_num) then
               current_bond%other_berg=>other_berg
@@ -2231,6 +2232,10 @@ missing_bond=.false.
     enddo
   enddo;enddo
 
+  if (debug) then
+    check_bond_quality=.true.
+    call count_bonds(bergs, nbonds,check_bond_quality)
+  endif
 
 end subroutine connect_all_bonds
 
@@ -2248,15 +2253,19 @@ integer, intent(out) :: number_of_bonds
 integer :: number_of_bonds_all_pe
 integer :: grdi, grdj
 logical :: bond_is_good
-logical, optional :: check_bond_quality
+logical, intent(inout), optional :: check_bond_quality
 logical :: quality_check
-logical :: all_bonds_matching
+integer :: num_unmatched_bonds,num_unmatched_bonds_all_pe
+integer :: num_unassosiated_bond_pairs, num_unassosiated_bond_pairs_all_pe 
 integer :: stderrunit
 
- print *, "starting bond_check"
+!  print *, "starting bond_check"
+ stderrunit = stderr()
  quality_check=.false.
- all_bonds_matching=.True.
  if(present(check_bond_quality)) quality_check = check_bond_quality
+ check_bond_quality=.false.
+ num_unmatched_bonds=0
+ num_unassosiated_bond_pairs=0
 
  ! For convenience
   grd=>bergs%grd
@@ -2272,7 +2281,8 @@ integer :: stderrunit
 
         ! ##### Beginning Quality Check on Bonds ######
         if (quality_check) then
-          all_bonds_matching=.True.
+          num_unmatched_bonds=0
+          num_unassosiated_bond_pairs=0
           bond_is_good=.False.
           other_berg=>current_bond%other_berg
           if (associated(other_berg)) then
@@ -2292,14 +2302,14 @@ integer :: stderrunit
             enddo  ! End of loop over the other berg's bonds.
 
             if (bond_is_good) then
-              print*, 'Perfect quality Bond:', berg%iceberg_num, current_bond%other_berg_num
+              !if (debug) write(stderrunit,*) 'Perfect quality Bond:', berg%iceberg_num, current_bond%other_berg_num
             else  
-              print*, 'Non-matching bond...:', berg%iceberg_num, current_bond%other_berg_num
-              all_bonds_matching=.false.
+              if (debug) write(stderrunit,*) 'Non-matching bond...:', berg%iceberg_num, current_bond%other_berg_num
+              num_unmatched_bonds=num_unmatched_bonds+1
             endif
           else
-            print *, 'Opposite berg is not assosiated:', berg%iceberg_num, current_bond%other_berg%iceberg_num    
-            all_bonds_matching=.false.
+            if (debug) write(stderrunit,*) 'Opposite berg is not assosiated:', berg%iceberg_num, current_bond%other_berg%iceberg_num    
+            num_unassosiated_bond_pairs=0
           endif
         endif
         ! ##### Ending Quality Check on Bonds ######
@@ -2319,14 +2329,29 @@ integer :: stderrunit
     endif
 
     if (quality_check) then
-      if (.not.all_bonds_matching) then
-        stderrunit = stderr()
-        write(stderrunit,*) 'diamonds, Bonds are not matching!!!! PE=',mpp_pe()
+      num_unmatched_bonds_all_pe=num_unmatched_bonds
+      num_unassosiated_bond_pairs_all_pe = num_unassosiated_bond_pairs
+      call mpp_sum(num_unmatched_bonds_all_pe)
+      call mpp_sum(num_unassosiated_bond_pairs_all_pe)
+
+      if (num_unmatched_bonds_all_pe .gt. 0) then
         call error_mesg('diamonds, bonds', 'Bonds are not matching!', FATAL)
+      endif
+      if (num_unassosiated_bond_pairs_all_pe .ne. 0) then
+        call error_mesg('diamonds, bonds', 'Bonds partners not located!', Warning)
+        if (num_unassosiated_bond_pairs .ne. 0) then
+          write(*,'(2a)') 'diamonds, Bonds parnters not located!!!! PE=', mpp_pe()
+        endif
+      endif
+      if ((num_unmatched_bonds_all_pe == 0)  .and. (num_unassosiated_bond_pairs_all_pe == 0)) then
+        if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') 'diamonds: All iceberg bonds are connected and working well.'
+        check_bond_quality=.true.
+      else
+        if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') 'diamonds: Warning, Broken Bonds! '
       endif
     endif
 
-    print *, "ending bond_check"
+!    print *, "ending bond_check"
 
 end subroutine count_bonds
 

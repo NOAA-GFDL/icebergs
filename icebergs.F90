@@ -85,6 +85,8 @@ real, dimension(:,:), intent(in) :: cos_rot, sin_rot
 real, dimension(:,:), intent(in), optional :: ocean_depth
 logical, intent(in), optional :: maskmap(:,:)
 logical, intent(in), optional :: fractional_area
+integer :: nbonds
+logical :: check_bond_quality
 
 integer :: stdlogunit, stderrunit
 
@@ -119,6 +121,10 @@ integer :: stdlogunit, stderrunit
     else
       call read_restart_bonds(bergs,Time)
     endif
+    call update_halo_icebergs(bergs)
+    call connect_all_bonds(bergs)
+    check_bond_quality=.True.
+    call count_bonds(bergs, nbonds,check_bond_quality)
   endif
 
 end subroutine icebergs_init
@@ -132,16 +138,11 @@ type(icebergs), pointer :: bergs
 type(iceberg), pointer :: berg
 type(iceberg), pointer :: other_berg
 type(icebergs_gridded), pointer :: grd
-   
-
-
 real :: T1, L1, W1, lon1, lat1, x1, y1, R1, A1   !Current iceberg
 real :: T2, L2, W2, lon2, lat2, x2, y2, R2, A2   !Other iceberg
 real :: r_dist_x, r_dist_y, r_dist
 integer :: grdi_outer, grdj_outer
 integer :: grdi_inner, grdj_inner
-integer :: nbonds
-logical :: check_bond_quality
 
 
   ! For convenience
@@ -175,11 +176,6 @@ logical :: check_bond_quality
       berg=>berg%next
     enddo ! End of looping through all bergs in the outer list
   enddo ; enddo; !End of outer loop.
-
-
-  check_bond_quality=.True.
-  call count_bonds(bergs, nbonds,check_bond_quality)
-
 
 
 end subroutine initialize_iceberg_bonds
@@ -1132,12 +1128,13 @@ integer,    optional, intent(in) :: stagger, stress_stagger
 ! Local variables
 integer :: iyr, imon, iday, ihr, imin, isec, k
 type(icebergs_gridded), pointer :: grd
-logical :: lerr, sample_traj, write_traj, lbudget, lverbose
+logical :: lerr, sample_traj, write_traj, lbudget, lverbose, check_bond_quality 
 real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
 integer :: i, j, Iu, ju, iv, Jv, Iu_off, ju_off, iv_off, Jv_off
 real :: mask
 real, dimension(:,:), allocatable :: uC_tmp, vC_tmp
 integer :: vel_stagger, str_stagger
+integer :: nbonds
 
 integer :: stderrunit
 
@@ -1549,6 +1546,10 @@ integer :: stderrunit
     bergs%berg_melt=0.
     bergs%bergy_melt=0.
     bergs%bergy_src=0.
+
+    check_bond_quality=.true.
+    call count_bonds(bergs, nbonds,check_bond_quality)
+    if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') 'diamonds, Bond check complete. Bonds are perfect: ',check_bond_quality
   endif
 
   if (debug) call bergs_chksum(bergs, 'run bergs (bot)')
