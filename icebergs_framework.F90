@@ -15,8 +15,9 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 
 implicit none ; private
 
-integer, parameter :: buffer_width=30 !Changed from 20 to 30 by Alon 
-integer, parameter :: buffer_width_traj=33  !Changed from 23 by Alon
+integer :: buffer_width=26 !Changed from 20 to 26 by Alon 
+!integer, parameter :: buffer_width=26 !Changed from 20 to 26 by Alon 
+integer, parameter :: buffer_width_traj=29  !Changed from 23 by Alon
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 
 !Local Vars
@@ -575,7 +576,10 @@ if (.not.interactive_icebergs_on) then
 endif
 if (.not. iceberg_bonds_on) then
    max_bonds=0
+else
+  buffer_width=buffer_width+(max_bonds*3) ! Increase buffer width to include bonds being passed between processors 
 endif
+
 
 
  ! Parameters
@@ -1384,15 +1388,11 @@ end subroutine send_bergs_to_other_pes
     buff%data(22,n)=berg%ayn  !Alon
     buff%data(23,n)=berg%bxn  !Alon
     buff%data(24,n)=berg%byn  !Alon
-    buff%data(25,n)=berg%uvel_old  !Alon  
-    buff%data(26,n)=berg%vvel_old  !Alon
-    buff%data(27,n)=berg%lon_old  !Alon
-    buff%data(28,n)=berg%lat_old  !Alon
-    buff%data(29,n)=float(berg%iceberg_num)
-    buff%data(30,n)=berg%halo_berg 
+    buff%data(25,n)=float(berg%iceberg_num)
+    buff%data(26,n)=berg%halo_berg 
 
     if (max_bonds .gt. 0) then
-      counter=30 !how many data points being passed so far (must match above)
+      counter=26 !how many data points being passed so far (must match above)
       do k = 1,max_bonds
         current_bond=>berg%first_bond
         if (associated(current_bond)) then
@@ -1490,13 +1490,16 @@ end subroutine send_bergs_to_other_pes
     localberg%ayn=buff%data(22,n) !Alon
     localberg%bxn=buff%data(23,n) !Alon
     localberg%byn=buff%data(24,n) !Alon
-    localberg%uvel_old=buff%data(25,n) !Alon
-    localberg%vvel_old=buff%data(26,n) !Alon
-    localberg%lon_old=buff%data(27,n) !Alon
-    localberg%lat_old=buff%data(28,n) !Alon
-    localberg%iceberg_num=nint(buff%data(29,n))
-    localberg%halo_berg=buff%data(30,n) 
-   
+    localberg%iceberg_num=nint(buff%data(25,n))
+    localberg%halo_berg=buff%data(26,n) 
+
+    !These quantities no longer need to be passed between processors
+    localberg%uvel_old=localberg%uvel
+    localberg%vvel_old=localberg%vvel
+    localberg%lon_old=localberg%lon
+    localberg%lat_old=localberg%lat
+
+
     if(force_app) then !force append with origin ine,jne (for I/O)
 
       localberg%ine=buff%data(19,n) 
@@ -1536,7 +1539,7 @@ end subroutine send_bergs_to_other_pes
     !#  Do stuff to do with bonds here MP1
 
     if (max_bonds .gt. 0) then
-      counter=30 !how many data points being passed so far (must match above)
+      counter=26 !how many data points being passed so far (must match above)
       do k = 1,max_bonds
         other_berg_num=nint(buff%data(counter+(3*(k-1)+1),n))
         other_berg_ine=nint(buff%data(counter+(3*(k-1)+2),n))
@@ -1684,12 +1687,8 @@ end subroutine send_bergs_to_other_pes
     buff%data(25,n)=traj%ayn !Alon
     buff%data(26,n)=traj%bxn !Alon
     buff%data(27,n)=traj%byn !Alon
-    buff%data(28,n)=traj%uvel_old !Alon
-    buff%data(29,n)=traj%vvel_old !Alon
-    buff%data(30,n)=traj%lon_old !Alon
-    buff%data(31,n)=traj%lat_old !Alon
-    buff%data(32,n)=float(traj%iceberg_num)
-    buff%data(33,n)=traj%halo_berg !Alon
+    buff%data(28,n)=float(traj%iceberg_num)
+    buff%data(29,n)=traj%halo_berg !Alon
 
   end subroutine pack_traj_into_buffer2
 
@@ -1731,12 +1730,8 @@ end subroutine send_bergs_to_other_pes
     traj%ayn=buff%data(25,n) !Alon
     traj%bxn=buff%data(26,n) !Alon
     traj%byn=buff%data(27,n) !Alon
-    traj%uvel_old=buff%data(28,n) !Alon
-    traj%vvel_old=buff%data(29,n) !Alon
-    traj%lon_old=buff%data(30,n) !Alon
-    traj%lat_old=buff%data(31,n) !Alon
-    traj%iceberg_num=nint(buff%data(32,n))
-    traj%halo_berg=buff%data(33,n) !Alon
+    traj%iceberg_num=nint(buff%data(28,n))
+    traj%halo_berg=buff%data(29,n) !Alon
 
     call append_posn(first, traj)
 
