@@ -16,8 +16,9 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 implicit none ; private
 
 integer :: buffer_width=26 !Changed from 20 to 26 by Alon 
+integer :: buffer_width_traj=29  !Changed from 23 by Alon
 !integer, parameter :: buffer_width=26 !Changed from 20 to 26 by Alon 
-integer, parameter :: buffer_width_traj=29  !Changed from 23 by Alon
+!integer, parameter :: buffer_width_traj=29  !Changed from 23 by Alon
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 
 !Local Vars
@@ -205,6 +206,7 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
   logical :: time_average_weight=.false. ! Time average the weight on the ocean
   logical :: Runge_not_Verlet=.True.  !True=Runge Kuttai, False=Verlet.  - Added by Alon 
+  logical :: save_short_traj=.True.  !True saves only lon,lat,time,iceberg_num in iceberg_trajectory.nc 
   logical :: iceberg_bonds_on=.False.  !True=Allow icebergs to have bonds, False=don't allow. 
   logical :: manually_initialize_bonds=.False.  !True= Bonds are initialize manually. 
   logical :: use_new_predictive_corrective =.False.  !Flag to use Bob's predictive corrective iceberg scheme- Added by Alon 
@@ -308,6 +310,7 @@ logical :: time_average_weight=.false. ! Time average the weight on the ocean
 real :: speed_limit=0. ! CFL speed limit for a berg
 real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
 logical :: Runge_not_Verlet=.True.  !True=Runge Kutta, False=Verlet.  - Added by Alon 
+logical :: save_short_traj=.True.  !True saves only lon,lat,time,iceberg_num in iceberg_trajectory.nc 
 logical :: iceberg_bonds_on=.False.  !True=Allow icebergs to have bonds, False=don't allow. 
 logical :: manually_initialize_bonds=.False.  !True= Bonds are initialize manually. 
 logical :: use_new_predictive_corrective =.False.  !Flag to use Bob's predictive corrective iceberg scheme- Added by Alon 
@@ -319,7 +322,7 @@ real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10,
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim) , 
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
 real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
-namelist /icebergs_nml/ verbose, budget, halo, iceberg_halo, traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, &
+namelist /icebergs_nml/ verbose, budget, halo, iceberg_halo, traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj, &
          distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef, radial_damping_coef, tangental_damping_coef, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, iceberg_bonds_on, manually_initialize_bonds, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, &
@@ -579,13 +582,14 @@ if (.not. iceberg_bonds_on) then
 else
   buffer_width=buffer_width+(max_bonds*3) ! Increase buffer width to include bonds being passed between processors 
 endif
-
+if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffer used for abrevated traj
 
 
  ! Parameters
   bergs%dt=dt
   bergs%traj_sample_hrs=traj_sample_hrs
   bergs%traj_write_hrs=traj_write_hrs
+  bergs%save_short_traj=save_short_traj
   bergs%verbose_hrs=verbose_hrs
   bergs%grd%halo=halo
   bergs%max_bonds=max_bonds
@@ -1650,11 +1654,12 @@ end subroutine send_bergs_to_other_pes
 
   end subroutine increase_buffer_traj
 
-  subroutine pack_traj_into_buffer2(traj, buff, n)
+  subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj)
   ! Arguments
   type(xyt), pointer :: traj
   type(buffer), pointer :: buff
   integer, intent(in) :: n
+  logical, intent(in) :: save_short_traj
   ! Local variables
 
     if (.not.associated(buff)) call increase_buffer_traj(buff,delta_buf)
@@ -1664,35 +1669,37 @@ end subroutine send_bergs_to_other_pes
     buff%data(2,n)=traj%lat
     buff%data(3,n)=float(traj%year)
     buff%data(4,n)=traj%day
-    buff%data(5,n)=traj%uvel
-    buff%data(6,n)=traj%vvel
-    buff%data(7,n)=traj%mass
-    buff%data(8,n)=traj%mass_of_bits
-    buff%data(9,n)=traj%heat_density
-    buff%data(10,n)=traj%thickness
-    buff%data(11,n)=traj%width
-    buff%data(12,n)=traj%length
-    buff%data(13,n)=traj%uo
-    buff%data(14,n)=traj%vo
-    buff%data(15,n)=traj%ui
-    buff%data(16,n)=traj%vi
-    buff%data(17,n)=traj%ua
-    buff%data(18,n)=traj%va
-    buff%data(19,n)=traj%ssh_x
-    buff%data(20,n)=traj%ssh_y
-    buff%data(21,n)=traj%sst
-    buff%data(22,n)=traj%cn
-    buff%data(23,n)=traj%hi
-    buff%data(24,n)=traj%axn !Alon
-    buff%data(25,n)=traj%ayn !Alon
-    buff%data(26,n)=traj%bxn !Alon
-    buff%data(27,n)=traj%byn !Alon
-    buff%data(28,n)=float(traj%iceberg_num)
-    buff%data(29,n)=traj%halo_berg !Alon
+    buff%data(5,n)=float(traj%iceberg_num)
+    if (.not. save_short_traj) then
+      buff%data(6,n)=traj%uvel
+      buff%data(7,n)=traj%vvel
+      buff%data(8,n)=traj%mass
+      buff%data(9,n)=traj%mass_of_bits
+      buff%data(10,n)=traj%heat_density
+      buff%data(11,n)=traj%thickness
+      buff%data(12,n)=traj%width
+      buff%data(13,n)=traj%length
+      buff%data(14,n)=traj%uo
+      buff%data(15,n)=traj%vo
+      buff%data(16,n)=traj%ui
+      buff%data(17,n)=traj%vi
+      buff%data(18,n)=traj%ua
+      buff%data(19,n)=traj%va
+      buff%data(20,n)=traj%ssh_x
+      buff%data(21,n)=traj%ssh_y
+      buff%data(22,n)=traj%sst
+      buff%data(23,n)=traj%cn
+      buff%data(24,n)=traj%hi
+      buff%data(25,n)=traj%axn !Alon
+      buff%data(26,n)=traj%ayn !Alon
+      buff%data(27,n)=traj%bxn !Alon
+      buff%data(28,n)=traj%byn !Alon
+      buff%data(29,n)=traj%halo_berg !Alon
+    endif
 
   end subroutine pack_traj_into_buffer2
 
-  subroutine unpack_traj_from_buffer2(first, buff, n)
+  subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj)
   ! Arguments
   type(xyt), pointer :: first
   type(buffer), pointer :: buff
@@ -1700,6 +1707,7 @@ end subroutine send_bergs_to_other_pes
  ! Local variables
   type(xyt) :: traj
   integer :: stderrunit
+  logical, intent(in) :: save_short_traj 
   ! Get the stderr unit number
   stderrunit = stderr()
 
@@ -1707,32 +1715,33 @@ end subroutine send_bergs_to_other_pes
     traj%lat=buff%data(2,n)
     traj%year=nint(buff%data(3,n))
     traj%day=buff%data(4,n)
-    traj%uvel=buff%data(5,n)
-    traj%vvel=buff%data(6,n)
-    traj%mass=buff%data(7,n)
-    traj%mass_of_bits=buff%data(8,n)
-    traj%heat_density=buff%data(9,n)
-    traj%thickness=buff%data(10,n)
-    traj%width=buff%data(11,n)
-    traj%length=buff%data(12,n)
-    traj%uo=buff%data(13,n)
-    traj%vo=buff%data(14,n)
-    traj%ui=buff%data(15,n)
-    traj%vi=buff%data(16,n)
-    traj%ua=buff%data(17,n)
-    traj%va=buff%data(18,n)
-    traj%ssh_x=buff%data(19,n)
-    traj%ssh_y=buff%data(20,n)
-    traj%sst=buff%data(21,n)
-    traj%cn=buff%data(22,n)
-    traj%hi=buff%data(23,n)
-    traj%axn=buff%data(24,n) !Alon
-    traj%ayn=buff%data(25,n) !Alon
-    traj%bxn=buff%data(26,n) !Alon
-    traj%byn=buff%data(27,n) !Alon
-    traj%iceberg_num=nint(buff%data(28,n))
-    traj%halo_berg=buff%data(29,n) !Alon
-
+    traj%iceberg_num=nint(buff%data(5,n))
+    if (.not. save_short_traj) then
+      traj%uvel=buff%data(6,n)
+      traj%vvel=buff%data(7,n)
+      traj%mass=buff%data(8,n)
+      traj%mass_of_bits=buff%data(9,n)
+      traj%heat_density=buff%data(10,n)
+      traj%thickness=buff%data(11,n)
+      traj%width=buff%data(12,n)
+      traj%length=buff%data(13,n)
+      traj%uo=buff%data(14,n)
+      traj%vo=buff%data(15,n)
+      traj%ui=buff%data(16,n)
+      traj%vi=buff%data(17,n)
+      traj%ua=buff%data(18,n)
+      traj%va=buff%data(19,n)
+      traj%ssh_x=buff%data(20,n)
+      traj%ssh_y=buff%data(21,n)
+      traj%sst=buff%data(22,n)
+      traj%cn=buff%data(23,n)
+      traj%hi=buff%data(24,n)
+      traj%axn=buff%data(25,n) !Alon
+      traj%ayn=buff%data(26,n) !Alon
+      traj%bxn=buff%data(27,n) !Alon
+      traj%byn=buff%data(28,n) !Alon
+      traj%halo_berg=buff%data(29,n) !Alon
+    endif
     call append_posn(first, traj)
 
   end subroutine unpack_traj_from_buffer2

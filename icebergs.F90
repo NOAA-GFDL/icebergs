@@ -1373,7 +1373,7 @@ integer :: stderrunit
   if (sample_traj) call record_posn(bergs)
   if (write_traj) then
     call move_all_trajectories(bergs)
-    call write_trajectory(bergs%trajectories)
+    call write_trajectory(bergs%trajectories, bergs%save_short_traj)
   endif
 
   ! Gridded diagnostics
@@ -2807,7 +2807,7 @@ type(iceberg), pointer :: this, next
   ! Delete bergs and structures
   call move_all_trajectories(bergs, delete_bergs=.true.)
 
-  call write_trajectory(bergs%trajectories)
+  call write_trajectory(bergs%trajectories, bergs%save_short_traj)
 
   deallocate(bergs%grd%lon)
   deallocate(bergs%grd%lat)
