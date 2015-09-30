@@ -2326,7 +2326,16 @@ integer :: grdi, grdj
         ! Adjusting mass...                      Alon decided to move this before calculating the new velocities (so that acceleration can be a fn(r_np1)
         i=i1;j=j1;xi=berg%xi;yj=berg%yj
         call adjust_index_and_ground(grd, lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag)  !Alon:"unclear which velocity to use here?"
-     !  call adjust_index_and_ground(grd, lonn, latn, uvel1, vvel1, i, j, xi, yj, bounced, error_flag)  !Alon:"unclear which velocity to use here?"
+        !call adjust_index_and_ground(grd, lonn, latn, uvel1, vvel1, i, j, xi, yj, bounced, error_flag)  !Alon:"unclear which velocity to use here?"
+
+        ! If the iceberg bounces off the land, then its velocity and acceleration are set to zero
+        if (bounced) then
+                axn=0. ; ayn=0.
+                bxn=0. ; byn=0.
+                uvel3=0.; vvel3=0.
+                uvel1=0.; vvel1=0.
+        endif
+
         i2=i; j2=j
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
           call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
@@ -2338,7 +2347,7 @@ integer :: grdi, grdj
   !Solving for the new velocity
         if (on_tangential_plane) then
           call rotvec_to_tang(lonn,uvel3,vvel3,xdot3,ydot3)
-          call rotvec_to_tang(lon1,ax1,ay1,xddot1,yddot1)
+          call rotvec_to_tang(lonn,ax1,ay1,xddot1,yddot1)
           xdotn=xdot3+(dt*xddot1); ydotn=ydot3+(dt*yddot1)                                    !Alon
           call rotvec_from_tang(lonn,xdotn,ydotn,uveln,vveln)
         else
