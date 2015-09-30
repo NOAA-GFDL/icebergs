@@ -1582,9 +1582,11 @@ integer :: stderrunit
     bergs%bergy_melt=0.
     bergs%bergy_src=0.
 
-    check_bond_quality=.true.
-    call count_bonds(bergs, nbonds,check_bond_quality)
-    if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') 'diamonds, Bond check complete. Bonds are perfect: ',check_bond_quality
+    if (bergs%iceberg_bonds_on) then
+      check_bond_quality=.true.
+      call count_bonds(bergs, nbonds,check_bond_quality)
+      if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') 'diamonds, Bond check complete. Bonds are perfect: ',check_bond_quality
+    endif
   endif
 
   if (debug) call bergs_chksum(bergs, 'run bergs (bot)')
