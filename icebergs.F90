@@ -290,7 +290,7 @@ end subroutine interactive_force
 ! ##############################################################################
 
 
-subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, axn, ayn, bxn, byn, debug_flag) !Saving  acceleration for Verlet, Adding Verlet flag - Alon
+subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, axn, ayn, bxn, byn, debug_flag) !Saving  acceleration for Verlet, Adding Verlet flag - Alon  MP1
 !subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, debug_flag) !old version commmented out by Alon
 ! Arguments
 type(icebergs), pointer :: bergs
@@ -2200,7 +2200,7 @@ lon1=berg%lon; lat1=berg%lat
   axn=berg%axn; ayn=berg%ayn !Alon
   bxn=berg%bxn; byn=berg%byn !Alon
 
-
+print *, 'first', axn, bxn, lon1, lat1, uvel1, i, j ,xi, yj
 
 ! Velocities used to update the position
   uvel2=uvel1+(dt_2*axn)+(dt_2*bxn)                    !Alon
@@ -2219,7 +2219,7 @@ if (on_tangential_plane) call rotvec_to_tang(lon1,uvel2,vvel2,xdot2,ydot2)
   endif
   dxdln=r180_pi/(Rearth*cos(latn*pi_180))
 
-! Turn the velocities into u_star, v_star.(uvel3 is v_star) - Alon (not sure how this works with tangent plane)
+! Turn the velocities into u_star, v_star.(uvel3 is v_star)
   uvel3=uvel1+(dt_2*axn)                  !Alon
   vvel3=vvel1+(dt_2*ayn)                  !Alon
 
@@ -2228,14 +2228,25 @@ if (on_tangential_plane) call rotvec_to_tang(lon1,uvel2,vvel2,xdot2,ydot2)
   i=i1;j=j1;xi=berg%xi;yj=berg%yj
   call adjust_index_and_ground(grd, lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag)  !Alon:"unclear which velocity to use here?"
 !  call adjust_index_and_ground(grd, lonn, latn, uvel1, vvel1, i, j, xi, yj, bounced, error_flag)  !Alon:"unclear which velocity to use here?"
+
+if (bounced) then  !This is the case when the iceberg changes direction due to  topography
+  axn=0.
+  ayn=0.
+  bxn=0.
+  byn=0.
+endif
+
+
   i2=i; j2=j
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
     call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
 
 
+print *, 'second', axn, bxn, lon1, lat1, uvel1, i , j , xi, yj
 !Calling the acceleration   (note that the velocity is converted to u_star inside the accel script)
   call accel(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, ax1, ay1, axn, ayn, bxn, byn) !axn, ayn, bxn, byn - Added by Alon
 
+print *, 'third', axn, bxn, lon1, lat1, uvel1, i, j, xi, yj
 !Solving for the new velocity
   if (on_tangential_plane) then
     call rotvec_to_tang(lonn,uvel3,vvel3,xdot3,ydot3)
@@ -2249,6 +2260,7 @@ if (on_tangential_plane) call rotvec_to_tang(lon1,uvel2,vvel2,xdot2,ydot2)
   uveln=uvel4
   vveln=vvel4 
 
+print *, 'forth', axn, bxn, lon1, lat1, uvel1, i, j, xi, yj, uveln
 !Debugging
   if (.not.error_flag) then
     if (.not. is_point_in_cell(bergs%grd, lonn, latn, i, j)) error_flag=.true.
@@ -2299,6 +2311,7 @@ if (on_tangential_plane) call rotvec_to_tang(lon1,uvel2,vvel2,xdot2,ydot2)
   endif
 
 
+print *, 'fifth', axn, bxn, lon1, lat1, uvel1, i, j, xi, yj, uveln
 
   endif ! End of the Verlet Stepiing -added by Alon  
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
