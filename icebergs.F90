@@ -198,6 +198,7 @@ logical :: critical_interaction_damping_on
 real :: spring_coef, accel_spring, radial_damping_coef, p_ia_coef, tangental_damping_coef, bond_coef
 real, intent(out) :: IA_x, IA_y 
 real, intent(out) :: P_ia_11, P_ia_12, P_ia_22, P_ia_21, P_ia_times_u_x, P_ia_times_u_y
+real :: L_dist
 integer :: stderrunit
 integer :: grdi, grdj
 logical :: iceberg_bonds_on
@@ -313,7 +314,7 @@ call rotpos_to_tang(lon1,lat1,x1,y1)
       else
         L2=other_berg%length
         W2=other_berg%width
-        !T2=other_berg%thickness ! Note, that it is not dependent on thickness This means that it might go unstable for small icebergs
+        T2=other_berg%thickness ! Note, that it is not dependent on thickness This means that it might go unstable for small icebergs
         !u2=other_berg%uvel_old
         !v2=other_berg%vvel_old 
         A2=L2*W2
@@ -325,10 +326,14 @@ call rotpos_to_tang(lon1,lat1,x1,y1)
         r_dist=sqrt( ((x1-x2)**2) + ((y1-y2)**2) )
 
         ! Think about doing bonds using an "inverse overlap area, or some type"
-        if ((r_dist>0.) .AND. (r_dist> (R1+R2)) ) then  
-          accel_spring=bond_coef*(r_dist-(R1+R2)) 
-          IA_x=IA_x+(accel_spring*(r_dist_x/r_dist))
-          IA_y=IA_y+(accel_spring*(r_dist_y/r_dist))
+        if ((r_dist>0.) .AND. (r_dist> (R1+R2)) ) then 
+          L_dist = min( (r_dist-(R1+R2) ),min(R1,R2) ) 
+          call overlap_area(R1,R2,L_dist,A_o,trapped)
+          T_min=min(T1,T2)
+          accel_spring=bond_coef*(T_min/T1)*(A_o/A1)
+          !accel_spring=bond_coef*(r_dist-(R1+R2)) 
+          IA_x=IA_x-(accel_spring*(r_dist_x/r_dist))  !Note: negative sign is an attractive force.
+          IA_y=IA_y-(accel_spring*(r_dist_y/r_dist))
         endif  !Note, no damping on bond force has been added yet    
       endif
       current_bond=>current_bond%next_bond
@@ -1585,7 +1590,12 @@ integer :: stderrunit
     if (bergs%iceberg_bonds_on) then
       check_bond_quality=.true.
       call count_bonds(bergs, nbonds,check_bond_quality)
-      if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') 'diamonds, Bond check complete. Bonds are perfect: ',check_bond_quality
+      if (mpp_pe().eq.mpp_root_pe()) 
+        if (check_bond_quality) then
+          write(*,'(2a)') 'diamonds, Bond check complete. Bonds are perfect'
+        else
+          write(*,'(2a)') 'diamonds, Bond check complete. Bonds are not perfect'
+        endif
     endif
   endif
 
@@ -2032,6 +2042,7 @@ integer :: grdi, grdj
           uvel2=uvel1+dt_2*ax1; vvel2=vvel1+dt_2*ay1
         endif
         i=i1;j=j1;xi=berg%xi;yj=berg%yj
+        !print *, 'Alon: look here!', lon2, lat2, uvel2, vvel2, i, j, xi, yj
         call adjust_index_and_ground(grd, lon2, lat2, uvel2, vvel2, i, j, xi, yj, bounced, error_flag)
         i2=i; j2=j
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
@@ -2327,6 +2338,7 @@ integer :: grdi, grdj
   
         ! Adjusting mass...                      Alon decided to move this before calculating the new velocities (so that acceleration can be a fn(r_np1)
         i=i1;j=j1;xi=berg%xi;yj=berg%yj
+        !print *, 'Alon: look here!', lonn, latn, uvel3, vvel3, i, j, xi, yj
         call adjust_index_and_ground(grd, lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag)  !Alon:"unclear which velocity to use here?"
         !call adjust_index_and_ground(grd, lonn, latn, uvel1, vvel1, i, j, xi, yj, bounced, error_flag)  !Alon:"unclear which velocity to use here?"
 
