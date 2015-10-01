@@ -1590,12 +1590,12 @@ integer :: stderrunit
     if (bergs%iceberg_bonds_on) then
       check_bond_quality=.true.
       call count_bonds(bergs, nbonds,check_bond_quality)
-      if (mpp_pe().eq.mpp_root_pe()) 
-        if (check_bond_quality) then
-          write(*,'(2a)') 'diamonds, Bond check complete. Bonds are perfect'
-        else
-          write(*,'(2a)') 'diamonds, Bond check complete. Bonds are not perfect'
-        endif
+      !if (mpp_pe().eq.mpp_root_pe()) then 
+        !if (check_bond_quality) then
+        !  write(*,'(2a)') 'diamonds, Bond check complete. Bonds are perfect'
+        !else
+        !  write(*,'(2a)') 'diamonds, Bond check complete. Bonds are not perfect'
+        !endif
     endif
   endif
 

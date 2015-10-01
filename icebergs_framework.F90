@@ -1361,6 +1361,7 @@ end subroutine send_bergs_to_other_pes
   integer :: counter, k, max_bonds
   type(bond), pointer :: current_bond
  
+    !print *, 'Packing berg', berg%iceberg_num, mpp_pe(), berg%halo_berg
     max_bonds=0
     if (present(max_bonds_in)) max_bonds=max_bonds_in
 
@@ -1397,8 +1398,8 @@ end subroutine send_bergs_to_other_pes
 
     if (max_bonds .gt. 0) then
       counter=26 !how many data points being passed so far (must match above)
+      current_bond=>berg%first_bond
       do k = 1,max_bonds
-        current_bond=>berg%first_bond
         if (associated(current_bond)) then
           buff%data(counter+(3*(k-1)+1),n)=float(current_bond%other_berg_num) 
           buff%data(counter+(3*(k-1)+2),n)=float(current_bond%other_berg_ine)
@@ -1503,6 +1504,7 @@ end subroutine send_bergs_to_other_pes
     localberg%lon_old=localberg%lon
     localberg%lat_old=localberg%lat
 
+    !print *, 'Unpacking berg', localberg%iceberg_num, mpp_pe(), localberg%halo_berg
 
     if(force_app) then !force append with origin ine,jne (for I/O)
 
@@ -1548,11 +1550,12 @@ end subroutine send_bergs_to_other_pes
         other_berg_num=nint(buff%data(counter+(3*(k-1)+1),n))
         other_berg_ine=nint(buff%data(counter+(3*(k-1)+2),n))
         other_berg_jne=nint(buff%data(counter+(3*(k-1)+3),n))
-        if (other_berg_num .gt. 0) then
+        if (other_berg_num .gt. 1) then
           call form_a_bond(this, other_berg_num, other_berg_ine, other_berg_jne)
         endif
       enddo
     endif
+    this=>null()
 
     !##############################
 
@@ -2156,26 +2159,25 @@ type(iceberg), optional,  pointer :: other_berg
 type(bond) , pointer :: new_bond, first_bond
 integer, intent(in) :: other_berg_num
 integer, optional  :: other_berg_ine, other_berg_jne
-
-print *, 'Forming a bond!!!'
     
-
-! Step 1: Create a new bond
-allocate(new_bond)
-new_bond%other_berg_num=other_berg_num
-if(present(other_berg)) then
-  new_bond%other_berg=>other_berg
-  new_bond%other_berg_ine=other_berg%ine
-  new_bond%other_berg_jne=other_berg%jne
-else
-  new_bond%other_berg=>null()
-  if (present(other_berg_ine)) then
-    new_bond%other_berg_ine=other_berg_ine
-    new_bond%other_berg_jne=other_berg_jne
+if (berg%iceberg_num .ne. other_berg_num) then
+  print *, 'Forming a bond!!!', mpp_pe(), berg%iceberg_num, other_berg_num, berg%halo_berg
+  ! Step 1: Create a new bond
+  allocate(new_bond)
+  new_bond%other_berg_num=other_berg_num
+  if(present(other_berg)) then
+    new_bond%other_berg=>other_berg
+    new_bond%other_berg_ine=other_berg%ine
+    new_bond%other_berg_jne=other_berg%jne
+  else
+    new_bond%other_berg=>null()
+    if (present(other_berg_ine)) then
+      new_bond%other_berg_ine=other_berg_ine
+      new_bond%other_berg_jne=other_berg_jne
+    endif
   endif
-endif
 
-! Step 2: Put this new bond at the start of the bond list
+  ! Step 2: Put this new bond at the start of the bond list
    first_bond=>berg%first_bond
    if (associated(first_bond)) then
         new_bond%next_bond=>first_bond
@@ -2187,6 +2189,10 @@ endif
        new_bond%prev_bond=>null()  !This should not be needed
        berg%first_bond=>new_bond
    endif
+   new_bond=>null()
+ else
+   call error_mesg('diamonds, bonds', 'An iceberg is trying to bond with itself!!!', FATAL)
+ endif
 
 end subroutine form_a_bond
 
