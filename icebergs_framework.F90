@@ -64,7 +64,7 @@ public add_new_berg_to_list, count_out_of_order, check_for_duplicates
 public insert_berg_into_list, create_iceberg, delete_iceberg_from_list, destroy_iceberg
 public print_fld,print_berg, print_bergs,record_posn, push_posn, append_posn, check_position
 public move_trajectory, move_all_trajectories
-public form_a_bond, connect_all_bonds
+public form_a_bond, connect_all_bonds, show_all_bonds, bond_address_update
 public find_cell,find_cell_by_search,count_bergs,is_point_in_cell,pos_within_cell, count_bonds
 public sum_mass,sum_heat,bilin,yearday,bergs_chksum
 public checksum_gridded
@@ -724,10 +724,6 @@ if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffe
   call mpp_clock_end(bergs%clock_ini)
   call mpp_clock_end(bergs%clock)
 
-!print *, mpp_pe(), 'Alon: global', grd%isg, grd%ieg, grd%jsg, grd%jeg
-!print *, mpp_pe(), 'Alon: comp', grd%isc, grd%iec, grd%jsc, grd%jec
-!print *, mpp_pe(), 'Alon: data', grd%isd, grd%ied, grd%jsd, grd%jed
-
 end subroutine ice_bergs_framework_init
 
 ! ##############################################################################
@@ -844,8 +840,6 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
  ! For convenience
    grd=>bergs%grd
 
-
-
 ! Step 1: Clear the current halos
 
 
@@ -896,6 +890,7 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
 
   !Bergs on the western side of the processor
   do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%isc+halo_width-1 
+    this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
       kick_the_bucket=>this
       this=>this%next
@@ -970,6 +965,7 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
 
   !Bergs on north side of the processor
   do grdj = grd%jec-halo_width+1,grd%jec ; do grdi = grd%isd,grd%ied
+    this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
       kick_the_bucket=>this
       this=>this%next
@@ -984,6 +980,7 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
 
   !Bergs on south side of the processor
   do grdj = grd%jsc,grd%jsc+halo_width-1 ; do grdi = grd%isd,grd%ied
+    this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
       kick_the_bucket=>this
       this=>this%next
@@ -1361,7 +1358,6 @@ end subroutine send_bergs_to_other_pes
   integer :: counter, k, max_bonds
   type(bond), pointer :: current_bond
  
-    !print *, 'Packing berg', berg%iceberg_num, mpp_pe(), berg%halo_berg
     max_bonds=0
     if (present(max_bonds_in)) max_bonds=max_bonds_in
 
@@ -1412,9 +1408,46 @@ end subroutine send_bergs_to_other_pes
         endif
       enddo
     endif
-
+   
+    ! Clearing berg pointer from partner bonds
+    !if (berg%halo_berg .lt. 0.5) then
+    !  call clear_berg_from_partners_bonds(berg)
+    !endif
 
   end subroutine pack_berg_into_buffer2
+
+
+!###########################################################################3
+
+  subroutine clear_berg_from_partners_bonds(berg) 
+  !Arguments
+  type(iceberg), intent(in), pointer :: berg
+  type(iceberg), pointer :: other_berg
+  type(bond), pointer :: current_bond, matching_bond
+  
+    current_bond=>berg%first_bond
+    do while (associated(current_bond)) !Looping over bonds
+      other_berg=>current_bond%other_berg
+      if (associated(other_berg)) then
+        matching_bond=>other_berg%first_bond
+        do while (associated(matching_bond))  ! Looping over possible matching bonds in other_berg
+          if (matching_bond%other_berg_num .eq. berg%iceberg_num) then
+            matching_bond%other_berg=>null()
+            matching_bond=>null()
+          else
+            matching_bond=>matching_bond%next_bond
+          endif
+        enddo
+      else
+       ! Note: This is meant to be unmatched after you have cleared the first berg       
+       ! call error_mesg('diamonds, clear berg from partners', 'The bond you are trying to clear is unmatched!', WARNING) 
+      endif
+      current_bond=>current_bond%next_bond
+    enddo !End loop over bonds
+
+  end subroutine clear_berg_from_partners_bonds
+
+
 
   subroutine increase_buffer(old,delta)
   ! Arguments
@@ -1504,8 +1537,7 @@ end subroutine send_bergs_to_other_pes
     localberg%lon_old=localberg%lon
     localberg%lat_old=localberg%lat
 
-    !print *, 'Unpacking berg', localberg%iceberg_num, mpp_pe(), localberg%halo_berg
-
+    ! force_app=.true.
     if(force_app) then !force append with origin ine,jne (for I/O)
 
       localberg%ine=buff%data(19,n) 
@@ -1544,6 +1576,7 @@ end subroutine send_bergs_to_other_pes
 
     !#  Do stuff to do with bonds here MP1
 
+    this%first_bond=>null()
     if (max_bonds .gt. 0) then
       counter=26 !how many data points being passed so far (must match above)
       do k = 1,max_bonds
@@ -1770,11 +1803,14 @@ type(iceberg), pointer :: new=>null()
   endif
 
   if (present(quick)) then
-    if(quick) call insert_berg_into_list(first, new, quick=.true.)
+    if(quick) then
+      call insert_berg_into_list(first, new, quick=.true.)
+    else
+      call insert_berg_into_list(first, new)
+    endif
   else
     call insert_berg_into_list(first, new)
   endif
-
 
   !Clear new
   new=>null()
@@ -2091,6 +2127,9 @@ subroutine destroy_iceberg(berg)
 type(iceberg), pointer :: berg
 ! Local variables
 
+  ! Clears all matching bonds before deallocint memory
+  call clear_berg_from_partners_bonds(berg)
+
   ! Bye-bye berg
   deallocate(berg)
 
@@ -2161,7 +2200,8 @@ integer, intent(in) :: other_berg_num
 integer, optional  :: other_berg_ine, other_berg_jne
     
 if (berg%iceberg_num .ne. other_berg_num) then
-  print *, 'Forming a bond!!!', mpp_pe(), berg%iceberg_num, other_berg_num, berg%halo_berg
+  !print *, 'Forming a bond!!!', mpp_pe(), berg%iceberg_num, other_berg_num, berg%halo_berg, berg%ine, berg%jne
+
   ! Step 1: Create a new bond
   allocate(new_bond)
   new_bond%other_berg_num=other_berg_num
@@ -2198,16 +2238,49 @@ end subroutine form_a_bond
 
 ! #############################################################################
 
-subroutine connect_all_bonds(bergs)
+subroutine bond_address_update(bergs)
 type(icebergs), pointer :: bergs
 type(iceberg), pointer :: other_berg, berg
 type(icebergs_gridded), pointer :: grd
-integer :: grdi, grdj
-type(bond) , pointer :: current_bond, other_berg_bond
-logical :: bond_matched, missing_bond, check_bond_quality
-integer nbonds
+integer :: grdi, grdj, nbonds
+type(bond) , pointer :: current_bond
 
-missing_bond=.false.
+ ! For convenience
+  grd=>bergs%grd
+
+  ! This could be done for only the bergs near the halos
+  do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
+    berg=>bergs%list(grdi,grdj)%first
+    do while (associated(berg)) ! loop over all bergs
+      current_bond=>berg%first_bond
+      do while (associated(current_bond)) ! loop over all bonds
+        if  (associated(current_bond%other_berg)) then
+          current_bond%other_berg_ine=current_bond%other_berg%ine
+          current_bond%other_berg_jne=current_bond%other_berg%jne
+          current_bond=>current_bond%next_bond
+        else
+          if (berg%halo_berg .lt. 0.5) then     
+            call error_mesg('diamonds, bond address update', 'other berg in bond not assosiated!', FATAL)
+          endif
+          current_bond=>current_bond%next_bond
+        endif
+      enddo
+      berg=>berg%next
+    enddo
+  enddo; enddo
+
+  call mpp_sync_self()
+
+end subroutine bond_address_update
+
+!###################################################################################################
+
+subroutine show_all_bonds(bergs)
+type(icebergs), pointer :: bergs
+type(iceberg), pointer :: other_berg, berg
+type(icebergs_gridded), pointer :: grd
+integer :: grdi, grdj, nbonds
+type(bond) , pointer :: current_bond
 
  ! For convenience
   grd=>bergs%grd
@@ -2218,27 +2291,86 @@ missing_bond=.false.
       current_bond=>berg%first_bond
       do while (associated(current_bond)) ! loop over all bonds
 
+        print *, 'Show Bond1 :', berg%iceberg_num, current_bond%other_berg_num, current_bond%other_berg_ine, current_bond%other_berg_jne,  mpp_pe()
+        if  (associated(current_bond%other_berg)) then
+        print *, 'Show Bond2 :', berg%iceberg_num, current_bond%other_berg_num, current_bond%other_berg%ine, current_bond%other_berg%jne,  mpp_pe()
+                print *, 'Bond matching', current_bond%other_berg%iceberg_num, current_bond%other_berg_num, mpp_pe()
+        endif
+       current_bond=>current_bond%next_bond
+      enddo
+      berg=>berg%next
+    enddo
+  enddo; enddo
+
+end subroutine show_all_bonds
+
+
+subroutine connect_all_bonds(bergs)
+type(icebergs), pointer :: bergs
+type(iceberg), pointer :: other_berg, berg
+type(icebergs_gridded), pointer :: grd
+integer :: i, j
+integer :: grdi, grdj
+integer :: grdi_inner, grdj_inner
+type(bond) , pointer :: current_bond, other_berg_bond
+logical :: bond_matched, missing_bond, check_bond_quality
+integer nbonds
+
+missing_bond=.false.
+bond_matched=.false.
+
+! For convenience
+  grd=>bergs%grd
+
+  do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
+! do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec  ! Don't connect halo bergs
+    berg=>bergs%list(grdi,grdj)%first
+    do while (associated(berg)) ! loop over all bergs
+      current_bond=>berg%first_bond
+      do while (associated(current_bond)) ! loop over all bonds
         !code to find parter bond goes here
         if (.not.associated(current_bond%other_berg)) then
-          other_berg=>bergs%list(current_bond%other_berg_ine,current_bond%other_berg_jne)%first
+          bond_matched=.false.
+          i = current_bond%other_berg_ine ; j = current_bond%other_berg_jne
+          other_berg=>bergs%list(i,j)%first
           do while (associated(other_berg)) ! loop over all other bergs
-            bond_matched=.false.
             if (other_berg%iceberg_num == current_bond%other_berg_num) then
               current_bond%other_berg=>other_berg
               other_berg=>null()
-              bond_matched=.true.  
+              bond_matched=.true. 
             else
               other_berg=>other_berg%next
             endif 
           enddo
           if (.not.bond_matched) then
-             if (berg%halo_berg .lt. 0.5) then
-                missing_bond=.true.     
-                call error_mesg('diamonds, connect_all_bonds', 'A non halo bond is missing!!!', WARNING)
-             endif
+            ! If you are stil not matched, then search adjacent cells
+            do grdj_inner = j-1,j+1 ; do grdi_inner = i-1,i+1
+              if (.not. bond_matched) then
+                if    ((grdj_inner .gt. grd%jsd-1) .and. (grdj_inner .lt. grd%jed+1)        &
+                .and.  (grdi_inner .gt. grd%isd-1) .and. (grdi_inner .lt. grd%ied+1)      &
+                .and. ((grdi_inner .ne. i) .or. (grdj_inner .ne. j)) ) then
+                  other_berg=>bergs%list(grdi_inner,grdj_inner)%first
+                  do while (associated(other_berg)) ! loop over all other bergs
+                    if (other_berg%iceberg_num == current_bond%other_berg_num) then
+                      current_bond%other_berg=>other_berg
+                      other_berg=>null()
+                      bond_matched=.true.  
+                    else
+                      other_berg=>other_berg%next
+                    endif 
+                  enddo
+                endif
+              endif
+            enddo;enddo
+          endif
+          if (.not.bond_matched) then
+            if (berg%halo_berg .lt. 0.5) then
+              missing_bond=.true.    
+             print * , berg%iceberg_num, mpp_pe(), current_bond%other_berg_num, current_bond%other_berg_ine 
+              call error_mesg('diamonds, connect_all_bonds', 'A non-halo bond is missing!!!', FATAL)
+            endif
           endif
         endif
-
         current_bond=>current_bond%next_bond
       enddo
       berg=>berg%next
@@ -2247,6 +2379,7 @@ missing_bond=.false.
 
   if (debug) then
     check_bond_quality=.true.
+    nbonds=0
     call count_bonds(bergs, nbonds,check_bond_quality)
   endif
 
@@ -2261,7 +2394,6 @@ type(iceberg), pointer :: berg
 type(iceberg), pointer :: other_berg
 type(icebergs_gridded), pointer :: grd
 type(bond) , pointer :: current_bond, other_berg_bond
-!integer, intent(out) :: number_of_bonds 
 integer, intent(out) :: number_of_bonds
 integer :: number_of_bonds_all_pe
 integer :: grdi, grdj
@@ -2284,7 +2416,6 @@ integer :: stderrunit
   grd=>bergs%grd
 
   number_of_bonds=0  ! This is a bond counter.
-
   do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
     berg=>bergs%list(grdi,grdj)%first
     do while (associated(berg)) ! loop over all bergs
@@ -2293,6 +2424,7 @@ integer :: stderrunit
         number_of_bonds=number_of_bonds+1
 
         ! ##### Beginning Quality Check on Bonds ######
+!      print *, 'Quality check', mpp_pe(), berg%iceberg_num
         if (quality_check) then
           num_unmatched_bonds=0
           num_unassosiated_bond_pairs=0
@@ -2301,7 +2433,7 @@ integer :: stderrunit
           if (associated(other_berg)) then
             other_berg_bond=>other_berg%first_bond
           
-            do while (associated(other_berg_bond))  !loops over the icebergs in the other icebergs bond list            
+            do while (associated(other_berg_bond))  !loops over the icebergs in the other icebergs bond list           
               if (associated(other_berg_bond%other_berg)) then
                 if (other_berg_bond%other_berg%iceberg_num==berg%iceberg_num) then
                   bond_is_good=.True.  !Bond_is_good becomes true when the corresponding bond is found
@@ -2315,7 +2447,7 @@ integer :: stderrunit
             enddo  ! End of loop over the other berg's bonds.
 
             if (bond_is_good) then
-              !if (debug) write(stderrunit,*) 'Perfect quality Bond:', berg%iceberg_num, current_bond%other_berg_num
+              if (debug) write(stderrunit,*) 'Perfect quality Bond:', berg%iceberg_num, current_bond%other_berg_num
             else  
               if (debug) write(stderrunit,*) 'Non-matching bond...:', berg%iceberg_num, current_bond%other_berg_num
               num_unmatched_bonds=num_unmatched_bonds+1
@@ -2338,7 +2470,7 @@ integer :: stderrunit
 
     bergs%nbonds=number_of_bonds_all_pe !Total number of bonds across all pe's
     if (number_of_bonds .gt. 0) then
-      print *, "Number of bonds on pe, out of a total of: ", number_of_bonds, number_of_bonds_all_pe
+      print *, "Number of bonds on pe:",  mpp_pe(), "out of a total of: ", number_of_bonds, number_of_bonds_all_pe
     endif
 
     if (quality_check) then
@@ -2363,8 +2495,6 @@ integer :: stderrunit
         if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') 'diamonds: Warning, Broken Bonds! '
       endif
     endif
-
-!    print *, "ending bond_check"
 
 end subroutine count_bonds
 

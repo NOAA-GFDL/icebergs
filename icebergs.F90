@@ -26,7 +26,7 @@ use ice_bergs_framework, only: ice_bergs_framework_init
 use ice_bergs_framework, only: icebergs_gridded, xyt, iceberg, icebergs, buffer, bond
 use ice_bergs_framework, only: verbose, really_debug,debug,old_bug_rotated_weights,budget,use_roundoff_fix
 use ice_bergs_framework, only: find_cell,find_cell_by_search,count_bergs,is_point_in_cell,pos_within_cell
-use ice_bergs_framework, only: count_bonds, form_a_bond,connect_all_bonds
+use ice_bergs_framework, only: count_bonds, form_a_bond,connect_all_bonds,show_all_bonds, bond_address_update
 use ice_bergs_framework, only: nclasses,old_bug_bilin
 use ice_bergs_framework, only: sum_mass,sum_heat,bilin,yearday,count_bergs,bergs_chksum
 use ice_bergs_framework, only: checksum_gridded,add_new_berg_to_list
@@ -124,6 +124,7 @@ integer :: stdlogunit, stderrunit
     call update_halo_icebergs(bergs)
     call connect_all_bonds(bergs)
     check_bond_quality=.True.
+    nbonds=0
     call count_bonds(bergs, nbonds,check_bond_quality)
   endif
 
@@ -1328,6 +1329,7 @@ integer :: stderrunit
 
   if (debug) call bergs_chksum(bergs, 'run bergs (top)')
   if (debug) call checksum_gridded(bergs%grd, 'top of s/r run')
+  
 
   ! Accumulate ice from calving
   call accumulate_calving(bergs)
@@ -1356,12 +1358,13 @@ integer :: stderrunit
   if (debug) call checksum_gridded(bergs%grd, 's/r run after evolve')
   call mpp_clock_end(bergs%clock_mom)
 
+
   ! Send bergs to other PEs
   call mpp_clock_begin(bergs%clock_com)
+  if (bergs%iceberg_bonds_on)  call  bond_address_update(bergs)
   call send_bergs_to_other_pes(bergs)
-  call connect_all_bonds(bergs)
   call update_halo_icebergs(bergs)
-  call connect_all_bonds(bergs)
+  if (bergs%iceberg_bonds_on)  call connect_all_bonds(bergs)
   if (debug) call bergs_chksum(bergs, 'run bergs (exchanged)')
   if (debug) call checksum_gridded(bergs%grd, 's/r run after exchange')
   call mpp_clock_end(bergs%clock_com)
@@ -1372,6 +1375,7 @@ integer :: stderrunit
   if (debug) call bergs_chksum(bergs, 'run bergs (thermo)')
   if (debug) call checksum_gridded(bergs%grd, 's/r run after thermodynamics')
   call mpp_clock_end(bergs%clock_the)
+
 
   ! For each berg, record
   call mpp_clock_begin(bergs%clock_dia)
@@ -1434,6 +1438,10 @@ integer :: stderrunit
 
   ! Dump icebergs to screen
   if (really_debug) call print_bergs(stderrunit,bergs,'icebergs_run, status')
+  
+  ! Dump icebergs bonds to screen
+  if (really_debug)  call show_all_bonds(bergs)
+
   call mpp_clock_end(bergs%clock_dia)
 
   ! Return what ever calving we did not use and additional icebergs melt
@@ -1589,13 +1597,8 @@ integer :: stderrunit
 
     if (bergs%iceberg_bonds_on) then
       check_bond_quality=.true.
+      nbonds=0
       call count_bonds(bergs, nbonds,check_bond_quality)
-      !if (mpp_pe().eq.mpp_root_pe()) then 
-        !if (check_bond_quality) then
-        !  write(*,'(2a)') 'diamonds, Bond check complete. Bonds are perfect'
-        !else
-        !  write(*,'(2a)') 'diamonds, Bond check complete. Bonds are not perfect'
-        !endif
     endif
   endif
 
