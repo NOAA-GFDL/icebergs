@@ -425,6 +425,7 @@ beta=1.0
 use_new_predictive_corrective=.True.
 endif
 
+
 !print *, 'axn=',axn,'ayn=',ayn
   u_star=uvel0+(axn*(dt/2.))  !Alon
   v_star=vvel0+(ayn*(dt/2.))  !Alon
@@ -509,7 +510,6 @@ if (interactive_icebergs_on) then
                bxn=bxn + IA_x
                byn=byn + IA_y
            endif
-!print *,'IA_x=',IA_x
 !print *,'IA_x=',IA_x,'IA_y',IA_y
 !print *,'P_ia_11',P_ia_11,'P_ia_12',P_ia_12, 'P_ia_21',P_ia_21,'P_ia_22', P_ia_22
 !print *, 'P_ia_times_u_x', P_ia_times_u_x, 'P_ia_times_u_y', P_ia_times_u_y
@@ -621,8 +621,12 @@ endif
     axn=0.
     ayn=0.
     if (.not.Runge_not_Verlet) then
-        axn=-gravity*ssh_x +wave_rad*uwave + IA_x
-        ayn=-gravity*ssh_y +wave_rad*vwave + IA_y
+        axn=-gravity*ssh_x +wave_rad*uwave
+        ayn=-gravity*ssh_y +wave_rad*vwave
+        if (interactive_icebergs_on) then
+          axn=axn + IA_x
+          ayn=ayn + IA_y
+        endif
     endif
     if (C_N>0.) then !  C_N=1 for Crank Nicolson Coriolis, C_N=0 for full implicit Coriolis !Alon 
       axn=axn+f_cori*vveln
@@ -2342,11 +2346,13 @@ integer :: grdi, grdj
         ! Adjusting mass...                      Alon decided to move this before calculating the new velocities (so that acceleration can be a fn(r_np1)
         i=i1;j=j1;xi=berg%xi;yj=berg%yj
         !print *, 'Alon: look here!', lonn, latn, uvel3, vvel3, i, j, xi, yj
+        !print *, lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag 
         call adjust_index_and_ground(grd, lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag)  !Alon:"unclear which velocity to use here?"
         !call adjust_index_and_ground(grd, lonn, latn, uvel1, vvel1, i, j, xi, yj, bounced, error_flag)  !Alon:"unclear which velocity to use here?"
 
         ! If the iceberg bounces off the land, then its velocity and acceleration are set to zero
         if (bounced) then
+       !print *, 'you have been bounce: big time!',lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag 
                 axn=0. ; ayn=0.
                 bxn=0. ; byn=0.
                 uvel3=0.; vvel3=0.
@@ -2442,7 +2448,6 @@ integer :: grdi, grdj
       !call interp_flds(grd, i, j, xi, yj, berg%uo, berg%vo, berg%ui, berg%vi, berg%ua, berg%va, berg%ssh_x, berg%ssh_y, berg%sst)
       !if (debug) call print_berg(stderr(), berg, 'evolve_iceberg, final posn.')
       if (debug) call check_position(grd, berg, 'evolve_iceberg (bot)')
-
 
       berg=>berg%next
     enddo ! loop over all bergs

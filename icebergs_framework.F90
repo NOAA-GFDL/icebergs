@@ -3702,7 +3702,7 @@ integer function berg_chksum(berg )
 type(iceberg), pointer :: berg
 ! Local variables
 real :: rtmp(37) !Changed from 28 to 34 by Alon
-integer :: itmp(37+3), i8=0, ichk1, ichk2, ichk3 !Changed from 28 to 34 by Alon
+integer :: itmp(37+4), i8=0, ichk1, ichk2, ichk3 !Changed from 28 to 34 by Alon
 integer :: i
 
   rtmp(:)=0.
