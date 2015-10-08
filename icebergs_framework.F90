@@ -842,15 +842,14 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
  ! For convenience
    grd=>bergs%grd
 
-
 !For debugging
-do grdj = grd%jsd,grd%jsd ;  do grdi = grd%isd,grd%ied
-    this=>bergs%list(grdi,grdj)%first
-    do while (associated(this))
-      print *, 'A', this%iceberg_num, mpp_pe(), this%halo_berg
-      this=>this%next
-    enddo
-enddo; enddo
+!do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
+!    this=>bergs%list(grdi,grdj)%first
+!    do while (associated(this))
+!      print *, 'A', this%iceberg_num, mpp_pe(), this%halo_berg, grdi, grdj
+!      this=>this%next
+!    enddo
+!enddo; enddo
 
 
 
@@ -876,13 +875,13 @@ enddo; enddo
 !##############################
 
 !For debugging
-do grdj = grd%jsd,grd%jsd ;  do grdi = grd%isd,grd%ied
-    this=>bergs%list(grdi,grdj)%first
-      do while (associated(this))
-      print *, 'B', this%iceberg_num, mpp_pe(), this%halo_berg
-    this=>this%next
-    enddo
-enddo; enddo
+!do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
+!    this=>bergs%list(grdi,grdj)%first
+!      do while (associated(this))
+!      print *, 'B', this%iceberg_num, mpp_pe(), this%halo_berg, grdi, grdj
+!    this=>this%next
+!    enddo
+!enddo; enddo
 
 
 !#######################################################
@@ -1096,13 +1095,13 @@ enddo; enddo
 
 
 !For debugging
-do grdj = grd%jsd,grd%jsd ;  do grdi = grd%isd,grd%ied
-    this=>bergs%list(grdi,grdj)%first
-    do while (associated(this))
-      print *, 'C', this%iceberg_num, mpp_pe(), this%halo_berg
-      this=>this%next
-    enddo
-enddo; enddo
+!do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
+!    this=>bergs%list(grdi,grdj)%first
+!    do while (associated(this))
+!      print *, 'C', this%iceberg_num, mpp_pe(), this%halo_berg,  grdi, grdj
+!      this=>this%next
+!    enddo
+!enddo; enddo
 
 
 

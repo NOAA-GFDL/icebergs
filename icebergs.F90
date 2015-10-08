@@ -190,14 +190,14 @@ type(iceberg), pointer :: other_berg
 type(bond), pointer :: current_bond
 real :: T1, L1, W1, lon1, lat1, x1, y1, R1, A1   !Current iceberg
 real :: T2, L2, W2, lon2, lat2, x2, y2, R2, A2   !Other iceberg
-real :: r_dist_x, r_dist_y, r_dist, A_o, trapped, T_min
+real :: r_dist_x, r_dist_y, r_dist, A_o, A_min, trapped, T_min
 real, intent(in) :: u0,v0, u1, v1
 real :: P_11, P_12, P_21, P_22
 real :: u2, v2
 real :: Rearth
 logical :: critical_interaction_damping_on
 real :: spring_coef, accel_spring, radial_damping_coef, p_ia_coef, tangental_damping_coef, bond_coef
-real :: mult_factor
+real :: mult_factor, damping_factor
 real, intent(out) :: IA_x, IA_y 
 real, intent(out) :: P_ia_11, P_ia_12, P_ia_22, P_ia_21, P_ia_times_u_x, P_ia_times_u_y
 real :: L_dist
@@ -213,12 +213,12 @@ tangental_damping_coef=bergs%tangental_damping_coef
 critical_interaction_damping_on=bergs%critical_interaction_damping_on
 iceberg_bonds_on=bergs%iceberg_bonds_on
 
-
 !Using critical values for damping rather than manually setting the damping.
 if (critical_interaction_damping_on) then
      radial_damping_coef=2.*sqrt(spring_coef)  ! Critical damping  
-     tangental_damping_coef=(2.*sqrt(spring_coef)/5)  ! Critical damping  /5   (just a guess)
+     tangental_damping_coef=(2.*sqrt(spring_coef))  ! Critical damping   (just a guess)
 endif
+print *, radial_damping_coef
 
 
 ! Get the stderr unit number.  Not sure what this does
@@ -258,22 +258,23 @@ call rotpos_to_tang(lon1,lat1,x1,y1)
 
        call overlap_area(R1,R2,r_dist,A_o,trapped)
        T_min=min(T1,T2)
+       A_min = min((pi*R1**R1),(pi*R2*R2)) 
 
        !Calculating spring force  (later this should only be done on the first time around)
-       accel_spring=spring_coef*(T_min/T1)*(A_o/A1)
        if ((r_dist>0.) .AND. (r_dist< (R1+R2)) ) then
+         !Spring force
+         accel_spring=spring_coef*(T_min/T1)*(A_o/A1)
          IA_x=IA_x+(accel_spring*(r_dist_x/r_dist))
          IA_y=IA_y+(accel_spring*(r_dist_y/r_dist))
-
-
          !Working out the damping
 
+         !Damping force:
          !Paralel velocity
           P_11=(r_dist_x*r_dist_x)/(r_dist**2)
           P_12=(r_dist_x*r_dist_y)/(r_dist**2)
           P_21=(r_dist_x*r_dist_y)/(r_dist**2)
           P_22=(r_dist_y*r_dist_y)/(r_dist**2)
-          p_ia_coef=radial_damping_coef*(T_min/T1)*(A_o/A1)
+          p_ia_coef=radial_damping_coef*(T_min/T1)*(A_min/A1)
           p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2)) &
           + sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
           P_ia_11=P_ia_11+p_ia_coef*P_11
@@ -286,7 +287,7 @@ call rotpos_to_tang(lon1,lat1,x1,y1)
 
           !Normal velocities
           P_11=1-P_11  ;  P_12=-P_12 ; P_22=1-P_22
-          p_ia_coef=tangental_damping_coef*(T_min/T1)*(A_o/A1)
+          p_ia_coef=tangental_damping_coef*(T_min/T1)*(A_min/A1)
           p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2))  &
           + sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
           P_ia_11=P_ia_11+p_ia_coef*P_11
@@ -317,8 +318,8 @@ call rotpos_to_tang(lon1,lat1,x1,y1)
         L2=other_berg%length
         W2=other_berg%width
         T2=other_berg%thickness ! Note, that it is not dependent on thickness This means that it might go unstable for small icebergs
-        !u2=other_berg%uvel_old
-        !v2=other_berg%vvel_old 
+        u2=other_berg%uvel_old
+        v2=other_berg%vvel_old 
         A2=L2*W2
         R2=sqrt(A2/pi) ! Interaction radius of the other iceberg
         lon2=other_berg%lon_old; lat2=other_berg%lat_old 
@@ -326,25 +327,60 @@ call rotpos_to_tang(lon1,lat1,x1,y1)
 
         r_dist_x=x1-x2 ; r_dist_y=y1-y2
         r_dist=sqrt( ((x1-x2)**2) + ((y1-y2)**2) )
-
-        ! Think about doing bonds using an "inverse overlap area, or some type"
-        mult_factor=((r_dist/(R1+R2))-1) 
-        if ((r_dist>0.) .AND. (r_dist> (R1+R2)) ) then 
-          T_min=min(T1,T2)
-          A_o = min((pi*R1**R1),(pi*R2*R2))  !New idea - force increase with distance
-          !L_dist = min( (r_dist-(R1+R2) ),min(R1,R2) )
-          !call overlap_area(R1,R2,L_dist,A_o,trapped)
-          !accel_spring=bond_coef*(T_min/T1)*(A_o/A1)
-          accel_spring=bond_coef*mult_factor*(T_min/T1)*(A_o/A1)
-          !accel_spring=bond_coef*(r_dist-(R1+R2)) 
+        T_min=min(T1,T2)
+        A_min = min((pi*R1**R1),(pi*R2*R2)) 
+       
+       !Spring force 
+        if ((r_dist>0.) .AND. (r_dist> (R1+R2)) ) then
+          mult_factor=((r_dist/(R1+R2))-1) 
+          accel_spring=bond_coef*mult_factor*(T_min/T1)*(A_min/A1)
           IA_x=IA_x-(accel_spring*(r_dist_x/r_dist))  !Note: negative sign is an attractive force.
           IA_y=IA_y-(accel_spring*(r_dist_y/r_dist))
-        endif  !Note, no damping on bond force has been added yet    
+        endif  !Note, no damping on bond force has been added yet   
+
+       damping_factor=2.0
+       !Spring damping 
+        if ((r_dist>0.) .AND. (r_dist> (R1+R2)) .AND. (r_dist< (damping_factor*(R1+R2))) ) then 
+         !Paralel velocity
+          P_11=(r_dist_x*r_dist_x)/(r_dist**2)
+          P_12=(r_dist_x*r_dist_y)/(r_dist**2)
+          P_21=(r_dist_x*r_dist_y)/(r_dist**2)
+          P_22=(r_dist_y*r_dist_y)/(r_dist**2)
+          p_ia_coef=radial_damping_coef*(T_min/T1)*(A_min/A1)
+          p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2)) &
+          + sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
+          P_ia_11=P_ia_11+p_ia_coef*P_11
+          P_ia_12=P_ia_12+p_ia_coef*P_12
+          P_ia_21=P_ia_21+p_ia_coef*P_21
+          P_ia_22=P_ia_22+p_ia_coef*P_22
+          P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
+          P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
+
+          !Normal velocities
+          P_11=1-P_11  ;  P_12=-P_12 ; P_22=1-P_22
+          p_ia_coef=tangental_damping_coef*(T_min/T1)*(A_min/A1)
+          p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2))  &
+          + sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
+          P_ia_11=P_ia_11+p_ia_coef*P_11
+          P_ia_12=P_ia_12+p_ia_coef*P_12
+          P_ia_21=P_ia_21+p_ia_coef*P_21
+          P_ia_22=P_ia_22+p_ia_coef*P_22
+          P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
+          P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
+
+        endif 
+
       endif
+
+
+
       current_bond=>current_bond%next_bond
     enddo
   endif
 
+!print *,'IA_x=',IA_x,'IA_y',IA_y
+!print *,'P_ia_11',P_ia_11,'P_ia_12',P_ia_12, 'P_ia_21',P_ia_21,'P_ia_22', P_ia_22
+!print *, 'P_ia_times_u_x', P_ia_times_u_x, 'P_ia_times_u_y', P_ia_times_u_y
   contains
 
   subroutine overlap_area(R1,R2,d,A,trapped)
@@ -514,9 +550,6 @@ if (interactive_icebergs_on) then
                bxn=bxn + IA_x
                byn=byn + IA_y
            endif
-!print *,'IA_x=',IA_x,'IA_y',IA_y
-!print *,'P_ia_11',P_ia_11,'P_ia_12',P_ia_12, 'P_ia_21',P_ia_21,'P_ia_22', P_ia_22
-!print *, 'P_ia_times_u_x', P_ia_times_u_x, 'P_ia_times_u_y', P_ia_times_u_y
 
 endif
 
@@ -540,8 +573,11 @@ endif
      uveln=uvel; vveln=vvel
   endif
  
+  us=uvel0   ; vs=vvel0
   do itloop=1,2 ! Iterate on drag coefficients
-
+    if (itloop .eq. 2) then
+      us=uveln   ; vs=vveln
+    endif
   if (use_new_predictive_corrective) then
     !Alon's proposed change - using Bob's improved scheme.
     drag_ocn=c_ocn*0.5*(sqrt( (uveln-uo)**2+(vveln-vo)**2 )+sqrt( (uvel0-uo)**2+(vvel0-vo)**2 ))
@@ -578,8 +614,6 @@ if (interactive_icebergs_on) then
          RHS_y=RHS_y - (((P_ia_21*uvel)+(P_ia_22*vvel))-P_ia_times_u_y)       
     endif
 endif
-
-
 
 
   ! Solve for implicit accelerations
@@ -2350,7 +2384,6 @@ integer :: grdi, grdj
         ! Adjusting mass...                      Alon decided to move this before calculating the new velocities (so that acceleration can be a fn(r_np1)
         i=i1;j=j1;xi=berg%xi;yj=berg%yj
         !print *, 'Alon: look here!', lonn, latn, uvel3, vvel3, i, j, xi, yj
-        !print *, lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag 
         call adjust_index_and_ground(grd, lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag)  !Alon:"unclear which velocity to use here?"
         !call adjust_index_and_ground(grd, lonn, latn, uvel1, vvel1, i, j, xi, yj, bounced, error_flag)  !Alon:"unclear which velocity to use here?"
 
@@ -2366,7 +2399,6 @@ integer :: grdi, grdj
         i2=i; j2=j
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
           call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
-  
   
         ! Calling the acceleration   (note that the velocity is converted to u_star inside the accel script)
         call accel(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, ax1, ay1, axn, ayn, bxn, byn) !axn, ayn, bxn, byn - Added by Alon
@@ -2536,6 +2568,7 @@ real :: xi0, yj0, lon0, lat0
   lon0=lon; lat0=lat ! original position
   i0=i; j0=j ! original i,j
   lret=pos_within_cell(grd, lon, lat, i, j, xi, yj)
+!  print *, 'Alon:', lon, lat, i, j, xi, yj, lret
   xi0=xi; yj0=yj ! original xi,yj
   if (debug) then
     !Sanity check lret, xi and yj
