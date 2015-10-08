@@ -197,6 +197,7 @@ real :: u2, v2
 real :: Rearth
 logical :: critical_interaction_damping_on
 real :: spring_coef, accel_spring, radial_damping_coef, p_ia_coef, tangental_damping_coef, bond_coef
+real :: mult_factor
 real, intent(out) :: IA_x, IA_y 
 real, intent(out) :: P_ia_11, P_ia_12, P_ia_22, P_ia_21, P_ia_times_u_x, P_ia_times_u_y
 real :: L_dist
@@ -327,11 +328,14 @@ call rotpos_to_tang(lon1,lat1,x1,y1)
         r_dist=sqrt( ((x1-x2)**2) + ((y1-y2)**2) )
 
         ! Think about doing bonds using an "inverse overlap area, or some type"
+        mult_factor=((r_dist/(R1+R2))-1) 
         if ((r_dist>0.) .AND. (r_dist> (R1+R2)) ) then 
-          L_dist = min( (r_dist-(R1+R2) ),min(R1,R2) ) 
-          call overlap_area(R1,R2,L_dist,A_o,trapped)
           T_min=min(T1,T2)
-          accel_spring=bond_coef*(T_min/T1)*(A_o/A1)
+          A_o = min((pi*R1**R1),(pi*R2*R2))  !New idea - force increase with distance
+          !L_dist = min( (r_dist-(R1+R2) ),min(R1,R2) )
+          !call overlap_area(R1,R2,L_dist,A_o,trapped)
+          !accel_spring=bond_coef*(T_min/T1)*(A_o/A1)
+          accel_spring=bond_coef*mult_factor*(T_min/T1)*(A_o/A1)
           !accel_spring=bond_coef*(r_dist-(R1+R2)) 
           IA_x=IA_x-(accel_spring*(r_dist_x/r_dist))  !Note: negative sign is an attractive force.
           IA_y=IA_y-(accel_spring*(r_dist_y/r_dist))

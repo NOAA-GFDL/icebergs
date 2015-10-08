@@ -26,7 +26,7 @@ use ice_bergs_framework, only: icebergs_gridded, xyt, iceberg, icebergs, buffer,
 use ice_bergs_framework, only: pack_berg_into_buffer2,unpack_berg_from_buffer2
 use ice_bergs_framework, only: pack_traj_into_buffer2,unpack_traj_from_buffer2
 use ice_bergs_framework, only: find_cell,find_cell_by_search,count_bergs,is_point_in_cell,pos_within_cell,append_posn
-use ice_bergs_framework, only: count_bonds, form_a_bond
+use ice_bergs_framework, only: count_bonds, form_a_bond, find_individual_iceberg
 use ice_bergs_framework, only: push_posn
 use ice_bergs_framework, only: add_new_berg_to_list,destroy_iceberg
 use ice_bergs_framework, only: increase_ibuffer,increase_ibuffer_traj,grd_chksum2,grd_chksum3
@@ -726,6 +726,7 @@ real :: lon0, lon1, lat0, lat1
 character(len=33) :: filename, filename_base
 type(icebergs_gridded), pointer :: grd
 type(iceberg) :: localberg ! NOT a pointer but an actual local variable
+real :: pos_is_good, pos_is_good_all_pe
 integer :: stderrunit
 
 real, allocatable, dimension(:) :: lon,          &
@@ -862,6 +863,16 @@ integer, allocatable, dimension(:) :: ine,       &
          else
            lres=find_cell_by_search(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
          endif
+       endif
+       ! The next few lines are a check to see whether the icebergs are all found.
+       pos_is_good=0.0
+       if (lres) then
+         pos_is_good=1.0
+       endif
+       pos_is_good_all_pe=pos_is_good
+       call mpp_sum(pos_is_good_all_pe)
+       if (pos_is_good_all_pe .lt. 0.5) then
+         call error_mesg('diamonds, read_restart_bergs', 'One of the iceberg positions was not found', FATAL)
        endif
        if (really_debug) then
          write(stderrunit,'(a,i8,a,2f9.4,a,i8)') 'diamonds, read_restart_bergs: berg ',k,' is at ',localberg%lon,localberg%lat,&
@@ -1070,6 +1081,8 @@ integer :: number_perfect_bonds ! How many complete bonds formed
 integer :: number_partial_bonds ! How many either complete/partial bonds formed.
 integer :: all_pe_number_perfect_bonds, all_pe_number_partial_bonds
 integer :: all_pe_number_first_bonds_matched, all_pe_number_second_bonds_matched
+integer :: ine, jne
+real :: berg_found, berg_found_all_pe
 integer, allocatable, dimension(:) :: first_berg_num,   &
                                       other_berg_num,  &
                                       first_berg_jne,   &
@@ -1118,7 +1131,36 @@ integer, allocatable, dimension(:) :: first_berg_num,   &
     number_perfect_bonds=0
     number_partial_bonds=0
     do k=1, nbonds_in_file
-       
+      
+
+       ! If i,j in restart files are not good, then we find the berg position of the bond addresses manually:
+       if (ignore_ij_restart) then 
+         !Finding first iceberg in bond
+         ine=999 ; jne=999 ; berg_found=0.0
+         call find_individual_iceberg(bergs,first_berg_num(k), ine, jne,berg_found)
+         berg_found_all_pe=berg_found
+         call mpp_sum(berg_found_all_pe)
+         !print *, mpp_pe(), berg_found_all_pe, berg_found, first_berg_num(k),'here'
+         if (berg_found_all_pe .gt. 0.5) then
+           first_berg_ine(k)=ine
+           first_berg_jne(k)=jne
+         else
+          call error_mesg('read_restart_bonds_bergs_new', 'First iceberg in bond not found on any pe', FATAL)
+         endif
+
+         !Finding other iceberg other iceberg
+         ine=999 ; jne=999 ; berg_found=0.0
+         call find_individual_iceberg(bergs,other_berg_num(k), ine, jne, berg_found)
+         call mpp_sum(berg_found)
+         if (berg_found .gt. 0.5) then
+           other_berg_ine(k)=ine
+           other_berg_jne(k)=jne
+         else
+          call error_mesg('read_restart_bonds_bergs_new', 'Other iceberg in bond not found on any pe', FATAL)
+         endif
+       endif
+
+
       ! Decide whether the first iceberg is on the processeor
       if ( first_berg_ine(k)>=grd%isc .and. first_berg_ine(k)<=grd%iec .and. &
         first_berg_jne(k)>=grd%jsc .and.first_berg_jne(k)<=grd%jec ) then
@@ -1203,6 +1245,7 @@ integer, allocatable, dimension(:) :: first_berg_num,   &
             other_berg_jne )
   endif
 end subroutine read_restart_bonds
+
 ! ##############################################################################
 
 subroutine read_restart_calving(bergs)

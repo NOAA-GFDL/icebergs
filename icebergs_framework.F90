@@ -71,6 +71,8 @@ public checksum_gridded
 public grd_chksum2,grd_chksum3
 public fix_restart_dates, offset_berg_dates
 public move_berg_between_cells
+public find_individual_iceberg
+
 
 type :: icebergs_gridded
   type(domain2D), pointer :: domain ! MPP domain
@@ -840,6 +842,18 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
  ! For convenience
    grd=>bergs%grd
 
+
+!For debugging
+do grdj = grd%jsd,grd%jsd ;  do grdi = grd%isd,grd%ied
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+      print *, 'A', this%iceberg_num, mpp_pe(), this%halo_berg
+      this=>this%next
+    enddo
+enddo; enddo
+
+
+
 ! Step 1: Clear the current halos
 
 
@@ -858,6 +872,20 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
   do grdj = grd%jsd,grd%jed ;    do grdi = grd%iec+1,grd%ied
     call delete_all_bergs_in_list(bergs,grdj,grdi)
   enddo ; enddo
+
+!##############################
+
+!For debugging
+do grdj = grd%jsd,grd%jsd ;  do grdi = grd%isd,grd%ied
+    this=>bergs%list(grdi,grdj)%first
+      do while (associated(this))
+      print *, 'B', this%iceberg_num, mpp_pe(), this%halo_berg
+    this=>this%next
+    enddo
+enddo; enddo
+
+
+!#######################################################
 
 
 ! Step 2: Updating the halos  - This code is mostly copied from send_to_other_pes
@@ -1065,6 +1093,18 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
 
 
   call mpp_sync_self()
+
+
+!For debugging
+do grdj = grd%jsd,grd%jsd ;  do grdi = grd%isd,grd%ied
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+      print *, 'C', this%iceberg_num, mpp_pe(), this%halo_berg
+      this=>this%next
+    enddo
+enddo; enddo
+
+
 
 
 end subroutine update_halo_icebergs
@@ -2470,7 +2510,7 @@ integer :: stderrunit
 
     bergs%nbonds=number_of_bonds_all_pe !Total number of bonds across all pe's
     if (number_of_bonds .gt. 0) then
-      print *, "Number of bonds on pe:",  mpp_pe(), "out of a total of: ", number_of_bonds, number_of_bonds_all_pe
+      print *, "Bonds on PE:",number_of_bonds, "Total bonds", number_of_bonds_all_PE, "on PE number:",  mpp_pe()
     endif
 
     if (quality_check) then
@@ -2892,6 +2932,40 @@ logical :: explain=.false.
   end function find_cell_loc
 
 end function find_cell_by_search
+
+
+! ##############################################################################
+
+subroutine find_individual_iceberg(bergs,iceberg_num, ine, jne, berg_found)
+type(icebergs), pointer :: bergs
+type(iceberg), pointer :: this
+type(icebergs_gridded), pointer :: grd
+integer :: grdi, grdj
+integer, intent(in) :: iceberg_num
+integer, intent(out) :: ine, jne
+real, intent(out) :: berg_found
+
+berg_found=0.0
+ine=999
+jne=999
+  ! For convenience
+    grd=>bergs%grd
+    
+    do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+      this=>bergs%list(grdi,grdj)%first
+      do while (associated(this))
+        if (iceberg_num .eq. this%iceberg_num) then
+          ine=this%ine
+          jne=this%jne
+          berg_found=1.0
+          !print *, 'found this one'
+          return
+        endif
+        this=>this%next
+      enddo
+    enddo ; enddo                                                                             
+end subroutine  find_individual_iceberg 
+
 
 ! ##############################################################################
 
