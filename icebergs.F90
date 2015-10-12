@@ -188,93 +188,142 @@ type(icebergs), pointer :: bergs
 type(iceberg), pointer :: berg
 type(iceberg), pointer :: other_berg
 type(bond), pointer :: current_bond
-real :: T1, L1, W1, lon1, lat1, x1, y1, R1, A1   !Current iceberg
-real :: T2, L2, W2, lon2, lat2, x2, y2, R2, A2   !Other iceberg
-real :: r_dist_x, r_dist_y, r_dist, A_o, A_min, trapped, T_min
 real, intent(in) :: u0,v0, u1, v1
-real :: P_11, P_12, P_21, P_22
 real :: u2, v2
-real :: Rearth
 logical :: critical_interaction_damping_on
-real :: spring_coef, accel_spring, radial_damping_coef, p_ia_coef, tangental_damping_coef, bond_coef
-real :: mult_factor, damping_factor
 real, intent(out) :: IA_x, IA_y 
 real, intent(out) :: P_ia_11, P_ia_12, P_ia_22, P_ia_21, P_ia_times_u_x, P_ia_times_u_y
-real :: L_dist
-integer :: stderrunit
 integer :: grdi, grdj
 logical :: iceberg_bonds_on
-Rearth=6360.e3
-!spring_coef=1.e-4
-spring_coef=bergs%spring_coef
-bond_coef=bergs%bond_coef 
-radial_damping_coef=bergs%radial_damping_coef
-tangental_damping_coef=bergs%tangental_damping_coef
-critical_interaction_damping_on=bergs%critical_interaction_damping_on
+logical :: bonded
 iceberg_bonds_on=bergs%iceberg_bonds_on
 
-!Using critical values for damping rather than manually setting the damping.
-if (critical_interaction_damping_on) then
-     radial_damping_coef=2.*sqrt(spring_coef)  ! Critical damping  
-     tangental_damping_coef=(2.*sqrt(spring_coef))  ! Critical damping   (just a guess)
-endif
-print *, radial_damping_coef
+  IA_x=0.
+  IA_y=0.
+  P_ia_11=0. ; P_ia_12=0. ;  P_ia_21=0.;  P_ia_22=0. 
+  P_ia_times_u_x=0. ; P_ia_times_u_y=0.
 
-
-! Get the stderr unit number.  Not sure what this does
-  stderrunit = stderr()
-
-IA_x=0.
-IA_y=0.
-P_ia_11=0. ; P_ia_12=0. ;  P_ia_21=0.;  P_ia_22=0. 
-P_ia_times_u_x=0. ; P_ia_times_u_y=0.
-
-
-L1=berg%length
-W1=berg%width
-T1=berg%thickness 
-A1=L1*W1 
-R1=sqrt(A1/pi) ! Interaction radius of the iceberg (assuming circular icebergs)
-lon1=berg%lon; lat1=berg%lat
-call rotpos_to_tang(lon1,lat1,x1,y1)
-
+  bonded=.false. !Unbonded iceberg interactions
   do grdj = berg%jne-1,berg%jne+1 ; do grdi = berg%ine-1,berg%ine+1
     other_berg=>bergs%list(grdi,grdj)%first
-    !Note: This summing should be made order invarient. 
     do while (associated(other_berg)) ! loop over all other bergs  
+      call calculate_force(bergs,berg,other_berg,IA_x, IA_y, u0, v0, u1, v1, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y, bonded) 
+      other_berg=>other_berg%next
+    enddo ! loop over all bergs
+  enddo ; enddo
+
+  bonded=.true.  !Interactions due to iceberg bonds
+  if (iceberg_bonds_on) then ! MP1  
+    current_bond=>berg%first_bond
+    do while (associated(current_bond)) ! loop over all bonds
+      other_berg=>current_bond%other_berg
+      if (.not. associated(current_bond)) then
+        call error_mesg('diamonds,bond interactions', 'Trying to do Bond interactions with unassosiated bond!' ,FATAL)
+      else
+        call calculate_force(bergs,berg,other_berg,IA_x, IA_y, u0, v0, u1, v1, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y,bonded) 
+      endif
+      current_bond=>current_bond%next_bond
+    enddo
+  endif
+
+!print *,'IA_x=',IA_x,'IA_y',IA_y, berg%iceberg_num
+!print *,'P_ia_11',P_ia_11,'P_ia_12',P_ia_12, 'P_ia_21',P_ia_21,'P_ia_22', P_ia_22
+!print *, 'P_ia_times_u_x', P_ia_times_u_x, 'P_ia_times_u_y', P_ia_times_u_y
+  contains
+
+
+   subroutine calculate_force(bergs,berg,other_berg,IA_x, IA_y, u0, v0, u1, v1, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y,bonded) 
+   !Arguments
+     type(icebergs), pointer :: bergs
+     type(iceberg), pointer :: berg
+     type(iceberg), pointer :: other_berg
+     real :: T1, L1, W1, lon1, lat1, x1, y1, R1, A1   !Current iceberg
+     real :: T2, L2, W2, lon2, lat2, x2, y2, R2, A2   !Other iceberg
+     real :: dlon, dlat
+     real :: r_dist_x, r_dist_y, r_dist, A_o, A_min, trapped, T_min
+     real, intent(in) :: u0,v0, u1, v1
+     real :: P_11, P_12, P_21, P_22
+     real :: M1, M2, M_min
+     real :: u2, v2
+     real :: Rearth
+     logical :: critical_interaction_damping_on
+     real :: spring_coef, accel_spring, radial_damping_coef, p_ia_coef, tangental_damping_coef, bond_coef
+     real, intent(inout) :: IA_x, IA_y 
+     real, intent(inout) :: P_ia_11, P_ia_12, P_ia_22, P_ia_21, P_ia_times_u_x, P_ia_times_u_y
+     logical ,intent(in) :: bonded
+
+      Rearth=6360.e3
+      spring_coef=bergs%spring_coef
+      !bond_coef=bergs%bond_coef 
+      radial_damping_coef=bergs%radial_damping_coef
+      tangental_damping_coef=bergs%tangental_damping_coef
+      critical_interaction_damping_on=bergs%critical_interaction_damping_on
+
+      !Using critical values for damping rather than manually setting the damping.
+      if (critical_interaction_damping_on) then
+        radial_damping_coef=2.*sqrt(spring_coef)  ! Critical damping  
+        tangental_damping_coef=(2.*sqrt(spring_coef))  ! Critical damping   (just a guess)
+      endif
+
       if (berg%iceberg_num .ne. other_berg%iceberg_num) then
+        !From Berg 1
+        L1=berg%length
+        W1=berg%width
+        T1=berg%thickness 
+        M1=berg%mass 
+        A1=L1*W1 
+        R1=sqrt(A1/pi) ! Interaction radius of the iceberg (assuming circular icebergs)
+        lon1=berg%lon; lat1=berg%lat
+        !call rotpos_to_tang(lon1,lat1,x1,y1)
+
+              
+        !From Berg 1
         L2=other_berg%length
         W2=other_berg%width
         T2=other_berg%thickness 
+        M2=other_berg%mass 
         u2=other_berg%uvel_old !Old values are used to make it order invariant 
         v2=other_berg%vvel_old !Old values are used to make it order invariant 
         A2=L2*W2
         R2=sqrt(A2/pi) ! Interaction radius of the other iceberg
         lon2=other_berg%lon_old; lat2=other_berg%lat_old !Old values are used to make it order invariant
-        call rotpos_to_tang(lon2,lat2,x2,y2)
+        !call rotpos_to_tang(lon2,lat2,x2,y2)
 
-        r_dist_x=x1-x2 ; r_dist_y=y1-y2
-        r_dist=sqrt( ((x1-x2)**2) + ((y1-y2)**2) )
+        dlon=lon1-lon2
+        dlat=lat1-lat2
+        
+        !Note that this is not the exact distance along a great circle.
+        !Approximation for small distances. Should be fine.
+        !r_dist_x=x1-x2 ; r_dist_y=y1-y2
+        !r_dist=sqrt( ((x1-x2)**2) + ((y1-y2)**2) )
+        r_dist_x=dlon*(pi/180)*Rearth*cos(0.5*(lat1+lat2)*(pi/180))
+        r_dist_y=dlat*(pi/180)*Rearth
+        r_dist=sqrt( (r_dist_x**2) + (r_dist_y**2) )
 
-       call overlap_area(R1,R2,r_dist,A_o,trapped)
-       T_min=min(T1,T2)
-       A_min = min((pi*R1**R1),(pi*R2*R2)) 
-
+        !print *, 'outside the loop',R1, R2,r_dist, bonded
+       !call overlap_area(R1,R2,r_dist,A_o,trapped)
+       !T_min=min(T1,T2)
+       !A_min = min((pi*R1**R1),(pi*R2*R2)) 
+       M_min=min(M1,M2)
        !Calculating spring force  (later this should only be done on the first time around)
-       if ((r_dist>0.) .AND. (r_dist< (R1+R2)) ) then
+       if ((r_dist>0.) .AND. ((r_dist< (R1+R2)) .OR. ( (r_dist> (R1+R2)) .AND. (bonded) ) )) then
          !Spring force
-         accel_spring=spring_coef*(T_min/T1)*(A_o/A1)
+         !accel_spring=spring_coef*(T_min/T1)*(A_o/A1) ! Old version dependent on area
+         accel_spring=spring_coef*(M_min/M1)*(R1+R2-r_dist)
          IA_x=IA_x+(accel_spring*(r_dist_x/r_dist))
          IA_y=IA_y+(accel_spring*(r_dist_y/r_dist))
-         !Working out the damping
 
+         !MP1
+         !print *, 'in the loop1', spring_coef, (M_min/M1), accel_spring,(R1+R2-r_dist) 
+         !print *, 'in the loop2', IA_x, IA_y, R1, R2,r_dist
          !Damping force:
          !Paralel velocity
           P_11=(r_dist_x*r_dist_x)/(r_dist**2)
           P_12=(r_dist_x*r_dist_y)/(r_dist**2)
           P_21=(r_dist_x*r_dist_y)/(r_dist**2)
           P_22=(r_dist_y*r_dist_y)/(r_dist**2)
-          p_ia_coef=radial_damping_coef*(T_min/T1)*(A_min/A1)
+          !p_ia_coef=radial_damping_coef*(T_min/T1)*(A_min/A1)
+          p_ia_coef=radial_damping_coef*(M_min/M1)
           p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2)) &
           + sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
           P_ia_11=P_ia_11+p_ia_coef*P_11
@@ -287,7 +336,8 @@ call rotpos_to_tang(lon1,lat1,x1,y1)
 
           !Normal velocities
           P_11=1-P_11  ;  P_12=-P_12 ; P_22=1-P_22
-          p_ia_coef=tangental_damping_coef*(T_min/T1)*(A_min/A1)
+          !p_ia_coef=tangental_damping_coef*(T_min/T1)*(A_min/A1)
+          p_ia_coef=tangental_damping_coef*(M_min/M1)
           p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2))  &
           + sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
           P_ia_11=P_ia_11+p_ia_coef*P_11
@@ -303,85 +353,10 @@ call rotpos_to_tang(lon1,lat1,x1,y1)
           !print *, 'P_22',P_22
         endif
       endif
-      other_berg=>other_berg%next
-    enddo ! loop over all bergs
-  enddo ; enddo
-
-  !Interactions due to iceberg bonds
-  if (iceberg_bonds_on) then ! MP1  
-    current_bond=>berg%first_bond
-    do while (associated(current_bond)) ! loop over all bonds
-      other_berg=>current_bond%other_berg
-      if (.not. associated(current_bond)) then
-        call error_mesg('diamonds,bond interactions', 'Trying to do Bond interactions with unassosiated bond!' ,FATAL)
-      else
-        L2=other_berg%length
-        W2=other_berg%width
-        T2=other_berg%thickness ! Note, that it is not dependent on thickness This means that it might go unstable for small icebergs
-        u2=other_berg%uvel_old
-        v2=other_berg%vvel_old 
-        A2=L2*W2
-        R2=sqrt(A2/pi) ! Interaction radius of the other iceberg
-        lon2=other_berg%lon_old; lat2=other_berg%lat_old 
-        call rotpos_to_tang(lon2,lat2,x2,y2)
-
-        r_dist_x=x1-x2 ; r_dist_y=y1-y2
-        r_dist=sqrt( ((x1-x2)**2) + ((y1-y2)**2) )
-        T_min=min(T1,T2)
-        A_min = min((pi*R1**R1),(pi*R2*R2)) 
-       
-       !Spring force 
-        if ((r_dist>0.) .AND. (r_dist> (R1+R2)) ) then
-          mult_factor=((r_dist/(R1+R2))-1) 
-          accel_spring=bond_coef*mult_factor*(T_min/T1)*(A_min/A1)
-          IA_x=IA_x-(accel_spring*(r_dist_x/r_dist))  !Note: negative sign is an attractive force.
-          IA_y=IA_y-(accel_spring*(r_dist_y/r_dist))
-        endif  !Note, no damping on bond force has been added yet   
-
-       damping_factor=2.0
-       !Spring damping 
-        if ((r_dist>0.) .AND. (r_dist> (R1+R2)) .AND. (r_dist< (damping_factor*(R1+R2))) ) then 
-         !Paralel velocity
-          P_11=(r_dist_x*r_dist_x)/(r_dist**2)
-          P_12=(r_dist_x*r_dist_y)/(r_dist**2)
-          P_21=(r_dist_x*r_dist_y)/(r_dist**2)
-          P_22=(r_dist_y*r_dist_y)/(r_dist**2)
-          p_ia_coef=radial_damping_coef*(T_min/T1)*(A_min/A1)
-          p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2)) &
-          + sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
-          P_ia_11=P_ia_11+p_ia_coef*P_11
-          P_ia_12=P_ia_12+p_ia_coef*P_12
-          P_ia_21=P_ia_21+p_ia_coef*P_21
-          P_ia_22=P_ia_22+p_ia_coef*P_22
-          P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
-          P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
-
-          !Normal velocities
-          P_11=1-P_11  ;  P_12=-P_12 ; P_22=1-P_22
-          p_ia_coef=tangental_damping_coef*(T_min/T1)*(A_min/A1)
-          p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2))  &
-          + sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
-          P_ia_11=P_ia_11+p_ia_coef*P_11
-          P_ia_12=P_ia_12+p_ia_coef*P_12
-          P_ia_21=P_ia_21+p_ia_coef*P_21
-          P_ia_22=P_ia_22+p_ia_coef*P_22
-          P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
-          P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
-
-        endif 
-
-      endif
 
 
+      end subroutine calculate_force
 
-      current_bond=>current_bond%next_bond
-    enddo
-  endif
-
-!print *,'IA_x=',IA_x,'IA_y',IA_y
-!print *,'P_ia_11',P_ia_11,'P_ia_12',P_ia_12, 'P_ia_21',P_ia_21,'P_ia_22', P_ia_22
-!print *, 'P_ia_times_u_x', P_ia_times_u_x, 'P_ia_times_u_y', P_ia_times_u_y
-  contains
 
   subroutine overlap_area(R1,R2,d,A,trapped)
     real, intent(in) :: R1, R2, d
@@ -408,6 +383,9 @@ call rotpos_to_tang(lon1,lat1,x1,y1)
     endif
 
    end subroutine overlap_area
+
+
+
 
 end subroutine interactive_force
 

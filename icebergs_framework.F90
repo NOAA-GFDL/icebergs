@@ -298,8 +298,8 @@ integer :: traj_write_hrs=480 ! Period between writing sampled trajectories to d
 integer :: verbose_hrs=24 ! Period between verbose messages
 integer :: max_bonds=6 ! Maximum number of iceberg bond passed between processors
 real :: rho_bergs=850. ! Density of icebergs
-real :: spring_coef=1.e-4  ! Spring contant for iceberg interactions - Alon
-real :: bond_coef=1.e-4  ! Spring contant for iceberg bonds - Alon
+real :: spring_coef=1.e-8  ! Spring contant for iceberg interactions - Alon
+real :: bond_coef=1.e-8  ! Spring contant for iceberg bonds - Alon
 real :: radial_damping_coef=1.e-4     ! Coef for relative iceberg motion damping (radial component) -Alon
 real :: tangental_damping_coef=2.e-5     ! Coef for relative iceberg motion damping (tangental component) -Alon
 real :: LoW_ratio=1.5 ! Initial ratio L/W for newly calved icebergs
@@ -833,7 +833,7 @@ integer :: temp1, temp2
 real :: current_halo_status
 logical :: force_app
 
-force_app =.false.
+force_app =.true.
 halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used for updating weight.
 
  ! Get the stderr unit number
@@ -846,16 +846,18 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
 !do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
 !    this=>bergs%list(grdi,grdj)%first
 !    do while (associated(this))
-!      print *, 'A', this%iceberg_num, mpp_pe(), this%halo_berg, grdi, grdj
+!      write(stderrunit,*) 'A', this%iceberg_num, mpp_pe(), this%halo_berg, grdi, grdj
 !      this=>this%next
 !    enddo
 !enddo; enddo
+! Use when debugging:
+!call show_all_bonds(bergs)
 
 
 
 ! Step 1: Clear the current halos
 
-
+  call mpp_sync_self()
   do grdj = grd%jsd,grd%jsc-1 ;  do grdi = grd%isd,grd%ied
     call delete_all_bergs_in_list(bergs, grdj, grdi)
   enddo ; enddo
@@ -872,30 +874,26 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
     call delete_all_bergs_in_list(bergs,grdj,grdi)
   enddo ; enddo
 
+  call mpp_sync_self()
 !##############################
 
 !For debugging
 !do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
 !    this=>bergs%list(grdi,grdj)%first
 !      do while (associated(this))
-!      print *, 'B', this%iceberg_num, mpp_pe(), this%halo_berg, grdi, grdj
+!      write(stderrunit,*) 'B', this%iceberg_num, mpp_pe(), this%halo_berg, grdi, grdj
 !    this=>this%next
 !    enddo
 !enddo; enddo
 
-
-!#######################################################
-
-
-! Step 2: Updating the halos  - This code is mostly copied from send_to_other_pes
-
-!  ! Get the stderr unit number
-!  stderrunit = stderr()
-!
-
   if (debug) then
     nbergs_start=count_bergs(bergs)
   endif
+
+!#######################################################
+
+! Step 2: Updating the halos  - This code is mostly copied from send_to_other_pes
+
 
   ! Find number of bergs that headed east/west
   nbergs_to_send_e=0
@@ -905,6 +903,7 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
   do grdj = grd%jsc,grd%jec ; do grdi = grd%iec-halo_width+1,grd%iec  
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
+    !write(stderrunit,*)  'sending east', this%iceberg_num, this%ine, this%jne, mpp_pe()
         kick_the_bucket=>this
         this=>this%next
         nbergs_to_send_e=nbergs_to_send_e+1
@@ -947,6 +946,7 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
     endif
   endif
 
+  call mpp_sync_self()
   ! Receive bergs from west
   if (grd%pe_W.ne.NULL_PE) then
     nbergs_rcvd_from_w=-999
@@ -982,7 +982,6 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
   else
     nbergs_rcvd_from_e=0
   endif
-
 
 
  ! Find number of bergs that headed north/south
@@ -1089,19 +1088,17 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
     nbergs_rcvd_from_n=0
   endif
 
-
-
   call mpp_sync_self()
 
 
 !For debugging
-!do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
-!    this=>bergs%list(grdi,grdj)%first
-!    do while (associated(this))
-!      print *, 'C', this%iceberg_num, mpp_pe(), this%halo_berg,  grdi, grdj
-!      this=>this%next
-!    enddo
-!enddo; enddo
+do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+      write(stderrunit,*)  'C', this%iceberg_num, mpp_pe(), this%halo_berg,  grdi, grdj
+      this=>this%next
+    enddo
+enddo; enddo
 
 
 
@@ -1123,8 +1120,8 @@ subroutine delete_all_bergs_in_list(bergs,grdj,grdi)
     this=>this%next
     call destroy_iceberg(kick_the_bucket)
 !    call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
-    bergs%list(grdi,grdj)%first=>null()
   enddo
+  bergs%list(grdi,grdj)%first=>null()
 end  subroutine delete_all_bergs_in_list
 
 
@@ -1146,7 +1143,7 @@ integer :: stderrunit
 integer :: grdi, grdj
 logical :: force_app
 
-force_app=.false.
+force_app=.true.
 
   ! Get the stderr unit number
   stderrunit = stderr()
@@ -1463,14 +1460,19 @@ end subroutine send_bergs_to_other_pes
   type(iceberg), intent(in), pointer :: berg
   type(iceberg), pointer :: other_berg
   type(bond), pointer :: current_bond, matching_bond
-  
+  integer ::  stderrunit
+  ! Get the stderr unit number
+  stderrunit = stderr()
+
     current_bond=>berg%first_bond
     do while (associated(current_bond)) !Looping over bonds
       other_berg=>current_bond%other_berg
       if (associated(other_berg)) then
+        !write(stderrunit,*) , 'Other berg', berg%iceberg_num, other_berg%iceberg_num, mpp_pe()
         matching_bond=>other_berg%first_bond
         do while (associated(matching_bond))  ! Looping over possible matching bonds in other_berg
           if (matching_bond%other_berg_num .eq. berg%iceberg_num) then
+            !write(stderrunit,*) , 'Clearing', berg%iceberg_num, matching_bond%other_berg_num,other_berg%iceberg_num, mpp_pe()
             matching_bond%other_berg=>null()
             matching_bond=>null()
           else
@@ -1622,7 +1624,7 @@ end subroutine send_bergs_to_other_pes
         other_berg_num=nint(buff%data(counter+(3*(k-1)+1),n))
         other_berg_ine=nint(buff%data(counter+(3*(k-1)+2),n))
         other_berg_jne=nint(buff%data(counter+(3*(k-1)+3),n))
-        if (other_berg_num .gt. 1) then
+        if (other_berg_num .gt. 0.5) then
           call form_a_bond(this, other_berg_num, other_berg_ine, other_berg_jne)
         endif
       enddo
@@ -2237,9 +2239,13 @@ type(iceberg), optional,  pointer :: other_berg
 type(bond) , pointer :: new_bond, first_bond
 integer, intent(in) :: other_berg_num
 integer, optional  :: other_berg_ine, other_berg_jne
+integer :: stderrunit
+
+ stderrunit = stderr()
     
 if (berg%iceberg_num .ne. other_berg_num) then
-  !print *, 'Forming a bond!!!', mpp_pe(), berg%iceberg_num, other_berg_num, berg%halo_berg, berg%ine, berg%jne
+              
+ !write (stderrunit,*) , 'Forming a bond!!!', mpp_pe(), berg%iceberg_num, other_berg_num, berg%halo_berg, berg%ine, berg%jne
 
   ! Step 1: Create a new bond
   allocate(new_bond)
@@ -2403,6 +2409,7 @@ bond_matched=.false.
             enddo;enddo
           endif
           if (.not.bond_matched) then
+             print * , berg%iceberg_num, mpp_pe(), current_bond%other_berg_num, current_bond%other_berg_ine 
             if (berg%halo_berg .lt. 0.5) then
               missing_bond=.true.    
              print * , berg%iceberg_num, mpp_pe(), current_bond%other_berg_num, current_bond%other_berg_ine 
@@ -2968,7 +2975,7 @@ end subroutine  find_individual_iceberg
 
 ! ##############################################################################
 
-logical function find_cell(grd, x, y, oi, oj)
+logical function find_cell(grd, x, y, oi, oj) !MP1
 ! Arguments
 type(icebergs_gridded), intent(in) :: grd
 real, intent(in) :: x, y
