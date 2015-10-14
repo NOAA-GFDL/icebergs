@@ -306,7 +306,7 @@ iceberg_bonds_on=bergs%iceberg_bonds_on
        !A_min = min((pi*R1**R1),(pi*R2*R2)) 
        M_min=min(M1,M2)
        !Calculating spring force  (later this should only be done on the first time around)
-       if ((r_dist>0.) .AND. ((r_dist< (R1+R2)) .OR. ( (r_dist> (R1+R2)) .AND. (bonded) ) )) then
+       if ((r_dist>0.) .AND. ((r_dist< (R1+R2).AND. (.not. bonded)) .OR. ( (r_dist> (R1+R2)) .AND. (bonded) ) )) then
          !Spring force
          !accel_spring=spring_coef*(T_min/T1)*(A_o/A1) ! Old version dependent on area
          accel_spring=spring_coef*(M_min/M1)*(R1+R2-r_dist)
@@ -314,8 +314,9 @@ iceberg_bonds_on=bergs%iceberg_bonds_on
          IA_y=IA_y+(accel_spring*(r_dist_y/r_dist))
 
          !MP1
+         !print *, 'in the loop1', berg%iceberg_num, other_berg%iceberg_num,r_dist, bonded
          !print *, 'in the loop1', spring_coef, (M_min/M1), accel_spring,(R1+R2-r_dist) 
-         !print *, 'in the loop2', IA_x, IA_y, R1, R2,r_dist
+         !print *, 'in the loop2', IA_x, IA_y, R1, R2,r_dist, berg%iceberg_num,other_berg%iceberg_num
          !Damping force:
          !Paralel velocity
           P_11=(r_dist_x*r_dist_x)/(r_dist**2)
@@ -591,6 +592,8 @@ if (interactive_icebergs_on) then
          RHS_x=RHS_x - (((P_ia_11*uvel)+(P_ia_12*vvel))-P_ia_times_u_x)
          RHS_y=RHS_y - (((P_ia_21*uvel)+(P_ia_22*vvel))-P_ia_times_u_y)       
     endif
+    !print *,'Before calculation:', berg%iceberg_num, IA_x, IA_y, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y
+    !print *,'Before calculation:', berg%iceberg_num, itloop, IA_x, IA_y
 endif
 
 
@@ -2048,6 +2051,8 @@ integer :: grdi, grdj
         uvel1=berg%uvel; vvel1=berg%vvel
         if (on_tangential_plane) call rotvec_to_tang(lon1,uvel1,vvel1,xdot1,ydot1)
         u1=uvel1*dxdl1; v1=vvel1*dydl
+
+
         call accel(bergs, berg, i, j, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, axn1, ayn1, bxn, byn) !axn,ayn, bxn, byn  - Added by Alon
         !call accel(bergs, berg, i, j, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt, ax1, ay1, axn1, ayn1, bxn, byn) !Note change to dt. Markpoint_1
         if (on_tangential_plane) call rotvec_to_tang(lon1,ax1,ay1,xddot1,yddot1)
@@ -2361,7 +2366,6 @@ integer :: grdi, grdj
   
         ! Adjusting mass...                      Alon decided to move this before calculating the new velocities (so that acceleration can be a fn(r_np1)
         i=i1;j=j1;xi=berg%xi;yj=berg%yj
-        !print *, 'Alon: look here!', lonn, latn, uvel3, vvel3, i, j, xi, yj
         call adjust_index_and_ground(grd, lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag)  !Alon:"unclear which velocity to use here?"
         !call adjust_index_and_ground(grd, lonn, latn, uvel1, vvel1, i, j, xi, yj, bounced, error_flag)  !Alon:"unclear which velocity to use here?"
 

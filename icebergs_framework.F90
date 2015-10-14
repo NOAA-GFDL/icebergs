@@ -208,6 +208,7 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
   logical :: time_average_weight=.false. ! Time average the weight on the ocean
   logical :: Runge_not_Verlet=.True.  !True=Runge Kuttai, False=Verlet.  - Added by Alon 
+  logical :: halo_debugging=.False.  !Use for debugging halos (remove when its working) 
   logical :: save_short_traj=.True.  !True saves only lon,lat,time,iceberg_num in iceberg_trajectory.nc 
   logical :: iceberg_bonds_on=.False.  !True=Allow icebergs to have bonds, False=don't allow. 
   logical :: manually_initialize_bonds=.False.  !True= Bonds are initialize manually. 
@@ -298,8 +299,8 @@ integer :: traj_write_hrs=480 ! Period between writing sampled trajectories to d
 integer :: verbose_hrs=24 ! Period between verbose messages
 integer :: max_bonds=6 ! Maximum number of iceberg bond passed between processors
 real :: rho_bergs=850. ! Density of icebergs
-real :: spring_coef=1.e-8  ! Spring contant for iceberg interactions - Alon
-real :: bond_coef=1.e-8  ! Spring contant for iceberg bonds - Alon
+real :: spring_coef=3.e-9  ! Spring contant for iceberg interactions (this seems to be the highest stable value)
+real :: bond_coef=3.e-9  ! Spring contant for iceberg bonds - not being used right now
 real :: radial_damping_coef=1.e-4     ! Coef for relative iceberg motion damping (radial component) -Alon
 real :: tangental_damping_coef=2.e-5     ! Coef for relative iceberg motion damping (tangental component) -Alon
 real :: LoW_ratio=1.5 ! Initial ratio L/W for newly calved icebergs
@@ -312,6 +313,7 @@ logical :: time_average_weight=.false. ! Time average the weight on the ocean
 real :: speed_limit=0. ! CFL speed limit for a berg
 real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
 logical :: Runge_not_Verlet=.True.  !True=Runge Kutta, False=Verlet.  - Added by Alon 
+logical :: halo_debugging=.False.  !Use for debugging halos (remove when its working) 
 logical :: save_short_traj=.True.  !True saves only lon,lat,time,iceberg_num in iceberg_trajectory.nc 
 logical :: iceberg_bonds_on=.False.  !True=Allow icebergs to have bonds, False=don't allow. 
 logical :: manually_initialize_bonds=.False.  !True= Bonds are initialize manually. 
@@ -327,7 +329,7 @@ real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250
 namelist /icebergs_nml/ verbose, budget, halo, iceberg_halo, traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj, &
          distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef, radial_damping_coef, tangental_damping_coef, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, iceberg_bonds_on, manually_initialize_bonds, &
-         parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, &
+         parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, halo_debugging, &
          time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_icebergs_on, critical_interaction_damping_on, &
          old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj
 
@@ -609,6 +611,7 @@ if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffe
   bergs%time_average_weight=time_average_weight
   bergs%speed_limit=speed_limit
   bergs%Runge_not_Verlet=Runge_not_Verlet   !Alon
+  bergs%halo_debugging=halo_debugging
   bergs%iceberg_bonds_on=iceberg_bonds_on   !Alon
   bergs%manually_initialize_bonds=manually_initialize_bonds   !Alon
   bergs%critical_interaction_damping_on=critical_interaction_damping_on   !Alon
@@ -832,9 +835,11 @@ integer :: halo_width
 integer :: temp1, temp2
 real :: current_halo_status
 logical :: force_app
+logical :: halo_debugging
 
 force_app =.true.
 halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used for updating weight.
+halo_debugging=bergs%halo_debugging  ! Must be less than current halo value used for updating weight.
 
  ! Get the stderr unit number
    stderrunit = stderr()
@@ -842,16 +847,20 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
  ! For convenience
    grd=>bergs%grd
 
+
+
 !For debugging
-!do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
-!    this=>bergs%list(grdi,grdj)%first
-!    do while (associated(this))
-!      write(stderrunit,*) 'A', this%iceberg_num, mpp_pe(), this%halo_berg, grdi, grdj
-!      this=>this%next
-!    enddo
-!enddo; enddo
-! Use when debugging:
-!call show_all_bonds(bergs)
+if (halo_debugging) then
+  do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+      write(stderrunit,*) 'A', this%iceberg_num, mpp_pe(), this%halo_berg, grdi, grdj
+      this=>this%next
+    enddo
+  enddo; enddo
+  ! Use when debugging:
+  call show_all_bonds(bergs)
+endif
 
 
 
@@ -878,14 +887,15 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
 !##############################
 
 !For debugging
-!do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
-!    this=>bergs%list(grdi,grdj)%first
-!      do while (associated(this))
-!      write(stderrunit,*) 'B', this%iceberg_num, mpp_pe(), this%halo_berg, grdi, grdj
-!    this=>this%next
-!    enddo
-!enddo; enddo
-
+if (halo_debugging) then
+  do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
+    this=>bergs%list(grdi,grdj)%first
+      do while (associated(this))
+      write(stderrunit,*) 'B', this%iceberg_num, mpp_pe(), this%halo_berg, grdi, grdj
+    this=>this%next
+    enddo
+  enddo; enddo
+endif
   if (debug) then
     nbergs_start=count_bergs(bergs)
   endif
@@ -1092,14 +1102,15 @@ halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used f
 
 
 !For debugging
-do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
+if (halo_debugging) then
+  do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
       write(stderrunit,*)  'C', this%iceberg_num, mpp_pe(), this%halo_berg,  grdi, grdj
       this=>this%next
     enddo
-enddo; enddo
-
+  enddo; enddo
+endif
 
 
 
@@ -2377,16 +2388,18 @@ bond_matched=.false.
         if (.not.associated(current_bond%other_berg)) then
           bond_matched=.false.
           i = current_bond%other_berg_ine ; j = current_bond%other_berg_jne
-          other_berg=>bergs%list(i,j)%first
-          do while (associated(other_berg)) ! loop over all other bergs
-            if (other_berg%iceberg_num == current_bond%other_berg_num) then
-              current_bond%other_berg=>other_berg
-              other_berg=>null()
-              bond_matched=.true. 
-            else
-              other_berg=>other_berg%next
-            endif 
-          enddo
+          if ( (i.gt. grd%isd-1) .and. (i .lt. grd%ied+1) .and. (j .gt. grd%jsd-1) .and. (j .lt. grd%jed+1)) then
+            other_berg=>bergs%list(i,j)%first
+            do while (associated(other_berg)) ! loop over all other bergs
+              if (other_berg%iceberg_num == current_bond%other_berg_num) then
+                current_bond%other_berg=>other_berg
+                other_berg=>null()
+                bond_matched=.true. 
+              else
+                other_berg=>other_berg%next
+              endif 
+            enddo
+          endif
           if (.not.bond_matched) then
             ! If you are stil not matched, then search adjacent cells
             do grdj_inner = j-1,j+1 ; do grdi_inner = i-1,i+1
@@ -2408,12 +2421,17 @@ bond_matched=.false.
               endif
             enddo;enddo
           endif
-          if (.not.bond_matched) then
-             print * , berg%iceberg_num, mpp_pe(), current_bond%other_berg_num, current_bond%other_berg_ine 
+          if (.not.bond_matched) then      
             if (berg%halo_berg .lt. 0.5) then
               missing_bond=.true.    
-             print * , berg%iceberg_num, mpp_pe(), current_bond%other_berg_num, current_bond%other_berg_ine 
+              print * ,'non-halo berg unmatched: ', berg%iceberg_num, mpp_pe(), current_bond%other_berg_num, current_bond%other_berg_ine 
               call error_mesg('diamonds, connect_all_bonds', 'A non-halo bond is missing!!!', FATAL)
+            else  ! This is not a problem if the partner berg is not yet in the halo
+              if (  (current_bond%other_berg_ine .gt.grd%isd-1) .and. (current_bond%other_berg_ine .lt.grd%ied+1) &
+                .and.  (current_bond%other_berg_jne .gt.grd%jsd-1) .and. (current_bond%other_berg_jne .lt.grd%jed+1) ) then      
+                print * ,'halo berg unmatched: ',mpp_pe(),  berg%iceberg_num, current_bond%other_berg_num, current_bond%other_berg_ine,current_bond%other_berg_jne 
+                call error_mesg('diamonds, connect_all_bonds', 'A halo bond is missing!!!', WARNING)
+              endif
             endif
           endif
         endif
@@ -2516,7 +2534,7 @@ integer :: stderrunit
 
     bergs%nbonds=number_of_bonds_all_pe !Total number of bonds across all pe's
     if (number_of_bonds .gt. 0) then
-      print *, "Bonds on PE:",number_of_bonds, "Total bonds", number_of_bonds_all_PE, "on PE number:",  mpp_pe()
+      write(stderrunit,*) "Bonds on PE:",number_of_bonds, "Total bonds", number_of_bonds_all_PE, "on PE number:",  mpp_pe()
     endif
 
     if (quality_check) then
