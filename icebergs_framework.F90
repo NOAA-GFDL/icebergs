@@ -208,6 +208,7 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
   logical :: time_average_weight=.false. ! Time average the weight on the ocean
   logical :: Runge_not_Verlet=.True.  !True=Runge Kuttai, False=Verlet.  - Added by Alon 
+  logical :: only_interactive_forces=.False.  !Icebergs only feel interactive forces, and not ocean, wind... 
   logical :: halo_debugging=.False.  !Use for debugging halos (remove when its working) 
   logical :: save_short_traj=.True.  !True saves only lon,lat,time,iceberg_num in iceberg_trajectory.nc 
   logical :: iceberg_bonds_on=.False.  !True=Allow icebergs to have bonds, False=don't allow. 
@@ -313,6 +314,7 @@ logical :: time_average_weight=.false. ! Time average the weight on the ocean
 real :: speed_limit=0. ! CFL speed limit for a berg
 real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
 logical :: Runge_not_Verlet=.True.  !True=Runge Kutta, False=Verlet.  - Added by Alon 
+logical :: only_interactive_forces=.False.  !Icebergs only feel interactive forces, and not ocean, wind... 
 logical :: halo_debugging=.False.  !Use for debugging halos (remove when its working) 
 logical :: save_short_traj=.True.  !True saves only lon,lat,time,iceberg_num in iceberg_trajectory.nc 
 logical :: iceberg_bonds_on=.False.  !True=Allow icebergs to have bonds, False=don't allow. 
@@ -327,7 +329,7 @@ real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
 real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
 namelist /icebergs_nml/ verbose, budget, halo, iceberg_halo, traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj, &
-         distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef, radial_damping_coef, tangental_damping_coef, &
+         distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef, radial_damping_coef, tangental_damping_coef, only_interactive_forces, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, iceberg_bonds_on, manually_initialize_bonds, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, halo_debugging, &
          time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_icebergs_on, critical_interaction_damping_on, &
@@ -610,7 +612,8 @@ if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffe
   bergs%passive_mode=passive_mode
   bergs%time_average_weight=time_average_weight
   bergs%speed_limit=speed_limit
-  bergs%Runge_not_Verlet=Runge_not_Verlet   !Alon
+  bergs%Runge_not_Verlet=Runge_not_Verlet   
+  bergs%only_interactive_forces=only_interactive_forces
   bergs%halo_debugging=halo_debugging
   bergs%iceberg_bonds_on=iceberg_bonds_on   !Alon
   bergs%manually_initialize_bonds=manually_initialize_bonds   !Alon

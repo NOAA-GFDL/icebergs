@@ -262,7 +262,7 @@ iceberg_bonds_on=bergs%iceberg_bonds_on
       !Using critical values for damping rather than manually setting the damping.
       if (critical_interaction_damping_on) then
         radial_damping_coef=2.*sqrt(spring_coef)  ! Critical damping  
-        tangental_damping_coef=(2.*sqrt(spring_coef))  ! Critical damping   (just a guess)
+        tangental_damping_coef=(2.*sqrt(spring_coef))/4  ! Critical damping   (just a guess)
       endif
 
       if (berg%iceberg_num .ne. other_berg%iceberg_num) then
@@ -312,46 +312,50 @@ iceberg_bonds_on=bergs%iceberg_bonds_on
          accel_spring=spring_coef*(M_min/M1)*(R1+R2-r_dist)
          IA_x=IA_x+(accel_spring*(r_dist_x/r_dist))
          IA_y=IA_y+(accel_spring*(r_dist_y/r_dist))
+         
 
-         !MP1
-         !print *, 'in the loop1', berg%iceberg_num, other_berg%iceberg_num,r_dist, bonded
-         !print *, 'in the loop1', spring_coef, (M_min/M1), accel_spring,(R1+R2-r_dist) 
-         !print *, 'in the loop2', IA_x, IA_y, R1, R2,r_dist, berg%iceberg_num,other_berg%iceberg_num
-         !Damping force:
-         !Paralel velocity
-          P_11=(r_dist_x*r_dist_x)/(r_dist**2)
-          P_12=(r_dist_x*r_dist_y)/(r_dist**2)
-          P_21=(r_dist_x*r_dist_y)/(r_dist**2)
-          P_22=(r_dist_y*r_dist_y)/(r_dist**2)
-          !p_ia_coef=radial_damping_coef*(T_min/T1)*(A_min/A1)
-          p_ia_coef=radial_damping_coef*(M_min/M1)
-          p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2)) &
-          + sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
-          P_ia_11=P_ia_11+p_ia_coef*P_11
-          P_ia_12=P_ia_12+p_ia_coef*P_12
-          P_ia_21=P_ia_21+p_ia_coef*P_21
-          P_ia_22=P_ia_22+p_ia_coef*P_22
-          P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
-          P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
+        if (r_dist < 5*(R1+R2)) then
+          !MP1
+          !print *, 'in the loop1', berg%iceberg_num, other_berg%iceberg_num,r_dist, bonded, IA_x, IA_y
+          !print *, 'in the loop1', spring_coef, (M_min/M1), accel_spring,(R1+R2-r_dist) 
+          !print *, 'in the loop2', IA_x, IA_y, R1, R2,r_dist, berg%iceberg_num,other_berg%iceberg_num
+          !Damping force:
+          !Paralel velocity
+           P_11=(r_dist_x*r_dist_x)/(r_dist**2)
+           P_12=(r_dist_x*r_dist_y)/(r_dist**2)
+           P_21=(r_dist_x*r_dist_y)/(r_dist**2)
+           P_22=(r_dist_y*r_dist_y)/(r_dist**2)
+           !p_ia_coef=radial_damping_coef*(T_min/T1)*(A_min/A1)
+           p_ia_coef=radial_damping_coef*(M_min/M1)
+           p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2)) &
+           + sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
+          
+           P_ia_11=P_ia_11+p_ia_coef*P_11
+           P_ia_12=P_ia_12+p_ia_coef*P_12
+           P_ia_21=P_ia_21+p_ia_coef*P_21
+           P_ia_22=P_ia_22+p_ia_coef*P_22
+           P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
+           P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
+           !print *, 'Paralel: ',berg%iceberg_num,  p_ia_coef, IA_x, P_ia_11, P_ia_21,P_ia_12, P_ia_22
 
-
-          !Normal velocities
-          P_11=1-P_11  ;  P_12=-P_12 ; P_22=1-P_22
-          !p_ia_coef=tangental_damping_coef*(T_min/T1)*(A_min/A1)
-          p_ia_coef=tangental_damping_coef*(M_min/M1)
-          p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2))  &
-          + sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
-          P_ia_11=P_ia_11+p_ia_coef*P_11
-          P_ia_12=P_ia_12+p_ia_coef*P_12
-          P_ia_21=P_ia_21+p_ia_coef*P_21
-          P_ia_22=P_ia_22+p_ia_coef*P_22
-          P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
-          P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
-
-          !print *, 'P_11',P_11
-          !print *, 'P_21',P_21
-          !print *, 'P_12',P_12
-          !print *, 'P_22',P_22
+           !Normal velocities
+           P_11=1-P_11  ;  P_12=-P_12 ; P_21= -P_21 ;    P_22=1-P_22
+           !p_ia_coef=tangental_damping_coef*(T_min/T1)*(A_min/A1)
+           p_ia_coef=tangental_damping_coef*(M_min/M1)
+           p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2))  &
+           + sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
+           P_ia_11=P_ia_11+p_ia_coef*P_11
+           P_ia_12=P_ia_12+p_ia_coef*P_12
+           P_ia_21=P_ia_21+p_ia_coef*P_21
+           P_ia_22=P_ia_22+p_ia_coef*P_22
+           P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
+           P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
+           !print *, 'Perp: ',berg%iceberg_num,  p_ia_coef, IA_x, P_ia_11, P_ia_21,P_ia_12, P_ia_22
+           !print *, 'P_11',P_11
+           !print *, 'P_21',P_21
+           !print *, 'P_12',P_12
+           !print *, 'P_22',P_22
+          endif
         endif
       endif
 
@@ -521,7 +525,7 @@ endif
 
 ! Interactive spring acceleration - (Does the spring part need to be called twice?)
 if (interactive_icebergs_on) then
-           call Interactive_force(bergs, berg, IA_x, IA_y, uvel0, vvel0, uvel0, vvel0, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y) ! Spring forces, Made by Alon.
+           call interactive_force(bergs, berg, IA_x, IA_y, uvel0, vvel0, uvel0, vvel0, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y) ! Spring forces, Made by Alon.
            if (.not.Runge_not_Verlet) then
                axn=axn + IA_x
                ayn=ayn + IA_y
@@ -583,7 +587,7 @@ endif
 
 if (interactive_icebergs_on) then
    if (itloop>1) then
-        call Interactive_force(bergs, berg, IA_x, IA_y, us, vs, uvel0, vvel0, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y) ! Spring forces, Made by Alon.
+        call interactive_force(bergs, berg, IA_x, IA_y, uvel0, vvel0, us,vs, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y) ! Spring forces, Made by Alon.
     endif
      if (beta>0.) then ! If implicit, use u_star, v_star rather than RK4 latest
          RHS_x=RHS_x -(((P_ia_11*u_star)+(P_ia_12*v_star))-P_ia_times_u_x) 
@@ -593,7 +597,6 @@ if (interactive_icebergs_on) then
          RHS_y=RHS_y - (((P_ia_21*uvel)+(P_ia_22*vvel))-P_ia_times_u_y)       
     endif
     !print *,'Before calculation:', berg%iceberg_num, IA_x, IA_y, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y
-    !print *,'Before calculation:', berg%iceberg_num, itloop, IA_x, IA_y
 endif
 
 
@@ -612,11 +615,24 @@ endif
       endif
 
       if (interactive_icebergs_on) then
-            A11=A11+P_ia_11
-            A12=A12+P_ia_12
-            A21=A21+P_ia_21
-            A22=A22+P_ia_22
+            A11=A11+(dt*P_ia_11)
+            A12=A12+(dt*P_ia_12)
+            A21=A21+(dt*P_ia_21)
+            A22=A22+(dt*P_ia_22)
      endif
+
+     !This is for testing the code using only interactive forces
+     if (bergs%only_interactive_forces) then
+       RHS_x=(IA_x/2) -(((P_ia_11*u_star)+(P_ia_12*v_star))-P_ia_times_u_x) 
+       RHS_y=(IA_y/2) -(((P_ia_21*u_star)+(P_ia_22*v_star))-P_ia_times_u_y) 
+       A11=1+(dt*P_ia_11)
+       A12=(dt*P_ia_12)
+       A21=(dt*P_ia_21)
+       A22=1+(dt*P_ia_22)
+      !print *,'Other', berg%iceberg_num, P_ia_12,u_star, P_ia_times_u_x, P_ia_11, dt
+     endif
+
+
 
       detA=1./((A11*A22)-(A12*A21))
       ax=detA*(A22*RHS_x-A12*RHS_y)
@@ -633,8 +649,8 @@ endif
       uveln=u_star+dt*ax        ! Alon
       vveln=v_star+dt*ay        ! Alon
 
+      !print *,'IN loop', berg%iceberg_num, RHS_x,  A11, A12, A21, A22, ax, itloop, uveln
   enddo ! itloop
- 
 
 !Saving the totally explicit part of the acceleration to use in finding the next position and u_star -Alon
     axn=0.
@@ -651,9 +667,17 @@ endif
       axn=axn+f_cori*vveln
       ayn=ayn-f_cori*uveln
     endif
+
+     !This is for testing the code using only interactive forces
+     if (bergs%only_interactive_forces) then
+       axn=IA_x/2
+       ayn=IA_y/2
+     endif
+
     bxn= ax-(axn/2) !Alon
     byn= ay-(ayn/2) !Alon
 
+    !print *,'After1', berg%iceberg_num, axn, bxn, uveln
  
   ! Limit speed of bergs based on a CFL criteria
   if (bergs%speed_limit>0.) then
