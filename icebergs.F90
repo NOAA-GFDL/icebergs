@@ -204,7 +204,7 @@ iceberg_bonds_on=bergs%iceberg_bonds_on
   P_ia_times_u_x=0. ; P_ia_times_u_y=0.
 
   bonded=.false. !Unbonded iceberg interactions
-  do grdj = berg%jne-1,berg%jne+1 ; do grdi = berg%ine-1,berg%ine+1
+  do grdj = berg%jne-2,berg%jne+2 ; do grdi = berg%ine-2,berg%ine+2  !Note: need  to make sure this is wide enough, but less than the halo width
     other_berg=>bergs%list(grdi,grdj)%first
     do while (associated(other_berg)) ! loop over all other bergs  
       call calculate_force(bergs,berg,other_berg,IA_x, IA_y, u0, v0, u1, v1, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y, bonded) 
@@ -273,7 +273,7 @@ iceberg_bonds_on=bergs%iceberg_bonds_on
         M1=berg%mass 
         A1=L1*W1 
         R1=sqrt(A1/pi) ! Interaction radius of the iceberg (assuming circular icebergs)
-        lon1=berg%lon; lat1=berg%lat
+        lon1=berg%lon_new; lat1=berg%lat_new
         !call rotpos_to_tang(lon1,lat1,x1,y1)
 
               
@@ -286,7 +286,8 @@ iceberg_bonds_on=bergs%iceberg_bonds_on
         v2=other_berg%vvel_old !Old values are used to make it order invariant 
         A2=L2*W2
         R2=sqrt(A2/pi) ! Interaction radius of the other iceberg
-        lon2=other_berg%lon_old; lat2=other_berg%lat_old !Old values are used to make it order invariant
+        lon2=other_berg%lon_new; lat2=other_berg%lat_new !Old values are used to make it order invariant
+
         !call rotpos_to_tang(lon2,lat2,x2,y2)
 
         dlon=lon1-lon2
@@ -300,6 +301,12 @@ iceberg_bonds_on=bergs%iceberg_bonds_on
         r_dist_y=dlat*(pi/180)*Rearth
         r_dist=sqrt( (r_dist_x**2) + (r_dist_y**2) )
 
+        
+          if (berg%iceberg_num .eq. 1) then
+            print *, 'Comparing longitudes: ', lon1, lon2, r_dist_x, dlon, r_dist
+            print *, 'Outside, iceberg_num, r_dist', berg%iceberg_num, r_dist,bonded
+            print *, 'Halo_status', berg%halo_berg,other_berg%halo_berg 
+          endif
         !print *, 'outside the loop',R1, R2,r_dist, bonded
        !call overlap_area(R1,R2,r_dist,A_o,trapped)
        !T_min=min(T1,T2)
@@ -315,8 +322,12 @@ iceberg_bonds_on=bergs%iceberg_bonds_on
          
 
         if (r_dist < 5*(R1+R2)) then
+          
           !MP1
-          !print *, 'in the loop1', berg%iceberg_num, other_berg%iceberg_num,r_dist, bonded, IA_x, IA_y
+          if (berg%iceberg_num .eq. 1) then
+            print *,  '************************************************************'
+            print *, 'INSIDE, r_dist', berg%iceberg_num, r_dist, bonded
+          endif
           !print *, 'in the loop1', spring_coef, (M_min/M1), accel_spring,(R1+R2-r_dist) 
           !print *, 'in the loop2', IA_x, IA_y, R1, R2,r_dist, berg%iceberg_num,other_berg%iceberg_num
           !Damping force:
@@ -629,7 +640,6 @@ endif
        A12=(dt*P_ia_12)
        A21=(dt*P_ia_21)
        A22=1+(dt*P_ia_22)
-      !print *,'Other', berg%iceberg_num, P_ia_12,u_star, P_ia_times_u_x, P_ia_11, dt
      endif
 
 
@@ -648,8 +658,15 @@ endif
 
       uveln=u_star+dt*ax        ! Alon
       vveln=v_star+dt*ay        ! Alon
-
-      !print *,'IN loop', berg%iceberg_num, RHS_x,  A11, A12, A21, A22, ax, itloop, uveln
+!MP4
+  !    if (berg%iceberg_num .eq. 1) then
+  !      print *, '***************************************************'
+  !      print *,'Iceberg_num, itloop', berg%iceberg_num, itloop
+  !      print *, 'P matrix:', P_ia_11, P_ia_12,P_ia_21,P_ia_22,P_ia_times_u_x, P_ia_times_u_x 
+  !      print *,'A_matrix', A11, A12, A21, A22 
+  !      print *,'IA_x IA_y', IA_x, IA_y 
+  !      print *, 'RHS, ustar, uvel,ax: ', RHS_x, u_star,uveln, ax
+  !    endif
   enddo ! itloop
 
 !Saving the totally explicit part of the acceleration to use in finding the next position and u_star -Alon
@@ -670,14 +687,14 @@ endif
 
      !This is for testing the code using only interactive forces
      if (bergs%only_interactive_forces) then
-       axn=IA_x/2
-       ayn=IA_y/2
+       axn=IA_x
+       ayn=IA_y
      endif
 
     bxn= ax-(axn/2) !Alon
     byn= ay-(ayn/2) !Alon
 
-    !print *,'After1', berg%iceberg_num, axn, bxn, uveln
+    if (berg%iceberg_num .eq. 1)   print *,'axn, bxn, uveln:', axn, bxn, uveln
  
   ! Limit speed of bergs based on a CFL criteria
   if (bergs%speed_limit>0.) then
@@ -2351,20 +2368,21 @@ integer :: grdi, grdj
        ! Positions and velocity is updated by
        ! X2 = X1+dt*V1+((dt^2)/2)*a_n +((dt^2)/2)*b_n = X1+dt*u_star +((dt^2)/2)*b_n 
        ! V2 = V1+dt/2*a_n +dt/2*a_np1 +dt*b_n = u_star + dt/2*a_np1 + dt*b_np1 = u_star +dt*ax
-  
+ 
+      !*************************************************************************************************** 
        !print *, 'you are here!'
-  
+!MP5
+       !call update_verlet_position(bergs,berg,i1,j1)
+
         lon1=berg%lon; lat1=berg%lat
         if (on_tangential_plane) call rotpos_to_tang(lon1,lat1,x1,y1)
         dxdl1=r180_pi/(Rearth*cos(lat1*pi_180))
         dydl=r180_pi/Rearth
         uvel1=berg%uvel; vvel1=berg%vvel
-  
+
         ! Loading past acceleartions - Alon
         axn=berg%axn; ayn=berg%ayn !Alon
-        bxn=berg%bxn; byn=berg%byn !Alon
-  
-  
+        bxn=berg%bxn; byn=berg%byn !Alon 
   
         ! Velocities used to update the position
         uvel2=uvel1+(dt_2*axn)+(dt_2*bxn)                    !Alon
@@ -2372,7 +2390,6 @@ integer :: grdi, grdj
   
         if (on_tangential_plane) call rotvec_to_tang(lon1,uvel2,vvel2,xdot2,ydot2)
         u2=uvel2*dxdl1; v2=vvel2*dydl
-  
   
         ! Solving for new position
         if (on_tangential_plane) then
@@ -2382,20 +2399,24 @@ integer :: grdi, grdj
           lonn=lon1+(dt*u2) ; latn=lat1+(dt*v2)  !Alon
         endif
         dxdln=r180_pi/(Rearth*cos(latn*pi_180))
-  
+ 
+!       print *, 'TEST2: ', lonn, latn, berg%iceberg_num
+
         ! Turn the velocities into u_star, v_star.(uvel3 is v_star) - Alon (not sure how this works with tangent plane)
         uvel3=uvel1+(dt_2*axn)                  !Alon
         vvel3=vvel1+(dt_2*ayn)                  !Alon
   
   
         ! Adjusting mass...                      Alon decided to move this before calculating the new velocities (so that acceleration can be a fn(r_np1)
+        !MP3
+        !print *, 'before the bounce.!',mpp_pe(),berg%iceberg_num,lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag 
         i=i1;j=j1;xi=berg%xi;yj=berg%yj
         call adjust_index_and_ground(grd, lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag)  !Alon:"unclear which velocity to use here?"
         !call adjust_index_and_ground(grd, lonn, latn, uvel1, vvel1, i, j, xi, yj, bounced, error_flag)  !Alon:"unclear which velocity to use here?"
 
         ! If the iceberg bounces off the land, then its velocity and acceleration are set to zero
         if (bounced) then
-       !print *, 'you have been bounce: big time!',lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag 
+        print *, 'you have been bounce: big time!',mpp_pe(),berg%iceberg_num,lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag 
                 axn=0. ; ayn=0.
                 bxn=0. ; byn=0.
                 uvel3=0.; vvel3=0.
@@ -2421,7 +2442,10 @@ integer :: grdi, grdj
      !  uveln=uvel4*dxdln; vveln=vvel4*dydl    !Converted to degrees.  (Perhaps this should not be here)
         uveln=uvel4
         vveln=vvel4 
-  
+
+        print *, 'New velocity: ', uveln, vveln
+
+
         ! Debugging
         if (.not.error_flag) then
           if (.not. is_point_in_cell(bergs%grd, lonn, latn, i, j)) error_flag=.true.
@@ -2500,10 +2524,20 @@ integer :: grdi, grdj
     do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
       berg=>bergs%list(grdi,grdj)%first
       do while (associated(berg)) ! loop over all bergs
+      
+       lonn=0. ; latn =0.
+       call update_verlet_position(bergs,berg,lonn, latn) 
+
+       if (berg%iceberg_num .eq. 1) then
+         print *, 'TEST2:' , berg%lon, berg%lat
+         print *, 'test1: ', lonn, latn
+       endif
 
         !Updating iceberg positions and velocities
-        berg%lon_old=berg%lon
-        berg%lat_old=berg%lat
+        berg%lon_new=lonn    ! This is the t=n+1 position (one step ahead)
+        berg%lat_new=latn
+        !berg%lon_new=berg%lon
+        !berg%lat_new=berg%lat
         berg%uvel_old=berg%uvel
         berg%vvel_old=berg%vvel
         berg=>berg%next
@@ -2513,6 +2547,75 @@ integer :: grdi, grdj
 
 
 contains
+
+!#######################################################################
+!MP6
+subroutine update_verlet_position(bergs,berg,lonn, latn)
+type(icebergs), intent(in), pointer :: bergs 
+type(iceberg), intent(in), pointer :: berg 
+real, intent(out) :: lonn, latn
+!Local variable
+real :: uvel3, vvel3
+real :: lon1, lat1, dxdl1, dydl
+real :: uvel1, vvel1, uvel2, vvel2
+real :: axn, ayn, bxn, byn 
+real :: u2, v2, x1, y1, xn, yn
+integer :: i_temp, j_temp
+integer :: i1, j1
+real :: xi_temp, yj_temp, dx
+logical :: on_tangential_plane
+
+      i1=berg%ine
+      j1=berg%jne
+
+      on_tangential_plane=.false.
+      if (berg%lat>89.) on_tangential_plane=.true.
+
+
+        lon1=berg%lon; lat1=berg%lat
+        if (on_tangential_plane) call rotpos_to_tang(lon1,lat1,x1,y1)
+        dxdl1=r180_pi/(Rearth*cos(lat1*pi_180))
+        dydl=r180_pi/Rearth
+        uvel1=berg%uvel; vvel1=berg%vvel
+
+
+        ! Loading past acceleartions - Alon
+        axn=berg%axn; ayn=berg%ayn !Alon
+        bxn=berg%bxn; byn=berg%byn !Alon 
+  
+        ! Velocities used to update the position
+        uvel2=uvel1+(dt_2*axn)+(dt_2*bxn)                    !Alon
+        vvel2=vvel1+(dt_2*ayn)+(dt_2*byn)                    !Alon
+
+        dx=(dt*(uvel1+(dt_2*axn)+(dt_2*bxn)))
+        print *, 'dx= ' ,dx,  dt, dt_2
+
+
+        if (on_tangential_plane) call rotvec_to_tang(lon1,uvel2,vvel2,xdot2,ydot2)
+        u2=uvel2*dxdl1; v2=vvel2*dydl
+  
+        ! Solving for new position
+        if (on_tangential_plane) then
+          xn=x1+(dt*xdot2) ; yn=y1+(dt*ydot2)             !Alon
+          call rotpos_from_tang(xn,yn,lonn,latn)
+        else
+          lonn=lon1+(dt*u2) ; latn=lat1+(dt*v2)  !Alon
+        endif
+        dxdln=r180_pi/(Rearth*cos(latn*pi_180))
+  
+
+        ! Turn the velocities into u_star, v_star.(uvel3 is v_star) - Alon (not sure how this works with tangent plane)
+        uvel3=uvel1+(dt_2*axn)                  !Alon
+        vvel3=vvel1+(dt_2*ayn)                  !Alon
+
+        ! Adjusting mass...
+        !MP3
+        i_temp=i1;  j_temp=j1;  xi_temp = berg%xi;  yj_temp = berg%yj
+        call adjust_index_and_ground(grd, lonn, latn, uvel3, vvel3, i_temp, j_temp, xi_temp, yj_temp, bounced, error_flag)  !Alon:"unclear which velocity to use here?"
+
+end subroutine update_verlet_position
+
+!#######################################################################
 
   subroutine rotpos_from_tang(x, y, lon, lat)
   ! Arguments
