@@ -613,8 +613,8 @@ contains
         localberg%jne=j
         localberg%lon=bilin(grd, grd%lon, i, j, localberg%xi, localberg%yj)
         localberg%lat=bilin(grd, grd%lat, i, j, localberg%xi, localberg%yj)
-        localberg%lon_new=bilin(grd, grd%lon, i, j, localberg%xi, localberg%yj) !Alon
-        localberg%lat_new=bilin(grd, grd%lat, i, j, localberg%xi, localberg%yj) !Alon
+        localberg%lon_old=bilin(grd, grd%lon, i, j, localberg%xi, localberg%yj) !Alon
+        localberg%lat_old=bilin(grd, grd%lat, i, j, localberg%xi, localberg%yj) !Alon
         localberg%mass=bergs%initial_mass(1)
         localberg%thickness=bergs%initial_thickness(1)
         localberg%width=bergs%initial_width(1)
@@ -846,8 +846,8 @@ integer, allocatable, dimension(:) :: ine,       &
          localberg%ayn=ayn(k) !Alon
          localberg%uvel_old=uvel(k) !Alon
          localberg%vvel_old=vvel(k) !Alon
-         localberg%lon_new=lon(k) !Alon
-         localberg%lat_new=lat(k) !Alon
+         localberg%lon_old=lon(k) !Alon
+         localberg%lat_old=lat(k) !Alon
          localberg%bxn=bxn(k) !Alon
          localberg%byn=byn(k) !Alon
          localberg%thickness=thickness(k)
@@ -937,8 +937,8 @@ contains
         localberg%jne=j
         localberg%lon=bilin(grd, grd%lon, i, j, localberg%xi, localberg%yj)
         localberg%lat=bilin(grd, grd%lat, i, j, localberg%xi, localberg%yj)
-        localberg%lon_new=bilin(grd, grd%lon, i, j, localberg%xi, localberg%yj) !Alon
-        localberg%lat_new=bilin(grd, grd%lat, i, j, localberg%xi, localberg%yj) !Alon
+        localberg%lon_old=bilin(grd, grd%lon, i, j, localberg%xi, localberg%yj) !Alon
+        localberg%lat_old=bilin(grd, grd%lat, i, j, localberg%xi, localberg%yj) !Alon
         localberg%mass=bergs%initial_mass(1)
         localberg%thickness=bergs%initial_thickness(1)
         localberg%width=bergs%initial_width(1)
