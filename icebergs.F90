@@ -118,6 +118,7 @@ integer :: stdlogunit, stderrunit
   if (really_debug) call print_bergs(stderrunit,bergs,'icebergs_init, initial status')
 
   if (bergs%iceberg_bonds_on) then
+    call update_halo_icebergs(bergs)
     if (bergs%manually_initialize_bonds) then
       call initialize_iceberg_bonds(bergs)
     else

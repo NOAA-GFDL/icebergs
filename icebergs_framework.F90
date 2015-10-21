@@ -300,8 +300,8 @@ integer :: traj_write_hrs=480 ! Period between writing sampled trajectories to d
 integer :: verbose_hrs=24 ! Period between verbose messages
 integer :: max_bonds=6 ! Maximum number of iceberg bond passed between processors
 real :: rho_bergs=850. ! Density of icebergs
-real :: spring_coef=3.e-9  ! Spring contant for iceberg interactions (this seems to be the highest stable value)
-real :: bond_coef=3.e-9  ! Spring contant for iceberg bonds - not being used right now
+real :: spring_coef=1.e-8  ! Spring contant for iceberg interactions (this seems to be the highest stable value)
+real :: bond_coef=1.e-8 ! Spring contant for iceberg bonds - not being used right now
 real :: radial_damping_coef=1.e-4     ! Coef for relative iceberg motion damping (radial component) -Alon
 real :: tangental_damping_coef=2.e-5     ! Coef for relative iceberg motion damping (tangental component) -Alon
 real :: LoW_ratio=1.5 ! Initial ratio L/W for newly calved icebergs
@@ -851,7 +851,6 @@ halo_debugging=bergs%halo_debugging  ! Must be less than current halo value used
    grd=>bergs%grd
 
 
-
 !For debugging
 if (halo_debugging) then
   do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
@@ -864,7 +863,6 @@ if (halo_debugging) then
   ! Use when debugging:
   call show_all_bonds(bergs)
 endif
-
 
 
 ! Step 1: Clear the current halos
@@ -903,6 +901,7 @@ endif
     nbergs_start=count_bergs(bergs)
   endif
 
+  call mpp_sync_self()
 !#######################################################
 
 ! Step 2: Updating the halos  - This code is mostly copied from send_to_other_pes
@@ -911,7 +910,6 @@ endif
   ! Find number of bergs that headed east/west
   nbergs_to_send_e=0
   nbergs_to_send_w=0
-
   !Bergs on eastern side of the processor
   do grdj = grd%jsc,grd%jec ; do grdi = grd%iec-halo_width+1,grd%iec  
     this=>bergs%list(grdi,grdj)%first
@@ -927,6 +925,7 @@ endif
     enddo
   enddo; enddo
 
+
   !Bergs on the western side of the processor
   do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%isc+halo_width-1 
     this=>bergs%list(grdi,grdj)%first
@@ -940,7 +939,6 @@ endif
        kick_the_bucket%halo_berg=current_halo_status
     enddo 
   enddo; enddo
-
 
 
   ! Send bergs east
@@ -959,7 +957,6 @@ endif
     endif
   endif
 
-  call mpp_sync_self()
   ! Receive bergs from west
   if (grd%pe_W.ne.NULL_PE) then
     nbergs_rcvd_from_w=-999
@@ -1101,11 +1098,11 @@ endif
     nbergs_rcvd_from_n=0
   endif
 
-  call mpp_sync_self()
 
 
 !For debugging
 if (halo_debugging) then
+  call mpp_sync_self()
   do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
@@ -1114,8 +1111,6 @@ if (halo_debugging) then
     enddo
   enddo; enddo
 endif
-
-
 
 end subroutine update_halo_icebergs
 
@@ -2316,13 +2311,12 @@ type(bond) , pointer :: current_bond
         if  (associated(current_bond%other_berg)) then
           current_bond%other_berg_ine=current_bond%other_berg%ine
           current_bond%other_berg_jne=current_bond%other_berg%jne
-          current_bond=>current_bond%next_bond
         else
           if (berg%halo_berg .lt. 0.5) then     
             call error_mesg('diamonds, bond address update', 'other berg in bond not assosiated!', FATAL)
           endif
-          current_bond=>current_bond%next_bond
         endif
+        current_bond=>current_bond%next_bond
       enddo
       berg=>berg%next
     enddo
@@ -2349,13 +2343,16 @@ type(bond) , pointer :: current_bond
     do while (associated(berg)) ! loop over all bergs
       current_bond=>berg%first_bond
       do while (associated(current_bond)) ! loop over all bonds
-
         print *, 'Show Bond1 :', berg%iceberg_num, current_bond%other_berg_num, current_bond%other_berg_ine, current_bond%other_berg_jne,  mpp_pe()
         if  (associated(current_bond%other_berg)) then
-        print *, 'Show Bond2 :', berg%iceberg_num, current_bond%other_berg_num, current_bond%other_berg%ine, current_bond%other_berg%jne,  mpp_pe()
-                print *, 'Bond matching', current_bond%other_berg%iceberg_num, current_bond%other_berg_num, mpp_pe()
+          if (current_bond%other_berg%iceberg_num .ne. current_bond%other_berg_num) then
+            print *, 'Bond matching', berg%iceberg_num,current_bond%other_berg%iceberg_num, current_bond%other_berg_num, mpp_pe()
+            call error_mesg('diamonds, show all bonds:', 'The bonds are not matching properly!', FATAL)
+          endif
+        else
+            print *, 'This bond has an non-assosiated other berg :', berg%iceberg_num, current_bond%other_berg_num, current_bond%other_berg_ine, current_bond%other_berg_jne,  mpp_pe()
         endif
-       current_bond=>current_bond%next_bond
+        current_bond=>current_bond%next_bond
       enddo
       berg=>berg%next
     enddo
@@ -2430,11 +2427,11 @@ bond_matched=.false.
               print * ,'non-halo berg unmatched: ', berg%iceberg_num, mpp_pe(), current_bond%other_berg_num, current_bond%other_berg_ine 
               call error_mesg('diamonds, connect_all_bonds', 'A non-halo bond is missing!!!', FATAL)
             else  ! This is not a problem if the partner berg is not yet in the halo
-              if (  (current_bond%other_berg_ine .gt.grd%isd-1) .and. (current_bond%other_berg_ine .lt.grd%ied+1) &
-                .and.  (current_bond%other_berg_jne .gt.grd%jsd-1) .and. (current_bond%other_berg_jne .lt.grd%jed+1) ) then      
-                print * ,'halo berg unmatched: ',mpp_pe(),  berg%iceberg_num, current_bond%other_berg_num, current_bond%other_berg_ine,current_bond%other_berg_jne 
-                call error_mesg('diamonds, connect_all_bonds', 'A halo bond is missing!!!', WARNING)
-              endif
+              !if (  (current_bond%other_berg_ine .gt.grd%isd-1) .and. (current_bond%other_berg_ine .lt.grd%ied+1) &
+                !.and.  (current_bond%other_berg_jne .gt.grd%jsd-1) .and. (current_bond%other_berg_jne .lt.grd%jed+1) ) then      
+                !print * ,'halo berg unmatched: ',mpp_pe(),  berg%iceberg_num, current_bond%other_berg_num, current_bond%other_berg_ine,current_bond%other_berg_jne 
+                !call error_mesg('diamonds, connect_all_bonds', 'A halo bond is missing!!!', WARNING)
+              !endif
             endif
           endif
         endif
@@ -2449,7 +2446,6 @@ bond_matched=.false.
     nbonds=0
     call count_bonds(bergs, nbonds,check_bond_quality)
   endif
-
 end subroutine connect_all_bonds
 
 
@@ -2963,14 +2959,16 @@ end function find_cell_by_search
 
 ! ##############################################################################
 
-subroutine find_individual_iceberg(bergs,iceberg_num, ine, jne, berg_found)
+subroutine find_individual_iceberg(bergs,iceberg_num, ine, jne, berg_found, search_data_domain)
 type(icebergs), pointer :: bergs
 type(iceberg), pointer :: this
 type(icebergs_gridded), pointer :: grd
 integer :: grdi, grdj
 integer, intent(in) :: iceberg_num
+logical, intent(in) :: search_data_domain
 integer, intent(out) :: ine, jne
 real, intent(out) :: berg_found
+integer :: ilim1, ilim2, jlim1, jlim2
 
 berg_found=0.0
 ine=999
@@ -2978,7 +2976,16 @@ jne=999
   ! For convenience
     grd=>bergs%grd
     
-    do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+    if (search_data_domain) then
+        ilim1 = grd%isd  ; ilim2=grd%ied  ; jlim1 = grd%jsd  ; jlim2=grd%jed
+    else
+        ilim1 = grd%isc  ; ilim2=grd%iec  ; jlim1 = grd%jsc  ; jlim2=grd%jec
+    endif
+
+
+    do grdj = jlim1, jlim2 ; do grdi = ilim1, ilim2
+    !do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+    !do grdj = bergs%grd%jsd,bergs%grd%jed ; do grdi = bergs%grd%isd,bergs%grd%ied
       this=>bergs%list(grdi,grdj)%first
       do while (associated(this))
         if (iceberg_num .eq. this%iceberg_num) then
