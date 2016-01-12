@@ -684,88 +684,89 @@ integer, allocatable, dimension(:) :: ine,       &
      allocate(ine(nbergs_in_file))
      allocate(jne(nbergs_in_file))
      allocate(start_year(nbergs_in_file))
+  endif
 
-     call read_unlimited_axis(filename,'lon',lon,domain=grd%domain)
-     call read_unlimited_axis(filename,'lat',lat,domain=grd%domain)
-     call read_unlimited_axis(filename,'lon_old',lon_old,domain=grd%domain) !Alon
-     call read_unlimited_axis(filename,'lat_old',lat_old,domain=grd%domain) !Alon
-     call read_unlimited_axis(filename,'uvel',uvel,domain=grd%domain)
-     call read_unlimited_axis(filename,'vvel',vvel,domain=grd%domain)
-     call read_unlimited_axis(filename,'mass',mass,domain=grd%domain)
-     call read_unlimited_axis(filename,'axn',axn,domain=grd%domain) !Alon
-     call read_unlimited_axis(filename,'ayn',ayn,domain=grd%domain) !Alon
-     call read_unlimited_axis(filename,'uvel_old',uvel_old,domain=grd%domain) !Alon
-     call read_unlimited_axis(filename,'vvel_old',vvel_old,domain=grd%domain) !Alon
-     call read_unlimited_axis(filename,'bxn',bxn,domain=grd%domain) !Alon
-     call read_unlimited_axis(filename,'byn',byn,domain=grd%domain) !Alon
-     call read_unlimited_axis(filename,'thickness',thickness,domain=grd%domain)
-     call read_unlimited_axis(filename,'width',width,domain=grd%domain)
-     call read_unlimited_axis(filename,'length',length,domain=grd%domain)
-     call read_unlimited_axis(filename,'start_lon',start_lon,domain=grd%domain)
-     call read_unlimited_axis(filename,'start_lat',start_lat,domain=grd%domain)
-     call read_unlimited_axis(filename,'start_day',start_day,domain=grd%domain)
-     call read_unlimited_axis(filename,'start_mass',start_mass,domain=grd%domain)
-     call read_unlimited_axis(filename,'mass_scaling',mass_scaling,domain=grd%domain)
-     call read_unlimited_axis(filename,'mass_of_bits',mass_of_bits,domain=grd%domain)
-     call read_unlimited_axis(filename,'heat_density',heat_density,domain=grd%domain)
+  call read_unlimited_axis(filename,'lon',lon,domain=grd%domain)
+  call read_unlimited_axis(filename,'lat',lat,domain=grd%domain)
+  call read_unlimited_axis(filename,'lon_old',lon_old,domain=grd%domain) !Alon
+  call read_unlimited_axis(filename,'lat_old',lat_old,domain=grd%domain) !Alon
+  call read_unlimited_axis(filename,'uvel',uvel,domain=grd%domain)
+  call read_unlimited_axis(filename,'vvel',vvel,domain=grd%domain)
+  call read_unlimited_axis(filename,'mass',mass,domain=grd%domain)
+  call read_unlimited_axis(filename,'axn',axn,domain=grd%domain) !Alon
+  call read_unlimited_axis(filename,'ayn',ayn,domain=grd%domain) !Alon
+  call read_unlimited_axis(filename,'uvel_old',uvel_old,domain=grd%domain) !Alon
+  call read_unlimited_axis(filename,'vvel_old',vvel_old,domain=grd%domain) !Alon
+  call read_unlimited_axis(filename,'bxn',bxn,domain=grd%domain) !Alon
+  call read_unlimited_axis(filename,'byn',byn,domain=grd%domain) !Alon
+  call read_unlimited_axis(filename,'thickness',thickness,domain=grd%domain)
+  call read_unlimited_axis(filename,'width',width,domain=grd%domain)
+  call read_unlimited_axis(filename,'length',length,domain=grd%domain)
+  call read_unlimited_axis(filename,'start_lon',start_lon,domain=grd%domain)
+  call read_unlimited_axis(filename,'start_lat',start_lat,domain=grd%domain)
+  call read_unlimited_axis(filename,'start_day',start_day,domain=grd%domain)
+  call read_unlimited_axis(filename,'start_mass',start_mass,domain=grd%domain)
+  call read_unlimited_axis(filename,'mass_scaling',mass_scaling,domain=grd%domain)
+  call read_unlimited_axis(filename,'mass_of_bits',mass_of_bits,domain=grd%domain)
+  call read_unlimited_axis(filename,'heat_density',heat_density,domain=grd%domain)
 
-     call read_unlimited_axis(filename,'ine',ine,domain=grd%domain)
-     call read_unlimited_axis(filename,'jne',jne,domain=grd%domain)
-     call read_unlimited_axis(filename,'start_year',start_year,domain=grd%domain)
+  call read_unlimited_axis(filename,'ine',ine,domain=grd%domain)
+  call read_unlimited_axis(filename,'jne',jne,domain=grd%domain)
+  call read_unlimited_axis(filename,'start_year',start_year,domain=grd%domain)
 
-     ! Find approx outer bounds for tile
-     lon0=minval( grd%lon(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
-     lon1=maxval( grd%lon(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
-     lat0=minval( grd%lat(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
-     lat1=maxval( grd%lat(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
-     do k=1, nbergs_in_file
-       localberg%lon=lon(k)
-       localberg%lat=lat(k)
-       if (.not. ignore_ij_restart) then ! read i,j position and avoid the "find" step
-         localberg%ine=ine(k)
-         localberg%jne=jne(k)
-         if ( localberg%ine>=grd%isc .and. localberg%ine<=grd%iec .and. &
-              localberg%jne>=grd%jsc .and.localberg%jne<=grd%jec ) then
-           lres=.true.
-         else
-           lres=.false.
-         endif
-       else ! i,j are not available from the file so we search the grid to find out if we reside on this PE
-         if (use_slow_find) then
-           lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
-         else
-           lres=find_cell_by_search(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
-         endif
-       endif
-       if (really_debug) then
-         write(stderrunit,'(a,i8,a,2f9.4,a,i8)') 'diamonds, read_restart_bergs: berg ',k,' is at ',localberg%lon,localberg%lat,&
-              & ' on PE ',mpp_pe()
-         write(stderrunit,*) 'diamonds, read_restart_bergs: lres = ',lres
-       endif
-       if (lres) then ! true if we reside on this PE grid
-         localberg%uvel=uvel(k)
-         localberg%vvel=vvel(k)
-         localberg%mass=mass(k)
-         localberg%axn=axn(k) !Alon
-         localberg%ayn=ayn(k) !Alon
-         localberg%uvel_old=uvel_old(k) !Alon
-         localberg%vvel_old=vvel_old(k) !Alon
-         localberg%lon_old=lon_old(k) !Alon
-         localberg%lat_old=lat_old(k) !Alon
-         localberg%bxn=bxn(k) !Alon
-         localberg%byn=byn(k) !Alon
-         localberg%thickness=thickness(k)
-         localberg%width=width(k)
-         localberg%length=length(k)
-         localberg%start_lon=start_lon(k)
-         localberg%start_lat=start_lat(k)
-         localberg%start_year=start_year(k)
-         localberg%start_day=start_day(k)
-         localberg%start_mass=start_mass(k)
-         localberg%mass_scaling=mass_scaling(k)
-         localberg%mass_of_bits=mass_of_bits(k)
-         localberg%heat_density=heat_density(k)
-         if (really_debug) lres=is_point_in_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, explain=.true.)
+  ! Find approx outer bounds for tile
+  lon0=minval( grd%lon(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
+  lon1=maxval( grd%lon(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
+  lat0=minval( grd%lat(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
+  lat1=maxval( grd%lat(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
+  do k=1, nbergs_in_file
+    localberg%lon=lon(k)
+    localberg%lat=lat(k)
+    if (.not. ignore_ij_restart) then ! read i,j position and avoid the "find" step
+      localberg%ine=ine(k)
+      localberg%jne=jne(k)
+      if ( localberg%ine>=grd%isc .and. localberg%ine<=grd%iec .and. &
+           localberg%jne>=grd%jsc .and.localberg%jne<=grd%jec ) then
+        lres=.true.
+      else
+        lres=.false.
+      endif
+    else ! i,j are not available from the file so we search the grid to find out if we reside on this PE
+      if (use_slow_find) then
+        lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+      else
+        lres=find_cell_by_search(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+      endif
+    endif
+    if (really_debug) then
+      write(stderrunit,'(a,i8,a,2f9.4,a,i8)') 'diamonds, read_restart_bergs: berg ',k,' is at ',localberg%lon,localberg%lat,&
+           & ' on PE ',mpp_pe()
+      write(stderrunit,*) 'diamonds, read_restart_bergs: lres = ',lres
+    endif
+    if (lres) then ! true if we reside on this PE grid
+      localberg%uvel=uvel(k)
+      localberg%vvel=vvel(k)
+      localberg%mass=mass(k)
+      localberg%axn=axn(k) !Alon
+      localberg%ayn=ayn(k) !Alon
+      localberg%uvel_old=uvel_old(k) !Alon
+      localberg%vvel_old=vvel_old(k) !Alon
+      localberg%lon_old=lon_old(k) !Alon
+      localberg%lat_old=lat_old(k) !Alon
+      localberg%bxn=bxn(k) !Alon
+      localberg%byn=byn(k) !Alon
+      localberg%thickness=thickness(k)
+      localberg%width=width(k)
+      localberg%length=length(k)
+      localberg%start_lon=start_lon(k)
+      localberg%start_lat=start_lat(k)
+      localberg%start_year=start_year(k)
+      localberg%start_day=start_day(k)
+      localberg%start_mass=start_mass(k)
+      localberg%mass_scaling=mass_scaling(k)
+      localberg%mass_of_bits=mass_of_bits(k)
+      localberg%heat_density=heat_density(k)
+      if (really_debug) lres=is_point_in_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, explain=.true.)
          lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
         !call add_new_berg_to_list(bergs%first, localberg, quick=.true.)
          call add_new_berg_to_list(bergs%first, localberg)
@@ -774,6 +775,8 @@ integer, allocatable, dimension(:) :: ine,       &
          call error_mesg('diamonds, read_restart_bergs', 'berg in PE file was not on PE!', FATAL)
        endif
      enddo
+  
+  if(nbergs_in_file > 0) then  
      deallocate(              &
                 lon,          &
                 lat,          &
