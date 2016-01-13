@@ -652,9 +652,11 @@ integer, allocatable, dimension(:) :: ine,       &
   found_restart = find_restart_file(filename_base, filename, multiPErestart, io_tile_id(1))
   call error_mesg('read_restart_bergs_new', 'Using new icebergs restart read', NOTE)
 
-  filename = filename_base
-  call get_field_size(filename,'i',siz, field_found=found, domain=bergs%grd%domain)
-  nbergs_in_file = siz(1)
+  if (found_restart) then
+     filename = filename_base
+     call get_field_size(filename,'i',siz, field_found=found, domain=bergs%grd%domain)
+     nbergs_in_file = siz(1)
+  endif
 
   if(nbergs_in_file > 0) then
      allocate(lon(nbergs_in_file))
@@ -686,33 +688,35 @@ integer, allocatable, dimension(:) :: ine,       &
      allocate(start_year(nbergs_in_file))
   endif
 
-  call read_unlimited_axis(filename,'lon',lon,domain=grd%domain)
-  call read_unlimited_axis(filename,'lat',lat,domain=grd%domain)
-  call read_unlimited_axis(filename,'lon_old',lon_old,domain=grd%domain) !Alon
-  call read_unlimited_axis(filename,'lat_old',lat_old,domain=grd%domain) !Alon
-  call read_unlimited_axis(filename,'uvel',uvel,domain=grd%domain)
-  call read_unlimited_axis(filename,'vvel',vvel,domain=grd%domain)
-  call read_unlimited_axis(filename,'mass',mass,domain=grd%domain)
-  call read_unlimited_axis(filename,'axn',axn,domain=grd%domain) !Alon
-  call read_unlimited_axis(filename,'ayn',ayn,domain=grd%domain) !Alon
-  call read_unlimited_axis(filename,'uvel_old',uvel_old,domain=grd%domain) !Alon
-  call read_unlimited_axis(filename,'vvel_old',vvel_old,domain=grd%domain) !Alon
-  call read_unlimited_axis(filename,'bxn',bxn,domain=grd%domain) !Alon
-  call read_unlimited_axis(filename,'byn',byn,domain=grd%domain) !Alon
-  call read_unlimited_axis(filename,'thickness',thickness,domain=grd%domain)
-  call read_unlimited_axis(filename,'width',width,domain=grd%domain)
-  call read_unlimited_axis(filename,'length',length,domain=grd%domain)
-  call read_unlimited_axis(filename,'start_lon',start_lon,domain=grd%domain)
-  call read_unlimited_axis(filename,'start_lat',start_lat,domain=grd%domain)
-  call read_unlimited_axis(filename,'start_day',start_day,domain=grd%domain)
-  call read_unlimited_axis(filename,'start_mass',start_mass,domain=grd%domain)
-  call read_unlimited_axis(filename,'mass_scaling',mass_scaling,domain=grd%domain)
-  call read_unlimited_axis(filename,'mass_of_bits',mass_of_bits,domain=grd%domain)
-  call read_unlimited_axis(filename,'heat_density',heat_density,domain=grd%domain)
+  if (found_restart) then
+     call read_unlimited_axis(filename,'lon',lon,domain=grd%domain)
+     call read_unlimited_axis(filename,'lat',lat,domain=grd%domain)
+     call read_unlimited_axis(filename,'lon_old',lon_old,domain=grd%domain) !Alon
+     call read_unlimited_axis(filename,'lat_old',lat_old,domain=grd%domain) !Alon
+     call read_unlimited_axis(filename,'uvel',uvel,domain=grd%domain)
+     call read_unlimited_axis(filename,'vvel',vvel,domain=grd%domain)
+     call read_unlimited_axis(filename,'mass',mass,domain=grd%domain)
+     call read_unlimited_axis(filename,'axn',axn,domain=grd%domain) !Alon
+     call read_unlimited_axis(filename,'ayn',ayn,domain=grd%domain) !Alon
+     call read_unlimited_axis(filename,'uvel_old',uvel_old,domain=grd%domain) !Alon
+     call read_unlimited_axis(filename,'vvel_old',vvel_old,domain=grd%domain) !Alon
+     call read_unlimited_axis(filename,'bxn',bxn,domain=grd%domain) !Alon
+     call read_unlimited_axis(filename,'byn',byn,domain=grd%domain) !Alon
+     call read_unlimited_axis(filename,'thickness',thickness,domain=grd%domain)
+     call read_unlimited_axis(filename,'width',width,domain=grd%domain)
+     call read_unlimited_axis(filename,'length',length,domain=grd%domain)
+     call read_unlimited_axis(filename,'start_lon',start_lon,domain=grd%domain)
+     call read_unlimited_axis(filename,'start_lat',start_lat,domain=grd%domain)
+     call read_unlimited_axis(filename,'start_day',start_day,domain=grd%domain)
+     call read_unlimited_axis(filename,'start_mass',start_mass,domain=grd%domain)
+     call read_unlimited_axis(filename,'mass_scaling',mass_scaling,domain=grd%domain)
+     call read_unlimited_axis(filename,'mass_of_bits',mass_of_bits,domain=grd%domain)
+     call read_unlimited_axis(filename,'heat_density',heat_density,domain=grd%domain)
 
-  call read_unlimited_axis(filename,'ine',ine,domain=grd%domain)
-  call read_unlimited_axis(filename,'jne',jne,domain=grd%domain)
-  call read_unlimited_axis(filename,'start_year',start_year,domain=grd%domain)
+     call read_unlimited_axis(filename,'ine',ine,domain=grd%domain)
+     call read_unlimited_axis(filename,'jne',jne,domain=grd%domain)
+     call read_unlimited_axis(filename,'start_year',start_year,domain=grd%domain)
+  endif
 
   ! Find approx outer bounds for tile
   lon0=minval( grd%lon(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
@@ -767,14 +771,14 @@ integer, allocatable, dimension(:) :: ine,       &
       localberg%mass_of_bits=mass_of_bits(k)
       localberg%heat_density=heat_density(k)
       if (really_debug) lres=is_point_in_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, explain=.true.)
-         lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
-        !call add_new_berg_to_list(bergs%first, localberg, quick=.true.)
-         call add_new_berg_to_list(bergs%first, localberg)
-         if (really_debug) call print_berg(stderrunit, bergs%first, 'read_restart_bergs, add_new_berg_to_list')
-       elseif (multiPErestart .and. io_tile_id(1) .lt. 0) then
-         call error_mesg('diamonds, read_restart_bergs', 'berg in PE file was not on PE!', FATAL)
-       endif
-     enddo
+      lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
+      !call add_new_berg_to_list(bergs%first, localberg, quick=.true.)
+      call add_new_berg_to_list(bergs%first, localberg)
+      if (really_debug) call print_berg(stderrunit, bergs%first, 'read_restart_bergs, add_new_berg_to_list')
+    elseif (multiPErestart .and. io_tile_id(1) .lt. 0) then
+      call error_mesg('diamonds, read_restart_bergs', 'berg in PE file was not on PE!', FATAL)
+    endif
+  enddo
   
   if(nbergs_in_file > 0) then  
      deallocate(              &
