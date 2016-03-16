@@ -875,33 +875,23 @@ real, parameter :: perday=1./86400.
         !print *, 'tip_parameter',tip_parameter
         if (Tn<(tip_parameter* min(Wn,Ln)))  then     !note that we use the Thickness instead of the Draft
           if (Wn<Ln) then
-            T=Tn
-            Tn=Wn
-            Wn=T
+            call swap_variables(Tn,Wn)
           else
-            T=Tn
-            Tn=Ln
-            Ln=T
+            call swap_variables(Tn,Ln)
           endif
         endif
       else
         if (bergs%tip_parameter>999.) then     !Use Rolling Scheme 2
           if ( min(Wn,Ln)<sqrt(0.92*(Tn**2)-58.32*Tn) ) then
             if (Wn<Ln) then
-              T=Tn
-              Tn=Wn
-              Wn=T
+              call swap_variables(Tn,Wn)
             else
-              T=Tn
-              Tn=Ln
-              Ln=T
+              call swap_variables(Tn,Ln)
             endif
           endif
         else     !Use Rolling Scheme 3
           if ( max(Wn,Ln)<sqrt(0.92*(Dn**2)+58.32*Dn) ) then
-            T=Tn
-            Tn=Wn
-            Wn=T
+            call swap_variables(Tn,Wn)
           endif
         endif
       end if
@@ -940,6 +930,17 @@ real, parameter :: perday=1./86400.
   
     this=>next
   enddo
+
+  contains
+
+  subroutine swap_variables(x,y)
+  ! Arguments
+  real, intent(inout) :: x, y
+  real :: temp
+  temp=x
+  x=y
+  y=temp
+  end subroutine swap_variables
 
 end subroutine thermodynamics
 
