@@ -727,6 +727,7 @@ real :: M, T, W, L, SST, Vol, Ln, Wn, Tn, nVol, IC, Dn
 real :: Mv, Me, Mb, melt, dvo, dva, dM, Ss, dMe, dMb, dMv
 real :: Mnew, Mnew1, Mnew2, Hocean
 real :: Mbits, nMbits, dMbitsE, dMbitsM, Lbits, Abits, Mbb
+real :: tip_parameter
 integer :: i,j, stderrunit
 type(iceberg), pointer :: this, next
 real, parameter :: perday=1./86400.
@@ -857,15 +858,37 @@ real, parameter :: perday=1./86400.
       call error_mesg('diamonds, thermodynamics', 'berg appears to have grounded!', FATAL)
     endif
 
-    ! Rolling
+    ! Rolling  - The corrected scheme has been included. The old scheme is here for legacy reasons
     Dn=(bergs%rho_bergs/rho_seawater)*Tn ! draught (keel depth)
     if ( Dn>0. ) then
-       if ( max(Wn,Ln)<sqrt(0.92*(Dn**2)+58.32*Dn) ) then
+      if (bergs%use_updated_rolling_scheme) then
+        if (bergs%tip_parameter>0.) then
+                tip_parameter=bergs%tip_parameter
+        else
+          ! Equation 27 from Burton et al 2012, or equivolently, Weeks and Mellor 1979 with constant density
+          tip_parameter=sqrt(6*(bergs%rho_bergs/rho_seawater)*(1-(bergs%rho_bergs/rho_seawater)))   !using default values gives 0.92
+        endif
+        !print *, 'tip_parameter',tip_parameter
+        if (Th<(tip_parameter* min(Wn,Ln)))  then     !note that we use the Thickness instead of the Draft
+          if (Wn<Ln) then
+            T=Tn
+            Tn=Wn
+            Wn=T
+          else
+            T=Tn
+            Tn=Ln
+            Ln=T
+          endif
+        endif
+      else     
+        !print *, 'using old tipping scheme'
+        if ( max(Wn,Ln)<sqrt(0.92*(Dn**2)+58.32*Dn) ) then
           T=Tn
           Tn=Wn
           Wn=T
-          Dn=(bergs%rho_bergs/rho_seawater)*Tn ! re-calculate draught (keel depth) for grounding
+        end if
       end if
+      Dn=(bergs%rho_bergs/rho_seawater)*Tn ! re-calculate draught (keel depth) for grounding
     endif
 
     ! Store the new state of iceberg (with L>W)
