@@ -858,43 +858,38 @@ real, parameter :: perday=1./86400.
       call error_mesg('diamonds, thermodynamics', 'berg appears to have grounded!', FATAL)
     endif
 
-    ! Rolling 
+   ! Rolling 
    !There are now 3 iceberg rolling schemes:
    !1) Rolling based on aspect ratio threshold (iceberg of constant density)
    !2) Rolling based on corrected Weeks and Mellor scheme
    !3) Rolling based on incorrect Weeks and Mellor scheme - kept for legacy reasons
     Dn=(bergs%rho_bergs/rho_seawater)*Tn ! draught (keel depth)
     if ( Dn>0. ) then
-      if (bergs%use_updated_rolling_scheme) then    !Use Rolling Scheme 1
-        if (bergs%tip_parameter>0.) then
-                tip_parameter=bergs%tip_parameter
-        else
-          ! Equation 27 from Burton et al 2012, or equivolently, Weeks and Mellor 1979 with constant density
-          tip_parameter=sqrt(6*(bergs%rho_bergs/rho_seawater)*(1-(bergs%rho_bergs/rho_seawater)))   !using default values gives 0.92
-        endif
-        !print *, 'tip_parameter',tip_parameter
-        if (Tn<(tip_parameter* min(Wn,Ln)))  then     !note that we use the Thickness instead of the Draft
-          if (Wn<Ln) then
-            call swap_variables(Tn,Wn)
-          else
-            call swap_variables(Tn,Ln)
-          endif
-        endif
-      else
-        if (bergs%tip_parameter>999.) then     !Use Rolling Scheme 2
-          if ( min(Wn,Ln)<sqrt(0.92*(Tn**2)-58.32*Tn) ) then
-            if (Wn<Ln) then
-              call swap_variables(Tn,Wn)
-            else
-              call swap_variables(Tn,Ln)
-            endif
-          endif
-        else     !Use Rolling Scheme 3
+      if ( (.not.bergs%use_updated_rolling_scheme) .and. (bergs%tip_parameter<999.) ) then    !Use Rolling Scheme 3
           if ( max(Wn,Ln)<sqrt(0.92*(Dn**2)+58.32*Dn) ) then
             call swap_variables(Tn,Wn)
           endif
+      else
+        if (Wn>Ln) call swap_variables(Ln,Wn)  !Make sure that Wn is the smaller dimension
+      
+        if ( (.not.bergs%use_updated_rolling_scheme) .and. (bergs%tip_parameter>=999.) ) then    !Use Rolling Scheme 2
+          if ( Wn<sqrt(0.92*(Tn**2)-58.32*Tn) ) then
+              call swap_variables(Tn,Wn)
+          endif
         endif
-      end if
+
+        if (bergs%use_updated_rolling_scheme) then    !Use Rolling Scheme 1
+          if (bergs%tip_parameter>0.) then
+            tip_parameter=bergs%tip_parameter
+          else
+            ! Equation 27 from Burton et al 2012, or equivolently, Weeks and Mellor 1979 with constant density
+            tip_parameter=sqrt(6*(bergs%rho_bergs/rho_seawater)*(1-(bergs%rho_bergs/rho_seawater)))   !using default values gives 0.92
+          endif
+          if (Tn<(tip_parameter* Wn))  then     !note that we use the Thickness instead of the Draft
+              call swap_variables(Tn,Wn)
+          endif
+        endif
+      endif
       Dn=(bergs%rho_bergs/rho_seawater)*Tn ! re-calculate draught (keel depth) for grounding
     endif
 
