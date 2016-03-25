@@ -2591,12 +2591,12 @@ logical :: on_tangential_plane, error_flag, bounced
         i=berg%ine;  j=berg%jne;  xi = berg%xi;  yj = berg%yj
         call adjust_index_and_ground(grd, lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag)  !Alon:"unclear which velocity to use here?"
 
-        if (bounced) then
-          print *, 'you have been bounce: big time!',mpp_pe(),berg%iceberg_num,lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag 
-          berg%axn=0.0  ;  berg%ayn=0.0
-          berg%bxn=0.0  ;  berg%byn=0.0
-          berg%uvel=0.0 ;  berg%vvel=0.0
-        endif
+        !if (bounced) then
+        !  print *, 'you have been bounce: big time!',mpp_pe(),berg%iceberg_num,lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag 
+        !  berg%axn=0.0  ;  berg%ayn=0.0
+        !  berg%bxn=0.0  ;  berg%byn=0.0
+        !  berg%uvel=0.0 ;  berg%vvel=0.0
+        !endif
 
         !Updating positions and index
         berg%lon=lonn      ;  berg%lat=latn
