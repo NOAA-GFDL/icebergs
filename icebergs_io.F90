@@ -700,6 +700,7 @@ type(icebergs_gridded), pointer :: grd
 type(iceberg) :: localberg ! NOT a pointer but an actual local variable
 real :: pos_is_good, pos_is_good_all_pe
 integer :: stderrunit
+integer :: grdj, grdi
 
 real, allocatable, dimension(:) :: lon,          &
                                    lat,          &
@@ -831,7 +832,12 @@ integer, allocatable, dimension(:) :: ine,       &
        pos_is_good_all_pe=pos_is_good
        call mpp_sum(pos_is_good_all_pe)
        if (pos_is_good_all_pe .lt. 0.5) then
-         call error_mesg('diamonds, read_restart_bergs', 'One of the iceberg positions was not found', FATAL)
+         if (bergs%ignore_missing_restart_bergs) then
+           call error_mesg('diamonds, read_restart_bergs', 'Iceberg number', iceberg_num(k), 'positions was not found', WARNING)
+         else
+           call error_mesg('diamonds, read_restart_bergs', 'Iceberg number', iceberg_num(k), 'positions was not found', FATAL)
+         endif
+
        endif
        if (really_debug) then
          write(stderrunit,'(a,i8,a,2f9.4,a,i8)') 'diamonds, read_restart_bergs: berg ',k,' is at ',localberg%lon,localberg%lat,&
@@ -910,6 +916,7 @@ integer, allocatable, dimension(:) :: ine,       &
   bergs%bergy_mass_start=sum_mass(bergs,justbits=.true.)
   call mpp_sum( bergs%bergy_mass_start )
   if (mpp_pe().eq.mpp_root_pe().and.verbose) write(*,'(a)') 'diamonds, read_restart_bergs: completed'
+
 
 contains
   

@@ -1416,7 +1416,10 @@ integer :: stderrunit
 
   ! For each berg, evolve
   call mpp_clock_begin(bergs%clock_mom)
-  call evolve_icebergs(bergs)
+
+  if (.not.bergs%Static_icebergs) then
+        call evolve_icebergs(bergs)
+  endif
   call move_berg_between_cells(bergs)  !Markpoint6
   if (debug) call bergs_chksum(bergs, 'run bergs (evolved)',ignore_halo_violation=.true.)
   if (debug) call checksum_gridded(bergs%grd, 's/r run after evolve')
@@ -2026,14 +2029,13 @@ logical :: bounced, interactive_icebergs_on, Runge_not_Verlet
       endif
       if (debug) call check_position(grd, berg, 'evolve_iceberg (top)')
 
-
-      !Time stepping schemes:
-      if (Runge_not_Verlet) then 
-             call Runge_Kutta_stepping(bergs,berg, axn, ayn, bxn, byn, uveln, vveln,lonn, latn, i, j, xi, yj)
-      endif 
-      if (.not.Runge_not_Verlet) then 
-        call verlet_stepping(bergs,berg, axn, ayn, bxn, byn, uveln, vveln)
-      endif 
+        !Time stepping schemes:
+        if (Runge_not_Verlet) then 
+          call Runge_Kutta_stepping(bergs,berg, axn, ayn, bxn, byn, uveln, vveln,lonn, latn, i, j, xi, yj)
+        endif 
+        if (.not.Runge_not_Verlet) then 
+          call verlet_stepping(bergs,berg, axn, ayn, bxn, byn, uveln, vveln)
+        endif 
 
       ! Saving all the iceberg variables.
       berg%axn=axn 
@@ -2059,12 +2061,14 @@ logical :: bounced, interactive_icebergs_on, Runge_not_Verlet
     enddo ! loop over all bergs
   enddo ; enddo
 
+
   ! When we are using interactive icebergs, we update the (old) iceberg positions and velocities in a second loop, all together (to make code order invarient)
   if (interactive_icebergs_on) then
     do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
       berg=>bergs%list(grdi,grdj)%first
       do while (associated(berg)) ! loop over all bergs
-      
+       
+
        if (.not. Runge_not_Verlet)  call update_verlet_position(bergs,berg) 
         
        !Updating old velocities (for use in iceberg interactions)
@@ -2555,7 +2559,7 @@ logical :: on_tangential_plane, error_flag, bounced
       if (berg%lat>89.) on_tangential_plane=.true.
 
         lon1=berg%lon; lat1=berg%lat
-        if (on_tangential_plane) call rotpos_to_tang(lon1,lat1,x1,y1)
+        if (on_tangential_plane) call rotpos_to_tang(lon1,lat1,x1,y1,berg%iceberg_num)
         dxdl1=r180_pi/(Rearth*cos(lat1*pi_180))
         dydl=r180_pi/Rearth
         uvel1=berg%uvel; vvel1=berg%vvel
@@ -2866,22 +2870,27 @@ integer :: stderrunit
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine rotpos_to_tang(lon, lat, x, y)
+subroutine rotpos_to_tang(lon, lat, x, y, iceberg_num_in)
   ! Arguments
   real, intent(in) :: lon, lat
   real, intent(out) :: x, y
+  integer, intent(in) , optional :: iceberg_num_in
   ! Local variables
   real :: r,colat,clon,slon
-  integer :: stderrunit
+  integer :: stderrunit, iceberg_num
 
   stderrunit = stderr()
-
+  iceberg_num=000
+  if (present(iceberg_num_in)) then
+        iceberg_num=iceberg_num_in
+  endif
+        
   if (lat>90.) then
-      write(stderrunit,*) 'diamonds, rotpos_to_tang: lat>90 already!',lat
+      write(stderrunit,*) 'diamonds, rotpos_to_tang: lat>90 already!',lat, lon, iceberg_num
       call error_mesg('diamonds, rotpos_to_tang','Something went very wrong!',FATAL)
     endif
     if (lat==90.) then
-      write(stderrunit,*) 'diamonds, rotpos_to_tang: lat==90 already!',lat
+      write(stderrunit,*) 'diamonds, rotpos_to_tang: lat==90 already!',lat, lon
       call error_mesg('diamonds, rotpos_to_tang','Something went wrong!',FATAL)
     endif
 
