@@ -1438,7 +1438,9 @@ integer :: stderrunit
 
   ! Iceberg thermodynamics (melting) + rolling
   call mpp_clock_begin(bergs%clock_the)
-  call thermodynamics(bergs)
+  if (.not.bergs%Thermodynamics_off) then
+          call thermodynamics(bergs)
+  endif
   if (debug) call bergs_chksum(bergs, 'run bergs (thermo)')
   if (debug) call checksum_gridded(bergs%grd, 's/r run after thermodynamics')
   call mpp_clock_end(bergs%clock_the)

@@ -210,6 +210,7 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   logical :: Runge_not_Verlet=.True.  !True=Runge Kuttai, False=Verlet.   
   logical :: ignore_missing_restart_bergs=.False.  !True Allows the model to ignorm icebergs missing in the restart. 
   logical :: Static_icebergs=.False.  !True= icebergs do no move
+  logical :: Thermodynamics_off=.False.  !True,, then icebergs do not decay
   logical :: only_interactive_forces=.False.  !Icebergs only feel interactive forces, and not ocean, wind... 
   logical :: halo_debugging=.False.  !Use for debugging halos (remove when its working) 
   logical :: save_short_traj=.True.  !True saves only lon,lat,time,iceberg_num in iceberg_trajectory.nc 
@@ -318,6 +319,7 @@ real :: grounding_fraction=0. ! Fraction of water column depth at which groundin
 logical :: Runge_not_Verlet=.True.  !True=Runge Kutta, False=Verlet.  - Added by Alon 
 logical :: ignore_missing_restart_bergs=.False.  !True Allows the model to ignorm icebergs missing in the restart. 
 logical :: Static_icebergs=.False.  !True= icebergs do no move
+logical :: Thermodynamics_off=.False.  !True,, then icebergs do not decay
 logical :: only_interactive_forces=.False.  !Icebergs only feel interactive forces, and not ocean, wind... 
 logical :: halo_debugging=.False.  !Use for debugging halos (remove when its working) 
 logical :: save_short_traj=.True.  !True saves only lon,lat,time,iceberg_num in iceberg_trajectory.nc 
@@ -335,7 +337,7 @@ real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250
 namelist /icebergs_nml/ verbose, budget, halo, iceberg_halo, traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,Static_icebergs,  &
          distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef, radial_damping_coef, tangental_damping_coef, only_interactive_forces, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, iceberg_bonds_on, manually_initialize_bonds, ignore_missing_restart_bergs, &
-         parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, halo_debugging, &
+         parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, halo_debugging, Thermodynamics_off, &
          time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_icebergs_on, critical_interaction_damping_on, &
          old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj
 
@@ -619,6 +621,7 @@ if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffe
   bergs%Runge_not_Verlet=Runge_not_Verlet   
   bergs%ignore_missing_restart_bergs=ignore_missing_restart_bergs
   bergs%Static_icebergs=Static_icebergs 
+  bergs%Thermodynamics_off=Thermodynamics_off 
   bergs%only_interactive_forces=only_interactive_forces
   bergs%halo_debugging=halo_debugging
   bergs%iceberg_bonds_on=iceberg_bonds_on   !Alon
