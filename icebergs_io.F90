@@ -833,7 +833,10 @@ integer, allocatable, dimension(:) :: ine,       &
        call mpp_sum(pos_is_good_all_pe)
        if (pos_is_good_all_pe .lt. 0.5) then
          if (bergs%ignore_missing_restart_bergs) then
-           call error_mesg('diamonds, read_restart_bergs', 'Iceberg positions was not found', WARNING)
+           if (mpp_pe().eq.mpp_root_pe()) then
+                   print * , 'Iceberg not located: ', lon(k),lat(k), iceberg_num(k)
+                   call error_mesg('diamonds, read_restart_bergs', 'Iceberg positions was not found', WARNING)
+           endif
          else
            call error_mesg('diamonds, read_restart_bergs', 'Iceberg positions was not found', FATAL)
          endif
@@ -875,8 +878,11 @@ integer, allocatable, dimension(:) :: ine,       &
         !call add_new_berg_to_list(bergs%first, localberg, quick=.true.)
         if (bergs%grd%area(localberg%ine,localberg%jne) .ne. 0)  then
          call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg)
-         else
-           call error_mesg('diamonds, read_restart_bergs', 'Iceberg not added because it is grounded', WARNING)
+        else
+           if (mpp_pe().eq.mpp_root_pe()) then
+             print * , 'Grounded iceberg: ', lat(k),lon(k), iceberg_num(k)
+             call error_mesg('diamonds, read_restart_bergs', 'Iceberg not added because it is grounded', WARNING)
+           endif
          endif
          if (really_debug) call print_berg(stderrunit, bergs%list(localberg%ine,localberg%jne)%first, 'read_restart_bergs, add_new_berg_to_list')
        elseif (multiPErestart .and. io_tile_id(1) .lt. 0) then

@@ -503,10 +503,32 @@ real :: Total_mass  !Added by Alon
   call mpp_update_domains(grd%ocean_depth, grd%domain)
   call mpp_update_domains(grd%parity_x, grd%parity_y, grd%domain, gridtype=AGRID) ! If either parity_x/y is -ve, we need rotation of vectors
 
-  ! Sanitize lon and lat at the SW edges
+  ! Sanitize lon and lat in the southern halo
   do j=grd%jsc-1,grd%jsd,-1; do i=grd%isd,grd%ied
       if (grd%lon(i,j).gt.900.) grd%lon(i,j)=grd%lon(i,j+1)
       if (grd%lat(i,j).gt.900.) grd%lat(i,j)=2.*grd%lat(i,j+1)-grd%lat(i,j+2)
+  enddo; enddo
+
+  ! fix halos on edge of the domain
+  !1) South
+  do j=grd%jsc-1,grd%jsd,-1; do i=grd%isd,grd%ied
+      if (grd%lon(i,j).gt.900.) grd%lon(i,j)=2.*grd%lon(i,j+1)-grd%lon(i,j+2)
+      if (grd%lat(i,j).gt.900.) grd%lat(i,j)=2.*grd%lat(i,j+1)-grd%lat(i,j+2)
+  enddo; enddo
+  !2) North
+  do j=grd%jec+1,grd%jed; do i=grd%isd,grd%ied
+      if (grd%lon(i,j).gt.900.) grd%lon(i,j)=2.*grd%lon(i,j-1)-grd%lon(i,j-2)
+      if (grd%lat(i,j).gt.900.) grd%lat(i,j)=2.*grd%lat(i,j-1)-grd%lat(i,j-2)
+  enddo; enddo
+  !3) West
+  do i=grd%isc-1,grd%isd,-1; do j=grd%jsd,grd%jed
+      if (grd%lon(i,j).gt.900.) grd%lon(i,j)=2.*grd%lon(i+1,j)-grd%lon(i+2,j)
+      if (grd%lat(i,j).gt.900.) grd%lat(i,j)=2.*grd%lat(i+1,j)-grd%lat(i+2,j)
+  enddo; enddo
+  !4) East
+  do i=grd%iec+1,grd%ied; do j=grd%jsd,grd%jed
+      if (grd%lon(i,j).gt.900.) grd%lon(i,j)=2.*grd%lon(i-1,j)-grd%lon(i-2,j)
+      if (grd%lat(i,j).gt.900.) grd%lat(i,j)=2.*grd%lat(i-1,j)-grd%lat(i-2,j)
   enddo; enddo
 
   if (.not. present(maskmap)) then ! Using a maskmap causes tickles this sanity check
@@ -538,6 +560,11 @@ real :: Total_mass  !Added by Alon
          grd%lon(i,j)=modulo(grd%lon(i,j)-minl,360.)+minl
   enddo; enddo
 
+
+
+
+
+
   ! lonc, latc used for searches
   do j=grd%jsd+1,grd%jed; do i=grd%isd+1,grd%ied
     grd%lonc(i,j)=0.25*( (grd%lon(i,j)+grd%lon(i-1,j-1)) &
@@ -552,20 +579,20 @@ real :: Total_mass  !Added by Alon
          ' [lon|lat][min|max]=', minval(grd%lon),maxval(grd%lon),minval(grd%lat),maxval(grd%lat)
   endif
 
- !if (mpp_pe().eq.3) then
- !  write(stderrunit,'(a3,32i7)') 'Lon',(i,i=grd%isd,grd%ied)
- !  do j=grd%jed,grd%jsd,-1
- !    write(stderrunit,'(i3,32f7.1)') j,(grd%lon(i,j),i=grd%isd,grd%ied)
- !  enddo
- !  write(stderrunit,'(a3,32i7)') 'Lat',(i,i=grd%isd,grd%ied)
- !  do j=grd%jed,grd%jsd,-1
- !    write(stderrunit,'(i3,32f7.1)') j,(grd%lat(i,j),i=grd%isd,grd%ied)
- !  enddo
- !  write(stderrunit,'(a3,32i7)') 'Msk',(i,i=grd%isd,grd%ied)
- !  do j=grd%jed,grd%jsd,-1
- !    write(stderrunit,'(i3,32f7.1)') j,(grd%msk(i,j),i=grd%isd,grd%ied)
- !  enddo
- !endif
+ if (mpp_pe().eq.15) then
+   write(stderrunit,'(a3,32i7)') 'Lon',(i,i=grd%isd,grd%ied)
+   do j=grd%jed,grd%jsd,-1
+     write(stderrunit,'(i3,32f7.1)') j,(grd%lon(i,j),i=grd%isd,grd%ied)
+   enddo
+   write(stderrunit,'(a3,32i7)') 'Lat',(i,i=grd%isd,grd%ied)
+   do j=grd%jed,grd%jsd,-1
+     write(stderrunit,'(i3,32f7.1)') j,(grd%lat(i,j),i=grd%isd,grd%ied)
+   enddo
+   write(stderrunit,'(a3,32i7)') 'Msk',(i,i=grd%isd,grd%ied)
+   do j=grd%jed,grd%jsd,-1
+     write(stderrunit,'(i3,32f7.1)') j,(grd%msk(i,j),i=grd%isd,grd%ied)
+   enddo
+ endif
 
 
 !Added by Alon  - If a freq distribution is input, we have to convert the freq distribution to a mass flux distribution)
@@ -3086,9 +3113,12 @@ integer :: stderrunit
            modulo(grd%lon(i  ,j-1)-(x-180.),360.)+(x-180.), &
            modulo(grd%lon(i-1,j  )-(x-180.),360.)+(x-180.), &
            modulo(grd%lon(i  ,j  )-(x-180.),360.)+(x-180.) )
+
   if (x.lt.xlo .or. x.gt.xhi) return
   ylo=min( grd%lat(i-1,j-1), grd%lat(i,j-1), grd%lat(i-1,j), grd%lat(i,j) )
   yhi=max( grd%lat(i-1,j-1), grd%lat(i,j-1), grd%lat(i-1,j), grd%lat(i,j) )
+
+
   if (y.lt.ylo .or. y.gt.yhi) return
   
   if (grd%lat(i,j).gt.89.999) then

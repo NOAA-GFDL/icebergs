@@ -1019,12 +1019,20 @@ integer :: grdi, grdj
       endif
   
       ! Store the new state of iceberg (with L>W)
-      this%mass=Mnew
-      this%mass_of_bits=nMbits
-      this%thickness=Tn
-      this%width=min(Wn,Ln)
-      this%length=max(Wn,Ln)
-  
+      if (.not.bergs%Thermodynamics_off) then
+        this%mass=Mnew
+        this%mass_of_bits=nMbits
+        this%thickness=Tn
+        this%width=min(Wn,Ln)
+        this%length=max(Wn,Ln)
+      else
+        Mnew=this%mass
+        Wn=this%width
+        Ln=this%length
+        Tn=this%thickness
+        nMbits=this%mass_of_bits
+        Dn=(bergs%rho_bergs/rho_seawater)*Tn ! draught (keel depth)
+      endif
       next=>this%next
   
       ! Did berg completely melt?
@@ -1044,7 +1052,7 @@ integer :: grdi, grdj
             Hocean=bergs%grounding_fraction*(grd%ocean_depth(i,j)+grd%ssh(i,j))
             if (Dn>Hocean) Mnew=Mnew*min(1.,Hocean/Dn)
           endif
-          call spread_mass_across_ocean_cells(grd, i, j, this%xi, this%yj, Mnew, nMbits, this%mass_scaling)
+          call spread_mass_across_ocean_cells(grd, i, j, this%xi, this%yj, Mnew, nMbits, this%mass_scaling, this%length*this%width )
         endif
       endif
     
@@ -1056,26 +1064,41 @@ end subroutine thermodynamics
 
 ! ##############################################################################
 
-subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling)
+subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling, Area)
   ! Arguments
   type(icebergs_gridded), pointer :: grd
   integer, intent(in) :: i, j
-  real, intent(in) :: x, y, Mberg, Mbits, scaling
+  real, intent(in) :: x, y, Mberg, Mbits, scaling, Area
   ! Local variables
-  real :: xL, xC, xR, yD, yC, yU, Mass
+  real :: xL, xC, xR, yD, yC, yU, Mass, L
   real :: yDxL, yDxC, yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR
   real, parameter :: rho_seawater=1035.
-  
+
   Mass=(Mberg+Mbits)*scaling
   ! This line attempts to "clip" the weight felt by the ocean. The concept of
   ! clipping is non-physical and this step should be replaced by grounding.
   if (grd%clipping_depth>0.) Mass=min(Mass,grd%clipping_depth*grd%area(i,j)*rho_seawater)
+ 
+  !L is the non dimensional length of the iceberg [  L=(Area of berg/ Area of grid cell)^0.5  ] or something like that.
 
-  xL=min(0.5, max(0., 0.5-x))
-  xR=min(0.5, max(0., x-0.5))
+  if (grd%area(i,j)>0) then
+          L=min( sqrt(Area / grd%area(i,j)),1.0)
+  else 
+        L=1.
+  endif
+
+  !xL=min(0.5, max(0., 0.5-x))
+  !xR=min(0.5, max(0., x-0.5))
+  !xC=max(0., 1.-(xL+xR))
+  !yD=min(0.5, max(0., 0.5-y))
+  !yU=min(0.5, max(0., y-0.5))
+  !yC=max(0., 1.-(yD+yU))
+  
+  xL=min(0.5, max(0., 0.5-(x/L)))
+  xR=min(0.5, max(0., (x/L)+(0.5-(1/L) )))
   xC=max(0., 1.-(xL+xR))
-  yD=min(0.5, max(0., 0.5-y))
-  yU=min(0.5, max(0., y-0.5))
+  yD=min(0.5, max(0., 0.5-(y/L)))
+  yU=min(0.5, max(0., (y/L)+(0.5-(1/L) )))
   yC=max(0., 1.-(yD+yU))
 
   yDxL=yD*xL*grd%msk(i-1,j-1)
@@ -1438,9 +1461,7 @@ integer :: stderrunit
 
   ! Iceberg thermodynamics (melting) + rolling
   call mpp_clock_begin(bergs%clock_the)
-  if (.not.bergs%Thermodynamics_off) then
-          call thermodynamics(bergs)
-  endif
+  call thermodynamics(bergs)
   if (debug) call bergs_chksum(bergs, 'run bergs (thermo)')
   if (debug) call checksum_gridded(bergs%grd, 's/r run after thermodynamics')
   call mpp_clock_end(bergs%clock_the)
@@ -2136,7 +2157,7 @@ integer :: stderrunit
         vvel3=vvel1+(dt_2*ayn)                  !Alon
 
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
+          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling, berg%length*berg%width )
 
         ! Calling the acceleration   (note that the velocity is converted to u_star inside the accel script)
         call accel(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, ax1, ay1, axn, ayn, bxn, byn) !axn, ayn, bxn, byn - Added by Alon
@@ -2251,7 +2272,7 @@ logical :: bounced, on_tangential_plane, error_flag
         if (berg%lat>89.) on_tangential_plane=.true.
         i1=i;j1=j
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
+          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width)
 
         ! Loading past accelerations - Alon
         axn=berg%axn; ayn=berg%ayn !Alon
@@ -2287,7 +2308,7 @@ logical :: bounced, on_tangential_plane, error_flag
         call adjust_index_and_ground(grd, lon2, lat2, uvel2, vvel2, i, j, xi, yj, bounced, error_flag)
         i2=i; j2=j
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
+          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling, berg%length*berg%width)
         ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon2,lat2,x2,y2)
         if (.not.error_flag) then
           if (debug .and. .not. is_point_in_cell(bergs%grd, lon2, lat2, i, j)) error_flag=.true.
@@ -2342,7 +2363,7 @@ logical :: bounced, on_tangential_plane, error_flag
         call adjust_index_and_ground(grd, lon3, lat3, uvel3, vvel3, i, j, xi, yj, bounced, error_flag)
         i3=i; j3=j
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
+          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width)
         ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon3,lat3,x3,y3)
         if (.not.error_flag) then
           if (debug .and. .not. is_point_in_cell(bergs%grd, lon3, lat3, i, j)) error_flag=.true.
@@ -2471,7 +2492,7 @@ logical :: bounced, on_tangential_plane, error_flag
         i=i1;j=j1;xi=berg%xi;yj=berg%yj
         call adjust_index_and_ground(grd, lonn, latn, uveln, vveln, i, j, xi, yj, bounced, error_flag)
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
+          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width)
   
         if (.not.error_flag) then
           if (.not. is_point_in_cell(bergs%grd, lonn, latn, i, j)) error_flag=.true.
