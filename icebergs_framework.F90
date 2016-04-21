@@ -579,20 +579,20 @@ real :: Total_mass  !Added by Alon
          ' [lon|lat][min|max]=', minval(grd%lon),maxval(grd%lon),minval(grd%lat),maxval(grd%lat)
   endif
 
- if (mpp_pe().eq.15) then
-   write(stderrunit,'(a3,32i7)') 'Lon',(i,i=grd%isd,grd%ied)
-   do j=grd%jed,grd%jsd,-1
-     write(stderrunit,'(i3,32f7.1)') j,(grd%lon(i,j),i=grd%isd,grd%ied)
-   enddo
-   write(stderrunit,'(a3,32i7)') 'Lat',(i,i=grd%isd,grd%ied)
-   do j=grd%jed,grd%jsd,-1
-     write(stderrunit,'(i3,32f7.1)') j,(grd%lat(i,j),i=grd%isd,grd%ied)
-   enddo
-   write(stderrunit,'(a3,32i7)') 'Msk',(i,i=grd%isd,grd%ied)
-   do j=grd%jed,grd%jsd,-1
-     write(stderrunit,'(i3,32f7.1)') j,(grd%msk(i,j),i=grd%isd,grd%ied)
-   enddo
- endif
+ !if (mpp_pe().eq.15) then
+ !  write(stderrunit,'(a3,32i7)') 'Lon',(i,i=grd%isd,grd%ied)
+ !  do j=grd%jed,grd%jsd,-1
+ !    write(stderrunit,'(i3,32f7.1)') j,(grd%lon(i,j),i=grd%isd,grd%ied)
+ !  enddo
+ !  write(stderrunit,'(a3,32i7)') 'Lat',(i,i=grd%isd,grd%ied)
+ !  do j=grd%jed,grd%jsd,-1
+ !    write(stderrunit,'(i3,32f7.1)') j,(grd%lat(i,j),i=grd%isd,grd%ied)
+ !  enddo
+ !  write(stderrunit,'(a3,32i7)') 'Msk',(i,i=grd%isd,grd%ied)
+ !  do j=grd%jed,grd%jsd,-1
+ !    write(stderrunit,'(i3,32f7.1)') j,(grd%msk(i,j),i=grd%isd,grd%ied)
+ !  enddo
+ !endif
 
 
 !Added by Alon  - If a freq distribution is input, we have to convert the freq distribution to a mass flux distribution)
