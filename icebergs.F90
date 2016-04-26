@@ -885,7 +885,7 @@ real, parameter :: perday=1./86400.
             ! Equation 27 from Burton et al 2012, or equivolently, Weeks and Mellor 1979 with constant density
             tip_parameter=sqrt(6*(bergs%rho_bergs/rho_seawater)*(1-(bergs%rho_bergs/rho_seawater)))   !using default values gives 0.92
           endif
-          if (Tn<(tip_parameter* Wn))  then     !note that we use the Thickness instead of the Draft
+          if (Tn>(tip_parameter* Wn))  then     !note that we use the Thickness instead of the Draft
               call swap_variables(Tn,Wn)
           endif
         endif
