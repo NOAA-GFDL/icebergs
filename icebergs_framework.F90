@@ -1617,7 +1617,7 @@ character(len=*) :: label
   write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,") start lon,lat,yr,day,mass=",2f10.4,i5,f7.2,es12.4)') &
     label, mpp_pe(), berg%start_lon, berg%start_lat, &
     berg%start_year, berg%start_day, berg%start_mass
-  write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,a,2i5,3(a,2f10.4),a,2l2)') &
+  write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,a,2i5,7(a,2f10.4),a,2l2)') &
     label, mpp_pe(), ') i,j=',berg%ine, berg%jne, &
     ' xi,yj=', berg%xi, berg%yj, &
     ' lon,lat=', berg%lon, berg%lat, &
