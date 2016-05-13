@@ -1754,8 +1754,8 @@ integer :: stderrunit
             call error_mesg('diamonds, calve_icebergs', 'berg xi,yj is not correct!', FATAL)
           endif
           if (grd%msk(i,j)<0.5) then
-            write(stderrunit,*) 'diamonds, adjust: WARNING!!! Iceberg born in land cell',i,j,newberg%lon,newberg%lat
-            if (debug) call error_mesg('diamonds,calve_icebergs', 'Iceberg born in Land Cell!', FATAL)
+            write(stderrunit,*) 'diamonds, calve_icebergs: WARNING!!! Iceberg born in land cell',i,j,newberg%lon,newberg%lat
+            if (debug) call error_mesg('diamonds, calve_icebergs', 'Iceberg born in Land Cell!', FATAL)
           endif
           newberg%ine=i
           newberg%jne=j
