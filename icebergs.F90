@@ -1019,21 +1019,12 @@ integer :: grdi, grdj
       endif
   
       ! Store the new state of iceberg (with L>W)
-      if (.not.bergs%Thermodynamics_off) then
         this%mass=Mnew
         this%mass_of_bits=nMbits
         this%thickness=Tn
         this%width=min(Wn,Ln)
         this%length=max(Wn,Ln)
-      else
-        Mnew=this%mass
-        Wn=this%width
-        Ln=this%length
-        Tn=this%thickness
-        nMbits=this%mass_of_bits
-        Dn=(bergs%rho_bergs/rho_seawater)*Tn ! draught (keel depth)
-      endif
-      next=>this%next
+        next=>this%next
   
       ! Did berg completely melt?
       if (Mnew<=0.) then ! Delete the berg
