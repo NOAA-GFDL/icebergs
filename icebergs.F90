@@ -1199,6 +1199,8 @@ integer :: stderrunit
     Jv_off = (size(tauya,2) - (grd%jec - grd%jsc))/2 - grd%jsc + 1
     allocate(uC_tmp(grd%isd:grd%ied,grd%jsd:grd%jed), &
              vC_tmp(grd%isd:grd%ied,grd%jsd:grd%jed))
+    uC_tmp(:,:) = 0.0
+    vC_tmp(:,:) = 0.0
     !   If the iceberg model used symmetric memory, the starting value of these
     ! copies would need to be decremented by 1.
     do I=grd%isc,grd%iec ; do j=grd%jsc,grd%jec
@@ -2615,6 +2617,12 @@ real :: xi0, yj0, lon0, lat0
   lret=pos_within_cell(grd, lon, lat, i, j, xi, yj) ! Update xi and yj
 
   if (.not. lret) then
+    write(0,*) 'i0, j0,=', i0,j0
+    write(0,*) 'xi0, yj0,=', xi0,yj0
+    write(0,*) 'grd%msk(i0, j0)=', grd%msk(i0,j0)
+    write(0,*) 'lon0, lat0,=', lon0,lat0
+    write(0,*) 'i,j,lon, lat,grd%msk(i,j)=', i,j,lon,lat,grd%msk(i,j)
+    
     write(stderrunit,*) 'diamonds, adjust: Should not get here! Berg is not in cell after adjustment'
     if (debug) error=.true.
   endif
