@@ -1201,10 +1201,8 @@ integer :: stderrunit
              vC_tmp(grd%isd:grd%ied,grd%jsd:grd%jed))
     !   If the iceberg model used symmetric memory, the starting value of these
     ! copies would need to be decremented by 1.
-    do I=grd%isc,grd%iec ; do j=grd%jsc,grd%jec
-      uC_tmp(I,j) = tauxa(I+Iu_off, j+ju_off)
-    enddo ; enddo
-    do i=grd%isc,grd%iec ; do J=grd%jsc,grd%jec
+    do i=grd%isc,grd%iec ; do j=grd%jsc,grd%jec
+      uC_tmp(i,j) = tauxa(i+Iu_off, j+ju_off)
       vC_tmp(i,J) = tauya(i+iv_off, J+Jv_off)
     enddo ; enddo
 
