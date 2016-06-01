@@ -18,6 +18,7 @@ implicit none ; private
 integer, parameter :: buffer_width=28 !Changed from 20 to 28 by Alon 
 integer, parameter :: buffer_width_traj=31  !Changed from 23 by Alon
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
+real, parameter :: missing_value = -1.0e34
 
 !Local Vars
 ! Global data (minimal for debugging)
@@ -45,7 +46,7 @@ logical :: force_all_pes_traj=.false. ! Force all pes write trajectory files reg
 public nclasses,buffer_width,buffer_width_traj
 public verbose, really_debug, debug, restart_input_dir,make_calving_reproduce,old_bug_bilin,use_roundoff_fix
 public ignore_ij_restart, use_slow_find,generate_test_icebergs,old_bug_rotated_weights,budget
-public orig_read, force_all_pes_traj
+public orig_read, force_all_pes_traj, missing_value
 
 
 !Public types
