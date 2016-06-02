@@ -35,7 +35,6 @@ use ice_bergs_framework, only: add_new_berg_to_list,delete_iceberg_from_list,des
 use ice_bergs_framework, only: grd_chksum2,grd_chksum3
 use ice_bergs_framework, only: fix_restart_dates, offset_berg_dates
 use ice_bergs_framework, only: orig_read  ! Remove when backward compatibility no longer needed
-use ice_bergs_framework, only: missing_value
 
 use ice_bergs_io,        only: ice_bergs_io_init,write_restart,write_trajectory
 use ice_bergs_io,        only: read_restart_bergs,read_restart_bergs_orig,read_restart_calving
@@ -1200,8 +1199,8 @@ integer :: stderrunit
     Jv_off = (size(tauya,2) - (grd%jec - grd%jsc))/2 - grd%jsc + 1
     allocate(uC_tmp(grd%isd:grd%ied,grd%jsd:grd%jed), &
              vC_tmp(grd%isd:grd%ied,grd%jsd:grd%jed))
-    uC_tmp(:,:) = missing_value
-    vC_tmp(:,:) = missing_value
+    uC_tmp(:,:) = 0. ! This avoids uninitialized values that might remain in halo
+    vC_tmp(:,:) = 0. ! regions after the call to mpp_update_domains() below.
     !   If the iceberg model used symmetric memory, the starting value of these
     ! copies would need to be decremented by 1.
     do i=grd%isc,grd%iec ; do j=grd%jsc,grd%jec
