@@ -2615,6 +2615,12 @@ real :: xi0, yj0, lon0, lat0
   lret=pos_within_cell(grd, lon, lat, i, j, xi, yj) ! Update xi and yj
 
   if (.not. lret) then
+    write(0,*) 'i0, j0,=', i0,j0
+    write(0,*) 'xi0, yj0,=', xi0,yj0
+    write(0,*) 'grd%msk(i0, j0)=', grd%msk(i0,j0)
+    write(0,*) 'lon0, lat0,=', lon0,lat0
+    write(0,*) 'i,j,lon, lat,grd%msk(i,j)=', i,j,lon,lat,grd%msk(i,j)
+    
     write(stderrunit,*) 'diamonds, adjust: Should not get here! Berg is not in cell after adjustment'
     if (debug) error=.true.
   endif
