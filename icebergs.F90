@@ -883,7 +883,8 @@ integer :: grdi, grdj
   ! For convenience
   grd=>bergs%grd
 
-  do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
+  !do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
+  do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied  ! Thermodynamics of  halos now calculated, so that spread mass to ocean works correctly
     this=>bergs%list(grdi,grdj)%first
     do while(associated(this))
       if (debug) call check_position(grd, this, 'thermodynamics (top)')
@@ -1068,6 +1069,7 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
   real :: Area_Q1,Area_Q2 , Area_Q3,Area_Q4, Area_hex
   real, parameter :: rho_seawater=1035.
   integer :: stderrunit
+  logical :: debug
 
   ! Get the stderr unit number
   stderrunit = stderr()
@@ -1081,7 +1083,8 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
   yDxL=0.  ; yDxC=0. ; yDxR=0. ; yCxL=0. ; yCxR=0.
   yUxL=0.  ; yUxC=0. ; yUxR=0. ; yCxC=1.
 
-  if (.not. hexagonal_icebergs) then  !Treat icebergs as rectangles of size L:
+  if (.not. hexagonal_icebergs) then  !Treat icebergs as rectangles of size L:  (this is the default)
+    
     !L is the non dimensional length of the iceberg [  L=(Area of berg/ Area of grid cell)^0.5  ] or something like that.
     if (grd%area(i,j)>0) then
       L=min( sqrt(Area / grd%area(i,j)),1.0)
@@ -1113,6 +1116,14 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
     yUxC=yU*xC*grd%msk(i  ,j+1)
     yUxR=yU*xR*grd%msk(i+1,j+1)
     yCxC=1.-( ((yDxL+yUxR)+(yDxR+yUxL)) + ((yCxL+yCxR)+(yDxC+yUxC)) )
+    
+    !Temporary for debugging reasons.
+    if (mpp_pe()==mpp_root_pe()) then 
+            write(stderrunit,*) 'diamonds, You are in the square!!!', grd%area(i,j),L
+            write(stderrunit,*) 'diamonds, x,y', x,y
+            write(stderrunit,*) 'diamonds, xL,xC,xR', xL,xC,xR
+            write(stderrunit,*) 'diamonds, yU,yC,yD', yU,yC,yD
+    endif
 
  
   else !Spread mass as if elements area hexagonal
@@ -1142,8 +1153,9 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
     theta=0.0
     call Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4)
     
-    if (min(min(Area_Q1,Area_Q2),min(Area_Q3, Area_Q4)) <0) then
+    if (min(min(Area_Q1,Area_Q2),min(Area_Q3, Area_Q4)) <-0.001) then
       call error_mesg('diamonds, hexagonal spreading', 'Intersection with hexagons should not be negative!!!', WARNING)
+      write(stderrunit,*) 'diamonds, yU,yC,yD', Area_Q1, Area_Q2, Area_Q3, Area_Q4
     endif
 
     Area_Q1=Area_Q1/Area_hex
@@ -1174,26 +1186,32 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
       yDxR=Area_Q4
     endif
                         
+    !Temporary for debugging reasons.
+    if (mpp_pe()==mpp_root_pe()) then 
+            !write(stderrunit,*) 'diamonds, You are in the hexagonal domain now!!!'
+    endif
 
       !Double check that all the mass is being used.
-      if (abs(yCxC-(1.-( ((yDxL+yUxR)+(yDxR+yUxL)) + ((yCxL+yCxR)+(yDxC+yUxC)) )))>0.001) then
+      if ((abs(yCxC-(1.-( ((yDxL+yUxR)+(yDxR+yUxL)) + ((yCxL+yCxR)+(yDxC+yUxC)) )))>0.001) .and. (mpp_pe().eq.5)) then
         !call error_mesg('diamonds, hexagonal spreading', 'All the mass is not being used!!!', WARNING)
-        write(stderrunit,*) 'diamonds, hexagonal spreading, dimensions',S, H, x0 , y0
-        write(stderrunit,*) 'diamonds, hexagonal spreading, Areas',(Area_Q1+Area_Q2 + Area_Q3+Area_Q4), Area_Q1,Area_Q2 , Area_Q3,Area_Q4
+        write(stderrunit,*) 'diamonds, hexagonal, H,x0,y0', H, x0 , y0
+        write(stderrunit,*) 'diamonds, hexagonal, Areas',(Area_Q1+Area_Q2 + Area_Q3+Area_Q4), Area_Q1,  Area_Q2 , Area_Q3,  Area_Q4
+        debug=.True.
+        !call Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4, debug)
         call error_mesg('diamonds, hexagonal spreading', 'All the mass is not being used!!!', FATAL)
       endif
 
   endif
 
-  grd%mass_on_ocean(i,j,1)=grd%mass_on_ocean(i,j,1)+yDxL*Mass
-  grd%mass_on_ocean(i,j,2)=grd%mass_on_ocean(i,j,2)+yDxC*Mass
-  grd%mass_on_ocean(i,j,3)=grd%mass_on_ocean(i,j,3)+yDxR*Mass
-  grd%mass_on_ocean(i,j,4)=grd%mass_on_ocean(i,j,4)+yCxL*Mass
-  grd%mass_on_ocean(i,j,5)=grd%mass_on_ocean(i,j,5)+yCxC*Mass
-  grd%mass_on_ocean(i,j,6)=grd%mass_on_ocean(i,j,6)+yCxR*Mass
-  grd%mass_on_ocean(i,j,7)=grd%mass_on_ocean(i,j,7)+yUxL*Mass
-  grd%mass_on_ocean(i,j,8)=grd%mass_on_ocean(i,j,8)+yUxC*Mass
-  grd%mass_on_ocean(i,j,9)=grd%mass_on_ocean(i,j,9)+yUxR*Mass
+  grd%mass_on_ocean(i,j,1)=grd%mass_on_ocean(i,j,1)+(yDxL*Mass)
+  grd%mass_on_ocean(i,j,2)=grd%mass_on_ocean(i,j,2)+(yDxC*Mass)
+  grd%mass_on_ocean(i,j,3)=grd%mass_on_ocean(i,j,3)+(yDxR*Mass)
+  grd%mass_on_ocean(i,j,4)=grd%mass_on_ocean(i,j,4)+(yCxL*Mass)
+  grd%mass_on_ocean(i,j,5)=grd%mass_on_ocean(i,j,5)+(yCxC*Mass)
+  grd%mass_on_ocean(i,j,6)=grd%mass_on_ocean(i,j,6)+(yCxR*Mass)
+  grd%mass_on_ocean(i,j,7)=grd%mass_on_ocean(i,j,7)+(yUxL*Mass)
+  grd%mass_on_ocean(i,j,8)=grd%mass_on_ocean(i,j,8)+(yUxC*Mass)
+  grd%mass_on_ocean(i,j,9)=grd%mass_on_ocean(i,j,9)+(yUxR*Mass)
 
 end subroutine spread_mass_across_ocean_cells
 
@@ -1209,47 +1227,69 @@ real function Area_of_triangle(Ax,Ay,Bx,By,Cx,Cy)
   Area_of_triangle    =   abs(    0.5*((Ax*(By-Cy))+(Bx*(Cy-Ay))+(Cx*(Ay-By))) );
 end function Area_of_triangle
 
+real function roundoff(x,sig_fig)
+  ! Arguments
+  real, intent(in) :: x
+  integer, intent(in) :: sig_fig
+    !roundoff=round(x*(10**(sig_fig))
+    roundoff=(FLOAT (INT(x * (10.**sig_fig) + 0.5)) / (10.**sig_fig))
+end function roundoff
 
-logical function point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,qx,qy,include_boundary)
+logical function point_in_interval(Ax,Ay,Bx,By,px,py)
+  ! Arguments
+  real, intent(in) :: Ax,Ay,Bx,By,px,py
+  point_in_interval=.False.
+  if ((px < max(Ax,Bx)) .and. (px > min(Ax,Bx))) then
+    if ((py < max(Ay,By)) .and. (py > min(Ay,By))) then
+      point_in_interval=.True.
+    endif
+  endif
+end function point_in_interval
+
+
+logical function point_is_on_the_line(Ax,Ay,Bx,By,qx,qy)
+  ! Arguments
+  real, intent(in) :: Ax,Ay,Bx,By,qx,qy
+  real :: tol, dxc,dyc,dxl,dyl,cross
+    tol=0.00000000000000;
+    dxc = qx - Ax;
+    dyc = qy - Ay;
+    dxl = Bx - Ax;
+    dyl = By - Ay;
+    cross = dxc * dyl - dyc * dxl;
+    if (abs(cross)<=tol) then
+      point_is_on_the_line=.True.
+    else
+     point_is_on_the_line=.False.
+    endif
+end function point_is_on_the_line
+
+logical function point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,qx,qy)
   !This function decides whether a point (qx,qy) is inside the triangle ABC.
   !There is also the option to include the boundary of the triangle.
   ! Arguments
-  real, intent(in) :: Ax,Ay,Bx,By,Cx,Cy,qx,qy,include_boundary
-  real :: tol, invDenom,u,v
+  real, intent(in) :: Ax,Ay,Bx,By,Cx,Cy,qx,qy
+  real :: l0,l1,l2,p0,p1,p2
   real :: v0x,v1x,v2x,v0y,v1y,v2y,dot00,dot01,dot02,dot11,dot12
   
-  tol=0.0000000001;
-  if (include_boundary==0.) tol=-tol;  !Negative number excludes the boundary case.
-  
+  point_in_triangle = .False.
   if ((Ax==qx .and. Ay==qy) .or. (Bx==qx .and. By==qy) .or. (Cx==qx .and. Cy==qy)) then  !Exclude the pathelogical case
-    if (include_boundary==0.) then
+      point_in_triangle = .False.
+  else
+    if (((point_is_on_the_line(Ax,Ay,Bx,By,qx,qy) .or. (point_is_on_the_line(Ax,Ay,Cx,Cy,qx,qy))) .or. (point_is_on_the_line(Bx,By,Cx,Cy,qx,qy)))) then
       point_in_triangle = .False.
     else
-      point_in_triangle = .True.
+      !Compute point in triangle using Barycentric coordinates (the same as sum_sign_dot_prod routines)
+      l0=(qx-Ax)*(By-Ay)-(qy-Ay)*(Bx-Ax)
+      l1=(qx-Bx)*(Cy-By)-(qy-By)*(Cx-Bx)
+      l2=(qx-Cx)*(Ay-Cy)-(qy-Cy)*(Ax-Cx)
+
+      p0=sign(1., l0); if (l0==0.)  p0=0.
+      p1=sign(1., l1); if (l1==0.)  p1=0.
+      p2=sign(1., l2); if (l2==0.)  p2=0.
+
+      if ( (abs(p0)+abs(p2))+(abs(p1)) == abs((p0+p2)+(p1)) )  point_in_triangle = .True.
     endif
-  else
-  
-    !Compute vectors
-    v0x=Cx-Ax;
-    v1x=Bx-Ax;
-    v2x=qx-Ax;
-    v0y=Cy-Ay;
-    v1y=By-Ay;
-    v2y=qy-Ay;
-
-    !Compute dot products
-    dot00 = (v0x*v0x)+(v0y*v0y);
-    dot01 = (v0x*v1x)+(v0y*v1y);
-    dot02 = (v0x*v2x)+(v0y*v2y);
-    dot11 = (v1x*v1x)+(v1y*v1y);
-    dot12 = (v1x*v2x)+(v1y*v2y);
-
-    !Compute barycentric coordinates
-    invDenom= 1 / ((dot00 * dot11) - (dot01*dot01));
-    u=((dot11*dot02)-(dot01*dot12))*invDenom;
-    v=((dot00*dot12)-(dot01*dot02))*invDenom;
-
-    point_in_triangle = ((  ((u+tol).ge.0.) .and. ((v+tol).ge.0)) .and. ((u+v).lt.(1+tol)))
   endif
 end function point_in_triangle
 
@@ -1398,8 +1438,23 @@ subroutine Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy,Area_triangle,
   real, intent(out) :: Area_triangle, Area_Q1, Area_Q2 ,Area_Q3 ,Area_Q4
   real :: Area_Upper, Area_Lower, Area_Right, Area_Left
   real :: px, py , qx , qy 
-  real :: Area_key_quadrant
+  real :: Area_key_quadrant,Error
   integer :: Key_quadrant
+  integer ::sig_fig
+  integer :: stderrunit
+
+  ! Get the stderr unit number
+  stderrunit = stderr()
+
+  !Round of numbers before proceeding further.
+  !sig_fig=12; !Significan figures
+  !Ax=roundoff(Ax0,sig_fig)
+  !Ay=roundoff(Ay0,sig_fig)
+  !Bx=roundoff(Bx0,sig_fig)
+  !By=roundoff(By0,sig_fig)
+  !Cx=roundoff(Cx0,sig_fig)
+  !Cy=roundoff(Cy0,sig_fig)
+ 
 
   Area_triangle=Area_of_triangle(Ax,Ay,Bx,By,Cx,Cy);
   
@@ -1410,20 +1465,23 @@ subroutine Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy,Area_triangle,
   !Decide if the origin is in the triangle. If so, then you have to divide the area 4 ways
   !This is done by finding a quadrant where the intersection between the triangle and quadrant forms a new triangle
   !(This occurs when on of the sides of the triangle  intersects both the x and y axis)
-  if (point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,0.,0.,0.)) then
+  if (point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,0.,0.)) then
     !Find a line in the triangle that cuts both axes in/on the trianlge
     call intercept_of_a_line(Ax,Ay,Bx,By,'x',px,py); !x_intercept
     call intercept_of_a_line(Ax,Ay,Bx,By,'y',qx,qy); !y_intercept
     !Note that the 1. here means that we include points on the boundary of the triange.
-    if (.not.(point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,px,py,1.) .and. point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,qx,qy,1.))) then
+    if (.not.((point_in_interval(Ax,Ay,Bx,By,px,py)) .and. (point_in_interval(Ax,Ay,Bx,By,qx,qy)))) then
       call intercept_of_a_line(Ax,Ay,Cx,Cy,'x',px,py); !x_intercept
       call intercept_of_a_line(Ax,Ay,Cx,Cy,'y',qx,qy); !y_intercept
-      if (.not.(point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,px,py,1.) .and. point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,qx,qy,1.))) then
+      if (.not.((point_in_interval(Ax,Ay,Cx,Cy,px,py)) .and. (point_in_interval(Ax,Ay,Cx,Cy,qx,qy)))) then
         call intercept_of_a_line(Bx,By,Cx,Cy,'x',px,py); !x_intercept
         call intercept_of_a_line(Bx,By,Cx,Cy,'y',qx,qy); !y_intercept
-        if (.not.(point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,px,py,1.) .and. point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,qx,qy,1.))) then
+        if (.not.((point_in_interval(Bx,By,Cx,Cy,px,py)) .and. (point_in_interval(Bx,By,Cx,Cy,qx,qy)))) then
           !print 'Houston, we have a problem'
           !You should not get here, but there might be some bugs in the code to do with points exactly falling on axes.
+          if (mpp_pe().eq.12) then
+            write(stderrunit,*) 'diamonds,corners', Ax,Ay,Bx,By,Cx,Cy
+          endif
           call error_mesg('diamonds, iceberg_run', 'Something went wrong with Triangle_divide_into_four_quadrants', FATAL)
         endif
       endif
@@ -1461,22 +1519,26 @@ subroutine Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy,Area_triangle,
     Area_Q1=Area_key_quadrant;
     Area_Q2=Area_Upper-Area_Q1;
     Area_Q4=Area_Right-Area_Q1;
-    Area_Q3=Area_Left-Area_Q2;
+    !Area_Q3=Area_Left-Area_Q2;   !These lines have been changes so that the sum of the 4 quadrants exactly matches the triangle area.
+    Area_Q3=Area_triangle-(Area_Q1+Area_Q2+Area_Q4);  
   elseif (Key_quadrant .eq. 2) then
     Area_Q2=Area_key_quadrant;
     Area_Q1=Area_Upper-Area_Q2;
     Area_Q4=Area_Right-Area_Q1;
-    Area_Q3=Area_Left-Area_Q2;
+    !Area_Q3=Area_Left-Area_Q2;
+    Area_Q3=Area_triangle-(Area_Q1+Area_Q2+Area_Q4);
   elseif (Key_quadrant==3) then
     Area_Q3=Area_key_quadrant;
     Area_Q2=Area_Left-Area_Q3;
     Area_Q1=Area_Upper-Area_Q2;
-    Area_Q4=Area_Right-Area_Q1;
+    !Area_Q4=Area_Right-Area_Q1;
+    Area_Q4=Area_triangle-(Area_Q1+Area_Q2+Area_Q3);
   elseif (Key_quadrant==4) then
     Area_Q4=Area_key_quadrant;
     Area_Q1=Area_Right-Area_Q4;
     Area_Q2=Area_Upper-Area_Q1;
-    Area_Q3=Area_Left-Area_Q2;
+    !Area_Q3=Area_Left-Area_Q2;
+    Area_Q3=Area_triangle-(Area_Q1+Area_Q2+Area_Q4);
   else
     !print 'Help, I need somebody, help!'
     call error_mesg('diamonds, iceberg_run', 'Logical error inside triangle into four quadrants. Should not get here.', FATAL)
@@ -1486,6 +1548,17 @@ subroutine Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy,Area_triangle,
   Area_Q2=max(Area_Q2,0.);
   Area_Q3=max(Area_Q3,0.);
   Area_Q4=max(Area_Q4,0.);
+
+
+  Error=abs(Area_Q1+Area_Q2+Area_Q3+Area_Q4-Area_triangle)
+  if (Error>0.01) then
+    call error_mesg('diamonds, triangle spreading', 'Triangle not evaluated accurately!!', WARNING)
+    if (mpp_pe().eq.mpp_root_pe()) then
+      write(stderrunit,*) 'diamonds, Triangle corners:',Ax,Ay,Bx,By,Cx,Cy
+      write(stderrunit,*) 'diamonds, Triangle, Areas', Area_Q1,  Area_Q2 , Area_Q3,  Area_Q4
+      write(stderrunit,*) 'diamonds, Triangle, Areas', Error
+    endif
+  endif
 
 
 end subroutine Triangle_divided_into_four_quadrants
@@ -1506,7 +1579,11 @@ subroutine Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex ,Area_Q
   real :: T45_Area, T45_Q1, T45_Q2, T45_Q3, T45_Q4
   real :: T56_Area, T56_Q1, T56_Q2, T56_Q3, T56_Q4
   real :: T61_Area, T61_Q1, T61_Q2, T61_Q3, T61_Q4
-  real :: S
+  real :: S, exact_hex_area, Error
+  integer :: stderrunit
+
+  ! Get the stderr unit number
+  stderrunit = stderr()
 
   !Length of side of Hexagon
   S=(2/sqrt(3.))*H
@@ -1532,8 +1609,53 @@ subroutine Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex ,Area_Q
   Area_Q1=T12_Q1+T23_Q1+T34_Q1+T45_Q1+T56_Q1+T61_Q1;
   Area_Q2=T12_Q2+T23_Q2+T34_Q2+T45_Q2+T56_Q2+T61_Q2;
   Area_Q3=T12_Q3+T23_Q3+T34_Q3+T45_Q3+T56_Q3+T61_Q3;
-  Area_Q4=T12_Q4+T23_Q4+T34_Q4+T45_Q4+T56_Q4+T61_Q4;
+  Area_Q4=T12_Q4+T23_Q4+T34_Q4+T45_Q4+T56_Q4+T61_Q4; 
+  
+  Area_Q1=max(Area_Q1,0.);
+  Area_Q2=max(Area_Q2,0.);
+  Area_Q3=max(Area_Q3,0.);
+  Area_Q4=max(Area_Q4,0.);
 
+  Error=Area_hex-(Area_Q1+Area_Q2+Area_Q3+Area_Q4)
+  if ((abs(Error)>0.01))then
+    if (mpp_pe().eq.mpp_root_pe()) then
+      call error_mesg('diamonds, hexagonal spreading', 'Hexagon error is large!!', WARNING)
+      write(stderrunit,*) 'diamonds, hex error, H,x0,y0, Error', H, x0 , y0, Error
+      write(stderrunit,*) 'diamonds, hex error, Areas',Area_hex, (Area_Q1+Area_Q2 + Area_Q3+Area_Q4), Area_Q1,  Area_Q2 , Area_Q3,  Area_Q4
+      write(stderrunit,*) 'diamonds, Triangle1',C1x,C1y,C2x,C2y,T12_Area,T12_Q1,T12_Q2,T12_Q3,T12_Q4,(T12_Q1+T12_Q2+T12_Q3+T12_Q4-T12_Area)
+      write(stderrunit,*) 'diamonds, Triangle2',C2x,C2y,C3x,C3y,T23_Area,T23_Q1,T23_Q2,T23_Q3,T23_Q4,(T23_Q1+T23_Q2+T23_Q3+T23_Q4-T23_Area)
+      write(stderrunit,*) 'diamonds, Triangle3',C3x,C3y,C4x,C4y,T34_Area,T34_Q1,T34_Q2,T34_Q3,T34_Q4,(T34_Q1+T34_Q2+T34_Q3+T34_Q4-T34_Area)
+      write(stderrunit,*) 'diamonds, Triangle4',C4x,C4y,C5x,C5y,T45_Area,T45_Q1,T45_Q2,T45_Q3,T45_Q4,(T45_Q1+T45_Q2+T45_Q3+T45_Q4-T45_Area)
+      write(stderrunit,*) 'diamonds, Triangle5',C5x,C5y,C6x,C6y,T56_Area,T56_Q1,T56_Q2,T56_Q3,T56_Q4,(T56_Q1+T56_Q2+T56_Q3+T56_Q4-T56_Area)
+      write(stderrunit,*) 'diamonds, Triangle6',C6x,C6y,C1x,C1y,T61_Area,T61_Q1,T61_Q2,T61_Q3,T61_Q4,(T61_Q1+T61_Q2+T61_Q3+T61_Q4-T61_Area)
+    endif
+  endif
+
+  exact_hex_area=((3.*sqrt(3.)/2)*(S*S))
+  if (abs(Area_hex-exact_hex_area)>0.01) then
+    call error_mesg('diamonds, hexagonal spreading', 'Hexagon not evaluated accurately!!', WARNING)
+    if (mpp_pe().eq.mpp_root_pe()) then
+      write(stderrunit,*) 'diamonds, hex calculations, H,x0,y0', H, x0 , y0
+      write(stderrunit,*) 'diamonds, hex calculations, Areas',Area_hex, (Area_Q1+Area_Q2 + Area_Q3+Area_Q4), Area_Q1,  Area_Q2 , Area_Q3,  Area_Q4
+    endif
+  endif
+
+  !Adjust Areas so that the error is zero by subtracting the error from the largest sector.
+   if  (((Area_Q1>=Area_Q2) .and. (Area_Q1>=Area_Q3)) .and. (Area_Q1>=Area_Q4)) then
+     Area_Q1=Area_Q1+Error
+   elseif  (((Area_Q2>=Area_Q1) .and. (Area_Q2>=Area_Q3)) .and. (Area_Q2>=Area_Q4)) then
+     Area_Q2=Area_Q2+Error
+   elseif  (((Area_Q3>=Area_Q1) .and. (Area_Q3>=Area_Q2)) .and. (Area_Q3>=Area_Q4)) then
+     Area_Q3=Area_Q3+Error
+   elseif  (((Area_Q4>=Area_Q1) .and. (Area_Q4>=Area_Q2)) .and. (Area_Q4>=Area_Q3)) then
+     Area_Q4=Area_Q4+Error
+   else
+     call error_mesg('diamonds, hexagonal spreading', 'Error in hexagon is larger than any quadrant!!', WARNING)
+     if (mpp_pe().eq.mpp_root_pe()) then
+      write(stderrunit,*) 'diamonds, hex quadrants, H,x0,y0', H, x0 , y0, Error
+      write(stderrunit,*) 'diamonds, hex quadrants, Areas',Area_hex, (Area_Q1+Area_Q2 + Area_Q3+Area_Q4), Area_Q1,  Area_Q2 , Area_Q3,  Area_Q4
+     endif
+   endif
 
 end subroutine Hexagon_into_quadrants_using_triangles
 
@@ -2201,6 +2323,11 @@ integer :: i, j
 type(icebergs_gridded), pointer :: grd
 real :: dmda
 logical :: lerr
+integer :: stderrunit
+
+  ! Get the stderr unit number
+  stderrunit = stderr()
+      
 
   if (.not. associated(bergs)) return
 
@@ -2215,7 +2342,6 @@ logical :: lerr
   ! Add iceberg+bits mass field to non-haloed SIS field (kg/m^2)
  !mass(:,:)=mass(:,:)+( grd%mass(grd%isc:grd%iec,grd%jsc:grd%jec) &
  !                    + grd%bergy_mass(grd%isc:grd%iec,grd%jsc:grd%jec) )
-
 
   if (debug) then
     grd%tmp(:,:)=0.; grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec)=mass
@@ -2572,8 +2698,10 @@ integer :: stderrunit
         uvel3=uvel1+(dt_2*axn)                  !Alon
         vvel3=vvel1+(dt_2*ayn)                  !Alon
 
+        !Note, the mass scaling is equal to 1 (rather than 0.25 as in RK), since
+        !this is only called once in Verlet stepping.
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling, berg%length*berg%width ,bergs%hexagonal_icebergs )
+          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 1.0*berg%mass_scaling, berg%length*berg%width ,bergs%hexagonal_icebergs )
 
         ! Calling the acceleration   (note that the velocity is converted to u_star inside the accel script)
         call accel(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, ax1, ay1, axn, ayn, bxn, byn) !axn, ayn, bxn, byn - Added by Alon
