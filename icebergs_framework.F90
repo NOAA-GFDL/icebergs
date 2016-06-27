@@ -3186,10 +3186,12 @@ integer :: stderrunit
   l2=(xx-xx2)*(y3-y2)-(y-y2)*(xx3-xx2)
   l3=(xx-xx3)*(y0-y3)-(y-y3)*(xx0-xx3)
 
-  p0=sign(1., l0); if (l0.eq.0.) p0=0.
-  p1=sign(1., l1); if (l1.eq.0.) p1=0.
-  p2=sign(1., l2); if (l2.eq.0.) p2=0.
-  p3=sign(1., l3); if (l3.eq.0.) p3=0.
+  !We use an asymerty between South and East line boundaries and North and East
+  !to avoid icebergs appearing to two cells (half values used for debugging
+  p0=sign(1., l0); if (l0.eq.0.) p0=-0.5
+  p1=sign(1., l1); if (l1.eq.0.) p1=0.5
+  p2=sign(1., l2); if (l2.eq.0.) p2=0.5
+  p3=sign(1., l3); if (l3.eq.0.) p3=-0.5
 
   if ( (abs(p0)+abs(p2))+(abs(p1)+abs(p3)) .eq. abs((p0+p2)+(p1+p3)) ) then
     sum_sign_dot_prod4=.true.
