@@ -1795,12 +1795,13 @@ integer,    optional, intent(in) :: stagger, stress_stagger
 integer :: iyr, imon, iday, ihr, imin, isec, k
 type(icebergs_gridded), pointer :: grd
 logical :: lerr, sample_traj, write_traj, lbudget, lverbose, check_bond_quality 
-real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass
+real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass,grdd_spread_mass
 integer :: i, j, Iu, ju, iv, Jv, Iu_off, ju_off, iv_off, Jv_off
 real :: mask
 real, dimension(:,:), allocatable :: uC_tmp, vC_tmp
 integer :: vel_stagger, str_stagger
 integer :: nbonds
+logical :: within_iceberg_model
 
 integer :: stderrunit
 
@@ -1824,6 +1825,7 @@ integer :: stderrunit
   grd%bergy_src(:,:)=0.
   grd%bergy_melt(:,:)=0.
   grd%bergy_mass(:,:)=0.
+  grd%spread_mass(:,:)=0.
   grd%mass(:,:)=0.
   if (bergs%add_weight_to_ocean) grd%mass_on_ocean(:,:,:)=0.
   grd%virtual_area(:,:)=0.
@@ -2013,6 +2015,12 @@ integer :: stderrunit
     call write_trajectory(bergs%trajectories, bergs%save_short_traj)
   endif
 
+  !Update diagnostic of iceberg mass spread on ocean
+  if (grd%id_spread_mass>0) then
+          within_iceberg_model=.True.
+    call icebergs_incr_mass(bergs, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec),within_iceberg_model) 
+  endif
+
   ! Gridded diagnostics
   if (grd%id_uo>0) &
     lerr=send_data(grd%id_uo, grd%uo(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
@@ -2050,6 +2058,8 @@ integer :: stderrunit
     lerr=send_data(grd%id_bergy_melt, grd%bergy_melt(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_bergy_mass>0) &
     lerr=send_data(grd%id_bergy_mass, grd%bergy_mass(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (grd%id_spread_mass>0) &
+    lerr=send_data(grd%id_spread_mass, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_mass>0) &
     lerr=send_data(grd%id_mass, grd%mass(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_stored_ice>0) &
@@ -2106,6 +2116,7 @@ integer :: stderrunit
     bergs%floating_mass_end=sum_mass(bergs)
     bergs%icebergs_mass_end=sum_mass(bergs,justbergs=.true.)
     bergs%bergy_mass_end=sum_mass(bergs,justbits=.true.)
+    bergs%spread_mass_end=sum_mass(bergs) !Not sure what this is
     bergs%floating_heat_end=sum_heat(bergs)
     grd%tmpc(:,:)=0.;
     call mpp_clock_end(bergs%clock); call mpp_clock_end(bergs%clock_dia) ! To enable calling of public s/r
@@ -2118,6 +2129,7 @@ integer :: stderrunit
     call mpp_sum(bergs%floating_mass_end)
     call mpp_sum(bergs%icebergs_mass_end)
     call mpp_sum(bergs%bergy_mass_end)
+    call mpp_sum(bergs%spread_mass_end)
     call mpp_sum(bergs%floating_heat_end)
     call mpp_sum(bergs%returned_mass_on_ocean)
     call mpp_sum(bergs%nbergs_end)
@@ -2144,6 +2156,8 @@ integer :: stderrunit
     call mpp_sum(grdd_berg_mass)
     grdd_bergy_mass=sum( grd%bergy_mass(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
     call mpp_sum(grdd_bergy_mass)
+    grdd_spread_mass=sum( grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
+    call mpp_sum(grdd_spread_mass)
     if (mpp_pe().eq.mpp_root_pe()) then
  100 format("diamonds: ",a19,3(a18,"=",es14.7,x,a2,:,","),a12,i8)
  200 format("diamonds: ",a19,10(a18,"=",es14.7,x,a2,:,","))
@@ -2151,6 +2165,7 @@ integer :: stderrunit
       call report_state('floating','kg','',bergs%floating_mass_start,'',bergs%floating_mass_end,'',bergs%nbergs_end)
       call report_state('icebergs','kg','',bergs%icebergs_mass_start,'',bergs%icebergs_mass_end,'')
       call report_state('bits','kg','',bergs%bergy_mass_start,'',bergs%bergy_mass_end,'')
+      call report_state('spread icebergs','kg','',bergs%spread_mass_start,'',bergs%spread_mass_end,'')
       call report_istate('berg #','',bergs%nbergs_start,'',bergs%nbergs_end,'')
       call report_ibudget('berg #','calved',bergs%nbergs_calved, &
                                    'melted',bergs%nbergs_melted, &
@@ -2172,6 +2187,7 @@ integer :: stderrunit
                                          'net mass',bergs%stored_start+bergs%floating_mass_start, &
                                                     bergs%stored_end+bergs%floating_mass_end)
       call report_consistant('iceberg mass','kg','gridded',grdd_berg_mass,'bergs',bergs%icebergs_mass_end)
+      call report_consistant('spread mass','kg','gridded',grdd_spread_mass,'bergs',bergs%spread_mass_end)
       call report_consistant('bits mass','kg','gridded',grdd_bergy_mass,'bits',bergs%bergy_mass_end)
       call report_consistant('wieght','kg','returned',bergs%returned_mass_on_ocean,'floating',bergs%floating_mass_end)
       call report_state('net heat','J','',bergs%stored_heat_start+bergs%floating_heat_start,'',&
@@ -2207,6 +2223,7 @@ integer :: stderrunit
     bergs%floating_mass_start=bergs%floating_mass_end
     bergs%icebergs_mass_start=bergs%icebergs_mass_end
     bergs%bergy_mass_start=bergs%bergy_mass_end
+    bergs%spread_mass_start=bergs%spread_mass_end
     bergs%net_calving_used=0.
     bergs%net_calving_to_bergs=0.
     bergs%net_heat_to_bergs=0.
@@ -2313,11 +2330,13 @@ end subroutine icebergs_run
 
 ! ##############################################################################
 
-subroutine icebergs_incr_mass(bergs, mass, Time)
+subroutine icebergs_incr_mass(bergs, mass, within_iceberg_model, Time)
 ! Arguments
 type(icebergs), pointer :: bergs
 real, dimension(bergs%grd%isc:bergs%grd%iec,bergs%grd%jsc:bergs%grd%jec), intent(inout) :: mass
 type(time_type), intent(in), optional :: Time
+logical, intent(in), optional :: within_iceberg_model
+logical :: within_model
 ! Local variables
 integer :: i, j
 type(icebergs_gridded), pointer :: grd
@@ -2327,14 +2346,19 @@ integer :: stderrunit
 
   ! Get the stderr unit number
   stderrunit = stderr()
+  
+  
+  within_model=.False.
+  if (present(within_iceberg_model)) then 
+    within_model=within_iceberg_model
+  endif
       
-
-  if (.not. associated(bergs)) return
-
-  if (.not. bergs%add_weight_to_ocean) return
-
-  call mpp_clock_begin(bergs%clock)
-  call mpp_clock_begin(bergs%clock_int)
+  if (.not.(within_model)) then
+    if (.not. associated(bergs)) return
+    if (.not. bergs%add_weight_to_ocean) return
+    call mpp_clock_begin(bergs%clock)
+    call mpp_clock_begin(bergs%clock_int)
+  endif
 
   ! For convenience
   grd=>bergs%grd
@@ -2370,7 +2394,12 @@ integer :: stderrunit
          +   ( (grd%mass_on_ocean(i-1,j  ,6)+grd%mass_on_ocean(i+1,j  ,4))   &
          +     (grd%mass_on_ocean(i  ,j-1,8)+grd%mass_on_ocean(i  ,j+1,2)) ) )
     if (grd%area(i,j)>0) dmda=dmda/grd%area(i,j)*grd%msk(i,j)
-    if (.not. bergs%passive_mode) mass(i,j)=mass(i,j)+dmda
+
+    if (.not.(within_model)) then
+      if (.not. bergs%passive_mode) mass(i,j)=mass(i,j)+dmda
+    else
+      mass(i,j)=dmda
+    endif
     if (grd%id_mass_on_ocn>0) grd%tmp(i,j)=dmda
   enddo; enddo
   if (present(Time).and. (grd%id_mass_on_ocn>0)) &
@@ -2382,9 +2411,10 @@ integer :: stderrunit
     call grd_chksum2(grd, grd%tmp, 'mass out (incr)')
   endif
 
-  call mpp_clock_end(bergs%clock_int)
-  call mpp_clock_end(bergs%clock)
-
+  if (.not.(within_model)) then
+    call mpp_clock_end(bergs%clock_int)
+    call mpp_clock_end(bergs%clock)
+  endif
 end subroutine icebergs_incr_mass
 
 ! ##############################################################################
@@ -3565,6 +3595,7 @@ type(iceberg), pointer :: this, next
   deallocate(bergs%grd%bergy_src)
   deallocate(bergs%grd%bergy_melt)
   deallocate(bergs%grd%bergy_mass)
+  deallocate(bergs%grd%spread_mass)
   deallocate(bergs%grd%virtual_area)
   deallocate(bergs%grd%mass)
   deallocate(bergs%grd%mass_on_ocean)
