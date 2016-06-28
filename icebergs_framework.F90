@@ -614,12 +614,16 @@ if (iceberg_halo .gt. halo) then
 endif
 
 if (interactive_icebergs_on) then
-  !Runge_not_Verlet=.false.  ! Iceberg interactions only with Verlet
-  call error_mesg('diamonds, framework', 'It is unlcear whther interactive icebergs work with Runge Kutta stepping.', WARNING) 
+  if (Runge_not_Verlet.eq..true.) then
+    !Runge_not_Verlet=.false.  ! Iceberg interactions only with Verlet
+    call error_mesg('diamonds, framework', 'It is unlcear whther interactive icebergs work with Runge Kutta stepping.', WARNING) 
+  endif
 endif
 if (.not.interactive_icebergs_on) then
-  !iceberg_bonds_on=.false.  
-  call error_mesg('diamonds, framework', 'Interactive icebergs off requires iceberg bonds off (turning bonds off).', WARNING) 
+  if (iceberg_bonds_on.eq..true.) then  
+    !iceberg_bonds_on=.false.  
+    call error_mesg('diamonds, framework', 'Interactive icebergs off requires iceberg bonds off (turning bonds off).', WARNING) 
+  endif
 endif
 if (.not. iceberg_bonds_on) then
    max_bonds=0
