@@ -1117,15 +1117,6 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
     yUxR=yU*xR*grd%msk(i+1,j+1)
     yCxC=1.-( ((yDxL+yUxR)+(yDxR+yUxL)) + ((yCxL+yCxR)+(yDxC+yUxC)) )
     
-    !Temporary for debugging reasons.
-    if (mpp_pe()==mpp_root_pe()) then 
-            write(stderrunit,*) 'diamonds, You are in the square!!!', grd%area(i,j),L
-            write(stderrunit,*) 'diamonds, x,y', x,y
-            write(stderrunit,*) 'diamonds, xL,xC,xR', xL,xC,xR
-            write(stderrunit,*) 'diamonds, yU,yC,yD', yU,yC,yD
-    endif
-
- 
   else !Spread mass as if elements area hexagonal
 
     if (grd%area(i,j)>0) then
