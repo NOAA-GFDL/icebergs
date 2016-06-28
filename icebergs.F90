@@ -916,6 +916,13 @@ integer :: grdi, grdj
           *perday ! convert to m/s
       Me=max( 1./12.*(SST+2.)*Ss*(1+cos(pi*(IC**3))) ,0.) &! Wave erosion
           *perday ! convert to m/s
+
+      if (bergs%set_melt_rates_to_zero) then
+        Mv=0.0
+        Mb=0.0
+        Me=0.0
+      endif
+
   
       if (bergs%use_operator_splitting) then
         ! Operator split update of volume/mass
@@ -1009,14 +1016,16 @@ integer :: grdi, grdj
       endif
   
       ! Rolling
-      Dn=(bergs%rho_bergs/rho_seawater)*Tn ! draught (keel depth)
-      if ( Dn>0. ) then
-         if ( max(Wn,Ln)<sqrt(0.92*(Dn**2)+58.32*Dn) ) then
+      if (bergs%allow_bergs_to_roll) then
+        Dn=(bergs%rho_bergs/rho_seawater)*Tn ! draught (keel depth)
+        if ( Dn>0. ) then
+          if ( max(Wn,Ln)<sqrt(0.92*(Dn**2)+58.32*Dn) ) then
             T=Tn
             Tn=Wn
             Wn=T
             Dn=(bergs%rho_bergs/rho_seawater)*Tn ! re-calculate draught (keel depth) for grounding
-        end if
+          end if
+        endif
       endif
   
       ! Store the new state of iceberg (with L>W)

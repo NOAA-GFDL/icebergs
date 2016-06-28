@@ -209,7 +209,9 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
   logical :: time_average_weight=.false. ! Time average the weight on the ocean
   logical :: Runge_not_Verlet=.True.  !True=Runge Kuttai, False=Verlet.   
+  logical :: set_melt_rates_to_zero=.False.  !Sets all melt rates to zero, for testing purposes (thermodynamics routine is still run)
   logical :: hexagonal_icebergs=.False. !True treats icebergs as rectangles, False as hexagonal elements (for the purpose of mass spreading)
+  logical :: allow_bergs_to_roll=.True. !Allows icebergs to roll over when rolling conditions are met
   logical :: ignore_missing_restart_bergs=.False.  !True Allows the model to ignorm icebergs missing in the restart. 
   logical :: Static_icebergs=.False.  !True= icebergs do no move
   logical :: only_interactive_forces=.False.  !Icebergs only feel interactive forces, and not ocean, wind... 
@@ -319,6 +321,8 @@ logical :: time_average_weight=.false. ! Time average the weight on the ocean
 real :: speed_limit=0. ! CFL speed limit for a berg
 real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
 logical :: Runge_not_Verlet=.True.  !True=Runge Kutta, False=Verlet.  - Added by Alon 
+logical :: set_melt_rates_to_zero=.False.  !Sets all melt rates to zero, for testing purposes (thermodynamics routine is still run)
+logical :: allow_bergs_to_roll=.True. !Allows icebergs to roll over when rolling conditions are met
 logical :: hexagonal_icebergs=.False. !True treats icebergs as rectangles, False as hexagonal elements (for the purpose of mass spreading)
 logical :: ignore_missing_restart_bergs=.False.  !True Allows the model to ignorm icebergs missing in the restart. 
 logical :: Static_icebergs=.False.  !True= icebergs do no move
@@ -341,7 +345,8 @@ namelist /icebergs_nml/ verbose, budget, halo, iceberg_halo, traj_sample_hrs, in
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, iceberg_bonds_on, manually_initialize_bonds, ignore_missing_restart_bergs, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, halo_debugging, hexagonal_icebergs, &
          time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_icebergs_on, critical_interaction_damping_on, &
-         old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj
+         old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj, &
+         allow_bergs_to_roll,set_melt_rates_to_zero
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -655,6 +660,8 @@ if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffe
   bergs%time_average_weight=time_average_weight
   bergs%speed_limit=speed_limit
   bergs%Runge_not_Verlet=Runge_not_Verlet   
+  bergs%set_melt_rates_to_zero=set_melt_rates_to_zero 
+  bergs%allow_bergs_to_roll=allow_bergs_to_roll 
   bergs%hexagonal_icebergs=hexagonal_icebergs 
   bergs%ignore_missing_restart_bergs=ignore_missing_restart_bergs
   bergs%Static_icebergs=Static_icebergs 
