@@ -475,7 +475,7 @@ endif
   ! Interpolate gridded fields to berg     - Note: It should be possible to move this to evolve, so that it only needs to be called once. !!!!
   call interp_flds(grd, i, j, xi, yj, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi)
 
-   f_cori=(2.*omega)*sin(pi_180*lat)
+   f_cori=(2.*bergs%Omega_icebergs)*sin(pi_180*lat)
 !  f_cori=0.
 
   M=berg%mass

@@ -201,6 +201,7 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   real :: LoW_ratio ! Initial ratio L/W for newly calved icebergs
   real :: bergy_bit_erosion_fraction ! Fraction of erosion melt flux to divert to bergy bits
   real :: sicn_shift ! Shift of sea-ice concentration in erosion flux modulation (0<sicn_shift<1)
+  real :: Omega_icebergs=omega ! Option to override the rotation rate.
   real, dimension(:), pointer :: initial_mass, distribution, mass_scaling
   real, dimension(:), pointer :: initial_thickness, initial_width, initial_length
   logical :: restarted=.false. ! Indicate whether we read state from a restart or not
@@ -314,6 +315,7 @@ real :: tangental_damping_coef=2.e-5     ! Coef for relative iceberg motion damp
 real :: LoW_ratio=1.5 ! Initial ratio L/W for newly calved icebergs
 real :: bergy_bit_erosion_fraction=0. ! Fraction of erosion melt flux to divert to bergy bits
 real :: sicn_shift=0. ! Shift of sea-ice concentration in erosion flux modulation (0<sicn_shift<1)
+real :: Omega_icebergs=omega ! Option to override the rotation rate.
 logical :: use_operator_splitting=.true. ! Use first order operator splitting for thermodynamics
 logical :: add_weight_to_ocean=.true. ! Add weight of icebergs + bits to ocean
 logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
@@ -346,7 +348,7 @@ namelist /icebergs_nml/ verbose, budget, halo, iceberg_halo, traj_sample_hrs, in
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, halo_debugging, hexagonal_icebergs, &
          time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_icebergs_on, critical_interaction_damping_on, &
          old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj, &
-         allow_bergs_to_roll,set_melt_rates_to_zero
+         allow_bergs_to_roll,set_melt_rates_to_zero,Omega_icebergs
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -660,6 +662,7 @@ if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffe
   bergs%time_average_weight=time_average_weight
   bergs%speed_limit=speed_limit
   bergs%Runge_not_Verlet=Runge_not_Verlet   
+  bergs%Omega_icebergs=Omega_icebergs
   bergs%set_melt_rates_to_zero=set_melt_rates_to_zero 
   bergs%allow_bergs_to_roll=allow_bergs_to_roll 
   bergs%hexagonal_icebergs=hexagonal_icebergs 
