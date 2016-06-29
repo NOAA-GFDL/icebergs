@@ -1676,6 +1676,10 @@ real :: dxm, dx0, dxp
 #endif
 real :: hxm, hxp
 real, parameter :: ssh_coast=0.00
+integer :: stderrunit
+
+  ! Get the stderr unit number
+  stderrunit = stderr()
 
   cos_rot=bilin(grd, grd%cos, i, j, xi, yj) ! If true, uses the inverted bilin function
   sin_rot=bilin(grd, grd%sin, i, j, xi, yj)
@@ -1691,7 +1695,7 @@ real, parameter :: ssh_coast=0.00
   sst=grd%sst(i,j) ! A-grid
   cn=grd%cn(i,j) ! A-grid
   hi=grd%hi(i,j) ! A-grid
-
+    
   ! Estimate SSH gradient in X direction
 #ifdef USE_OLD_SSH_GRADIENT
   dxp=0.5*(grd%dx(i+1,j)+grd%dx(i+1,j-1))
@@ -1928,8 +1932,8 @@ integer :: stderrunit
       ! Interpolate wind stresses from C-grid velocity-points.
       ! This masking is needed for now to prevent icebergs from running up on to land.
       mask = min(grd%msk(i,j), grd%msk(i+1,j), grd%msk(i,j+1), grd%msk(i+1,j+1))
-      grd%ua(I,J) = mask * 0.5*(uC_tmp(I,j)+uC_tmp(I,j+1))
-      grd%va(I,J) = mask * 0.5*(vC_tmp(i,J)+vC_tmp(i+1,J))
+       grd%ua(I,J) = mask * 0.5*(uC_tmp(I,j)+uC_tmp(I,j+1))
+       grd%va(I,J) = mask * 0.5*(vC_tmp(i,J)+vC_tmp(i+1,J))
     enddo ; enddo
     deallocate(uC_tmp, vC_tmp)
   else
@@ -1953,6 +1957,18 @@ integer :: stderrunit
   call mpp_update_domains(grd%cn, grd%domain)
   grd%hi(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=hi(:,:)
   call mpp_update_domains(grd%hi, grd%domain)
+
+ !Make sure that gridded values agree with mask  (to get ride of NaN values)
+  do i=grd%isd,grd%ied ; do j=grd%jsc-1,grd%jed
+  !Initializing all gridded values to zero
+    if (grd%msk(i,j).lt. 0.5) then
+      grd%ua(i,j) = 0.0 ;  grd%va(i,j) = 0.0
+      grd%uo(i,j) = 0.0 ;  grd%vo(i,j) = 0.0
+      grd%ui(i,j) = 0.0 ;  grd%vi(i,j) = 0.0
+      grd%sst(i,j) = 0.0;  grd%cn(i,j) = 0.0
+      grd%hi(i,j) = 0.0
+    endif
+  enddo; enddo
 
   if (debug) call bergs_chksum(bergs, 'run bergs (top)')
   if (debug) call checksum_gridded(bergs%grd, 'top of s/r run')
@@ -3144,6 +3160,10 @@ real :: u2, v2, x1, y1, xn, yn
 real :: dx, dt, dt_2
 integer :: i, j
 logical :: on_tangential_plane, error_flag, bounced
+integer :: stderrunit
+
+  ! Get the stderr unit number
+    stderrunit = stderr()
 
   ! For convenience
     grd=>bergs%grd
@@ -3361,7 +3381,7 @@ integer :: stderrunit
         if (grd%msk(i-1,j)>0.) then
           if (i>grd%isd+1) i=i-1
         else
-         !write(stderr(),'(a,6f8.3,i)') 'diamonds, adjust: bouncing berg from west',lon,lat,xi,yj,uvel,vvel,mpp_pe()
+         write(stderr(),'(a,6f8.3,i)') 'diamonds, adjust: bouncing berg from west',lon,lat,xi,yj,uvel,vvel,mpp_pe()
           bounced=.true.
         endif
       endif
@@ -3380,7 +3400,7 @@ integer :: stderrunit
         if (grd%msk(i,j-1)>0.) then
           if (j>grd%jsd+1) j=j-1
         else
-         !write(stderr(),'(a,6f8.3,i)') 'diamonds, adjust: bouncing berg from south',lon,lat,xi,yj,uvel,vvel,mpp_pe()
+         write(stderr(),'(a,6f8.3,i)') 'diamonds, adjust: bouncing berg from south',lon,lat,xi,yj,uvel,vvel,mpp_pe()
           bounced=.true.
         endif
       endif
@@ -3389,7 +3409,7 @@ integer :: stderrunit
         if (grd%msk(i,j+1)>0.) then
           if (j<grd%jed) j=j+1
         else
-         !write(stderr(),'(a,6f8.3,i)') 'diamonds, adjust: bouncing berg from north',lon,lat,xi,yj,uvel,vvel,mpp_pe()
+         write(stderr(),'(a,6f8.3,i)') 'diamonds, adjust: bouncing berg from north',lon,lat,xi,yj,uvel,vvel,mpp_pe()
           bounced=.true.
         endif
       endif
@@ -3407,7 +3427,6 @@ integer :: stderrunit
     endif
     lret=pos_within_cell(grd, lon, lat, i, j, xi, yj) ! Update xi and yj
   enddo
-
  !if (debug) then
  !  if (abs(i-i0)>2) then
  !    stop 'diamonds, adjust: Moved too far in i!'
@@ -3460,7 +3479,6 @@ integer :: stderrunit
     write(stderrunit,*) 'diamonds, adjust: Should not get here! Berg is not in cell after adjustment'
     if (debug) error=.true.
   endif
-
  end subroutine adjust_index_and_ground
 
 !end subroutine evolve_icebergs
