@@ -1076,6 +1076,7 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
   real :: yDxL, yDxC, yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR
   real :: S, H, origin_x, origin_y, x0, y0, theta
   real :: Area_Q1,Area_Q2 , Area_Q3,Area_Q4, Area_hex
+  real :: fraction_used
   real, parameter :: rho_seawater=1035.
   integer :: stderrunit
   logical :: debug
@@ -1202,16 +1203,22 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
       endif
 
   endif
+        
+  !Scale each cell by (1/fraction_used) in order to redisribute ice mass which landed up on the land, back into the ocean
+  !Note that for the square elements, the mass has already been reassigned, so fraction_used shoule be equal to 1 aready
+  fraction_used= ((yDxL*grd%msk(i-1,j-1)) + (yDxC*grd%msk(i  ,j-1))  +(yDxR*grd%msk(i+1,j-1)) +(yCxL*grd%msk(i-1,j  )) +  (yCxR*grd%msk(i+1,j  ))&
+                 +(yUxL*grd%msk(i-1,j+1)) +(yUxC*grd%msk(i  ,j+1))   +(yUxR*grd%msk(i+1,j+1)) + (yCxC**grd%msk(i,j)))
 
-  grd%mass_on_ocean(i,j,1)=grd%mass_on_ocean(i,j,1)+(yDxL*Mass)
-  grd%mass_on_ocean(i,j,2)=grd%mass_on_ocean(i,j,2)+(yDxC*Mass)
-  grd%mass_on_ocean(i,j,3)=grd%mass_on_ocean(i,j,3)+(yDxR*Mass)
-  grd%mass_on_ocean(i,j,4)=grd%mass_on_ocean(i,j,4)+(yCxL*Mass)
-  grd%mass_on_ocean(i,j,5)=grd%mass_on_ocean(i,j,5)+(yCxC*Mass)
-  grd%mass_on_ocean(i,j,6)=grd%mass_on_ocean(i,j,6)+(yCxR*Mass)
-  grd%mass_on_ocean(i,j,7)=grd%mass_on_ocean(i,j,7)+(yUxL*Mass)
-  grd%mass_on_ocean(i,j,8)=grd%mass_on_ocean(i,j,8)+(yUxC*Mass)
-  grd%mass_on_ocean(i,j,9)=grd%mass_on_ocean(i,j,9)+(yUxR*Mass)
+
+  grd%mass_on_ocean(i,j,1)=grd%mass_on_ocean(i,j,1)+(yDxL*Mass/fraction_used)
+  grd%mass_on_ocean(i,j,2)=grd%mass_on_ocean(i,j,2)+(yDxC*Mass/fraction_used)
+  grd%mass_on_ocean(i,j,3)=grd%mass_on_ocean(i,j,3)+(yDxR*Mass/fraction_used)
+  grd%mass_on_ocean(i,j,4)=grd%mass_on_ocean(i,j,4)+(yCxL*Mass/fraction_used)
+  grd%mass_on_ocean(i,j,5)=grd%mass_on_ocean(i,j,5)+(yCxC*Mass/fraction_used)
+  grd%mass_on_ocean(i,j,6)=grd%mass_on_ocean(i,j,6)+(yCxR*Mass/fraction_used)
+  grd%mass_on_ocean(i,j,7)=grd%mass_on_ocean(i,j,7)+(yUxL*Mass/fraction_used)
+  grd%mass_on_ocean(i,j,8)=grd%mass_on_ocean(i,j,8)+(yUxC*Mass/fraction_used)
+  grd%mass_on_ocean(i,j,9)=grd%mass_on_ocean(i,j,9)+(yUxR*Mass/fraction_used)
 
 end subroutine spread_mass_across_ocean_cells
 
@@ -1504,7 +1511,7 @@ subroutine Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy,Area_triangle,
     if      ( (.not. ((((Ax>0.) .and. (Ay>0.)) .or. ((Bx>0.) .and. (By> 0.))) .or. ((Cx>0.) .and. (Cy> 0.)))) .and. ((Area_Upper+Area_Right).le.Area_triangle) ) then
       !No points land in this quadrant and triangle does not cross the quadrant
       Key_quadrant=1;
-    elseif  ( (.not. ((((Ax<0.) .and. (Ay>=0)) .or. ((Bx<0.) .and. (By>=0.))) .or. ((Cx<0.) .and. (Cy>=0.)))) .and. ((Area_Upper+Area_Left).le. Area_triangle) ) then
+    elseif  ( (.not. ((((Ax<0.) .and. (Ay>0)) .or. ((Bx<0.) .and. (By>0.))) .or. ((Cx<0.) .and. (Cy>0.)))) .and. ((Area_Upper+Area_Left).le. Area_triangle) ) then
       Key_quadrant=2
     elseif  ( (.not. ((((Ax<0.) .and. (Ay<0.)) .or. ((Bx<0.) .and. (By< 0.))) .or. ((Cx<0.) .and. (Cy< 0.)))) .and. ((Area_Lower+Area_Left) .le.Area_triangle) ) then
       Key_quadrant=3;
@@ -1553,10 +1560,15 @@ subroutine Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy,Area_triangle,
   Error=abs(Area_Q1+Area_Q2+Area_Q3+Area_Q4-Area_triangle)
   if (Error>0.01) then
     call error_mesg('diamonds, triangle spreading', 'Triangle not evaluated accurately!!', WARNING)
-    if (mpp_pe().eq.mpp_root_pe()) then
+    !if (mpp_pe().eq.mpp_root_pe()) then
+    if (mpp_pe().eq. 0) then
       write(stderrunit,*) 'diamonds, Triangle corners:',Ax,Ay,Bx,By,Cx,Cy
       write(stderrunit,*) 'diamonds, Triangle, Areas', Area_Q1,  Area_Q2 , Area_Q3,  Area_Q4
       write(stderrunit,*) 'diamonds, Triangle, Areas', Error
+      write(stderrunit,*) 'diamonds, point in triangle',(point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,0.,0.)),Key_quadrant
+      write(stderrunit,*) 'diamonds, halves',Area_Upper,Area_Lower,Area_Right,Area_Left
+
+
     endif
   endif
 
