@@ -131,6 +131,7 @@ real, allocatable, dimension(:) :: lon,          &
                                    mass_scaling, &
                                    mass_of_bits, &
                                    halo_berg,    &
+                                   static_berg,  &
                                    heat_density
 
 integer, allocatable, dimension(:) :: ine,              &
@@ -184,6 +185,7 @@ integer :: grdi, grdj
    allocate(mass_of_bits(nbergs))
    allocate(heat_density(nbergs))
    allocate(halo_berg(nbergs))
+   allocate(static_berg(nbergs))
 
    allocate(ine(nbergs))
    allocate(jne(nbergs))
@@ -235,6 +237,8 @@ integer :: grdi, grdj
                                             longname='heat density',units='J/kg')
   id = register_restart_field(bergs_restart,filename,'halo_berg',halo_berg, &
                                             longname='halo_berg',units='dimensionless')
+  id = register_restart_field(bergs_restart,filename,'static_berg',static_berg, &
+                                            longname='static_berg',units='dimensionless')
 
 
   ! Write variables
@@ -255,6 +259,7 @@ integer :: grdi, grdj
       start_year(i) = this%start_year; start_day(i) = this%start_day
       start_mass(i) = this%start_mass; mass_scaling(i) = this%mass_scaling
       halo_berg(i) = this%halo_berg 
+      static_berg(i) = this%static_berg 
       iceberg_num(i) = this%iceberg_num; 
       mass_of_bits(i) = this%mass_of_bits; heat_density(i) = this%heat_density
       this=>this%next
@@ -284,7 +289,7 @@ integer :: grdi, grdj
              start_mass,   &
              mass_scaling, &
              mass_of_bits, &
-             halo_berg,    &
+             static_berg,    &
              heat_density )
 
   deallocate(           &
@@ -406,7 +411,7 @@ integer :: lonid, latid,  uvelid, vvelid, ineid, jneid
 integer :: axnid, aynid, uvel_oldid, vvel_oldid, bxnid, bynid
 integer :: massid, thicknessid, widthid, lengthid
 integer :: start_lonid, start_latid, start_yearid, iceberg_numid, start_dayid, start_massid
-integer :: scaling_id, mass_of_bits_id, heat_density_id, halo_bergid
+integer :: scaling_id, mass_of_bits_id, heat_density_id, halo_bergid, static_bergid
 logical :: lres, found_restart, multiPErestart
 real :: lon0, lon1, lat0, lat1
 character(len=33) :: filename, filename_base
@@ -481,6 +486,7 @@ integer :: stderrunit
   start_massid=inq_var(ncid, 'start_mass')
   scaling_id=inq_var(ncid, 'mass_scaling')
   halo_bergid=inq_var(ncid, 'halo_berg')
+  static_bergid=inq_var(ncid, 'static_berg')
   mass_of_bits_id=inq_var(ncid, 'mass_of_bits',unsafe=.true.)
   heat_density_id=inq_var(ncid, 'heat_density',unsafe=.true.)
   ineid=inq_var(ncid, 'ine',unsafe=.true.)
@@ -536,6 +542,7 @@ integer :: stderrunit
       localberg%start_mass=get_double(ncid, start_massid, k)
       localberg%mass_scaling=get_double(ncid, scaling_id, k)
       localberg%halo_berg=get_double(ncid, halo_bergid, k)
+      localberg%static_berg=get_double(ncid, static_bergid, k)
       if (mass_of_bits_id>0) then ! Allow reading of older restart with no bergy bits
         localberg%mass_of_bits=get_double(ncid, mass_of_bits_id, k)
       else
@@ -627,6 +634,7 @@ contains
         localberg%mass_scaling=bergs%mass_scaling(1)
         localberg%mass_of_bits=0.
         localberg%halo_berg=0.
+        localberg%static_berg=0.
         localberg%heat_density=0.
         localberg%uvel=1.
         localberg%vvel=0.
@@ -722,6 +730,7 @@ real, allocatable, dimension(:) :: lon,          &
                                    mass_scaling, &
                                    mass_of_bits, &
                                    halo_berg,    &
+                                   static_berg,    &
                                    heat_density
 integer, allocatable, dimension(:) :: ine,       &
                                       jne,       &
@@ -768,6 +777,7 @@ integer, allocatable, dimension(:) :: ine,       &
      allocate(mass_scaling(nbergs_in_file))
      allocate(mass_of_bits(nbergs_in_file))
      allocate(halo_berg(nbergs_in_file))
+     allocate(static_berg(nbergs_in_file))
      allocate(heat_density(nbergs_in_file))
 
      allocate(ine(nbergs_in_file))
@@ -794,6 +804,7 @@ integer, allocatable, dimension(:) :: ine,       &
      call read_unlimited_axis(filename,'mass_scaling',mass_scaling,domain=grd%domain)
      call read_unlimited_axis(filename,'mass_of_bits',mass_of_bits,domain=grd%domain)
      call read_unlimited_axis(filename,'halo_berg',halo_berg,domain=grd%domain)
+     call read_unlimited_axis(filename,'static_berg',static_berg,domain=grd%domain)
      call read_unlimited_axis(filename,'heat_density',heat_density,domain=grd%domain)
 
      call read_unlimited_axis(filename,'ine',ine,domain=grd%domain)
@@ -880,6 +891,7 @@ integer, allocatable, dimension(:) :: ine,       &
          localberg%mass_scaling=mass_scaling(k)
          localberg%mass_of_bits=mass_of_bits(k)
          localberg%halo_berg=halo_berg(k)
+         localberg%static_berg=static_berg(k)
          localberg%heat_density=heat_density(k)
          localberg%first_bond=>null()
          if (really_debug) lres=is_point_in_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, explain=.true.)
@@ -918,6 +930,7 @@ integer, allocatable, dimension(:) :: ine,       &
                 mass_scaling, &
                 mass_of_bits, &
                 halo_berg,    &
+                static_berg,    &
                 heat_density )
      deallocate(           &
                 ine,       &
@@ -997,6 +1010,7 @@ contains
         localberg%mass_scaling=bergs%mass_scaling(1)
         localberg%mass_of_bits=0.
         localberg%halo_berg=0.
+        localberg%static_berg=0.
         localberg%heat_density=0.
         localberg%uvel=1.
         localberg%vvel=0.

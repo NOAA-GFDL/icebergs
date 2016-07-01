@@ -15,8 +15,8 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 
 implicit none ; private
 
-integer :: buffer_width=26 !Changed from 20 to 28 by Alon 
-integer :: buffer_width_traj=29  !Changed from 23 by Alon
+integer :: buffer_width=27 !Changed from 20 to 28 by Alon 
+integer :: buffer_width_traj=30  !Changed from 23 by Alon
 !integer, parameter :: buffer_width=26 !Changed from 20 to 26 by Alon 
 !integer, parameter :: buffer_width_traj=29  !Changed from 23 by Alon
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
@@ -142,7 +142,7 @@ type :: xyt
   real :: lon, lat, day
   real :: mass, thickness, width, length, uvel, vvel
   real :: axn, ayn, bxn, byn, uvel_old, vvel_old, lat_old, lon_old  !Explicit and implicit accelerations !Alon 
-  real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi, halo_berg
+  real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi, halo_berg, static_berg
   real :: mass_of_bits, heat_density
   integer :: year, iceberg_num
   type(xyt), pointer :: next=>null()
@@ -156,6 +156,7 @@ type :: iceberg
   real :: start_lon, start_lat, start_day, start_mass, mass_scaling
   real :: mass_of_bits, heat_density
   real :: halo_berg  ! Equal to zero for bergs on computational domain, and =1 for bergs on the halo
+  real :: static_berg  ! Equal to 1 for icebergs which are static (not allowed to move). Might be extended to grounding later.
   integer :: start_year
   integer :: iceberg_num
   integer :: ine, jne ! nearest index in NE direction (for convenience)
@@ -1493,9 +1494,10 @@ end subroutine send_bergs_to_other_pes
     buff%data(24,n)=berg%byn  !Alon
     buff%data(25,n)=float(berg%iceberg_num)
     buff%data(26,n)=berg%halo_berg 
+    buff%data(27,n)=berg%static_berg 
 
     if (max_bonds .gt. 0) then
-      counter=26 !how many data points being passed so far (must match above)
+      counter=27 !how many data points being passed so far (must match above)
       current_bond=>berg%first_bond
       do k = 1,max_bonds
         if (associated(current_bond)) then
@@ -1637,6 +1639,7 @@ end subroutine send_bergs_to_other_pes
     localberg%byn=buff%data(24,n) !Alon
     localberg%iceberg_num=nint(buff%data(25,n))
     localberg%halo_berg=buff%data(26,n) 
+    localberg%static_berg=buff%data(27,n) 
 
     !These quantities no longer need to be passed between processors
     localberg%uvel_old=localberg%uvel
@@ -1838,6 +1841,7 @@ end subroutine send_bergs_to_other_pes
       buff%data(27,n)=traj%bxn !Alon
       buff%data(28,n)=traj%byn !Alon
       buff%data(29,n)=traj%halo_berg !Alon
+      buff%data(30,n)=traj%static_berg !Alon
     endif
 
   end subroutine pack_traj_into_buffer2
@@ -1884,6 +1888,7 @@ end subroutine send_bergs_to_other_pes
       traj%bxn=buff%data(27,n) !Alon
       traj%byn=buff%data(28,n) !Alon
       traj%halo_berg=buff%data(29,n) !Alon
+      traj%static_berg=buff%data(30,n) !Alon
     endif
     call append_posn(first, traj)
 
@@ -2695,6 +2700,7 @@ integer :: grdi, grdj
       posn%lon_old=this%lon_old
       posn%lat_old=this%lat_old
       posn%halo_berg=this%halo_berg
+      posn%static_berg=this%static_berg
   
       call push_posn(this%trajectory, posn)
   
@@ -3905,23 +3911,24 @@ integer :: i
   rtmp(26)=berg%ssh_y
   rtmp(27)=berg%cn
   rtmp(28)=berg%hi
-  rtmp(29)=berg%axn !Added by Alon
-  rtmp(30)=berg%ayn !Added by Alon
-  rtmp(31)=berg%bxn !Added by Alon
-  rtmp(32)=berg%byn !Added by Alon
-  rtmp(33)=berg%uvel_old !Added by Alon
-  rtmp(34)=berg%vvel_old !Added by Alon
-  rtmp(35)=berg%lat_old !Added by Alon
-  rtmp(36)=berg%lon_old !Added by Alon
-  itmp(37)=berg%halo_berg !Changed from 31 to 40 by Alon
-  itmp(1:37)=transfer(rtmp,i8) !Changed from 28 to 37 by Alon
-  itmp(38)=berg%start_year !Changed from 29 to 38 by Alon
-  itmp(39)=berg%ine !Changed from 30 to 39 by Alon
-  itmp(40)=berg%jne !Changed from 31 to 40 by Alon
-  itmp(41)=berg%iceberg_num !added  by Alon
+  rtmp(29)=berg%axn 
+  rtmp(30)=berg%ayn 
+  rtmp(31)=berg%bxn 
+  rtmp(32)=berg%byn 
+  rtmp(33)=berg%uvel_old 
+  rtmp(34)=berg%vvel_old 
+  rtmp(35)=berg%lat_old 
+  rtmp(36)=berg%lon_old 
+  itmp(37)=berg%halo_berg 
+  itmp(38)=berg%static_berg 
+  itmp(1:38)=transfer(rtmp,i8) 
+  itmp(39)=berg%start_year 
+  itmp(40)=berg%ine 
+  itmp(41)=berg%jne 
+  itmp(42)=berg%iceberg_num 
 
   ichk1=0; ichk2=0; ichk3=0
-  do i=1,37+4 !Changd from 28 to 37, 3 to 4 by Alon
+  do i=1,38+4 
    ichk1=ichk1+itmp(i)
    ichk2=ichk2+itmp(i)*i
    ichk3=ichk3+itmp(i)*i*i

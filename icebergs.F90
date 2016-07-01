@@ -2575,6 +2575,7 @@ integer :: stderrunit
           newberg%mass_scaling=bergs%mass_scaling(k)
           newberg%mass_of_bits=0.
           newberg%halo_berg=0.
+          newberg%static_berg=0.
           newberg%heat_density=grd%stored_heat(i,j)/grd%stored_ice(i,j,k) ! This is in J/kg
           call add_new_berg_to_list(bergs%list(i,j)%first, newberg)
           calved_to_berg=bergs%initial_mass(k)*bergs%mass_scaling(k) ! Units of kg
@@ -2633,53 +2634,54 @@ logical :: bounced, interactive_icebergs_on, Runge_not_Verlet
   do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
     berg=>bergs%list(grdi,grdj)%first
     do while (associated(berg)) ! loop over all bergs
+      if (berg%static_berg .lt. 0.5) then  !Only allow non-static icebergs to evolve
  
-      !Checking it everything is ok:
-      if (.not. is_point_in_cell(bergs%grd, berg%lon, berg%lat, berg%ine, berg%jne) ) then
-        write(stderrunit,'(i4,a4,32i7)') mpp_pe(),'Lon',(i,i=grd%isd,grd%ied)
-        do j=grd%jed,grd%jsd,-1
-          write(stderrunit,'(2i4,32f7.1)') mpp_pe(),j,(grd%lon(i,j),i=grd%isd,grd%ied)
-        enddo
-        write(stderrunit,'(i4,a4,32i7)') mpp_pe(),'Lat',(i,i=grd%isd,grd%ied)
-        do j=grd%jed,grd%jsd,-1
-          write(stderrunit,'(2i4,32f7.1)') mpp_pe(),j,(grd%lat(i,j),i=grd%isd,grd%ied)
-        enddo
-        call print_berg(stderrunit, berg, 'evolve_iceberg, berg is not in proper starting cell')
-        write(stderrunit,'(a,i3,2(i4,3f8.2))') 'evolve_iceberg: pe,lon/lat(i,j)=', mpp_pe(), &
-                 berg%ine,berg%lon,grd%lon(berg%ine-1,berg%jne-1),grd%lon(berg%ine,berg%jne), &
-                 berg%jne,berg%lat,grd%lat(berg%ine-1,berg%jne-1),grd%lat(berg%ine,berg%jne)
-        if (debug) call error_mesg('diamonds, evolve_iceberg','berg is in wrong starting cell!',FATAL)
+        !Checking it everything is ok:
+        if (.not. is_point_in_cell(bergs%grd, berg%lon, berg%lat, berg%ine, berg%jne) ) then
+          write(stderrunit,'(i4,a4,32i7)') mpp_pe(),'Lon',(i,i=grd%isd,grd%ied)
+          do j=grd%jed,grd%jsd,-1
+            write(stderrunit,'(2i4,32f7.1)') mpp_pe(),j,(grd%lon(i,j),i=grd%isd,grd%ied)
+          enddo
+          write(stderrunit,'(i4,a4,32i7)') mpp_pe(),'Lat',(i,i=grd%isd,grd%ied)
+          do j=grd%jed,grd%jsd,-1
+            write(stderrunit,'(2i4,32f7.1)') mpp_pe(),j,(grd%lat(i,j),i=grd%isd,grd%ied)
+          enddo
+          call print_berg(stderrunit, berg, 'evolve_iceberg, berg is not in proper starting cell')
+          write(stderrunit,'(a,i3,2(i4,3f8.2))') 'evolve_iceberg: pe,lon/lat(i,j)=', mpp_pe(), &
+                   berg%ine,berg%lon,grd%lon(berg%ine-1,berg%jne-1),grd%lon(berg%ine,berg%jne), &
+                   berg%jne,berg%lat,grd%lat(berg%ine-1,berg%jne-1),grd%lat(berg%ine,berg%jne)
+          if (debug) call error_mesg('diamonds, evolve_iceberg','berg is in wrong starting cell!',FATAL)
+        endif
+        if (debug) call check_position(grd, berg, 'evolve_iceberg (top)')
+
+          !Time stepping schemes:
+          if (Runge_not_Verlet) then 
+            call Runge_Kutta_stepping(bergs,berg, axn, ayn, bxn, byn, uveln, vveln,lonn, latn, i, j, xi, yj)
+          endif 
+          if (.not.Runge_not_Verlet) then 
+            call verlet_stepping(bergs,berg, axn, ayn, bxn, byn, uveln, vveln)
+          endif 
+
+        ! Saving all the iceberg variables.
+        berg%axn=axn 
+        berg%ayn=ayn 
+        berg%bxn=bxn 
+        berg%byn=byn 
+        berg%uvel=uveln
+        berg%vvel=vveln
+
+        if (Runge_not_Verlet) then
+          berg%lon=lonn  ;   berg%lat=latn
+          berg%ine=i     ;   berg%jne=j
+          berg%xi=xi     ;   berg%yj=yj
+        else
+          if (.not. interactive_icebergs_on)  call update_verlet_position(bergs,berg) 
+        endif
+
+        !call interp_flds(grd, i, j, xi, yj, berg%uo, berg%vo, berg%ui, berg%vi, berg%ua, berg%va, berg%ssh_x, berg%ssh_y, berg%sst)
+        !if (debug) call print_berg(stderr(), berg, 'evolve_iceberg, final posn.')
+        if (debug) call check_position(grd, berg, 'evolve_iceberg (bot)')
       endif
-      if (debug) call check_position(grd, berg, 'evolve_iceberg (top)')
-
-        !Time stepping schemes:
-        if (Runge_not_Verlet) then 
-          call Runge_Kutta_stepping(bergs,berg, axn, ayn, bxn, byn, uveln, vveln,lonn, latn, i, j, xi, yj)
-        endif 
-        if (.not.Runge_not_Verlet) then 
-          call verlet_stepping(bergs,berg, axn, ayn, bxn, byn, uveln, vveln)
-        endif 
-
-      ! Saving all the iceberg variables.
-      berg%axn=axn 
-      berg%ayn=ayn 
-      berg%bxn=bxn 
-      berg%byn=byn 
-      berg%uvel=uveln
-      berg%vvel=vveln
-
-      if (Runge_not_Verlet) then
-        berg%lon=lonn  ;   berg%lat=latn
-        berg%ine=i     ;   berg%jne=j
-        berg%xi=xi     ;   berg%yj=yj
-      else
-        if (.not. interactive_icebergs_on)  call update_verlet_position(bergs,berg) 
-      endif
-
-      !call interp_flds(grd, i, j, xi, yj, berg%uo, berg%vo, berg%ui, berg%vi, berg%ua, berg%va, berg%ssh_x, berg%ssh_y, berg%sst)
-      !if (debug) call print_berg(stderr(), berg, 'evolve_iceberg, final posn.')
-      if (debug) call check_position(grd, berg, 'evolve_iceberg (bot)')
-
       berg=>berg%next
     enddo ! loop over all bergs
   enddo ; enddo
@@ -2690,16 +2692,15 @@ logical :: bounced, interactive_icebergs_on, Runge_not_Verlet
     do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
       berg=>bergs%list(grdi,grdj)%first
       do while (associated(berg)) ! loop over all bergs
-       
-
-       if (.not. Runge_not_Verlet)  call update_verlet_position(bergs,berg) 
-        
-       !Updating old velocities (for use in iceberg interactions)
-        berg%uvel_old=berg%uvel
-        berg%vvel_old=berg%vvel
-        berg%lon_old=berg%lon  ! lon_old, lat_old are not really needed for Verlet. But are needed for RK
-        berg%lat_old=berg%lat
-
+        if (berg%static_berg .lt. 0.5) then  !Only allow non-static icebergs to evolve
+         if (.not. Runge_not_Verlet)  call update_verlet_position(bergs,berg) 
+          
+         !Updating old velocities (for use in iceberg interactions)
+          berg%uvel_old=berg%uvel
+          berg%vvel_old=berg%vvel
+          berg%lon_old=berg%lon  ! lon_old, lat_old are not really needed for Verlet. But are needed for RK
+          berg%lat_old=berg%lat
+        endif
         berg=>berg%next
       enddo ! loop over all bergs
     enddo ; enddo
