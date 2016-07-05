@@ -144,6 +144,7 @@ type(iceberg), pointer :: other_berg
 type(icebergs_gridded), pointer :: grd
 real :: T1, L1, W1, lon1, lat1, x1, y1, R1, A1   !Current iceberg
 real :: T2, L2, W2, lon2, lat2, x2, y2, R2, A2   !Other iceberg
+real :: dlon,dlat
 real :: r_dist_x, r_dist_y, r_dist
 integer :: grdi_outer, grdj_outer
 integer :: grdi_inner, grdj_inner
@@ -157,7 +158,7 @@ integer :: grdi_inner, grdj_inner
     do while (associated(berg)) ! loop over all bergs
     
       lon1=berg%lon; lat1=berg%lat
-      call rotpos_to_tang(lon1,lat1,x1,y1)
+      !call rotpos_to_tang(lon1,lat1,x1,y1)  !Is this correct? Shouldn't it only be on tangent plane?
 
       do grdj_inner = grd%jsc,grd%jec ; do grdi_inner = grd%isc,grd%iec  !This line uses n^2 steps
 !     do grdj_inner = berg%jne-1,berg%jne+1 ; do grdi_inner = berg%ine-1,berg%ine+1   !Only looping through adjacent cells.
@@ -166,9 +167,15 @@ integer :: grdi_inner, grdj_inner
           
           if (berg%iceberg_num .ne. other_berg%iceberg_num) then
             lon2=other_berg%lon; lat2=other_berg%lat
-            call rotpos_to_tang(lon2,lat2,x2,y2)
-            r_dist_x=x1-x2 ; r_dist_y=y1-y2
-            r_dist=sqrt( ((x1-x2)**2) + ((y1-y2)**2) )
+            !call rotpos_to_tang(lon2,lat2,x2,y2) !Is this correct? Shouldn't it only be on tangent plane?
+            !r_dist_x=x1-x2 ; r_dist_y=y1-y2
+            !r_dist=sqrt( ((x1-x2)**2) + ((y1-y2)**2) )
+
+            dlon=lon1-lon2
+            dlat=lat1-lat2
+            r_dist_x=dlon*(pi/180)*Rearth*cos(0.5*(lat1+lat2)*(pi/180))
+            r_dist_y=dlat*(pi/180)*Rearth
+            r_dist=sqrt( (r_dist_x**2) + (r_dist_y**2) )
         
             !if (r_dist.gt.1000.) then  ! If the bergs are close together, then form a bond
               call form_a_bond(berg, other_berg%iceberg_num, other_berg%ine, other_berg%jne, other_berg)
@@ -879,6 +886,7 @@ integer :: i,j, stderrunit
 type(iceberg), pointer :: this, next
 real, parameter :: perday=1./86400.
 integer :: grdi, grdj
+real :: orientation
 
   ! For convenience
   grd=>bergs%grd
@@ -1053,6 +1061,15 @@ integer :: grdi, grdj
             Hocean=bergs%grounding_fraction*(grd%ocean_depth(i,j)+grd%ssh(i,j))
             if (Dn>Hocean) Mnew=Mnew*min(1.,Hocean/Dn)
           endif
+
+          orientation=bergs%initial_orientation
+          if ((bergs%iceberg_bonds_on) .and. (bergs%rotate_icebergs_for_mass_spreading)) then
+                  orientation=find_orientation_using_iceberg_bonds(this,bergs%initial_orientation)
+                  print *, 'orientation: ', orientation, this%iceberg_num
+
+          endif
+
+
           call spread_mass_across_ocean_cells(grd, i, j, this%xi, this%yj, Mnew, nMbits, this%mass_scaling, this%length*this%width, bergs%hexagonal_icebergs )
         endif
       endif
@@ -1062,6 +1079,55 @@ integer :: grdi, grdj
   enddo ; enddo
 
 end subroutine thermodynamics
+
+!MPP1
+real function find_orientation_using_iceberg_bonds(berg,initial_orientation)
+  ! Arguments
+  type(iceberg) :: berg
+  real, intent(in) :: initial_orientation 
+  type(iceberg), pointer :: other_berg
+  type(bond), pointer :: current_bond
+  real :: angle, lat1,lat2,lon1,lon2,dlat,dlon
+  real :: r_dist_x, r_dist_y
+  real :: theta, bond_count, Average_angle
+    
+  bond_count=0.
+  Average_angle=0.
+  current_bond=>berg%first_bond
+  lat1=berg%lat
+  lon1=berg%lon
+  do while (associated(current_bond)) ! loop over all bonds
+      other_berg=>current_bond%other_berg
+      if (.not. associated(current_bond)) then
+        call error_mesg('diamonds,calculating orientation', 'Trying to do Bond interactions with unassosiated bond!' ,FATAL)
+      else
+        lat2=other_berg%lat
+        lon2=other_berg%lon
+
+        dlat=lat2-lat1
+        dlon=lon2-lon1
+        
+        r_dist_x=dlon*(pi/180)*Rearth*cos(0.5*(lat1+lat2)*(pi/180))
+        r_dist_y=dlat*(pi/180)*Rearth
+        if (r_dist_y .eq. 0.) then
+          angle=pi/2.
+        else
+          angle=atan(r_dist_x/r_dist_y)
+          angle= ((pi/2)  - (initial_orientation*(pi/180)))  - angle
+          angle=modulo(angle-(2*pi) ,pi/6.)
+        endif
+        bond_count=bond_count+1.
+        Average_angle=Average_angle+angle
+
+      endif
+      current_bond=>current_bond%next_bond
+    enddo
+    Average_angle =Average_angle/bond_count
+    find_orientation_using_iceberg_bonds=modulo(angle-(2*pi) ,pi/6.)
+
+end function find_orientation_using_iceberg_bonds
+
+
 
 ! ##############################################################################
 
