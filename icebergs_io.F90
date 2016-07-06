@@ -894,7 +894,7 @@ integer, allocatable, dimension(:) :: ine,       &
          localberg%static_berg=static_berg(k)
          localberg%heat_density=heat_density(k)
          localberg%first_bond=>null()
-         if (really_debug) lres=is_point_in_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, explain=.true.)
+         if (really_debug) lres=is_point_in_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne,explain=.true.)
          lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
         !call add_new_berg_to_list(bergs%first, localberg, quick=.true.)
         if (bergs%grd%area(localberg%ine,localberg%jne) .ne. 0)  then
