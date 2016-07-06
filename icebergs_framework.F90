@@ -560,11 +560,13 @@ real :: Total_mass  !Added by Alon
     enddo; enddo
   endif
 
-  if (Lx.gt.1E15 ) then
+  if ((Lx.gt.1E15 ) .and. (mpp_pe().eq.mpp_root_pe())) then
           call error_mesg('diamonds, framework', 'Model does not enjoy the domain being larger than 1E15. Not sure why. Probably to do with floating point precision.', WARNING) 
   endif
   if ((.not. grid_is_latlon) .and. (Lx.eq.360.)) then
-    call error_mesg('diamonds, framework', 'Since the lat/lon grid is off, the x-direction is being set as non-periodic. Set Lx not equal to 360 override.', WARNING) 
+    if (mpp_pe().eq.mpp_root_pe())  then
+            call error_mesg('diamonds, framework', 'Since the lat/lon grid is off, the x-direction is being set as non-periodic. Set Lx not equal to 360 override.', WARNING) 
+    endif
     Lx=1E14
   endif
 

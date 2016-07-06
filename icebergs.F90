@@ -1798,6 +1798,7 @@ real :: dxm, dx0, dxp
 real :: hxm, hxp
 real, parameter :: ssh_coast=0.00
 integer :: stderrunit
+integer :: ii, jj
 
   ! Get the stderr unit number
   stderrunit = stderr()
@@ -1811,6 +1812,29 @@ integer :: stderrunit
   vi=bilin(grd, grd%vi, i, j, xi, yj)
   ua=bilin(grd, grd%ua, i, j, xi, yj)
   va=bilin(grd, grd%va, i, j, xi, yj)
+
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  if (ua.ne.ua) then
+    if (mpp_pe().eq.9) then
+      write(stderrunit,'(a3,32i7)') 'ua',(ii,ii=grd%isd,grd%ied)
+      do jj=grd%jed,grd%jsd,-1
+        write(stderrunit,'(i3,32f7.1)') jj,(grd%ua(ii,jj),ii=grd%isd,grd%ied)
+      enddo
+  !   write(stderrunit,'(a3,32i7)') 'Lat',(i,i=grd%isd,grd%ied)
+  !   do j=grd%jed,grd%jsd,-1
+  !     write(stderrunit,'(i3,32f7.1)') j,(grd%lat(i,j),i=grd%isd,grd%ied)
+  !   enddo
+  !   write(stderrunit,'(a3,32i7)') 'Msk',(i,i=grd%isd,grd%ied)
+  !   do j=grd%jed,grd%jsd,-1
+  !     write(stderrunit,'(i3,32f7.1)') j,(grd%msk(i,j),i=grd%isd,grd%ied)
+  !   enddo
+  ! endif
+      call error_mesg('diamonds, interp fields', 'ua is NaNs', FATAL)
+    endif
+  endif
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
   ! These fields are cell centered (A-grid) and would
   ! best be interpolated using PLM. For now we use PCM!
   sst=grd%sst(i,j) ! A-grid
@@ -1865,6 +1889,14 @@ integer :: stderrunit
   call rotate(ua, va, cos_rot, sin_rot)
   call rotate(ssh_x, ssh_y, cos_rot, sin_rot)
 
+  if (((((uo.ne.uo) .or. (vo.ne.vo)) .or. ((ui.ne.ui) .or. (vi.ne.vi))) .or. (((ua.ne.ua) .or. (va.ne.va)) .or. ((ssh_x.ne.ssh_x) .or.  (ssh_y.ne.ssh_y)))) .or. \
+  (((sst.ne. sst) .or. (cn.ne.cn)) .or. (hi.ne. hi))) then
+    write(stderrunit,*) 'diamonds, Error in interpolate: uo,vo,ui,vi',uo, vo, ui, vi
+    write(stderrunit,*) 'diamonds, Error in interpolate: ua,va,ssh_x,ssh_y', ua, va, ssh_x, ssh_y
+    write(stderrunit,*) 'diamonds, Error in interpolate: sst,cn,hi', sst, cn, hi, mpp_pe()
+    call error_mesg('diamonds, interp fields', 'field interpaolations has NaNs', FATAL)
+
+  endif 
   contains
 
   real function ddx_ssh(grd,i,j)
@@ -2081,7 +2113,7 @@ integer :: stderrunit
   call mpp_update_domains(grd%hi, grd%domain)
 
  !Make sure that gridded values agree with mask  (to get ride of NaN values)
-  do i=grd%isd,grd%ied ; do j=grd%jsc-1,grd%jed
+  do i=grd%isd,grd%ied ; do j=grd%jsd,grd%jed
   !Initializing all gridded values to zero
     if (grd%msk(i,j).lt. 0.5) then
       grd%ua(i,j) = 0.0 ;  grd%va(i,j) = 0.0
@@ -2090,6 +2122,15 @@ integer :: stderrunit
       grd%sst(i,j) = 0.0;  grd%cn(i,j) = 0.0
       grd%hi(i,j) = 0.0
     endif
+    if (grd%ua(i,j) .ne. grd%ua(i,j)) grd%ua(i,j)=0.
+    if (grd%va(i,j) .ne. grd%va(i,j)) grd%va(i,j)=0.
+    if (grd%uo(i,j) .ne. grd%uo(i,j)) grd%uo(i,j)=0.
+    if (grd%vo(i,j) .ne. grd%vo(i,j)) grd%vo(i,j)=0.
+    if (grd%ui(i,j) .ne. grd%ui(i,j)) grd%ui(i,j)=0.
+    if (grd%vi(i,j) .ne. grd%vi(i,j)) grd%vi(i,j)=0.
+    if (grd%sst(i,j) .ne. grd%sst(i,j)) grd%sst(i,j)=0.
+    if (grd%cn(i,j) .ne. grd%cn(i,j)) grd%cn(i,j)=0.
+    if (grd%hi(i,j) .ne. grd%hi(i,j)) grd%hi(i,j)=0.
   enddo; enddo
 
   if (debug) call bergs_chksum(bergs, 'run bergs (top)')
@@ -3021,7 +3062,7 @@ logical :: bounced, on_tangential_plane, error_flag
           uvel2=uvel1+dt_2*ax1; vvel2=vvel1+dt_2*ay1
         endif
         i=i1;j=j1;xi=berg%xi;yj=berg%yj
-        call adjust_index_and_ground(grd, lon2, lat2, uvel2, vvel2, i, j, xi, yj, bounced, error_flag)
+        call adjust_index_and_ground(grd, lon2, lat2, uvel2, vvel2, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)
         i2=i; j2=j
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
           call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling, berg%length*berg%width , bergs%hexagonal_icebergs)
@@ -3077,7 +3118,7 @@ logical :: bounced, on_tangential_plane, error_flag
           uvel3=uvel1+dt_2*ax2; vvel3=vvel1+dt_2*ay2
         endif
         i=i1;j=j1;xi=berg%xi;yj=berg%yj
-        call adjust_index_and_ground(grd, lon3, lat3, uvel3, vvel3, i, j, xi, yj, bounced, error_flag)
+        call adjust_index_and_ground(grd, lon3, lat3, uvel3, vvel3, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)
         i3=i; j3=j
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
           call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, bergs%hexagonal_icebergs)
@@ -3135,7 +3176,7 @@ logical :: bounced, on_tangential_plane, error_flag
           uvel4=uvel1+dt*ax3; vvel4=vvel1+dt*ay3
         endif
         i=i1;j=j1;xi=berg%xi;yj=berg%yj
-        call adjust_index_and_ground(grd, lon4, lat4, uvel4, vvel4, i, j, xi, yj, bounced, error_flag)
+        call adjust_index_and_ground(grd, lon4, lat4, uvel4, vvel4, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)
         i4=i; j4=j
         ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon4,lat4,x4,y4)
         if (.not.error_flag) then
@@ -3209,7 +3250,7 @@ logical :: bounced, on_tangential_plane, error_flag
   
   
         i=i1;j=j1;xi=berg%xi;yj=berg%yj
-        call adjust_index_and_ground(grd, lonn, latn, uveln, vveln, i, j, xi, yj, bounced, error_flag)
+        call adjust_index_and_ground(grd, lonn, latn, uveln, vveln, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
           call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, bergs%hexagonal_icebergs)
   
@@ -3339,7 +3380,7 @@ integer :: stderrunit
         ! Adjusting mass...
         !MP3
         i=berg%ine;  j=berg%jne;  xi = berg%xi;  yj = berg%yj
-        call adjust_index_and_ground(grd, lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag)  !Alon:"unclear which velocity to use here?"
+        call adjust_index_and_ground(grd, lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)  !Alon:"unclear which velocity to use here?"
 
         !if (bounced) then
         !  print *, 'you have been bounce: big time!',mpp_pe(),berg%iceberg_num,lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag 
@@ -3400,11 +3441,12 @@ end subroutine update_verlet_position
 
 ! ##############################################################################
 
-subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, bounced, error)
+subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, bounced, error, iceberg_num)
 ! Arguments
 type(icebergs_gridded), pointer :: grd
 real, intent(inout) :: lon, lat, uvel, vvel, xi, yj
 integer, intent(inout) :: i,j
+integer, intent(in) :: iceberg_num
 logical, intent(out) :: bounced, error
 ! Local variables
 logical lret, lpos
@@ -3605,7 +3647,7 @@ integer :: stderrunit
   lret=pos_within_cell(grd, lon, lat, i, j, xi, yj) ! Update xi and yj
 
   if (.not. lret) then
-    write(stderrunit,*) 'diamonds, adjust: Should not get here! Berg is not in cell after adjustment'
+    write(stderrunit,*) 'diamonds, adjust: Should not get here! Berg is not in cell after adjustment', iceberg_num, mpp_pe()
     if (debug) error=.true.
   endif
  end subroutine adjust_index_and_ground
