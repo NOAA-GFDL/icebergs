@@ -1161,7 +1161,7 @@ real function find_orientation_using_iceberg_bonds(berg,initial_orientation,grid
           angle=pi/2.
         else
           angle=atan(r_dist_x/r_dist_y)
-          angle= ((pi/2)  - (initial_orientation*(pi/180)))  - angle
+          angle= ((pi/2)  - (initial_orientation*(pi/180.)))  - angle
           angle=modulo(angle-(2*pi) ,pi/6.)
         endif
         bond_count=bond_count+1.
@@ -1322,7 +1322,6 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
   !Note that for the square elements, the mass has already been reassigned, so fraction_used shoule be equal to 1 aready
   fraction_used= ((yDxL*grd%msk(i-1,j-1)) + (yDxC*grd%msk(i  ,j-1))  +(yDxR*grd%msk(i+1,j-1)) +(yCxL*grd%msk(i-1,j  )) +  (yCxR*grd%msk(i+1,j  ))&
                  +(yUxL*grd%msk(i-1,j+1)) +(yUxC*grd%msk(i  ,j+1))   +(yUxR*grd%msk(i+1,j+1)) + (yCxC**grd%msk(i,j)))
-
 
   grd%mass_on_ocean(i,j,1)=grd%mass_on_ocean(i,j,1)+(yDxL*Mass/fraction_used)
   grd%mass_on_ocean(i,j,2)=grd%mass_on_ocean(i,j,2)+(yDxC*Mass/fraction_used)
@@ -1541,11 +1540,9 @@ subroutine divding_triangle_across_axes(Ax,Ay,Bx,By,Cx,Cy,axes1,Area_positive, A
         Area_positive= 0.;
         Area_negative= A_triangle;
       else
-        !print 'You should not get here1'
         call error_mesg('diamonds, iceberg_run', 'Logical error inside triangle dividing routine', FATAL)
       endif
     else
-      !print 'You should not get here2'
       call error_mesg('diamonds, iceberg_run', 'Another logical error inside triangle dividing routine', FATAL)
     endif
   endif
@@ -1598,7 +1595,6 @@ subroutine Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy,Area_triangle,
         call intercept_of_a_line(Bx,By,Cx,Cy,'x',px,py); !x_intercept
         call intercept_of_a_line(Bx,By,Cx,Cy,'y',qx,qy); !y_intercept
         if (.not.((point_in_interval(Bx,By,Cx,Cy,px,py)) .and. (point_in_interval(Bx,By,Cx,Cy,qx,qy)))) then
-          !print 'Houston, we have a problem'
           !You should not get here, but there might be some bugs in the code to do with points exactly falling on axes.
           if (mpp_pe().eq.12) then
             write(stderrunit,*) 'diamonds,corners', Ax,Ay,Bx,By,Cx,Cy
@@ -1661,7 +1657,6 @@ subroutine Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy,Area_triangle,
     !Area_Q3=Area_Left-Area_Q2;
     Area_Q3=Area_triangle-(Area_Q1+Area_Q2+Area_Q4);
   else
-    !print 'Help, I need somebody, help!'
     call error_mesg('diamonds, iceberg_run', 'Logical error inside triangle into four quadrants. Should not get here.', FATAL)
   endif
 
@@ -1957,6 +1952,7 @@ integer :: stderrunit
   grd%bergy_mass(:,:)=0.
   grd%spread_mass(:,:)=0.
   grd%mass(:,:)=0.
+
   if (bergs%add_weight_to_ocean) grd%mass_on_ocean(:,:,:)=0.
   grd%virtual_area(:,:)=0.
 
@@ -2748,6 +2744,7 @@ logical :: bounced, interactive_icebergs_on, Runge_not_Verlet
   do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
     berg=>bergs%list(grdi,grdj)%first
     do while (associated(berg)) ! loop over all bergs
+
       if (berg%static_berg .lt. 0.5) then  !Only allow non-static icebergs to evolve
  
         !Checking it everything is ok:
@@ -3287,7 +3284,7 @@ real :: uvel3, vvel3
 real :: lon1, lat1, dxdl1, dydl
 real :: uvel1, vvel1, uvel2, vvel2
 real :: axn, ayn, bxn, byn
-real :: xdot2, ydot2, dxdln
+real :: xdot2, ydot2
 real :: u2, v2, x1, y1, xn, yn
 real :: dx, dt, dt_2
 integer :: i, j
@@ -3322,7 +3319,7 @@ integer :: stderrunit
         uvel2=uvel1+(dt_2*axn)+(dt_2*bxn)                    !Alon
         vvel2=vvel1+(dt_2*ayn)+(dt_2*byn)                    !Alon
 
-        dx=(dt*(uvel1+(dt_2*axn)+(dt_2*bxn)))
+        !dx=(dt*(uvel1+(dt_2*axn)+(dt_2*bxn)))
 
         if (on_tangential_plane) call rotvec_to_tang(lon1,uvel2,vvel2,xdot2,ydot2)
         u2=uvel2*dxdl1; v2=vvel2*dydl
@@ -3334,8 +3331,6 @@ integer :: stderrunit
         else
           lonn=lon1+(dt*u2) ; latn=lat1+(dt*v2)  !Alon
         endif
-        !dxdln=r180_pi/(Rearth*cos(latn*pi_180))
-        call  convert_from_meters_to_grid(latn,grd%grid_is_latlon ,dxdln,dydl)
   
         ! Turn the velocities into u_star, v_star.(uvel3 is v_star) - Alon (not sure how this works with tangent plane)
         uvel3=uvel1+(dt_2*axn)                  !Alon

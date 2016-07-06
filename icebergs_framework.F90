@@ -560,6 +560,14 @@ real :: Total_mass  !Added by Alon
     enddo; enddo
   endif
 
+  if (Lx.gt.1E15 ) then
+          call error_mesg('diamonds, framework', 'Model does not enjoy the domain being larger than 1E15. Not sure why. Probably to do with floating point precision.', WARNING) 
+  endif
+  if ((.not. grid_is_latlon) .and. (Lx.eq.360.)) then
+    call error_mesg('diamonds, framework', 'Since the lat/lon grid is off, the x-direction is being set as non-periodic. Set Lx not equal to 360 override.', WARNING) 
+    Lx=1E14
+  endif
+
  !The fix to reproduce across PE layout change, from AJA
   j=grd%jsc; do i=grd%isc+1,grd%ied
   minl=grd%lon(i-1,j)-(Lx/2.)
@@ -650,11 +658,6 @@ else
   buffer_width=buffer_width+(max_bonds*3) ! Increase buffer width to include bonds being passed between processors 
 endif
 if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffer used for abrevated traj
-
-if ((.not. grid_is_latlon) .and. (Lx.eq.360.)) then
-  call error_mesg('diamonds, framework', 'Since the lat/lon grid is off, the x-direction is being set as non-periodic. Set Lx not equal to 360 override.', WARNING) 
-  Lx=1E31
-endif
 
  ! Parameters
   bergs%dt=dt
