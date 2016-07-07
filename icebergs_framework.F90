@@ -448,7 +448,7 @@ real :: Total_mass  !Added by Alon
     bergs%list(i,j)%first => null()
   enddo ; enddo
 
-  big_number=1.0E30
+  big_number=1.0E15
  !write(stderrunit,*) 'diamonds: allocating grid'
   allocate( grd%lon(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%lon(:,:)=big_number
   allocate( grd%lat(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%lat(:,:)=big_number
@@ -501,6 +501,24 @@ real :: Total_mass  !Added by Alon
   grd%lon(is:ie,js:je)=ice_lon(:,:)
   grd%lat(is:ie,js:je)=ice_lat(:,:)
   grd%area(is:ie,js:je)=ice_area(:,:) !sis2 has *(4.*pi*radius*radius)
+
+  !!!!!!!!!!!!!!!debugging!!!!!!!!!!!!!!!!!!
+  !if (mpp_pe().eq.5) then
+  ! write(stderrunit,'(a3,32i7)') 'LB',(i,i=grd%isd,grd%ied)
+  ! do j=grd%jed,grd%jsd,-1
+  !   write(stderrunit,'(i3,32f7.1)') j,(grd%lon(i,j),i=grd%isd,grd%ied)
+  ! enddo
+  ! write(stderrunit,'(a3,32i7)') 'Ice lon',(i,i=grd%isd,grd%ied)
+  ! do j=grd%jed,grd%jsd,-1
+  !   write(stderrunit,'(i3,32f7.1)') j,(ice_lon(i,j),i=grd%isd,grd%ied)
+  ! enddo
+  ! write(stderrunit,'(a3,32i7)') 'LA',(i,i=grd%isd,grd%ied)
+  ! do j=grd%jed,grd%jsd,-1
+  !   write(stderrunit,'(i3,32f7.1)') j,(grd%lon(i,j),i=grd%isd,grd%ied)
+  ! enddo
+  !endif
+  !!!!!!!!!!!!!!!debugging!!!!!!!!!!!!!!!!!!
+
   !For SIS not to change answers
   if(present(fractional_area)) then
     if(fractional_area) grd%area(is:ie,js:je)=ice_area(:,:) *(4.*pi*radius*radius)
@@ -555,8 +573,8 @@ real :: Total_mass  !Added by Alon
 
   if (.not. present(maskmap)) then ! Using a maskmap causes tickles this sanity check
     do j=grd%jsd,grd%jed; do i=grd%isd,grd%ied
-      if (grd%lon(i,j).ge.big_number) write(stderrunit,*) 'bad lon: ',mpp_pe(),i-grd%isc+1,j-grd%jsc+1,grd%lon(i,j)
-      if (grd%lat(i,j).ge.big_number) write(stderrunit,*) 'bad lat: ',mpp_pe(),i-grd%isc+1,j-grd%jsc+1,grd%lat(i,j)
+      !if (grd%lon(i,j).ge.big_number) write(stderrunit,*) 'bad lon: ',mpp_pe(),i-grd%isc+1,j-grd%jsc+1,grd%lon(i,j)
+      !if (grd%lat(i,j).ge.big_number) write(stderrunit,*) 'bad lat: ',mpp_pe(),i-grd%isc+1,j-grd%jsc+1,grd%lat(i,j)
     enddo; enddo
   endif
 
@@ -611,20 +629,32 @@ real :: Total_mass  !Added by Alon
          ' [lon|lat][min|max]=', minval(grd%lon),maxval(grd%lon),minval(grd%lat),maxval(grd%lat)
   endif
 
-! if (mpp_pe().eq.3) then
-!   write(stderrunit,'(a3,32i7)') 'Lon',(i,i=grd%isd,grd%ied)
-!   do j=grd%jed,grd%jsd,-1
-!     write(stderrunit,'(i3,32f7.1)') j,(grd%lon(i,j),i=grd%isd,grd%ied)
-!   enddo
-!   write(stderrunit,'(a3,32i7)') 'Lat',(i,i=grd%isd,grd%ied)
-!   do j=grd%jed,grd%jsd,-1
-!     write(stderrunit,'(i3,32f7.1)') j,(grd%lat(i,j),i=grd%isd,grd%ied)
-!   enddo
-!   write(stderrunit,'(a3,32i7)') 'Msk',(i,i=grd%isd,grd%ied)
-!   do j=grd%jed,grd%jsd,-1
-!     write(stderrunit,'(i3,32f7.1)') j,(grd%msk(i,j),i=grd%isd,grd%ied)
-!   enddo
-! endif
+ !if (mpp_pe().eq.5) then
+ !  write(stderrunit,'(a3,32i7)') 'Lon',(i,i=grd%isd,grd%ied)
+ !  do j=grd%jed,grd%jsd,-1
+ !    write(stderrunit,'(i3,32f7.1)') j,(grd%lon(i,j),i=grd%isd,grd%ied)
+ !  enddo
+ !  write(stderrunit,'(a3,32i7)') 'Lat',(i,i=grd%isd,grd%ied)
+ !  do j=grd%jed,grd%jsd,-1
+ !    write(stderrunit,'(i3,32f7.1)') j,(grd%lat(i,j),i=grd%isd,grd%ied)
+ !  enddo
+ !  write(stderrunit,'(a3,32i7)') 'Msk',(i,i=grd%isd,grd%ied)
+ !  do j=grd%jed,grd%jsd,-1
+ !    write(stderrunit,'(i3,32f7.1)') j,(grd%msk(i,j),i=grd%isd,grd%ied)
+ !  enddo
+ !endif
+
+! Final check for NaN's in the latlon grid:
+  do j=grd%jsd+1,grd%jed; do i=grd%isd+1,grd%ied
+    if (grd%lat(i,j) .ne. grd%lat(i,j)) then
+      write(stderrunit,*) 'Lat not defined properly', mpp_pe(),i,j,grd%lat(i,j)
+      call error_mesg('diamonds,grid defining', 'Latitude contains NaNs', FATAL)
+    endif
+    if (grd%lon(i,j) .ne. grd%lon(i,j)) then
+      write(stderrunit,*) 'Lon not defined properly', mpp_pe(),i,j,grd%lon(i,j)
+      call error_mesg('diamonds, grid defining', 'Longatudes contains NaNs', FATAL)
+    endif
+  enddo; enddo
 
 
 !Added by Alon  - If a freq distribution is input, we have to convert the freq distribution to a mass flux distribution)
@@ -3238,7 +3268,7 @@ real :: Lx_2
   Lx_2=Lx/2.
 
   sum_sign_dot_prod4=.false.
-  xx=modulo(x-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x to within Lx_2of x0
+  xx=modulo(x-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x to within Lx_2 of x0
   xx0=modulo(x0-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x0 to within Lx_2of xx
   xx1=modulo(x1-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x1 to within Lx_2of xx
   xx2=modulo(x2-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x2 to within Lx_2of xx
@@ -3249,8 +3279,10 @@ real :: Lx_2
   l2=(xx-xx2)*(y3-y2)-(y-y2)*(xx3-xx2)
   l3=(xx-xx3)*(y0-y3)-(y-y3)*(xx0-xx3)
 
-  !We use an asymerty between South and East line boundaries and North and East
-  !to avoid icebergs appearing to two cells (half values used for debugging
+  !We use an assymerty between South and East line boundaries and North and East
+  !to avoid icebergs appearing to two cells (half values used for debugging)
+  !This is intended to make the South and East boundaries be part of the
+  !cell, while the North and West are not part of the cell.
   p0=sign(1., l0); if (l0.eq.0.) p0=-0.5
   p1=sign(1., l1); if (l1.eq.0.) p1=0.5
   p2=sign(1., l2); if (l2.eq.0.) p2=0.5
@@ -3920,8 +3952,8 @@ integer function berg_chksum(berg )
 ! Arguments
 type(iceberg), pointer :: berg
 ! Local variables
-real :: rtmp(37) !Changed from 28 to 34 by Alon
-integer :: itmp(37+4), i8=0, ichk1, ichk2, ichk3 !Changed from 28 to 34 by Alon
+real :: rtmp(38) !Changed from 28 to 34 by Alon
+integer :: itmp(38+4), i8=0, ichk1, ichk2, ichk3 !Changed from 28 to 34 by Alon
 integer :: i
 
   rtmp(:)=0.

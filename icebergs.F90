@@ -747,16 +747,23 @@ endif
     byn= ay-(ayn/2) !Alon
 
   ! Limit speed of bergs based on a CFL criteria
-  if (bergs%speed_limit>0.) then
+  if ((bergs%speed_limit>0.) .or. (bergs%speed_limit .eq.-1.)) then
     speed=sqrt(uveln*uveln+vveln*vveln) ! Speed of berg
     if (speed>0.) then
       loc_dx=min(0.5*(grd%dx(i,j)+grd%dx(i,j-1)),0.5*(grd%dy(i,j)+grd%dy(i-1,j))) ! min(dx,dy)
-     !new_speed=min(loc_dx/dt*bergs%speed_limit,speed) ! Restrict speed to dx/dt x factor
+      !new_speed=min(loc_dx/dt*bergs%speed_limit,speed) ! Restrict speed to dx/dt x factor
       new_speed=loc_dx/dt*bergs%speed_limit ! Speed limit as a factor of dx / dt 
       if (new_speed<speed) then
-        uveln=uveln*(new_speed/speed) ! Scale velocity to reduce speed
-        vveln=vveln*(new_speed/speed) ! without changing the direction
-        bergs%nspeeding_tickets=bergs%nspeeding_tickets+1
+        if (bergs%speed_limit>0.) then
+          uveln=uveln*(new_speed/speed) ! Scale velocity to reduce speed
+          vveln=vveln*(new_speed/speed) ! without changing the direction
+          bergs%nspeeding_tickets=bergs%nspeeding_tickets+1
+        else 
+          call error_mesg('diamonds, Speeding icebergs', 'Faster than the CFL!', WARNING)
+          write(stderrunit,*) 'diamonds, Speeding berg1! =',mpp_pe(), berg%iceberg_num
+          write(stderrunit,*) 'diamonds, Speeding berg2, speed =',speed, loc_dx/dt
+          write(stderrunit,*) 'diamonds, Speeding berg3, lat, lon =',lat,xi,yj
+        endif
       endif
     endif
   endif
@@ -1105,10 +1112,13 @@ real :: orientation
             if (Dn>Hocean) Mnew=Mnew*min(1.,Hocean/Dn)
           endif
 
+          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
+          !call show_all_bonds(bergs)
+          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
           orientation=bergs%initial_orientation
           if ((bergs%iceberg_bonds_on) .and. (bergs%rotate_icebergs_for_mass_spreading)) then
                   orientation=find_orientation_using_iceberg_bonds(this,bergs%initial_orientation,bergs%grd%grid_is_latlon)
-                  print *, 'orientation: ', orientation, this%iceberg_num
+                  print *, 'orientation: ', (180/pi)*orientation, this%iceberg_num
 
           endif
 
@@ -1141,6 +1151,7 @@ real function find_orientation_using_iceberg_bonds(berg,initial_orientation,grid
   current_bond=>berg%first_bond
   lat1=berg%lat
   lon1=berg%lon
+  print *, 'Looking for orientation: '
   do while (associated(current_bond)) ! loop over all bonds
       other_berg=>current_bond%other_berg
       if (.not. associated(current_bond)) then
@@ -1160,10 +1171,12 @@ real function find_orientation_using_iceberg_bonds(berg,initial_orientation,grid
         if (r_dist_y .eq. 0.) then
           angle=pi/2.
         else
-          angle=atan(r_dist_x/r_dist_y)
+          angle=atan(r_dist_y/r_dist_x)
           angle= ((pi/2)  - (initial_orientation*(pi/180.)))  - angle
-          angle=modulo(angle-(2*pi) ,pi/6.)
+          print *, 'angle: ', angle, initial_orientation
+          angle=modulo(angle ,pi/6.)
         endif
+        print *, 'angle2: ', angle
         bond_count=bond_count+1.
         Average_angle=Average_angle+angle
 
@@ -1171,7 +1184,8 @@ real function find_orientation_using_iceberg_bonds(berg,initial_orientation,grid
       current_bond=>current_bond%next_bond
     enddo
     Average_angle =Average_angle/bond_count
-    find_orientation_using_iceberg_bonds=modulo(angle-(2*pi) ,pi/6.)
+    find_orientation_using_iceberg_bonds=modulo(angle ,pi/3.)
+    print *, 'Finished looking: '
 
 end function find_orientation_using_iceberg_bonds
 
@@ -1359,8 +1373,8 @@ logical function point_in_interval(Ax,Ay,Bx,By,px,py)
   ! Arguments
   real, intent(in) :: Ax,Ay,Bx,By,px,py
   point_in_interval=.False.
-  if ((px < max(Ax,Bx)) .and. (px > min(Ax,Bx))) then
-    if ((py < max(Ay,By)) .and. (py > min(Ay,By))) then
+  if ((px <= max(Ax,Bx)) .and. (px >= min(Ax,Bx))) then
+    if ((py <= max(Ay,By)) .and. (py >= min(Ay,By))) then
       point_in_interval=.True.
     endif
   endif
@@ -1596,9 +1610,9 @@ subroutine Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy,Area_triangle,
         call intercept_of_a_line(Bx,By,Cx,Cy,'y',qx,qy); !y_intercept
         if (.not.((point_in_interval(Bx,By,Cx,Cy,px,py)) .and. (point_in_interval(Bx,By,Cx,Cy,qx,qy)))) then
           !You should not get here, but there might be some bugs in the code to do with points exactly falling on axes.
-          if (mpp_pe().eq.12) then
+          !if (mpp_pe().eq.12) then
             write(stderrunit,*) 'diamonds,corners', Ax,Ay,Bx,By,Cx,Cy
-          endif
+          !endif
           call error_mesg('diamonds, iceberg_run', 'Something went wrong with Triangle_divide_into_four_quadrants', FATAL)
         endif
       endif
@@ -2948,6 +2962,7 @@ integer :: stderrunit
          write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: latn=',latn,berg%lat
          write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: u3,un,u0=',uvel3,uveln,berg%uvel
          write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: v3,vn,v0=',vvel3,vveln,berg%vvel
+         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: iceberg_num=',berg%iceberg_num
          write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ax1=',&
               & dt*ax1
          write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ay1=',&
@@ -3465,6 +3480,9 @@ integer :: stderrunit
   lret=pos_within_cell(grd, lon, lat, i, j, xi, yj)
 !  print *, 'Alon:', lon, lat, i, j, xi, yj, lret
   xi0=xi; yj0=yj ! original xi,yj
+
+
+  !Removing this while debuggin
   if (debug) then
     !Sanity check lret, xi and yj
     lret=is_point_in_cell(grd, lon, lat, i, j)
@@ -3503,6 +3521,7 @@ integer :: stderrunit
     endif
     lret=pos_within_cell(grd, lon, lat, i, j, xi, yj)
   endif ! debug
+
   if (lret) return ! Berg was already in cell
 
   ! Find inm, jnm (as if adjusting i,j) based on xi,yj
@@ -3518,6 +3537,7 @@ integer :: stderrunit
         inm=inm-1
       endif
     elseif (xi.gt.1.) then
+!    elseif (xi.ge.1.) then   !Alon: maybe it should be .ge.
       if (inm<grd%ied) then
         inm=inm+1
       endif
@@ -3527,6 +3547,7 @@ integer :: stderrunit
         jnm=jnm-1
       endif
     elseif (yj.gt.1.) then
+!    elseif (yj.ge.1.) then   !Alon:maybe it should be .ge.
       if (jnm<grd%jed) then
         jnm=jnm+1
       endif
@@ -3552,11 +3573,12 @@ integer :: stderrunit
         if (grd%msk(i-1,j)>0.) then
           if (i>grd%isd+1) i=i-1
         else
-         write(stderr(),'(a,6f8.3,i)') 'diamonds, adjust: bouncing berg from west',lon,lat,xi,yj,uvel,vvel,mpp_pe()
+         !write(stderr(),'(a,6f8.3,i)') 'diamonds, adjust: bouncing berg from west',lon,lat,xi,yj,uvel,vvel,mpp_pe()
           bounced=.true.
         endif
       endif
-    elseif (xi.gt.1.) then
+    elseif (xi.ge.1.) then    !Alon!!!!
+!    elseif (xi.gt.1.) then
       if (i<grd%ied) then
         if (grd%msk(i+1,j)>0.) then
           if (i<grd%ied) i=i+1
@@ -3571,24 +3593,27 @@ integer :: stderrunit
         if (grd%msk(i,j-1)>0.) then
           if (j>grd%jsd+1) j=j-1
         else
-         write(stderr(),'(a,6f8.3,i)') 'diamonds, adjust: bouncing berg from south',lon,lat,xi,yj,uvel,vvel,mpp_pe()
+         !write(stderr(),'(a,6f8.3,i)') 'diamonds, adjust: bouncing berg from south',lon,lat,xi,yj,uvel,vvel,mpp_pe()
           bounced=.true.
         endif
       endif
-    elseif (yj.gt.1.) then
+    elseif (yj.ge.1.) then     !Alon.
+!    elseif (yj.gt.1.) then
       if (j<grd%jed) then
         if (grd%msk(i,j+1)>0.) then
           if (j<grd%jed) j=j+1
         else
-         write(stderr(),'(a,6f8.3,i)') 'diamonds, adjust: bouncing berg from north',lon,lat,xi,yj,uvel,vvel,mpp_pe()
+         !write(stderr(),'(a,6f8.3,i)') 'diamonds, adjust: bouncing berg from north',lon,lat,xi,yj,uvel,vvel,mpp_pe()
           bounced=.true.
         endif
       endif
     endif
     if (bounced) then
-      if (xi>1.) xi=1.-posn_eps
+      if (xi>=1.) xi=1.-posn_eps   !Alon.
+!      if (xi>1.) xi=1.-posn_eps   !
       if (xi<0.) xi=posn_eps
-      if (yj>1.) yj=1.-posn_eps
+      if (yj>=1.) yj=1.-posn_eps  !Alon.
+!      if (yj>1.) yj=1.-posn_eps
       if (yj<0.) yj=posn_eps
       lon=bilin(grd, grd%lon, i, j, xi, yj)
       lat=bilin(grd, grd%lat, i, j, xi, yj)
@@ -3634,14 +3659,20 @@ integer :: stderrunit
         yj=(yj-0.5)*(1.-posn_eps)+0.5
       endif
       call error_mesg('diamonds, adjust', 'Berg did not move or bounce during iterations AND was not in cell. Adjusting!', WARNING)
+      write(stderrunit,*) 'diamonds, adjust: The adjusting iceberg is: ', iceberg_num,  mpp_pe()
+      write(stderrunit,*) 'diamonds, adjust: The adjusting lon,lat,u,v: ', lon, lat, uvel, vvel
+      write(stderrunit,*) 'diamonds, adjust: The adjusting xi,ji: ', xi, yj
+      lret=pos_within_cell(grd, lon, lat, inm, jnm, xi, yj,explain=.true.)
     else
       call error_mesg('diamonds, adjust', 'Berg iterated many times without bouncing!', WARNING)
     endif
   endif
-  if (xi>1.) xi=1.-posn_eps
+!  if (xi>1.) xi=1.-posn_eps    !Alon
+  if (xi>=1.) xi=1.-posn_eps
   if (xi<0.) xi=posn_eps
   if (yj>1.) yj=1.-posn_eps
-  if (yj<0.) yj=posn_eps
+!  if (yj>1.) yj=1.-posn_eps
+  if (yj<=0.) yj=posn_eps        !Alon
   lon=bilin(grd, grd%lon, i, j, xi, yj)
   lat=bilin(grd, grd%lat, i, j, xi, yj)
   lret=pos_within_cell(grd, lon, lat, i, j, xi, yj) ! Update xi and yj

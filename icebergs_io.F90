@@ -1114,15 +1114,20 @@ integer, allocatable, dimension(:) :: first_berg_num,   &
 
   ! Zero out nbergs_in_file
   nbonds_in_file = 0
+  all_pe_number_perfect_bonds=0
 
   filename_base=trim(restart_input_dir)//'bonds_iceberg.res.nc'
 
   found_restart = find_restart_file(filename_base, filename, multiPErestart, io_tile_id(1))
-  call error_mesg('read_restart_bonds_bergs_new', 'Using new icebergs bond restart read', NOTE)
+  call error_mesg('read_restart_bonds_bergs_new', 'Using icebergs bond restart read', NOTE)
 
   filename = filename_base
   call get_field_size(filename,'i',siz, field_found=found, domain=bergs%grd%domain)
   nbonds_in_file = siz(1)
+  
+    if (mpp_pe() .eq. mpp_root_pe()) then
+      write(stderrunit,*)  'diamonds, bond read restart : ','Number of bonds in file',  nbonds_in_file
+    endif
 
   if (nbonds_in_file .gt. 0) then
 
@@ -1278,6 +1283,10 @@ integer, allocatable, dimension(:) :: first_berg_num,   &
             first_berg_jne,   &
             other_berg_ine,  &
             other_berg_jne )
+  endif
+    
+  if (mpp_pe() .eq. mpp_root_pe()) then
+    write(stderrunit,*)  'diamonds, bond read restart : ','Number of bonds created',  all_pe_number_perfect_bonds
   endif
 
 end subroutine read_restart_bonds
