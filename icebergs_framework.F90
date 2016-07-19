@@ -1688,13 +1688,14 @@ end subroutine send_bergs_to_other_pes
     localberg%mass_of_bits=buff%data(17,n)
     localberg%heat_density=buff%data(18,n)
 
-    localberg%axn=buff%data(21,n) !Alon
-    localberg%ayn=buff%data(22,n) !Alon
-    localberg%bxn=buff%data(23,n) !Alon
-    localberg%byn=buff%data(24,n) !Alon
+    localberg%axn=buff%data(21,n) 
+    localberg%ayn=buff%data(22,n) 
+    localberg%bxn=buff%data(23,n) 
+    localberg%byn=buff%data(24,n) 
     localberg%iceberg_num=nint(buff%data(25,n))
     localberg%halo_berg=buff%data(26,n) 
     localberg%static_berg=buff%data(27,n) 
+    counter=27 !how many data points being passed so far (must match largest number directly above)
 
     !These quantities no longer need to be passed between processors
     localberg%uvel_old=localberg%uvel
@@ -1743,7 +1744,6 @@ end subroutine send_bergs_to_other_pes
 
     this%first_bond=>null()
     if (max_bonds .gt. 0) then
-      counter=26 !how many data points being passed so far (must match above)
       do k = 1,max_bonds
         other_berg_num=nint(buff%data(counter+(3*(k-1)+1),n))
         other_berg_ine=nint(buff%data(counter+(3*(k-1)+2),n))
