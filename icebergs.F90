@@ -1112,18 +1112,14 @@ real :: orientation
             if (Dn>Hocean) Mnew=Mnew*min(1.,Hocean/Dn)
           endif
 
-          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1
-          !call show_all_bonds(bergs)
-          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
           orientation=bergs%initial_orientation
           if ((bergs%iceberg_bonds_on) .and. (bergs%rotate_icebergs_for_mass_spreading)) then
-                  orientation=find_orientation_using_iceberg_bonds(this,bergs%initial_orientation,bergs%grd%grid_is_latlon)
-                  print *, 'orientation: ', (180/pi)*orientation, this%iceberg_num
-
+            orientation=find_orientation_using_iceberg_bonds(this,bergs%initial_orientation,bergs%grd%grid_is_latlon)
+            !print *, 'orientation: ', (180/pi)*orientation, this%iceberg_num
+          else
+            orientation=0.0
           endif
-
-
-          call spread_mass_across_ocean_cells(grd, i, j, this%xi, this%yj, Mnew, nMbits, this%mass_scaling, this%length*this%width, bergs%hexagonal_icebergs )
+          call spread_mass_across_ocean_cells(grd, i, j, this%xi, this%yj, Mnew, nMbits, this%mass_scaling, this%length*this%width, bergs%hexagonal_icebergs,orientation)
         endif
       endif
     
@@ -1133,7 +1129,7 @@ real :: orientation
 
 end subroutine thermodynamics
 
-!MPP1
+
 real function find_orientation_using_iceberg_bonds(berg,initial_orientation,grid_is_latlon)
   ! Arguments
   type(iceberg) :: berg
@@ -1167,50 +1163,55 @@ real function find_orientation_using_iceberg_bonds(berg,initial_orientation,grid
         call convert_from_grid_to_meters(lat_ref,grid_is_latlon,dx_dlon,dy_dlat)
         r_dist_x=dlon*dx_dlon
         r_dist_y=dlat*dy_dlat
+        !print *, 'r_dist_x,r_dist_y: ', r_dist_x,r_dist_y
 
-        if (r_dist_y .eq. 0.) then
+        if (r_dist_x .eq. 0.) then
           angle=pi/2.
         else
           angle=atan(r_dist_y/r_dist_x)
-          angle= ((pi/2)  - (initial_orientation*(pi/180.)))  - angle
-          print *, 'angle: ', angle, initial_orientation
-          angle=modulo(angle ,pi/6.)
+          angle= ((pi/2.)  - (initial_orientation*(pi/180.)))  - angle
+          !print *, 'angle: ', angle*(180/pi), initial_orientation
+          angle=modulo(angle ,pi/3.)
         endif
-        print *, 'angle2: ', angle
+        !print *, 'angle2: ', angle*(180/pi)
         bond_count=bond_count+1.
         Average_angle=Average_angle+angle
-
       endif
       current_bond=>current_bond%next_bond
     enddo
     Average_angle =Average_angle/bond_count
+    !print *, 'Average angle', Average_angle*(180/pi), bond_count
     find_orientation_using_iceberg_bonds=modulo(angle ,pi/3.)
-    print *, 'Finished looking: '
+    !print *, 'Finished looking: '
 
 end function find_orientation_using_iceberg_bonds
 
-
-
-! ##############################################################################
-
-subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling, Area, hexagonal_icebergs)
+subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling, Area, hexagonal_icebergs,theta_in)
   ! Arguments
   type(icebergs_gridded), pointer :: grd
   integer, intent(in) :: i, j
   real, intent(in) :: x, y, Mberg, Mbits, scaling, Area
   logical, intent(in) :: hexagonal_icebergs
+  real, optional, intent(in) :: theta_in
   ! Local variables
   real :: xL, xC, xR, yD, yC, yU, Mass, L
   real :: yDxL, yDxC, yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR
-  real :: S, H, origin_x, origin_y, x0, y0, theta
+  real :: S, H, origin_x, origin_y, x0, y0
   real :: Area_Q1,Area_Q2 , Area_Q3,Area_Q4, Area_hex
   real :: fraction_used
+  real :: theta
   real, parameter :: rho_seawater=1035.
   integer :: stderrunit
   logical :: debug
 
   ! Get the stderr unit number
   stderrunit = stderr()
+
+  theta=0.0
+  !This is here because the findinding orientaion scheme is not coded when spread mass to ocean is called directly from the time stepping scheme.
+  if (present(theta_in)) then
+    theta=theta_in
+  endif
 
   Mass=(Mberg+Mbits)*scaling
   ! This line attempts to "clip" the weight felt by the ocean. The concept of
@@ -1279,7 +1280,6 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
     x0=(x-origin_x)
     y0=(y-origin_y)
 
-    theta=0.0
     call Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4)
     
     if (min(min(Area_Q1,Area_Q2),min(Area_Q3, Area_Q4)) <-0.001) then
@@ -1698,6 +1698,20 @@ subroutine Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy,Area_triangle,
 
 end subroutine Triangle_divided_into_four_quadrants
 
+subroutine rotate_and_translate(px,py,theta,x0,y0)
+  !This function takes a point px,py, and rotates it clockwise around the origin by theta degrees, and then translates by (x0,y0)
+  ! Arguments
+  real, intent(in) :: x0,y0,theta
+  real, intent(inout) :: px,py
+
+  !Rotation
+  px = ( cos(theta*pi/180)*px) + (sin(theta*pi/180)*py)
+  py = (-sin(theta*pi/180)*px) + (cos(theta*pi/180)*py)
+ 
+  !Translation
+  px= px + x0
+  py= py + y0
+end subroutine rotate_and_translate
 
 subroutine Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex ,Area_Q1, Area_Q2, Area_Q3, Area_Q4)
   !This subroutine divides a regular hexagon centered at x0,y0 with apothen H, and orientation theta into its intersection with the 4 quadrants
@@ -1724,12 +1738,20 @@ subroutine Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex ,Area_Q
   S=(2/sqrt(3.))*H
   
   !Finding positions of corners
-  C1x=S  +x0        ; C1y=0.+y0;  !Corner 1 (right)
-  C2x=H/sqrt(3.) +x0 ; C2y=H+y0;  !Corner 2 (top right)
-  C3x=-H/sqrt(3.)+x0 ; C3y=H+y0;  !Corner 3 (top left)
-  C4x=-S     +x0    ; C4y=0.+y0;  !Corner 4 (left)
-  C5x=-H/sqrt(3.) +x0; C5y=-H+y0; !Corner 5 (top left)
-  C6x=H/sqrt(3.) +x0 ; C6y=-H+y0; !Corner 3 (top left)
+  C1x=S           ; C1y=0.  !Corner 1 (right)
+  C2x=H/sqrt(3.)  ; C2y=H;  !Corner 2 (top right)
+  C3x=-H/sqrt(3.) ; C3y=H;  !Corner 3 (top left)
+  C4x=-S          ; C4y=0.; !Corner 4 (left)
+  C5x=-H/sqrt(3.) ; C5y=-H; !Corner 5 (bottom left)
+  C6x=H/sqrt(3.)  ; C6y=-H; !Corner 6 (bottom right)
+
+  !Finding positions of corners
+  call rotate_and_translate(C1x,C1y,theta,x0,y0)
+  call rotate_and_translate(C2x,C2y,theta,x0,y0)
+  call rotate_and_translate(C3x,C3y,theta,x0,y0)
+  call rotate_and_translate(C4x,C4y,theta,x0,y0)
+  call rotate_and_translate(C5x,C5y,theta,x0,y0)
+  call rotate_and_translate(C6x,C6y,theta,x0,y0)
 
   !Area of Hexagon is the sum of the triangles
   call Triangle_divided_into_four_quadrants(x0,y0,C1x,C1y,C2x,C2y,T12_Area,T12_Q1,T12_Q2,T12_Q3,T12_Q4); !Triangle 012
