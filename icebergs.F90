@@ -272,9 +272,9 @@ iceberg_bonds_on=bergs%iceberg_bonds_on
     enddo
   endif
 
-!print *,'IA_x=',IA_x,'IA_y',IA_y, berg%iceberg_num
-!print *,'P_ia_11',P_ia_11,'P_ia_12',P_ia_12, 'P_ia_21',P_ia_21,'P_ia_22', P_ia_22
-!print *, 'P_ia_times_u_x', P_ia_times_u_x, 'P_ia_times_u_y', P_ia_times_u_y
+  !print *,'IA_x=',IA_x,'IA_y',IA_y, berg%iceberg_num
+  !print *,'P_ia_11',P_ia_11,'P_ia_12',P_ia_12, 'P_ia_21',P_ia_21,'P_ia_22', P_ia_22
+  !print *, 'P_ia_times_u_x', P_ia_times_u_x, 'P_ia_times_u_y', P_ia_times_u_y
   contains
 
 
@@ -317,11 +317,9 @@ iceberg_bonds_on=bergs%iceberg_bonds_on
         T1=berg%thickness 
         M1=berg%mass 
         A1=L1*W1 
-        R1=sqrt(A1/pi) ! Interaction radius of the iceberg (assuming circular icebergs)
         lon1=berg%lon_old; lat1=berg%lat_old
         !call rotpos_to_tang(lon1,lat1,x1,y1)
 
-              
         !From Berg 1
         L2=other_berg%length
         W2=other_berg%width
@@ -330,7 +328,6 @@ iceberg_bonds_on=bergs%iceberg_bonds_on
         u2=other_berg%uvel_old !Old values are used to make it order invariant 
         v2=other_berg%vvel_old !Old values are used to make it order invariant 
         A2=L2*W2
-        R2=sqrt(A2/pi) ! Interaction radius of the other iceberg
         lon2=other_berg%lon_old; lat2=other_berg%lat_old !Old values are used to make it order invariant
 
         !call rotpos_to_tang(lon2,lat2,x2,y2)
@@ -348,14 +345,25 @@ iceberg_bonds_on=bergs%iceberg_bonds_on
         r_dist_x=dlon*dx_dlon
         r_dist_y=dlat*dy_dlat
         r_dist=sqrt( (r_dist_x**2) + (r_dist_y**2) )
-        
-          !if (berg%iceberg_num .eq. 1) then
-            !print *, 'Comparing longitudes: ', lon1, lon2, r_dist_x, dlon, r_dist
-            !print *, 'Comparing longitudes: ', lon1, lon2, r_dist_x, dlon, r_dist
-            !print *, 'Outside, iceberg_num, r_dist', berg%iceberg_num, r_dist,bonded
-            !print *, 'Halo_status', berg%halo_berg,other_berg%halo_berg 
-          !endif
-        !print *, 'outside the loop',R1, R2,r_dist, bonded
+       
+        if (bergs%hexagonal_icebergs) then 
+          R1=sqrt(A1/(2.*sqrt(3.)))
+          R2=sqrt(A2/(2.*sqrt(3.)))
+        else !square packing
+          R1=sqrt(A1/pi) ! Interaction radius of the iceberg (assuming circular icebergs)
+          R2=sqrt(A2/pi) ! Interaction radius of the other iceberg
+        endif
+       !!!!!!!!!!!!!!!!!!!!!!!!!!!debugging!!!!!!!!!!!!!!!!!!!!!!!!!!MP1 
+       ! if (berg%iceberg_num .eq. 1) then
+       !   print *, 'Comparing longitudes: ', lon1, lon2, r_dist_x, dlon
+       !   print *, 'Comparing latitudes: ', lat1, lat2, r_dist_y, dlat
+       !   print *, 'Outside, iceberg_num, r_dist', berg%iceberg_num, r_dist,bonded
+       !   print *, 'Halo_status', berg%halo_berg,other_berg%halo_berg 
+       ! endif
+       ! print *, 'outside the loop',R1, R2,r_dist, bonded
+       !!!!!!!!!!!!!!!!!!!!!!!!!!!debugging!!!!!!!!!!!!!!!!!!!!!!!!!! 
+
+
        !call overlap_area(R1,R2,r_dist,A_o,trapped)
        !T_min=min(T1,T2)
        !A_min = min((pi*R1**R1),(pi*R2*R2)) 
@@ -1261,7 +1269,7 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
     if (grd%area(i,j)>0) then
       H = min(( (sqrt(Area/(2.*sqrt(3.)))  / sqrt(grd%area(i,j)))),1.) ;  !Non dimensionalize element length by grid area. (This gives the non-dim Apothen of the hexagon)
     else 
-      H= (sqrt(3.)/2)*(0.49)  !Larges allowable H, since this makes S=0.49, and S has to be less than 0.5  (Not sure what the implications of this are)
+      H= (sqrt(3.)/2)*(0.49)  !Largest allowable H, since this makes S=0.49, and S has to be less than 0.5  (Not sure what the implications of this are)
     endif
     S=(2/sqrt(3.))*H !Side of the hexagon
 
