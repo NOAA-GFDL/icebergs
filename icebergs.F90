@@ -1147,7 +1147,7 @@ real function find_orientation_using_iceberg_bonds(berg,initial_orientation,grid
   current_bond=>berg%first_bond
   lat1=berg%lat
   lon1=berg%lon
-  print *, 'Looking for orientation: '
+  !print *, 'Looking for orientation: '
   do while (associated(current_bond)) ! loop over all bonds
       other_berg=>current_bond%other_berg
       if (.not. associated(current_bond)) then
