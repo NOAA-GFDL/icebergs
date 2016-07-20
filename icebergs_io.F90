@@ -1093,8 +1093,10 @@ integer :: number_first_bonds_matched !How many first bond bergs found on pe
 integer :: number_second_bonds_matched !How many second bond bergs found on pe
 integer :: number_perfect_bonds ! How many complete bonds formed
 integer :: number_partial_bonds ! How many either complete/partial bonds formed.
+integer :: number_perfect_bonds_with_first_on_pe ! How many bonds with first bond on the compuational domain
 integer :: all_pe_number_perfect_bonds, all_pe_number_partial_bonds
 integer :: all_pe_number_first_bonds_matched, all_pe_number_second_bonds_matched
+integer :: all_pe_number_perfect_bonds_with_first_on_pe
 integer :: ine, jne
 logical :: search_data_domain
 real :: berg_found, berg_found_all_pe
@@ -1150,6 +1152,7 @@ integer, allocatable, dimension(:) :: first_berg_num,   &
     number_second_bonds_matched=0
     number_perfect_bonds=0
     number_partial_bonds=0
+    number_perfect_bonds_with_first_on_pe=0
 
     do k=1, nbonds_in_file
       
@@ -1164,13 +1167,9 @@ integer, allocatable, dimension(:) :: first_berg_num,   &
          if (berg_found_all_pe .gt. 0.5) then
              first_berg_ine(k)=ine
              first_berg_jne(k)=jne
-           !endif
          else
-          call error_mesg('read_restart_bonds_bergs_new', 'First iceberg in bond not found on any pe', FATAL)
-         endif
-         if (berg_found_all_pe .lt. 0.5) then
-                 print * , 'First bond berg not located: ', first_berg_num(k),berg_found, mpp_pe(),ine, jne
-             call error_mesg('read_restart_bonds_bergs_new', 'First bond iceberg not located', FATAL)
+           print * , 'First bond berg not located: ', first_berg_num(k),berg_found, mpp_pe(),ine, jne
+           call error_mesg('read_restart_bonds_bergs_new', 'First iceberg in bond not found on any pe', FATAL)
          endif
          !else
 
@@ -1199,7 +1198,7 @@ integer, allocatable, dimension(:) :: first_berg_num,   &
       if ( (first_berg_ine(k)>=grd%isd) .and. (first_berg_ine(k)<=grd%ied) .and. &
         (first_berg_jne(k)>=grd%jsd) .and. (first_berg_jne(k)<=grd%jed) ) then
         number_first_bonds_matched=number_first_bonds_matched+1
-     
+        
         ! Search for the first berg, which the bond belongs to
         first_berg_found=.false.
         first_berg=>null()
@@ -1208,14 +1207,13 @@ integer, allocatable, dimension(:) :: first_berg_num,   &
           if (this%iceberg_num == first_berg_num(k)) then
             first_berg_found=.true.
             first_berg=>this
-            if (first_berg%halo_berg.gt.0.5) print *, 'bonding halo berg:', first_berg_num(k),  first_berg_ine(k),first_berg_jne(k) ,grd%isc, grd%iec, mpp_pe()
+            !if (first_berg%halo_berg.gt.0.5) print *, 'bonding halo berg:', first_berg_num(k),  first_berg_ine(k),first_berg_jne(k) ,grd%isc, grd%iec, mpp_pe()
             this=>null()
           else  
             this=>this%next
           endif
         enddo
      
-!Note, this is a bug since there are no bergs in the halos up to here, are there?
 
         ! Decide whether the second iceberg is on the processeor (data domain)
         second_berg_found=.false.
@@ -1244,6 +1242,13 @@ integer, allocatable, dimension(:) :: first_berg_num,   &
           if (second_berg_found) then
             call form_a_bond(first_berg, other_berg_num(k), other_berg_ine(k), other_berg_jne(k),  second_berg)
             number_perfect_bonds=number_perfect_bonds+1
+    
+            !Counting number of bonds where the first bond is in the computational domain
+            if ( (first_berg_ine(k)>=grd%isc) .and. (first_berg_ine(k)<=grd%iec) .and. &
+              (first_berg_jne(k)>=grd%jsc) .and. (first_berg_jne(k)<=grd%jec) ) then
+               number_perfect_bonds_with_first_on_pe=number_perfect_bonds_with_first_on_pe+1
+        endif
+     
           else
             !print *, 'Forming a bond of the second type', mpp_pe(), first_berg_num(k),  other_berg_num(k)
             !call form_a_bond(first_berg, other_berg_num(k),other_berg_ine(k),other_berg_jne(k))
@@ -1257,11 +1262,13 @@ integer, allocatable, dimension(:) :: first_berg_num,   &
 
     !Analyse how many bonds were created and take appropriate action
     all_pe_number_perfect_bonds=number_perfect_bonds
+    all_pe_number_perfect_bonds_with_first_on_pe=number_perfect_bonds_with_first_on_pe
     all_pe_number_partial_bonds=number_partial_bonds
     all_pe_number_first_bonds_matched=number_first_bonds_matched
     all_pe_number_second_bonds_matched=number_second_bonds_matched
     call mpp_sum(all_pe_number_perfect_bonds)
     call mpp_sum(all_pe_number_partial_bonds)
+    call mpp_sum(all_pe_number_perfect_bonds_with_first_on_pe)
 
     if (all_pe_number_partial_bonds .lt. nbonds_in_file) then
       write(stderrunit,*) 'diamonds, bond read restart : ','Not enough partial bonds formed', all_pe_number_partial_bonds , nbonds_in_file
@@ -1276,6 +1283,14 @@ integer, allocatable, dimension(:) :: first_berg_num,   &
       call error_mesg('read_restart_bonds_bergs_new', 'Not enough perfect bonds formed', NOTE)
     endif
 
+    if (all_pe_number_perfect_bonds_with_first_on_pe .ne. nbonds_in_file) then
+      call mpp_sum(all_pe_number_first_bonds_matched)
+      call mpp_sum(all_pe_number_second_bonds_matched)
+      write(stderrunit,*)  'diamonds, bond read restart : ','Warning, # bonds with first bond on computational domain, does not match file',  all_pe_number_first_bonds_matched , nbonds_in_file
+      write(stderrunit,*)  'diamonds, bond read restart : ','Computational bond, first second:', all_pe_number_second_bonds_matched , nbonds_in_file
+      call error_mesg('read_restart_bonds_bergs_new', 'Computational perfect bonds do not match those in file', NOTE)
+    endif
+
     deallocate(               &
             first_berg_num,   &
             other_berg_num,  &
@@ -1286,7 +1301,8 @@ integer, allocatable, dimension(:) :: first_berg_num,   &
   endif
     
   if (mpp_pe() .eq. mpp_root_pe()) then
-    write(stderrunit,*)  'diamonds, bond read restart : ','Number of bonds created',  all_pe_number_perfect_bonds
+    write(stderrunit,*)  'diamonds, bond read restart : ','Number of bonds (including halos)',  all_pe_number_perfect_bonds
+    write(stderrunit,*)  'diamonds, bond read restart : ','Number of true bonds created',  all_pe_number_perfect_bonds_with_first_on_pe
   endif
 
 end subroutine read_restart_bonds

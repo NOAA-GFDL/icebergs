@@ -77,7 +77,6 @@ public find_individual_iceberg
 type :: icebergs_gridded
   type(domain2D), pointer :: domain ! MPP domain
   integer :: halo ! Nominal halo width
-  integer :: iceberg_halo ! halo width used by icebergs (must be lt halo)
   integer :: isc, iec, jsc, jec ! Indices of computational domain
   integer :: isd, ied, jsd, jed ! Indices of data domain
   integer :: isg, ieg, jsg, jeg ! Indices of global domain
@@ -308,7 +307,6 @@ logical, intent(in), optional :: fractional_area
 
 ! Namelist parameters (and defaults)
 integer :: halo=4 ! Width of halo region
-integer :: iceberg_halo=2 ! Width of halo region for icebergs  (must be lt halo)
 integer :: traj_sample_hrs=24 ! Period between sampling of position for trajectory storage
 integer :: traj_write_hrs=480 ! Period between writing sampled trajectories to disk
 integer :: verbose_hrs=24 ! Period between verbose messages
@@ -353,7 +351,7 @@ real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10,
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim) , 
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
 real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
-namelist /icebergs_nml/ verbose, budget, halo, iceberg_halo, traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,Static_icebergs,  &
+namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,Static_icebergs,  &
          distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef, radial_damping_coef, tangental_damping_coef, only_interactive_forces, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, iceberg_bonds_on, manually_initialize_bonds, ignore_missing_restart_bergs, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, halo_debugging, hexagonal_icebergs, &
@@ -668,8 +666,9 @@ if (input_freq_distribution) then
      enddo
 endif 
 
-if (iceberg_halo .gt. halo) then
-    iceberg_halo=halo
+if ((halo .lt. 2) .and. (interactive_icebergs_on .or. iceberg_bonds_on) )   then
+    halo=2
+    call error_mesg('diamonds, framework', 'Setting iceberg halos =2, since halos must be >= 2 for interactions', WARNING) 
 endif
 
 if (interactive_icebergs_on) then
@@ -701,7 +700,6 @@ if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffe
   bergs%grd%Lx=Lx
   bergs%grd%grid_is_latlon=grid_is_latlon  
   bergs%max_bonds=max_bonds
-  bergs%grd%iceberg_halo=iceberg_halo
   bergs%rho_bergs=rho_bergs
   bergs%spring_coef=spring_coef
   bergs%bond_coef=bond_coef
@@ -954,8 +952,8 @@ logical :: force_app
 logical :: halo_debugging
 
 force_app =.true.
-halo_width=bergs%grd%iceberg_halo  ! Must be less than current halo value used for updating weight.
-halo_debugging=bergs%halo_debugging  ! Must be less than current halo value used for updating weight.
+halo_width=bergs%grd%halo  
+halo_debugging=bergs%halo_debugging  
 
  ! Get the stderr unit number
    stderrunit = stderr()
@@ -964,7 +962,7 @@ halo_debugging=bergs%halo_debugging  ! Must be less than current halo value used
    grd=>bergs%grd
 
 
-!For debugging
+!For debugging, MP1
 if (halo_debugging) then
   do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
     this=>bergs%list(grdi,grdj)%first
@@ -3126,7 +3124,7 @@ end subroutine  find_individual_iceberg
 
 ! ##############################################################################
 
-logical function find_cell(grd, x, y, oi, oj) !MP1
+logical function find_cell(grd, x, y, oi, oj) 
 ! Arguments
 type(icebergs_gridded), intent(in) :: grd
 real, intent(in) :: x, y

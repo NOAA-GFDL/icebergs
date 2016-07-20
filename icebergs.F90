@@ -263,8 +263,8 @@ iceberg_bonds_on=bergs%iceberg_bonds_on
     current_bond=>berg%first_bond
     do while (associated(current_bond)) ! loop over all bonds
       other_berg=>current_bond%other_berg
-      if (.not. associated(current_bond)) then
-        call error_mesg('diamonds,bond interactions', 'Trying to do Bond interactions with unassosiated bond!' ,FATAL)
+      if (.not. associated(other_berg)) then
+        call error_mesg('diamonds,bond interactions', 'Trying to do Bond interactions with unassosiated berg!' ,FATAL)
       else
         call calculate_force(bergs,berg,other_berg,IA_x, IA_y, u0, v0, u1, v1, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y,bonded) 
       endif
@@ -951,6 +951,7 @@ real :: orientation
 
   !do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
   do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied  ! Thermodynamics of  halos now calculated, so that spread mass to ocean works correctly
+  !do grdj = grd%jsc-1,grd%jec+1 ; do grdi = grd%isc-1,grd%iec+1  ! Thermodynamics of first halo row is calculated, so that spread mass to ocean works correctly
     this=>bergs%list(grdi,grdj)%first
     do while(associated(this))
       if (debug) call check_position(grd, this, 'thermodynamics (top)')
@@ -962,8 +963,8 @@ real :: orientation
       IC=min(1.,this%cn+bergs%sicn_shift) ! Shift sea-ice concentration 
       M=this%mass
       T=this%thickness ! total thickness
-    ! D=(bergs%rho_bergs/rho_seawater)*T ! draught (keel depth)
-    ! F=T-D ! freeboard
+      !D=(bergs%rho_bergs/rho_seawater)*T ! draught (keel depth)
+      !F=T-D ! freeboard
       W=this%width
       L=this%length
       i=this%ine
@@ -988,7 +989,6 @@ real :: orientation
         Mb=0.0
         Me=0.0
       endif
-
   
       if (bergs%use_operator_splitting) then
         ! Operator split update of volume/mass
@@ -1095,12 +1095,12 @@ real :: orientation
       endif
   
       ! Store the new state of iceberg (with L>W)
-        this%mass=Mnew
-        this%mass_of_bits=nMbits
-        this%thickness=Tn
-        this%width=min(Wn,Ln)
-        this%length=max(Wn,Ln)
-        next=>this%next
+      this%mass=Mnew
+      this%mass_of_bits=nMbits
+      this%thickness=Tn
+      this%width=min(Wn,Ln)
+      this%length=max(Wn,Ln)
+      next=>this%next
   
       ! Did berg completely melt?
       if (Mnew<=0.) then ! Delete the berg
@@ -1122,10 +1122,11 @@ real :: orientation
 
           orientation=bergs%initial_orientation
           if ((bergs%iceberg_bonds_on) .and. (bergs%rotate_icebergs_for_mass_spreading)) then
-            orientation=find_orientation_using_iceberg_bonds(this,bergs%initial_orientation,bergs%grd%grid_is_latlon)
+            !Don't check orientation of the edges of halo,  since they can contain unassosiated bonds  (this is why halo width must be larger >= 2 to use bonds)    
+            if  (  ((this%ine .gt.  grd%isd) .and. (this%ine .lt. grd%ied)) .and. ((this%jne .ge.  grd%jsd) .and. (this%jne .le. grd%jed) ) ) then  
+              orientation=find_orientation_using_iceberg_bonds(grd,this,bergs%initial_orientation)
+            endif
             !print *, 'orientation: ', (180/pi)*orientation, this%iceberg_num
-          else
-            orientation=0.0
           endif
           call spread_mass_across_ocean_cells(grd, i, j, this%xi, this%yj, Mnew, nMbits, this%mass_scaling, this%length*this%width, bergs%hexagonal_icebergs,orientation)
         endif
@@ -1138,18 +1139,20 @@ real :: orientation
 end subroutine thermodynamics
 
 
-real function find_orientation_using_iceberg_bonds(berg,initial_orientation,grid_is_latlon)
+real function find_orientation_using_iceberg_bonds(grd,berg,initial_orientation)
   ! Arguments
-  type(iceberg) :: berg
+  type(iceberg), pointer :: berg
   real, intent(in) :: initial_orientation 
-  logical, intent(in) :: grid_is_latlon
+  type(icebergs_gridded), pointer :: grd
   type(iceberg), pointer :: other_berg
   type(bond), pointer :: current_bond
   real :: angle, lat1,lat2,lon1,lon2,dlat,dlon
   real :: r_dist_x, r_dist_y 
   real :: lat_ref, dx_dlon, dy_dlat
   real :: theta, bond_count, Average_angle
+  logical  :: grid_is_latlon
     
+  grid_is_latlon=grd%grid_is_latlon
   bond_count=0.
   Average_angle=0.
   current_bond=>berg%first_bond
@@ -1157,39 +1160,50 @@ real function find_orientation_using_iceberg_bonds(berg,initial_orientation,grid
   lon1=berg%lon
   !print *, 'Looking for orientation: '
   do while (associated(current_bond)) ! loop over all bonds
-      other_berg=>current_bond%other_berg
-      if (.not. associated(current_bond)) then
-        call error_mesg('diamonds,calculating orientation', 'Trying to do Bond interactions with unassosiated bond!' ,FATAL)
+    other_berg=>current_bond%other_berg
+    if (.not. associated(other_berg)) then !good place for debugging 
+      !One valid option: current iceberg is on the edge of halo, with other berg on the next pe (not influencing mass spreading)
+        !print *, 'Iceberg bond details:',berg%iceberg_num, current_bond%other_berg_num,berg%halo_berg, mpp_pe()
+        !print *, 'Iceberg bond details2:',berg%ine, berg%jne, current_bond%other_berg_ine, current_bond%other_berg_jne
+        !print *, 'Iceberg isd,ied,jsd,jed:',grd%isd, grd%ied, grd%jsd, grd%jed
+        !print *, 'Iceberg isc,iec,jsc,jec:',grd%isc, grd%iec, grd%jsc, grd%jec
+        !call error_mesg('diamonds,calculating orientation', 'Looking at bond interactions of unassosiated berg!' ,FATAL)
+      !endif
+    else
+      lat2=other_berg%lat
+      lon2=other_berg%lon
+
+      dlat=lat2-lat1
+      dlon=lon2-lon1
+      
+      lat_ref=0.5*(lat1+lat2)
+      call convert_from_grid_to_meters(lat_ref,grid_is_latlon,dx_dlon,dy_dlat)
+      r_dist_x=dlon*dx_dlon
+      r_dist_y=dlat*dy_dlat
+      !print *, 'r_dist_x,r_dist_y: ', r_dist_x,r_dist_y
+
+      if (r_dist_x .eq. 0.) then
+        angle=pi/2.
       else
-        lat2=other_berg%lat
-        lon2=other_berg%lon
-
-        dlat=lat2-lat1
-        dlon=lon2-lon1
-        
-        lat_ref=0.5*(lat1+lat2)
-        call convert_from_grid_to_meters(lat_ref,grid_is_latlon,dx_dlon,dy_dlat)
-        r_dist_x=dlon*dx_dlon
-        r_dist_y=dlat*dy_dlat
-        !print *, 'r_dist_x,r_dist_y: ', r_dist_x,r_dist_y
-
-        if (r_dist_x .eq. 0.) then
-          angle=pi/2.
-        else
-          angle=atan(r_dist_y/r_dist_x)
-          angle= ((pi/2.)  - (initial_orientation*(pi/180.)))  - angle
-          !print *, 'angle: ', angle*(180/pi), initial_orientation
-          angle=modulo(angle ,pi/3.)
-        endif
-        !print *, 'angle2: ', angle*(180/pi)
-        bond_count=bond_count+1.
-        Average_angle=Average_angle+angle
+        angle=atan(r_dist_y/r_dist_x)
+        angle= ((pi/2.)  - (initial_orientation*(pi/180.)))  - angle
+        !print *, 'angle: ', angle*(180/pi), initial_orientation
+        angle=modulo(angle ,pi/3.)
       endif
-      current_bond=>current_bond%next_bond
-    enddo
+      !print *, 'angle2: ', angle*(180/pi)
+      bond_count=bond_count+1.
+      Average_angle=Average_angle+angle
+    endif
+    current_bond=>current_bond%next_bond
+  enddo  !End loop over bonds
+  if (bond_count.gt.0) then
     Average_angle =Average_angle/bond_count
+  else
+    Average_angle =0.
+  endif
     !print *, 'Average angle', Average_angle*(180/pi), bond_count
-    find_orientation_using_iceberg_bonds=modulo(angle ,pi/3.)
+    find_orientation_using_iceberg_bonds=modulo(Average_angle ,pi/3.)
+    !find_orientation_using_iceberg_bonds=modulo(angle ,pi/3.)
     !print *, 'Finished looking: '
 
 end function find_orientation_using_iceberg_bonds
@@ -1857,7 +1871,6 @@ integer :: ii, jj
   ua=bilin(grd, grd%ua, i, j, xi, yj)
   va=bilin(grd, grd%va, i, j, xi, yj)
 
-  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   if (ua.ne.ua) then
     if (mpp_pe().eq.9) then
       write(stderrunit,'(a3,32i7)') 'ua',(ii,ii=grd%isd,grd%ied)
@@ -1876,8 +1889,6 @@ integer :: ii, jj
       call error_mesg('diamonds, interp fields', 'ua is NaNs', FATAL)
     endif
   endif
-  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
 
   ! These fields are cell centered (A-grid) and would
   ! best be interpolated using PLM. For now we use PCM!
@@ -1952,6 +1963,8 @@ integer :: ii, jj
     dxp=0.5*(grd%dx(i+1,j)+grd%dx(i+1,j-1))
     dx0=0.5*(grd%dx(i,j)+grd%dx(i,j-1))
     ddx_ssh=2.*(grd%ssh(i+1,j)-grd%ssh(i,j))/(dx0+dxp)*grd%msk(i+1,j)*grd%msk(i,j)
+
+    if (ddx_ssh .ne. ddx_ssh)  ddx_ssh=0. !This makes the model not crash for finite domains. 
   end function ddx_ssh
 
   real function ddy_ssh(grd,i,j)
@@ -1963,6 +1976,7 @@ integer :: ii, jj
     dyp=0.5*(grd%dy(i,j+1)+grd%dy(i-1,j+1))
     dy0=0.5*(grd%dy(i,j)+grd%dy(i-1,j))
     ddy_ssh=2.*(grd%ssh(i,j+1)-grd%ssh(i,j))/(dy0+dyp)*grd%msk(i,j+1)*grd%msk(i,j)
+    if (ddy_ssh .ne. ddy_ssh)  ddy_ssh=0.  !This makes the model not crash for finite domains. 
   end function ddy_ssh
 
   subroutine rotate(u, v, cos_rot, sin_rot)
