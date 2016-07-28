@@ -569,6 +569,7 @@ endif
   bergs%initial_width(:)=sqrt(initial_mass(:)/(LoW_ratio*rho_bergs*initial_thickness(:)))
   bergs%initial_length(:)=LoW_ratio*bergs%initial_width(:)
 
+  if (bergs%read_old_restarts) call error_mesg('diamonds, ice_bergs_framework_init', 'Setting "read_old_restarts=.true." can lead to non-reproducing checksums in restarts!', WARNING)
 
   ! Diagnostics
   id_class = diag_axis_init('mass_class', initial_mass, 'kg','Z', 'iceberg mass')

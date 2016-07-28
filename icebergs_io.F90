@@ -646,7 +646,7 @@ real :: lon0, lon1, lat0, lat1
 character(len=33) :: filename, filename_base
 type(icebergs_gridded), pointer :: grd
 type(iceberg) :: localberg ! NOT a pointer but an actual local variable
-integer :: stderrunit
+integer :: stderrunit, iNg, jNg, i, j
 
 real, allocatable, dimension(:) :: lon,          &
                                    lat,          &
@@ -684,6 +684,8 @@ integer, allocatable, dimension(:) :: ine,       &
 
   ! For convenience
   grd=>bergs%grd
+  iNg=(grd%ieg-grd%isg+1) ! Total number of points globally in i direction, used with read_old_restarts=.true.
+  jNg=(grd%jeg-grd%jsg+1) ! Total number of points globally in j direction, used with read_old_restarts=.true.
 
   ! Zero out nbergs_in_file
   nbergs_in_file = 0
@@ -756,7 +758,11 @@ integer, allocatable, dimension(:) :: ine,       &
      call read_unlimited_axis(filename,'ine',ine,domain=grd%domain)
      call read_unlimited_axis(filename,'jne',jne,domain=grd%domain)
      call read_unlimited_axis(filename,'start_year',start_year,domain=grd%domain)
-     call read_unlimited_axis(filename,'iceberg_num',iceberg_num,domain=grd%domain)
+     if (bergs%read_old_restarts) then
+       iceberg_num(:)=-1
+     else
+       call read_unlimited_axis(filename,'iceberg_num',iceberg_num,domain=grd%domain)
+     endif
   endif
 
   ! Find approx outer bounds for tile
@@ -806,7 +812,15 @@ integer, allocatable, dimension(:) :: ine,       &
       localberg%start_lon=start_lon(k)
       localberg%start_lat=start_lat(k)
       localberg%start_year=start_year(k)
-      localberg%iceberg_num=iceberg_num(k)
+      if (bergs%read_old_restarts) then
+        ! This emulates the iceberg counter used at calving sites but uses the restart position instead
+        i = localberg%ine
+        j = localberg%jne
+        localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i+(iNg*(j-1)))  ! unique number for each iceberg
+        grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
+      else
+        localberg%iceberg_num=iceberg_num(k)
+      endif
       localberg%start_day=start_day(k)
       localberg%start_mass=start_mass(k)
       localberg%mass_scaling=mass_scaling(k)
