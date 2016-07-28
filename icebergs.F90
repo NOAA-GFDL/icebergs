@@ -97,6 +97,7 @@ integer :: stdlogunit, stderrunit
 
   call mpp_clock_begin(bergs%clock_ior)
   call ice_bergs_io_init(bergs,io_layout)
+  call read_restart_calving(bergs)  !This is moved to before restart_bergs (by Alon) so that generate icebergs can have the correct counter
   if(orig_read) then
      call read_restart_bergs_orig(bergs,Time)
   else
@@ -104,7 +105,7 @@ integer :: stdlogunit, stderrunit
   endif
   call bergs_chksum(bergs, 'read_restart bergs')
   if (fix_restart_dates) call offset_berg_dates(bergs,Time)
-  call read_restart_calving(bergs)
+  !call read_restart_calving(bergs)
   call mpp_clock_end(bergs%clock_ior)
 
   if (really_debug) call print_bergs(stderrunit,bergs,'icebergs_init, initial status')
@@ -582,7 +583,7 @@ endif
     write(stderrunit,200) mpp_pe(),'Starting pars:', &
       'yr0=',berg%start_year, 'day0=',berg%start_day, &
       'lon0=',berg%start_lon, 'lat0=',berg%start_lat, 'mass0=',berg%start_mass, &
-      'sclng=',berg%mass_scaling
+      'sclng=',berg%mass_scaling, 'num0=',berg%iceberg_num
     write(stderrunit,100) mpp_pe(),'Geometry:', &
       'M=',M, 'T=',T, 'D=',D, 'F=',F, 'W=',W, 'L=',L
     write(stderrunit,100) mpp_pe(),'delta U:', &
@@ -1720,6 +1721,7 @@ type(icebergs), pointer :: bergs
 ! Local variables
 type(icebergs_gridded), pointer :: grd
 integer :: i,j,k,icnt,icntmax
+integer :: iNg, jNg  !Total number of points gloablly in i and j direction
 type(iceberg) :: newberg
 logical :: lret
 real :: xi, yj, ddt, calving_to_bergs, calved_to_berg, heat_to_bergs, heat_to_berg
@@ -1730,6 +1732,9 @@ integer :: stderrunit
 
   ! For convenience
   grd=>bergs%grd
+
+  iNg=(grd%ieg-grd%isg+1) ! Total number of points globally in i direction
+  jNg=(grd%jeg-grd%jsg+1) ! Total number of points globally in j direction
 
   grd%real_calving(:,:,:)=0.
   calving_to_bergs=0.
@@ -1774,6 +1779,7 @@ integer :: stderrunit
           newberg%start_lon=newberg%lon
           newberg%start_lat=newberg%lat
           newberg%start_year=bergs%current_year
+          newberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i+(iNg*(j-1)))  ! unique number for each iceberg
           newberg%start_day=bergs%current_yearday+ddt/86400.
           newberg%start_mass=bergs%initial_mass(k)
           newberg%mass_scaling=bergs%mass_scaling(k)
@@ -1797,6 +1803,7 @@ integer :: stderrunit
           icnt=icnt+1
           bergs%nbergs_calved=bergs%nbergs_calved+1
           bergs%nbergs_calved_by_class(k)=bergs%nbergs_calved_by_class(k)+1
+          grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
         enddo
         icntmax=max(icntmax,icnt)
       enddo

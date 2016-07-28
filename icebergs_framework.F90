@@ -15,8 +15,8 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 
 implicit none ; private
 
-integer, parameter :: buffer_width=28 !Changed from 20 to 28 by Alon 
-integer, parameter :: buffer_width_traj=31  !Changed from 23 by Alon
+integer, parameter :: buffer_width=29 !Changed from 20 to 29 by Alon 
+integer, parameter :: buffer_width_traj=32  !Changed from 23 by Alon
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 
 !Local Vars
@@ -72,6 +72,7 @@ type :: icebergs_gridded
   integer :: halo ! Nominal halo width
   integer :: isc, iec, jsc, jec ! Indices of computational domain
   integer :: isd, ied, jsd, jed ! Indices of data domain
+  integer :: isg, ieg, jsg, jeg ! Indices of global domain
   integer :: my_pe, pe_N, pe_S, pe_E, pe_W ! MPI PE identifiers
   real, dimension(:,:), pointer :: lon=>null() ! Longitude of cell corners
   real, dimension(:,:), pointer :: lat=>null() ! Latitude of cell corners
@@ -115,6 +116,7 @@ type :: icebergs_gridded
   real, dimension(:,:), pointer :: iceberg_heat_content=>null() ! Distributed heat content of bergs (J/m^2)
   real, dimension(:,:), pointer :: parity_x=>null() ! X component of vector point from i,j to i+1,j+1 (for detecting tri-polar fold)
   real, dimension(:,:), pointer :: parity_y=>null() ! Y component of vector point from i,j to i+1,j+1 (for detecting tri-polar fold)
+  integer, dimension(:,:), pointer :: iceberg_counter_grd=>null() ! Counts icebergs created for naming purposes
   ! Diagnostics handles
   integer :: id_uo=-1, id_vo=-1, id_calving=-1, id_stored_ice=-1, id_accum=-1, id_unused=-1, id_floating_melt=-1
   integer :: id_melt_buoy=-1, id_melt_eros=-1, id_melt_conv=-1, id_virtual_area=-1, id_real_calving=-1
@@ -133,7 +135,7 @@ type :: xyt
   real :: axn, ayn, bxn, byn, uvel_old, vvel_old, lat_old, lon_old  !Explicit and implicit accelerations !Alon 
   real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi
   real :: mass_of_bits, heat_density
-  integer :: year
+  integer :: year, iceberg_num
   type(xyt), pointer :: next=>null()
 end type xyt
 
@@ -145,6 +147,7 @@ type :: iceberg
   real :: start_lon, start_lat, start_day, start_mass, mass_scaling
   real :: mass_of_bits, heat_density
   integer :: start_year
+  integer :: iceberg_num
   integer :: ine, jne ! nearest index in NE direction (for convenience)
   real :: xi, yj ! Non-dimensional coords within current cell (0..1)
   ! Environment variables (as seen by the iceberg)
@@ -186,6 +189,7 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   logical :: use_new_predictive_corrective =.False.  !Flag to use Bob's predictive corrective iceberg scheme- Added by Alon 
   logical :: interactive_icebergs_on=.false.  !Turn on/off interactions between icebergs  - Added by Alon 
   logical :: critical_interaction_damping_on=.true.  !Sets the damping on relative iceberg velocity to critical value - Added by Alon 
+  logical :: read_old_restarts=.true. ! If true, read restarts prior to grid_of_lists and iceberg_num innovation
   real :: speed_limit=0. ! CFL speed limit for a berg [m/s]
   real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
   type(buffer), pointer :: obuffer_n=>null(), ibuffer_n=>null()
@@ -234,7 +238,7 @@ subroutine ice_bergs_framework_init(bergs, &
 
 use mpp_parameter_mod, only: SCALAR_PAIR, CGRID_NE, BGRID_NE, CORNER, AGRID
 use mpp_domains_mod, only: mpp_update_domains, mpp_define_domains
-use mpp_domains_mod, only: mpp_get_compute_domain, mpp_get_data_domain
+use mpp_domains_mod, only: mpp_get_compute_domain, mpp_get_data_domain, mpp_get_global_domain
 use mpp_domains_mod, only: CYCLIC_GLOBAL_DOMAIN, FOLD_NORTH_EDGE
 use mpp_domains_mod, only: mpp_get_neighbor_pe, NORTH, SOUTH, EAST, WEST
 use mpp_domains_mod, only: mpp_define_io_domain
@@ -284,7 +288,8 @@ logical :: use_new_predictive_corrective =.False.  !Flag to use Bob's predictive
 logical :: interactive_icebergs_on=.false.  !Turn on/off interactions between icebergs  - Added by Alon 
 logical :: critical_interaction_damping_on=.true.  !Sets the damping on relative iceberg velocity to critical value - Added by Alon 
 logical :: do_unit_tests=.false. ! Conduct some unit tests
-logical :: input_freq_distribution=.false. ! Alon: flag to show if input distribution is freq or mass dist (=1 if input is a freq dist, =0 to use an input mass dist)
+logical :: input_freq_distribution=.false. ! Flag to show if input distribution is freq or mass dist (=1 if input is a freq dist, =0 to use an input mass dist)
+logical :: read_old_restarts=.true. ! If true, read restarts prior to grid_of_lists and iceberg_num innovations
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim) , 
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
@@ -294,7 +299,8 @@ namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, tr
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, &
          time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_icebergs_on, critical_interaction_damping_on, &
-         old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj
+         old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj, &
+         read_old_restarts
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -360,11 +366,13 @@ real :: Total_mass  !Added by Alon
  !write(stderrunit,*) 'diamond: get compute domain'
   call mpp_get_compute_domain( grd%domain, grd%isc, grd%iec, grd%jsc, grd%jec )
   call mpp_get_data_domain( grd%domain, grd%isd, grd%ied, grd%jsd, grd%jed )
+  call mpp_get_global_domain( grd%domain, grd%isg, grd%ieg, grd%jsg, grd%jeg )
 
   call mpp_get_neighbor_pe(grd%domain, NORTH, grd%pe_N)
   call mpp_get_neighbor_pe(grd%domain, SOUTH, grd%pe_S)
   call mpp_get_neighbor_pe(grd%domain, EAST, grd%pe_E)
   call mpp_get_neighbor_pe(grd%domain, WEST, grd%pe_W)
+
 
   folded_north_on_pe = ((dom_y_flags == FOLD_NORTH_EDGE) .and. (grd%jec == gnj)) 
  !write(stderrunit,'(a,6i4)') 'diamonds, icebergs_init: pe,n,s,e,w =',mpp_pe(),grd%pe_N,grd%pe_S,grd%pe_E,grd%pe_W, NULL_PE
@@ -419,6 +427,7 @@ real :: Total_mass  !Added by Alon
   allocate( bergs%nbergs_calved_by_class(nclasses) ); bergs%nbergs_calved_by_class(:)=0
   allocate( grd%parity_x(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_x(:,:)=1.
   allocate( grd%parity_y(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_y(:,:)=1.
+  allocate( grd%iceberg_counter_grd(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%iceberg_counter_grd(:,:)=1
 
  !write(stderrunit,*) 'diamonds: copying grid'
   ! Copy data declared on ice model computational domain
@@ -550,6 +559,7 @@ endif
   bergs%use_new_predictive_corrective=use_new_predictive_corrective  !Alon
   bergs%grounding_fraction=grounding_fraction
   bergs%add_weight_to_ocean=add_weight_to_ocean
+  bergs%read_old_restarts=read_old_restarts
   allocate( bergs%initial_mass(nclasses) ); bergs%initial_mass(:)=initial_mass(:)
   allocate( bergs%distribution(nclasses) ); bergs%distribution(:)=distribution(:)
   allocate( bergs%mass_scaling(nclasses) ); bergs%mass_scaling(:)=mass_scaling(:)
@@ -559,6 +569,7 @@ endif
   bergs%initial_width(:)=sqrt(initial_mass(:)/(LoW_ratio*rho_bergs*initial_thickness(:)))
   bergs%initial_length(:)=LoW_ratio*bergs%initial_width(:)
 
+  if (bergs%read_old_restarts) call error_mesg('diamonds, ice_bergs_framework_init', 'Setting "read_old_restarts=.true." can lead to non-reproducing checksums in restarts!', WARNING)
 
   ! Diagnostics
   id_class = diag_axis_init('mass_class', initial_mass, 'kg','Z', 'iceberg mass')
@@ -659,6 +670,10 @@ endif
  !write(stderrunit,*) 'diamonds: done'
   call mpp_clock_end(bergs%clock_ini)
   call mpp_clock_end(bergs%clock)
+
+!print *, mpp_pe(), 'Alon: global', grd%isg, grd%ieg, grd%jsg, grd%jeg
+!print *, mpp_pe(), 'Alon: comp', grd%isc, grd%iec, grd%jsc, grd%jec
+!print *, mpp_pe(), 'Alon: data', grd%isd, grd%ied, grd%jsd, grd%jed
 
 end subroutine ice_bergs_framework_init
 
@@ -983,6 +998,7 @@ end subroutine send_bergs_to_other_pes
     buff%data(26,n)=berg%vvel_old  !Alon
     buff%data(27,n)=berg%lon_old  !Alon
     buff%data(28,n)=berg%lat_old  !Alon
+    buff%data(29,n)=float(berg%iceberg_num)
 
   end subroutine pack_berg_into_buffer2
 
@@ -1066,6 +1082,7 @@ end subroutine send_bergs_to_other_pes
     localberg%vvel_old=buff%data(26,n) !Alon
     localberg%lon_old=buff%data(27,n) !Alon
     localberg%lat_old=buff%data(28,n) !Alon
+    localberg%iceberg_num=nint(buff%data(29,n))
    
      lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
     if (lres) then
@@ -1236,6 +1253,7 @@ end subroutine send_bergs_to_other_pes
     buff%data(29,n)=traj%vvel_old !Alon
     buff%data(30,n)=traj%lon_old !Alon
     buff%data(31,n)=traj%lat_old !Alon
+    buff%data(32,n)=float(traj%iceberg_num)
 
   end subroutine pack_traj_into_buffer2
 
@@ -1281,6 +1299,7 @@ end subroutine send_bergs_to_other_pes
     traj%vvel_old=buff%data(29,n) !Alon
     traj%lon_old=buff%data(30,n) !Alon
     traj%lat_old=buff%data(31,n) !Alon
+    traj%iceberg_num=nint(buff%data(32,n))
 
     call append_posn(first, traj)
 
@@ -1440,7 +1459,7 @@ end subroutine insert_berg_into_list
 
 ! ##############################################################################
 
-logical function inorder(berg1, berg2)
+logical function inorder(berg1, berg2)  !MP Alon - Change to include iceberg_num
 ! Arguments
 type(iceberg), pointer :: berg1, berg2
 ! Local variables
@@ -1484,7 +1503,7 @@ end function inorder
 
 ! ##############################################################################
 
-  real function time_hash(berg)
+  real function time_hash(berg)!  Alon: Think about removing this.
   ! Arguments
   type(iceberg), pointer :: berg
     time_hash=berg%start_day+366.*float(berg%start_year)
@@ -1500,7 +1519,7 @@ end function inorder
 
 ! ##############################################################################
 
-logical function sameid(berg1, berg2)
+logical function sameid(berg1, berg2) !  Alon: MP updat this.
 ! Arguments
 type(iceberg), pointer :: berg1, berg2
 ! Local variables
@@ -1573,6 +1592,7 @@ integer :: stderrunit
 
 end subroutine create_iceberg
 
+
 ! ##############################################################################
 
 subroutine delete_iceberg_from_list(first, berg)
@@ -1614,9 +1634,9 @@ type(iceberg), pointer :: berg
 character(len=*) :: label
 ! Local variables
 
-  write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,") start lon,lat,yr,day,mass=",2f10.4,i5,f7.2,es12.4)') &
+  write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,") start lon,lat,yr,day,mass=",2f10.4,i5,i9,f7.2,es12.4)') &
     label, mpp_pe(), berg%start_lon, berg%start_lat, &
-    berg%start_year, berg%start_day, berg%start_mass
+    berg%start_year, berg%iceberg_num, berg%start_day, berg%start_mass
   write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,a,2i5,7(a,2f10.4),a,2l2)') &
     label, mpp_pe(), ') i,j=',berg%ine, berg%jne, &
     ' xi,yj=', berg%xi, berg%yj, &
@@ -1779,6 +1799,7 @@ type(xyt) :: vals
   vals%lon=berg%start_lon
   vals%lat=berg%start_lat
   vals%year=berg%start_year
+  vals%iceberg_num=berg%iceberg_num
   vals%day=berg%start_day
   vals%mass=berg%start_mass
   call push_posn(berg%trajectory, vals)
@@ -2827,7 +2848,7 @@ integer function berg_chksum(berg )
 type(iceberg), pointer :: berg
 ! Local variables
 real :: rtmp(36) !Changed from 28 to 34 by Alon
-integer :: itmp(36+3), i8=0, ichk1, ichk2, ichk3 !Changed from 28 to 34 by Alon
+integer :: itmp(36+4), i8=0, ichk1, ichk2, ichk3 !Changed from 28 to 34 by Alon
 integer :: i
 
   rtmp(:)=0.
@@ -2871,9 +2892,10 @@ integer :: i
   itmp(37)=berg%start_year !Changed from 29 to 37 by Alon
   itmp(38)=berg%ine !Changed from 30 to 38 by Alon
   itmp(39)=berg%jne !Changed from 31 to 39 by Alon
+  itmp(40)=berg%iceberg_num !added  by Alon
 
   ichk1=0; ichk2=0; ichk3=0
-  do i=1,36+3 !Changd from 28 to 36 by Alon
+  do i=1,37+3 !Changd from 28 to 37 by Alon
    ichk1=ichk1+itmp(i)
    ichk2=ichk2+itmp(i)*i
    ichk3=ichk3+itmp(i)*i*i
