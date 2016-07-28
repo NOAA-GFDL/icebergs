@@ -291,7 +291,7 @@ end subroutine interactive_force
 ! ##############################################################################
 
 
-subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, axn, ayn, bxn, byn, debug_flag) !Saving  acceleration for Verlet, Adding Verlet flag - Alon
+subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, axn, ayn, bxn, byn, debug_flag) !Saving  acceleration for Verlet, Adding Verlet flag - Alon  MP1
 !subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, debug_flag) !old version commmented out by Alon
 ! Arguments
 type(icebergs), pointer :: bergs
@@ -728,6 +728,7 @@ real :: M, T, W, L, SST, Vol, Ln, Wn, Tn, nVol, IC, Dn
 real :: Mv, Me, Mb, melt, dvo, dva, dM, Ss, dMe, dMb, dMv
 real :: Mnew, Mnew1, Mnew2, Hocean
 real :: Mbits, nMbits, dMbitsE, dMbitsM, Lbits, Abits, Mbb
+real :: tip_parameter
 integer :: i,j, stderrunit
 type(iceberg), pointer :: this, next
 real, parameter :: perday=1./86400.
@@ -858,15 +859,39 @@ real, parameter :: perday=1./86400.
       call error_mesg('diamonds, thermodynamics', 'berg appears to have grounded!', FATAL)
     endif
 
-    ! Rolling
+   ! Rolling 
+   !There are now 3 iceberg rolling schemes:
+   !1) Rolling based on aspect ratio threshold (iceberg of constant density)
+   !2) Rolling based on corrected Weeks and Mellor scheme
+   !3) Rolling based on incorrect Weeks and Mellor scheme - kept for legacy reasons
     Dn=(bergs%rho_bergs/rho_seawater)*Tn ! draught (keel depth)
     if ( Dn>0. ) then
-       if ( max(Wn,Ln)<sqrt(0.92*(Dn**2)+58.32*Dn) ) then
-          T=Tn
-          Tn=Wn
-          Wn=T
-          Dn=(bergs%rho_bergs/rho_seawater)*Tn ! re-calculate draught (keel depth) for grounding
-      end if
+      if ( (.not.bergs%use_updated_rolling_scheme) .and. (bergs%tip_parameter<999.) ) then    !Use Rolling Scheme 3
+          if ( max(Wn,Ln)<sqrt(0.92*(Dn**2)+58.32*Dn) ) then
+            call swap_variables(Tn,Wn)
+          endif
+      else
+        if (Wn>Ln) call swap_variables(Ln,Wn)  !Make sure that Wn is the smaller dimension
+      
+        if ( (.not.bergs%use_updated_rolling_scheme) .and. (bergs%tip_parameter>=999.) ) then    !Use Rolling Scheme 2
+          if ( Wn<sqrt(0.92*(Tn**2)-58.32*Tn) ) then
+              call swap_variables(Tn,Wn)
+          endif
+        endif
+
+        if (bergs%use_updated_rolling_scheme) then    !Use Rolling Scheme 1
+          if (bergs%tip_parameter>0.) then
+            tip_parameter=bergs%tip_parameter
+          else
+            ! Equation 27 from Burton et al 2012, or equivolently, Weeks and Mellor 1979 with constant density
+            tip_parameter=sqrt(6*(bergs%rho_bergs/rho_seawater)*(1-(bergs%rho_bergs/rho_seawater)))   !using default values gives 0.92
+          endif
+          if ((tip_parameter*Tn)>Wn)  then     !note that we use the Thickness instead of the Draft
+              call swap_variables(Tn,Wn)
+          endif
+        endif
+      endif
+      Dn=(bergs%rho_bergs/rho_seawater)*Tn ! re-calculate draught (keel depth) for grounding
     endif
 
     ! Store the new state of iceberg (with L>W)
@@ -901,6 +926,17 @@ real, parameter :: perday=1./86400.
   
     this=>next
   enddo
+
+  contains
+
+  subroutine swap_variables(x,y)
+  ! Arguments
+  real, intent(inout) :: x, y
+  real :: temp
+  temp=x
+  x=y
+  y=temp
+  end subroutine swap_variables
 
 end subroutine thermodynamics
 
@@ -2215,7 +2251,7 @@ lon1=berg%lon; lat1=berg%lat
   axn=berg%axn; ayn=berg%ayn !Alon
   bxn=berg%bxn; byn=berg%byn !Alon
 
-
+print *, 'first', axn, bxn, lon1, lat1, uvel1, i, j ,xi, yj
 
 ! Velocities used to update the position
   uvel2=uvel1+(dt_2*axn)+(dt_2*bxn)                    !Alon
@@ -2234,7 +2270,7 @@ if (on_tangential_plane) call rotvec_to_tang(lon1,uvel2,vvel2,xdot2,ydot2)
   endif
   dxdln=r180_pi/(Rearth*cos(latn*pi_180))
 
-! Turn the velocities into u_star, v_star.(uvel3 is v_star) - Alon (not sure how this works with tangent plane)
+! Turn the velocities into u_star, v_star.(uvel3 is v_star)
   uvel3=uvel1+(dt_2*axn)                  !Alon
   vvel3=vvel1+(dt_2*ayn)                  !Alon
 
@@ -2243,14 +2279,25 @@ if (on_tangential_plane) call rotvec_to_tang(lon1,uvel2,vvel2,xdot2,ydot2)
   i=i1;j=j1;xi=berg%xi;yj=berg%yj
   call adjust_index_and_ground(grd, lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag)  !Alon:"unclear which velocity to use here?"
 !  call adjust_index_and_ground(grd, lonn, latn, uvel1, vvel1, i, j, xi, yj, bounced, error_flag)  !Alon:"unclear which velocity to use here?"
+
+if (bounced) then  !This is the case when the iceberg changes direction due to  topography
+  axn=0.
+  ayn=0.
+  bxn=0.
+  byn=0.
+endif
+
+
   i2=i; j2=j
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
     call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling)
 
 
+print *, 'second', axn, bxn, lon1, lat1, uvel1, i , j , xi, yj
 !Calling the acceleration   (note that the velocity is converted to u_star inside the accel script)
   call accel(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, ax1, ay1, axn, ayn, bxn, byn) !axn, ayn, bxn, byn - Added by Alon
 
+print *, 'third', axn, bxn, lon1, lat1, uvel1, i, j, xi, yj
 !Solving for the new velocity
   if (on_tangential_plane) then
     call rotvec_to_tang(lonn,uvel3,vvel3,xdot3,ydot3)
@@ -2264,6 +2311,7 @@ if (on_tangential_plane) call rotvec_to_tang(lon1,uvel2,vvel2,xdot2,ydot2)
   uveln=uvel4
   vveln=vvel4 
 
+print *, 'forth', axn, bxn, lon1, lat1, uvel1, i, j, xi, yj, uveln
 !Debugging
   if (.not.error_flag) then
     if (.not. is_point_in_cell(bergs%grd, lonn, latn, i, j)) error_flag=.true.
@@ -2314,6 +2362,7 @@ if (on_tangential_plane) call rotvec_to_tang(lon1,uvel2,vvel2,xdot2,ydot2)
   endif
 
 
+print *, 'fifth', axn, bxn, lon1, lat1, uvel1, i, j, xi, yj, uveln
 
   endif ! End of the Verlet Stepiing -added by Alon  
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
