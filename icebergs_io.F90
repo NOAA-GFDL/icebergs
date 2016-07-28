@@ -341,13 +341,15 @@ real :: lon0, lon1, lat0, lat1
 character(len=33) :: filename, filename_base
 type(icebergs_gridded), pointer :: grd
 type(iceberg) :: localberg ! NOT a pointer but an actual local variable
-integer :: stderrunit
+integer :: stderrunit, iNg, jNg, i, j
 
   ! Get the stderr unit number
   stderrunit=stderr()
 
   ! For convenience
   grd=>bergs%grd
+  iNg=(grd%ieg-grd%isg+1) ! Total number of points globally in i direction, used with read_old_restarts=.true.
+  jNg=(grd%jeg-grd%jsg+1) ! Total number of points globally in j direction, used with read_old_restarts=.true.
 
   ! Find a restart file
   multiPErestart=.false.
@@ -409,7 +411,11 @@ integer :: stderrunit
   start_lonid=inq_var(ncid, 'start_lon')
   start_latid=inq_var(ncid, 'start_lat')
   start_yearid=inq_var(ncid, 'start_year')
-  iceberg_numid=inq_var(ncid, 'icberg_num')
+  if (bergs%read_old_restarts) then
+    iceberg_numid=-1
+  else
+    iceberg_numid=inq_var(ncid, 'icberg_num')
+  endif
   start_dayid=inq_var(ncid, 'start_day')
   start_massid=inq_var(ncid, 'start_mass')
   scaling_id=inq_var(ncid, 'mass_scaling')
@@ -467,7 +473,15 @@ integer :: stderrunit
       localberg%start_lon=get_double(ncid, start_lonid, k)
       localberg%start_lat=get_double(ncid, start_latid, k)
       localberg%start_year=get_int(ncid, start_yearid, k)
-      localberg%iceberg_num=get_int(ncid, iceberg_numid, k)
+      if (bergs%read_old_restarts) then
+        ! This emulates the iceberg counter used at calving sites but uses the restart position instead
+        i = localberg%ine
+        j = localberg%jne
+        localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i+(iNg*(j-1)))  ! unique number for each iceberg
+        grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
+      else
+        localberg%iceberg_num=get_int(ncid, iceberg_numid, k)
+      endif
       localberg%start_day=get_double(ncid, start_dayid, k)
       localberg%start_mass=get_double(ncid, start_massid, k)
       localberg%mass_scaling=get_double(ncid, scaling_id, k)
