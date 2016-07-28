@@ -2647,8 +2647,10 @@ integer :: stderrunit
     call mpp_sum(number_of_bonds_all_pe)
 
     bergs%nbonds=number_of_bonds_all_pe !Total number of bonds across all pe's
-    if (number_of_bonds .gt. 0) then
-      write(stderrunit,*) "Bonds on PE:",number_of_bonds, "Total bonds", number_of_bonds_all_PE, "on PE number:",  mpp_pe()
+    if (debug) then 
+      if (number_of_bonds .gt. 0) then
+        write(stderrunit,*) "Bonds on PE:",number_of_bonds, "Total bonds", number_of_bonds_all_PE, "on PE number:",  mpp_pe()
+      endif
     endif
 
     if (quality_check) then
@@ -2667,7 +2669,9 @@ integer :: stderrunit
         endif
       endif
       if ((num_unmatched_bonds_all_pe == 0)  .and. (num_unassosiated_bond_pairs_all_pe == 0)) then
-        if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') 'diamonds: All iceberg bonds are connected and working well.'
+        if (mpp_pe().eq.mpp_root_pe()) then
+                write(stderrunit,*)  "Total number of bonds is: ", number_of_bonds_all_PE, "All iceberg bonds are connected and working well"
+        endif
         check_bond_quality=.true.
       else
         if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') 'diamonds: Warning, Broken Bonds! '

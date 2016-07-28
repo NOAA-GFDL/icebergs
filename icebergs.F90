@@ -1944,6 +1944,10 @@ integer :: ii, jj
   call rotate(ua, va, cos_rot, sin_rot)
   call rotate(ssh_x, ssh_y, cos_rot, sin_rot)
 
+  !There are some issues with the boundaries ssh gradient calculation in a finite domain. This is a temporary fix
+  if (ssh_x.ne.ssh_x) ssh_x=0.
+  if (ssh_y.ne.ssh_y) ssh_y=0.
+
   if (((((uo.ne.uo) .or. (vo.ne.vo)) .or. ((ui.ne.ui) .or. (vi.ne.vi))) .or. (((ua.ne.ua) .or. (va.ne.va)) .or. ((ssh_x.ne.ssh_x) .or.  (ssh_y.ne.ssh_y)))) .or. \
   (((sst.ne. sst) .or. (cn.ne.cn)) .or. (hi.ne. hi))) then
     write(stderrunit,*) 'diamonds, Error in interpolate: uo,vo,ui,vi',uo, vo, ui, vi
@@ -1963,8 +1967,6 @@ integer :: ii, jj
     dxp=0.5*(grd%dx(i+1,j)+grd%dx(i+1,j-1))
     dx0=0.5*(grd%dx(i,j)+grd%dx(i,j-1))
     ddx_ssh=2.*(grd%ssh(i+1,j)-grd%ssh(i,j))/(dx0+dxp)*grd%msk(i+1,j)*grd%msk(i,j)
-
-    if (ddx_ssh .ne. ddx_ssh)  ddx_ssh=0. !This makes the model not crash for finite domains. 
   end function ddx_ssh
 
   real function ddy_ssh(grd,i,j)
@@ -1976,7 +1978,6 @@ integer :: ii, jj
     dyp=0.5*(grd%dy(i,j+1)+grd%dy(i-1,j+1))
     dy0=0.5*(grd%dy(i,j)+grd%dy(i-1,j))
     ddy_ssh=2.*(grd%ssh(i,j+1)-grd%ssh(i,j))/(dy0+dyp)*grd%msk(i,j+1)*grd%msk(i,j)
-    if (ddy_ssh .ne. ddy_ssh)  ddy_ssh=0.  !This makes the model not crash for finite domains. 
   end function ddy_ssh
 
   subroutine rotate(u, v, cos_rot, sin_rot)
@@ -2065,7 +2066,8 @@ integer :: stderrunit
   end if
   lbudget=.false.
   if (bergs%verbose_hrs>0) then
-     if (mod(24*iday+ihr,bergs%verbose_hrs).eq.0) lbudget=budget
+     !if (mod(24*iday+ihr,bergs%verbose_hrs).eq.0) lbudget=budget
+     if (mod(24*iday+ihr+(imin/60.),float(bergs%verbose_hrs)).eq.0) lbudget=budget  !Added minutes, so that it does not repeat when smaller time steps are used.:q
   end if
   if (mpp_pe()==mpp_root_pe().and.lverbose) write(*,'(a,3i5,a,3i5,a,i5,f8.3)') &
        'diamonds: y,m,d=',iyr, imon, iday,' h,m,s=', ihr, imin, isec, &
