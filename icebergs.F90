@@ -1128,7 +1128,8 @@ real :: orientation
             endif
             !print *, 'orientation: ', (180/pi)*orientation, this%iceberg_num
           endif
-          call spread_mass_across_ocean_cells(grd, i, j, this%xi, this%yj, Mnew, nMbits, this%mass_scaling, this%length*this%width, bergs%hexagonal_icebergs,orientation)
+          call spread_mass_across_ocean_cells(grd, i, j, this%xi, this%yj, Mnew, nMbits, this%mass_scaling, &
+                      this%length*this%width, bergs%use_old_spreading, bergs%hexagonal_icebergs,orientation)
         endif
       endif
     
@@ -1208,12 +1209,13 @@ real function find_orientation_using_iceberg_bonds(grd,berg,initial_orientation)
 
 end function find_orientation_using_iceberg_bonds
 
-subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling, Area, hexagonal_icebergs,theta_in)
+subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling, Area, use_old_spreading, hexagonal_icebergs, theta_in)
   ! Arguments
   type(icebergs_gridded), pointer :: grd
   integer, intent(in) :: i, j
   real, intent(in) :: x, y, Mberg, Mbits, scaling, Area
   logical, intent(in) :: hexagonal_icebergs
+  logical, intent(in) :: use_old_spreading
   real, optional, intent(in) :: theta_in
   ! Local variables
   real :: xL, xC, xR, yD, yC, yU, Mass, L
@@ -1253,20 +1255,22 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
       L=1.
     endif
   
-    !Old version before icebergs were given size L
-    !xL=min(0.5, max(0., 0.5-x))
-    !xR=min(0.5, max(0., x-0.5))
-    !xC=max(0., 1.-(xL+xR))
-    !yD=min(0.5, max(0., 0.5-y))
-    !yU=min(0.5, max(0., y-0.5))
-    !yC=max(0., 1.-(yD+yU))
-  
-    xL=min(0.5, max(0., 0.5-(x/L)))
-    xR=min(0.5, max(0., (x/L)+(0.5-(1/L) )))
-    xC=max(0., 1.-(xL+xR))
-    yD=min(0.5, max(0., 0.5-(y/L)))
-    yU=min(0.5, max(0., (y/L)+(0.5-(1/L) )))
-    yC=max(0., 1.-(yD+yU))
+    if (use_old_spreading) then
+      !Old version before icebergs were given size L
+      xL=min(0.5, max(0., 0.5-x))
+      xR=min(0.5, max(0., x-0.5))
+      xC=max(0., 1.-(xL+xR))
+      yD=min(0.5, max(0., 0.5-y))
+      yU=min(0.5, max(0., y-0.5))
+      yC=max(0., 1.-(yD+yU))
+    else
+      xL=min(0.5, max(0., 0.5-(x/L)))
+      xR=min(0.5, max(0., (x/L)+(0.5-(1/L) )))
+      xC=max(0., 1.-(xL+xR))
+      yD=min(0.5, max(0., 0.5-(y/L)))
+      yU=min(0.5, max(0., (y/L)+(0.5-(1/L) )))
+      yC=max(0., 1.-(yD+yU))
+    endif
 
     yDxL=yD*xL*grd%msk(i-1,j-1)
     yDxC=yD*xC*grd%msk(i  ,j-1)
@@ -2989,7 +2993,8 @@ integer :: stderrunit
         !Note, the mass scaling is equal to 1 (rather than 0.25 as in RK), since
         !this is only called once in Verlet stepping.
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 1.0*berg%mass_scaling, berg%length*berg%width ,bergs%hexagonal_icebergs )
+          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 1.0*berg%mass_scaling,berg%length*berg%width, &
+                         bergs%use_old_spreading, bergs%hexagonal_icebergs)
 
         ! Calling the acceleration   (note that the velocity is converted to u_star inside the accel script)
         call accel(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, ax1, ay1, axn, ayn, bxn, byn) !axn, ayn, bxn, byn - Added by Alon
@@ -3105,7 +3110,8 @@ logical :: bounced, on_tangential_plane, error_flag
         if ((berg%lat>89.) .and. (bergs%grd%grid_is_latlon)) on_tangential_plane=.true.
         i1=i;j1=j
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, bergs%hexagonal_icebergs)
+          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, &
+                         bergs%use_old_spreading, bergs%hexagonal_icebergs)
 
         ! Loading past accelerations - Alon
         axn=berg%axn; ayn=berg%ayn !Alon
@@ -3143,7 +3149,8 @@ logical :: bounced, on_tangential_plane, error_flag
         call adjust_index_and_ground(grd, lon2, lat2, uvel2, vvel2, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)
         i2=i; j2=j
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling, berg%length*berg%width , bergs%hexagonal_icebergs)
+          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, &
+                         bergs%use_old_spreading, bergs%hexagonal_icebergs)
         ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon2,lat2,x2,y2)
         if (.not.error_flag) then
           if (debug .and. .not. is_point_in_cell(bergs%grd, lon2, lat2, i, j)) error_flag=.true.
@@ -3199,7 +3206,8 @@ logical :: bounced, on_tangential_plane, error_flag
         call adjust_index_and_ground(grd, lon3, lat3, uvel3, vvel3, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)
         i3=i; j3=j
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, bergs%hexagonal_icebergs)
+          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, &
+                         bergs%use_old_spreading, bergs%hexagonal_icebergs)
         ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon3,lat3,x3,y3)
         if (.not.error_flag) then
           if (debug .and. .not. is_point_in_cell(bergs%grd, lon3, lat3, i, j)) error_flag=.true.
@@ -3330,7 +3338,8 @@ logical :: bounced, on_tangential_plane, error_flag
         i=i1;j=j1;xi=berg%xi;yj=berg%yj
         call adjust_index_and_ground(grd, lonn, latn, uveln, vveln, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, bergs%hexagonal_icebergs)
+          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, &
+                         bergs%use_old_spreading, bergs%hexagonal_icebergs)
   
         if (.not.error_flag) then
           if (.not. is_point_in_cell(bergs%grd, lonn, latn, i, j)) error_flag=.true.
