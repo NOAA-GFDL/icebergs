@@ -102,6 +102,8 @@ integer :: stdlogunit, stderrunit
              dt, Time, ice_lon, ice_lat, ice_wet, ice_dx, ice_dy, ice_area, &
              cos_rot, sin_rot, ocean_depth=ocean_depth, maskmap=maskmap, fractional_area=fractional_area)
 
+  call unit_testing()
+
   call mpp_clock_begin(bergs%clock_ior)
   call ice_bergs_io_init(bergs,io_layout)
   call read_restart_calving(bergs)  !This is moved to before restart_bergs (by Alon) so that generate icebergs can have the correct counter
@@ -133,6 +135,124 @@ integer :: stdlogunit, stderrunit
 
 end subroutine icebergs_init
 
+
+! ##############################################################################
+subroutine unit_testing()
+! Arguments
+
+call hexagon_test()
+
+end subroutine unit_testing
+
+
+subroutine hexagon_test()
+! Arguments
+real :: x0,y0  !Position of icebergs
+real :: H,theta,S !Apothen of iceberg and angle.
+real :: Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4 ! Areas of icebergs
+real :: tol
+logical :: fail_unit_test
+integer :: stderrunit
+  
+  ! Get the stderr unit number.
+  stderrunit = stderr()
+
+  fail_unit_test=.False.
+
+  tol=1.e-10
+  theta=0.0
+  H=1.
+  S=2.*H/sqrt(3.)
+
+  !Test 1: center at origin: Areas should be equal
+  x0=0.  ;  y0=0.
+  call Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4)
+  if (abs(Area_hex - ((3.*sqrt(3.)/2.)*(S*S)))>tol) then
+    call error_mesg('diamonds, hexagon unit testing:', 'Hexagon at origin has the wrong area!', WARNING)
+    if (mpp_pe() .eq. mpp_root_pe()) write(stderrunit,*) 'diamonds, hexagon areas =', Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4
+    fail_unit_test=.True.
+  endif
+  if (((abs((Area_hex/4)-Area_Q1 )>tol) .or.  (abs((Area_hex/4)-Area_Q2 )>tol)) .or. ((abs((Area_hex/4)-Area_Q3 )>tol) .or. (abs((Area_hex/4)-Area_Q4 )>tol))) then
+  if (mpp_pe() .eq. mpp_root_pe()) write(stderrunit,*) 'diamonds, hexagon areas =', Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4
+    call error_mesg('diamonds, hexagon unit testing:', 'Hexagon at origin divides into unqual parts!', WARNING)
+    fail_unit_test=.True.
+  endif
+
+  ! Test 2:  Hexagon split into two quadrants
+  !Test 2a: center on x>0 axis
+  x0=S  ;  y0=0.
+  call Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4)
+  if (((abs((Area_hex/2)-Area_Q1 )>tol) .or.  (abs(0-Area_Q2 )>tol)) .or. ((abs(0-Area_Q3 )>tol) .or. (abs((Area_hex/2)-Area_Q4 )>tol))) then
+  if (mpp_pe() .eq. mpp_root_pe()) write(stderrunit,*) 'diamonds, hexagon areas =', Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4
+    call error_mesg('diamonds, hexagon unit testing:', 'Hexagon split btw 1 and 4!', WARNING)
+    fail_unit_test=.True.
+  endif
+  !Test 2b: center on x<0 axis
+  x0=-S  ;  y0=0.
+  call Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4)
+  if (((abs((Area_hex/2)-Area_Q2 )>tol) .or.  (abs(0-Area_Q1 )>tol)) .or. ((abs(0-Area_Q4 )>tol) .or. (abs((Area_hex/2)-Area_Q3 )>tol))) then
+  if (mpp_pe() .eq. mpp_root_pe()) write(stderrunit,*) 'diamonds, hexagon areas =', Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4
+    call error_mesg('diamonds, hexagon unit testing:', 'Hexagon split btw 2 and 3!', WARNING)
+    fail_unit_test=.True.
+  endif
+  !Test 2c: center on y>0 axis
+  x0=0.  ;  y0=H
+  call Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4)
+  if (((abs((Area_hex/2)-Area_Q1 )>tol) .or.  (abs(0-Area_Q3 )>tol)) .or. ((abs(0-Area_Q4 )>tol) .or. (abs((Area_hex/2)-Area_Q2 )>tol))) then
+  if (mpp_pe() .eq. mpp_root_pe()) write(stderrunit,*) 'diamonds, hexagon areas =', Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4
+    call error_mesg('diamonds, hexagon unit testing:', 'Hexagon split btw 1 and 2!', WARNING)
+    fail_unit_test=.True.
+  endif
+  !Test 3d: center on y<0 axis
+  x0=0.  ;  y0=-H
+  call Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4)
+  if (((abs((Area_hex/2)-Area_Q3 )>tol) .or.  (abs(0-Area_Q1 )>tol)) .or. ((abs(0-Area_Q2 )>tol) .or. (abs((Area_hex/2)-Area_Q4 )>tol))) then
+  if (mpp_pe() .eq. mpp_root_pe()) write(stderrunit,*) 'diamonds, hexagon areas =', Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4
+    call error_mesg('diamonds, hexagon unit testing:', 'Hexagon split btw 3 and 4!', WARNING)
+    fail_unit_test=.True.
+  endif
+  
+  ! Test 3:  Two corners of hex on the axis
+  !Test 3a: center on x>0 axis
+  x0=S/2.  ;  y0=0.
+  call Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4)
+  if (((abs((2.5*Area_hex/6.)-Area_Q1 )>tol) .or.  (abs((0.5*Area_hex/6.)-Area_Q2 )>tol)) .or. ((abs((0.5*Area_hex/6.)-Area_Q3 )>tol) .or. (abs((2.5*Area_hex/6.)-Area_Q4 )>tol))) then
+  if (mpp_pe() .eq. mpp_root_pe()) write(stderrunit,*) 'diamonds, hexagon areas =', Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4
+    call error_mesg('diamonds, hexagon unit testing:', 'Hexagon split two coners of hex (x>0)!', WARNING)
+    fail_unit_test=.True.
+  endif
+  !Test 3b: center on x<0 axis
+  x0=-S/2.  ;  y0=0.
+  call Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4)
+  if (((abs((2.5*Area_hex/6.)-Area_Q2 )>tol) .or.  (abs((0.5*Area_hex/6.)-Area_Q1 )>tol)) .or. ((abs((0.5*Area_hex/6.)-Area_Q4 )>tol) .or. (abs((2.5*Area_hex/6.)-Area_Q3 )>tol))) then
+  if (mpp_pe() .eq. mpp_root_pe()) write(stderrunit,*) 'diamonds, hexagon areas =', Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4
+    call error_mesg('diamonds, hexagon unit testing:', 'Hexagon split two coners of hex (x<0)!', WARNING)
+    fail_unit_test=.True.
+  endif
+  !Test 3c: center on y>0 axis
+  !x0=0.  ;  y0=H/2.
+  !call Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4)
+  !if (((abs((2.5*Area_hex/6.)-Area_Q1 )>tol) .or.  (abs((0.5*Area_hex/6.)-Area_Q3 )>tol)) .or. ((abs((0.5*Area_hex/6.)-Area_Q4 )>tol) .or. (abs((2.5*Area_hex/6.)-Area_Q2 )>tol))) then
+  !if (mpp_pe() .eq. mpp_root_pe()) write(stderrunit,*) 'diamonds, hexagon areas =', Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4
+  !if (mpp_pe() .eq. mpp_root_pe()) write(stderrunit,*) 'diamonds, hexagon errors =', (abs((2.5*Area_hex/6.)-Area_Q1 )), (abs((0.5*Area_hex/6.)-Area_Q3 )),&
+  !  call error_mesg('diamonds, hexagon unit testing:', 'Hexagon split two coners of hex (y>0)!', WARNING)
+  !  fail_unit_test=.True.
+  !endif
+  !!Test 3d: center on y<0 axis
+  !x0=0.  ;  y0=-H/2.
+  !call Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4)
+  !if (((abs((2.5*Area_hex/6.)-Area_Q3 )>tol) .or.  (abs((0.5*Area_hex/6.)-Area_Q2 )>tol)) .or. ((abs((0.5*Area_hex/6.)-Area_Q1 )>tol) .or. (abs((2.5*Area_hex/6.)-Area_Q4 )>tol))) then
+  !if (mpp_pe() .eq. mpp_root_pe()) write(stderrunit,*) 'diamonds, hexagon areas =', Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4
+  !if (mpp_pe() .eq. mpp_root_pe()) write(stderrunit,*) 'diamonds, hexagon errots =', (abs((2.5*Area_hex/6.)-Area_Q3 )), (abs((0.5*Area_hex/6.)-Area_Q2 )),&
+  !  call error_mesg('diamonds, hexagon unit testing:', 'Hexagon split two coners of hex (y<0)!', WARNING)
+  !  fail_unit_test=.True.
+  !endif
+
+
+  if (fail_unit_test) call error_mesg('diamonds, hexagon unit testing:', 'Hexagon unit testing does not pass!', FATAL)
+
+
+end subroutine hexagon_test
 
 ! ##############################################################################
 
@@ -944,10 +1064,13 @@ integer :: i,j, stderrunit
 type(iceberg), pointer :: this, next
 real, parameter :: perday=1./86400.
 integer :: grdi, grdj
-real :: orientation
+real :: orientation, static_berg
 
   ! For convenience
   grd=>bergs%grd
+  
+  !Initializing static_berg
+  static_berg=0.
 
   !do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
   !do grdj = grd%jsd+2,grd%jed-1 ; do grdi = grd%isd+2,grd%ied-1  ! Thermodynamics of  halos now calculated, so that spread mass to ocean works correctly
@@ -1128,8 +1251,9 @@ real :: orientation
             endif
             !print *, 'orientation: ', (180/pi)*orientation, this%iceberg_num
           endif
+          if (bergs%hexagonal_icebergs) static_berg=this%static_berg  !Change this to use_old_restart=false when this is merged in
           call spread_mass_across_ocean_cells(grd, i, j, this%xi, this%yj, Mnew, nMbits, this%mass_scaling, &
-                      this%length*this%width, bergs%use_old_spreading, bergs%hexagonal_icebergs,orientation)
+                      this%length*this%width, bergs%use_old_spreading, bergs%hexagonal_icebergs,orientation,static_berg)
         endif
       endif
     
@@ -1209,7 +1333,7 @@ real function find_orientation_using_iceberg_bonds(grd,berg,initial_orientation)
 
 end function find_orientation_using_iceberg_bonds
 
-subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling, Area, use_old_spreading, hexagonal_icebergs, theta_in)
+subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling, Area, use_old_spreading,hexagonal_icebergs,theta_in,static_berg)
   ! Arguments
   type(icebergs_gridded), pointer :: grd
   integer, intent(in) :: i, j
@@ -1217,6 +1341,7 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
   logical, intent(in) :: hexagonal_icebergs
   logical, intent(in) :: use_old_spreading
   real, optional, intent(in) :: theta_in
+  real, optional, intent(in) :: static_berg
   ! Local variables
   real :: xL, xC, xR, yD, yC, yU, Mass, L
   real :: yDxL, yDxC, yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR
@@ -1224,6 +1349,7 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
   real :: Area_Q1,Area_Q2 , Area_Q3,Area_Q4, Area_hex
   real :: fraction_used
   real :: theta
+  real :: tol
   real, parameter :: rho_seawater=1035.
   integer :: stderrunit
   logical :: debug
@@ -1232,6 +1358,7 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
   stderrunit = stderr()
 
   theta=0.0
+  tol=1.e-10
   !This is here because the findinding orientaion scheme is not coded when spread mass to ocean is called directly from the time stepping scheme.
   if (present(theta_in)) then
     theta=theta_in
@@ -1308,7 +1435,7 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
 
     call Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4)
     
-    if (min(min(Area_Q1,Area_Q2),min(Area_Q3, Area_Q4)) <-0.001) then
+    if (min(min(Area_Q1,Area_Q2),min(Area_Q3, Area_Q4)) <-tol) then
       call error_mesg('diamonds, hexagonal spreading', 'Intersection with hexagons should not be negative!!!', WARNING)
       write(stderrunit,*) 'diamonds, yU,yC,yD', Area_Q1, Area_Q2, Area_Q3, Area_Q4
     endif
@@ -1347,7 +1474,7 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
     endif
 
       !Double check that all the mass is being used.
-      if ((abs(yCxC-(1.-( ((yDxL+yUxR)+(yDxR+yUxL)) + ((yCxL+yCxR)+(yDxC+yUxC)) )))>0.001) .and. (mpp_pe().eq.5)) then
+      if ((abs(yCxC-(1.-( ((yDxL+yUxR)+(yDxR+yUxL)) + ((yCxL+yCxR)+(yDxC+yUxC)) )))>tol) .and. (mpp_pe().eq. mpp_root_pe())) then
         !call error_mesg('diamonds, hexagonal spreading', 'All the mass is not being used!!!', WARNING)
         write(stderrunit,*) 'diamonds, hexagonal, H,x0,y0', H, x0 , y0
         write(stderrunit,*) 'diamonds, hexagonal, Areas',(Area_Q1+Area_Q2 + Area_Q3+Area_Q4), Area_Q1,  Area_Q2 , Area_Q3,  Area_Q4
@@ -1363,6 +1490,11 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
   fraction_used= ((yDxL*grd%msk(i-1,j-1)) + (yDxC*grd%msk(i  ,j-1))  +(yDxR*grd%msk(i+1,j-1)) +(yCxL*grd%msk(i-1,j  )) +  (yCxR*grd%msk(i+1,j  ))&
                  +(yUxL*grd%msk(i-1,j+1)) +(yUxC*grd%msk(i  ,j+1))   +(yUxR*grd%msk(i+1,j+1)) + (yCxC**grd%msk(i,j)))
 
+  if ((hexagonal_icebergs) .and.  (static_berg .eq. 1)) then
+    !Change this to use_old_restart=false when this is merged in
+    fraction_used=1.  !Static icebergs do not share their mass with the boundary (this to initialize icebergs in regular arrangements against boundaries)
+  endif
+
   grd%mass_on_ocean(i,j,1)=grd%mass_on_ocean(i,j,1)+(yDxL*Mass/fraction_used)
   grd%mass_on_ocean(i,j,2)=grd%mass_on_ocean(i,j,2)+(yDxC*Mass/fraction_used)
   grd%mass_on_ocean(i,j,3)=grd%mass_on_ocean(i,j,3)+(yDxR*Mass/fraction_used)
@@ -1372,6 +1504,7 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
   grd%mass_on_ocean(i,j,7)=grd%mass_on_ocean(i,j,7)+(yUxL*Mass/fraction_used)
   grd%mass_on_ocean(i,j,8)=grd%mass_on_ocean(i,j,8)+(yUxC*Mass/fraction_used)
   grd%mass_on_ocean(i,j,9)=grd%mass_on_ocean(i,j,9)+(yUxR*Mass/fraction_used)
+
 
 end subroutine spread_mass_across_ocean_cells
 
@@ -1411,7 +1544,7 @@ logical function point_is_on_the_line(Ax,Ay,Bx,By,qx,qy)
   ! Arguments
   real, intent(in) :: Ax,Ay,Bx,By,qx,qy
   real :: tol, dxc,dyc,dxl,dyl,cross
-    tol=0.00000000000000;
+    tol=1.e-12;
     dxc = qx - Ax;
     dyc = qy - Ay;
     dxl = Bx - Ax;
@@ -1597,22 +1730,14 @@ subroutine Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy,Area_triangle,
   real :: Area_Upper, Area_Lower, Area_Right, Area_Left
   real :: px, py , qx , qy 
   real :: Area_key_quadrant,Error
+  real :: tol
   integer :: Key_quadrant
   integer ::sig_fig
   integer :: stderrunit
 
   ! Get the stderr unit number
   stderrunit = stderr()
-
-  !Round of numbers before proceeding further.
-  !sig_fig=12; !Significan figures
-  !Ax=roundoff(Ax0,sig_fig)
-  !Ay=roundoff(Ay0,sig_fig)
-  !Bx=roundoff(Bx0,sig_fig)
-  !By=roundoff(By0,sig_fig)
-  !Cx=roundoff(Cx0,sig_fig)
-  !Cy=roundoff(Cy0,sig_fig)
- 
+  tol=1.e-10
 
   Area_triangle=Area_of_triangle(Ax,Ay,Bx,By,Cx,Cy);
   
@@ -1707,7 +1832,7 @@ subroutine Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy,Area_triangle,
 
 
   Error=abs(Area_Q1+Area_Q2+Area_Q3+Area_Q4-Area_triangle)
-  if (Error>0.01) then
+  if (Error>tol) then
     call error_mesg('diamonds, triangle spreading', 'Triangle not evaluated accurately!!', WARNING)
     !if (mpp_pe().eq.mpp_root_pe()) then
     if (mpp_pe().eq. 0) then
@@ -1755,10 +1880,12 @@ subroutine Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex ,Area_Q
   real :: T56_Area, T56_Q1, T56_Q2, T56_Q3, T56_Q4
   real :: T61_Area, T61_Q1, T61_Q2, T61_Q3, T61_Q4
   real :: S, exact_hex_area, Error
+  real :: tol
   integer :: stderrunit
 
   ! Get the stderr unit number
   stderrunit = stderr()
+  tol=1.e-10
 
   !Length of side of Hexagon
   S=(2/sqrt(3.))*H
@@ -1800,7 +1927,7 @@ subroutine Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex ,Area_Q
   Area_Q4=max(Area_Q4,0.);
 
   Error=Area_hex-(Area_Q1+Area_Q2+Area_Q3+Area_Q4)
-  if ((abs(Error)>0.01))then
+  if ((abs(Error)>tol))then
     if (mpp_pe().eq.mpp_root_pe()) then
       call error_mesg('diamonds, hexagonal spreading', 'Hexagon error is large!!', WARNING)
       write(stderrunit,*) 'diamonds, hex error, H,x0,y0, Error', H, x0 , y0, Error
@@ -1815,7 +1942,7 @@ subroutine Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex ,Area_Q
   endif
 
   exact_hex_area=((3.*sqrt(3.)/2)*(S*S))
-  if (abs(Area_hex-exact_hex_area)>0.01) then
+  if (abs(Area_hex-exact_hex_area)>tol) then
     call error_mesg('diamonds, hexagonal spreading', 'Hexagon not evaluated accurately!!', WARNING)
     if (mpp_pe().eq.mpp_root_pe()) then
       write(stderrunit,*) 'diamonds, hex calculations, H,x0,y0', H, x0 , y0
@@ -1842,9 +1969,6 @@ subroutine Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex ,Area_Q
 
 end subroutine Hexagon_into_quadrants_using_triangles
 
-
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 subroutine interp_flds(grd, i, j, xi, yj, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi)
 ! Arguments
@@ -2669,6 +2793,7 @@ integer :: stderrunit
     grd%tmp(:,:)=0.; grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec)=mass
     call grd_chksum3(grd, grd%mass_on_ocean, 'mass bergs (incr)')
     call grd_chksum2(grd, grd%tmp, 'mass out (incr)')
+
   endif
 
   if (.not.(within_model)) then
@@ -2957,6 +3082,7 @@ real :: x1,  y1, xddot1, yddot1, xi, yj
 real :: xdot3, ydot3
 real :: xdotn, ydotn
 real :: dt, dt_2, dt_6, dydl
+real :: static_berg
 logical :: bounced, on_tangential_plane, error_flag
 integer :: i, j 
 integer :: stderrunit
@@ -2979,6 +3105,10 @@ integer :: stderrunit
     dt=bergs%dt
     dt_2=0.5*dt
 
+    static_berg=0.  !Initializing
+    if (bergs%hexagonal_icebergs) static_berg=berg%static_berg  !Change this to use_old_restart=false when this is merged in
+    
+
         lonn = berg%lon ;   latn = berg%lat
         axn  = berg%axn ;   ayn  = berg%ayn
         bxn=   berg%bxn ;   byn  = berg%byn
@@ -2994,7 +3124,7 @@ integer :: stderrunit
         !this is only called once in Verlet stepping.
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
           call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 1.0*berg%mass_scaling,berg%length*berg%width, &
-                         bergs%use_old_spreading, bergs%hexagonal_icebergs)
+                         bergs%use_old_spreading, bergs%hexagonal_icebergs,static_berg )
 
         ! Calling the acceleration   (note that the velocity is converted to u_star inside the accel script)
         call accel(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, ax1, ay1, axn, ayn, bxn, byn) !axn, ayn, bxn, byn - Added by Alon
@@ -3075,6 +3205,7 @@ real :: x3, xdot3, xddot3, y3, ydot3, yddot3, xddot3n, yddot3n
 real :: x4, xdot4, xddot4, y4, ydot4, yddot4, xddot4n, yddot4n
 real :: xn, xdotn, xddotn, yn, ydotn, yddotn, xddotnn, yddotnn
 real :: dt, dt_2, dt_6, dydl
+real :: static_berg
 integer :: i1,j1,i2,j2,i3,j3,i4,j4
 integer :: stderrunit
 logical :: bounced, on_tangential_plane, error_flag
@@ -3100,6 +3231,9 @@ logical :: bounced, on_tangential_plane, error_flag
     dt=bergs%dt
     dt_2=0.5*dt
     dt_6=dt/6.
+    
+    static_berg=0.  !Initializing
+    if (bergs%hexagonal_icebergs) static_berg=berg%static_berg  !Change this to use_old_restart=false when this is merged in
 
         i=berg%ine
         j=berg%jne
@@ -3111,7 +3245,7 @@ logical :: bounced, on_tangential_plane, error_flag
         i1=i;j1=j
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
           call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, &
-                         bergs%use_old_spreading, bergs%hexagonal_icebergs)
+                         bergs%use_old_spreading, bergs%hexagonal_icebergs,static_berg )
 
         ! Loading past accelerations - Alon
         axn=berg%axn; ayn=berg%ayn !Alon
@@ -3150,7 +3284,7 @@ logical :: bounced, on_tangential_plane, error_flag
         i2=i; j2=j
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
           call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, &
-                         bergs%use_old_spreading, bergs%hexagonal_icebergs)
+                         bergs%use_old_spreading, bergs%hexagonal_icebergs,static_berg )
         ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon2,lat2,x2,y2)
         if (.not.error_flag) then
           if (debug .and. .not. is_point_in_cell(bergs%grd, lon2, lat2, i, j)) error_flag=.true.
@@ -3207,7 +3341,7 @@ logical :: bounced, on_tangential_plane, error_flag
         i3=i; j3=j
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
           call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, &
-                         bergs%use_old_spreading, bergs%hexagonal_icebergs)
+                         bergs%use_old_spreading, bergs%hexagonal_icebergs,static_berg )
         ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon3,lat3,x3,y3)
         if (.not.error_flag) then
           if (debug .and. .not. is_point_in_cell(bergs%grd, lon3, lat3, i, j)) error_flag=.true.
@@ -3339,7 +3473,7 @@ logical :: bounced, on_tangential_plane, error_flag
         call adjust_index_and_ground(grd, lonn, latn, uveln, vveln, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
           call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, &
-                         bergs%use_old_spreading, bergs%hexagonal_icebergs)
+                         bergs%use_old_spreading, bergs%hexagonal_icebergs,static_berg )
   
         if (.not.error_flag) then
           if (.not. is_point_in_cell(bergs%grd, lonn, latn, i, j)) error_flag=.true.
