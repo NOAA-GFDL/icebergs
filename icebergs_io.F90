@@ -307,7 +307,6 @@ integer :: grdi, grdj
    if (bergs%iceberg_bonds_on) then
      check_bond_quality=.true.
      call count_bonds(bergs, nbonds,check_bond_quality)
-   endif
 
    allocate(first_berg_num(nbonds))
    allocate(other_berg_num(nbonds))
@@ -369,7 +368,7 @@ integer :: grdi, grdj
 
 
   call nullify_domain()
-
+   endif
 !#############################################################################################
 
   ! Write stored ice
