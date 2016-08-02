@@ -332,7 +332,7 @@ real :: grounding_fraction=0. ! Fraction of water column depth at which groundin
 logical :: Runge_not_Verlet=.True.  !True=Runge Kutta, False=Verlet.  - Added by Alon 
 logical :: use_f_plane=.False.  !Flag to use a f-plane for the rotation
 logical :: grid_is_latlon=.True.  !True means that the grid is specified in lat lon, and uses to radius of the earth to convert to distance
-logical :: grid_is_regular !Flag to say whether point in cell can be found assuming regular cartesian grid
+logical :: grid_is_regular=.True. !Flag to say whether point in cell can be found assuming regular cartesian grid
 logical :: rotate_icebergs_for_mass_spreading=.True.  !Flag allows icebergs to rotate for spreading their mass (in hexagonal spreading mode)
 logical :: set_melt_rates_to_zero=.False.  !Sets all melt rates to zero, for testing purposes (thermodynamics routine is still run)
 logical :: allow_bergs_to_roll=.True. !Allows icebergs to roll over when rolling conditions are met
