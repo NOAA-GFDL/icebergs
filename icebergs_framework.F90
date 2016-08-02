@@ -671,7 +671,10 @@ if (input_freq_distribution) then
      enddo
 endif 
 
-if ((halo .lt. 2) .and. (interactive_icebergs_on .or. iceberg_bonds_on) )   then
+if ((halo .lt. 3) .and. (rotate_icebergs_for_mass_spreading .and. iceberg_bonds_on) )   then
+    halo=3
+    call error_mesg('diamonds, framework', 'Setting iceberg halos =3, since halos must be >= 3 for rotating icebergs for mass spreading', WARNING) 
+elseif  ((halo .lt. 2) .and. (interactive_icebergs_on .or. iceberg_bonds_on) )   then
     halo=2
     call error_mesg('diamonds, framework', 'Setting iceberg halos =2, since halos must be >= 2 for interactions', WARNING) 
 endif

@@ -1065,16 +1065,19 @@ type(iceberg), pointer :: this, next
 real, parameter :: perday=1./86400.
 integer :: grdi, grdj
 real :: orientation, static_berg
+integer :: extra_cell
 
   ! For convenience
   grd=>bergs%grd
   
   !Initializing static_berg
   static_berg=0.
+  extra_cell=0
+  if ((bergs%iceberg_bonds_on) .and. (bergs%rotate_icebergs_for_mass_spreading))  extra_cell=1
 
-  !do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
-  !do grdj = grd%jsd+2,grd%jed-1 ; do grdi = grd%isd+2,grd%ied-1  ! Thermodynamics of  halos now calculated, so that spread mass to ocean works correctly
-  do grdj = grd%jsc-1,grd%jec+1 ; do grdi = grd%isc-1,grd%iec+1  ! Thermodynamics of first halo row is calculated, so that spread mass to ocean works correctly
+  ! Thermodynamics of first halo row is calculated, so that spread mass to ocean works correctly
+  ! Thermodynamics of first second halo row is calculated if orientation is being found using bonds 
+  do grdj = grd%jsc-1-extra_cell,grd%jec+1+extra_cell ; do grdi = grd%isc-1-extra_cell,grd%iec+1+extra_cell  
     this=>bergs%list(grdi,grdj)%first
     do while(associated(this))
       if (debug) call check_position(grd, this, 'thermodynamics (top)')
@@ -1244,13 +1247,7 @@ real :: orientation, static_berg
           endif
 
           orientation=bergs%initial_orientation
-          if ((bergs%iceberg_bonds_on) .and. (bergs%rotate_icebergs_for_mass_spreading)) then
-            !Don't check orientation of the edges of halo,  since they can contain unassosiated bonds  (this is why halo width must be larger >= 2 to use bonds)    
-            if  (  ((this%ine .gt.  grd%isd) .and. (this%ine .lt. grd%ied)) .and. ((this%jne .ge.  grd%jsd) .and. (this%jne .le. grd%jed) ) ) then  
-              orientation=find_orientation_using_iceberg_bonds(grd,this,bergs%initial_orientation)
-            endif
-            !print *, 'orientation: ', (180/pi)*orientation, this%iceberg_num
-          endif
+          if ((bergs%iceberg_bonds_on) .and. (bergs%rotate_icebergs_for_mass_spreading)) call find_orientation_using_iceberg_bonds(grd,this,orientation)
           if (bergs%hexagonal_icebergs) static_berg=this%static_berg  !Change this to use_old_restart=false when this is merged in
           call spread_mass_across_ocean_cells(grd, i, j, this%xi, this%yj, Mnew, nMbits, this%mass_scaling, &
                       this%length*this%width, bergs%use_old_spreading, bergs%hexagonal_icebergs,orientation,static_berg)
@@ -1264,10 +1261,10 @@ real :: orientation, static_berg
 end subroutine thermodynamics
 
 
-real function find_orientation_using_iceberg_bonds(grd,berg,initial_orientation)
+subroutine find_orientation_using_iceberg_bonds(grd,berg,orientation)
   ! Arguments
   type(iceberg), pointer :: berg
-  real, intent(in) :: initial_orientation 
+  real, intent(inout) :: orientation 
   type(icebergs_gridded), pointer :: grd
   type(iceberg), pointer :: other_berg
   type(bond), pointer :: current_bond
@@ -1275,72 +1272,67 @@ real function find_orientation_using_iceberg_bonds(grd,berg,initial_orientation)
   real :: r_dist_x, r_dist_y 
   real :: lat_ref, dx_dlon, dy_dlat
   real :: theta, bond_count, Average_angle
-  logical  :: grid_is_latlon
     
-  grid_is_latlon=grd%grid_is_latlon
   bond_count=0.
   Average_angle=0.
-  current_bond=>berg%first_bond
-  lat1=berg%lat
-  lon1=berg%lon
-  !print *, 'Looking for orientation: '
-  do while (associated(current_bond)) ! loop over all bonds
-    other_berg=>current_bond%other_berg
-    if (.not. associated(other_berg)) then !good place for debugging 
-      !One valid option: current iceberg is on the edge of halo, with other berg on the next pe (not influencing mass spreading)
-        !print *, 'Iceberg bond details:',berg%iceberg_num, current_bond%other_berg_num,berg%halo_berg, mpp_pe()
-        !print *, 'Iceberg bond details2:',berg%ine, berg%jne, current_bond%other_berg_ine, current_bond%other_berg_jne
-        !print *, 'Iceberg isd,ied,jsd,jed:',grd%isd, grd%ied, grd%jsd, grd%jed
-        !print *, 'Iceberg isc,iec,jsc,jec:',grd%isc, grd%iec, grd%jsc, grd%jec
-        !call error_mesg('diamonds,calculating orientation', 'Looking at bond interactions of unassosiated berg!' ,FATAL)
-      !endif
-    else
-      lat2=other_berg%lat
-      lon2=other_berg%lon
-
-      dlat=lat2-lat1
-      dlon=lon2-lon1
-      
-      lat_ref=0.5*(lat1+lat2)
-      call convert_from_grid_to_meters(lat_ref,grid_is_latlon,dx_dlon,dy_dlat)
-      r_dist_x=dlon*dx_dlon
-      r_dist_y=dlat*dy_dlat
-      !print *, 'r_dist_x,r_dist_y: ', r_dist_x,r_dist_y
-
-      if (r_dist_x .eq. 0.) then
-        angle=pi/2.
+  !Don't check orientation of the edges of halo,  since they can contain unassosiated bonds  (this is why halo width must be larger >= 2 to use bonds)    
+  if  (  ((berg%ine .gt.  grd%isd) .and. (berg%ine .lt. grd%ied)) .and. ((berg%jne .ge.  grd%jsd) .and. (berg%jne .le. grd%jed) ) ) then  
+    current_bond=>berg%first_bond
+    lat1=berg%lat
+    lon1=berg%lon
+    do while (associated(current_bond)) ! loop over all bonds
+      other_berg=>current_bond%other_berg
+      if (.not. associated(other_berg)) then !good place for debugging 
+        !One valid option: current iceberg is on the edge of halo, with other berg on the next pe (not influencing mass spreading)
+          !print *, 'Iceberg bond details:',berg%iceberg_num, current_bond%other_berg_num,berg%halo_berg, mpp_pe()
+          !print *, 'Iceberg bond details2:',berg%ine, berg%jne, current_bond%other_berg_ine, current_bond%other_berg_jne
+          !print *, 'Iceberg isd,ied,jsd,jed:',grd%isd, grd%ied, grd%jsd, grd%jed
+          !print *, 'Iceberg isc,iec,jsc,jec:',grd%isc, grd%iec, grd%jsc, grd%jec
+          !call error_mesg('diamonds,calculating orientation', 'Looking at bond interactions of unassosiated berg!' ,FATAL)
+        !endif
       else
-        angle=atan(r_dist_y/r_dist_x)
-        angle= ((pi/2.)  - (initial_orientation*(pi/180.)))  - angle
-        !print *, 'angle: ', angle*(180/pi), initial_orientation
-        angle=modulo(angle ,pi/3.)
+        lat2=other_berg%lat
+        lon2=other_berg%lon
+
+        dlat=lat2-lat1
+        dlon=lon2-lon1
+        
+        lat_ref=0.5*(lat1+lat2)
+        call convert_from_grid_to_meters(lat_ref,grd%grid_is_latlon,dx_dlon,dy_dlat)
+        r_dist_x=dlon*dx_dlon
+        r_dist_y=dlat*dy_dlat
+
+        if (r_dist_x .eq. 0.) then
+          angle=pi/2.
+        else
+          angle=atan(r_dist_y/r_dist_x)
+          angle= ((pi/2.)  - (orientation*(pi/180.)))  - angle
+          !print *, 'angle: ', angle*(180/pi), initial_orientation
+          angle=modulo(angle ,pi/3.)
+        endif
+        bond_count=bond_count+1.
+        Average_angle=Average_angle+angle
       endif
-      !print *, 'angle2: ', angle*(180/pi)
-      bond_count=bond_count+1.
-      Average_angle=Average_angle+angle
+      current_bond=>current_bond%next_bond
+    enddo  !End loop over bonds
+    if (bond_count.gt.0) then
+      Average_angle =Average_angle/bond_count
+    else
+      Average_angle =0.
     endif
-    current_bond=>current_bond%next_bond
-  enddo  !End loop over bonds
-  if (bond_count.gt.0) then
-    Average_angle =Average_angle/bond_count
-  else
-    Average_angle =0.
+    orientation=modulo(Average_angle ,pi/3.)
   endif
-    !print *, 'Average angle', Average_angle*(180/pi), bond_count
-    find_orientation_using_iceberg_bonds=modulo(Average_angle ,pi/3.)
-    !find_orientation_using_iceberg_bonds=modulo(angle ,pi/3.)
-    !print *, 'Finished looking: '
 
-end function find_orientation_using_iceberg_bonds
+end subroutine find_orientation_using_iceberg_bonds
 
-subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling, Area, use_old_spreading,hexagonal_icebergs,theta_in,static_berg)
+subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling, Area, use_old_spreading,hexagonal_icebergs,theta,static_berg)
   ! Arguments
   type(icebergs_gridded), pointer :: grd
   integer, intent(in) :: i, j
   real, intent(in) :: x, y, Mberg, Mbits, scaling, Area
   logical, intent(in) :: hexagonal_icebergs
   logical, intent(in) :: use_old_spreading
-  real, optional, intent(in) :: theta_in
+  real, intent(in) :: theta
   real, optional, intent(in) :: static_berg
   ! Local variables
   real :: xL, xC, xR, yD, yC, yU, Mass, L
@@ -1348,7 +1340,6 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
   real :: S, H, origin_x, origin_y, x0, y0
   real :: Area_Q1,Area_Q2 , Area_Q3,Area_Q4, Area_hex
   real :: fraction_used
-  real :: theta
   real :: tol
   real, parameter :: rho_seawater=1035.
   integer :: stderrunit
@@ -1357,12 +1348,7 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
   ! Get the stderr unit number
   stderrunit = stderr()
 
-  theta=0.0
   tol=1.e-10
-  !This is here because the findinding orientaion scheme is not coded when spread mass to ocean is called directly from the time stepping scheme.
-  if (present(theta_in)) then
-    theta=theta_in
-  endif
 
   Mass=(Mberg+Mbits)*scaling
   ! This line attempts to "clip" the weight felt by the ocean. The concept of
@@ -3082,7 +3068,7 @@ real :: x1,  y1, xddot1, yddot1, xi, yj
 real :: xdot3, ydot3
 real :: xdotn, ydotn
 real :: dt, dt_2, dt_6, dydl
-real :: static_berg
+real :: static_berg, orientation
 logical :: bounced, on_tangential_plane, error_flag
 integer :: i, j 
 integer :: stderrunit
@@ -3106,6 +3092,8 @@ integer :: stderrunit
     dt_2=0.5*dt
 
     static_berg=0.  !Initializing
+    orientation=bergs%initial_orientation
+    if ((bergs%iceberg_bonds_on) .and. (bergs%rotate_icebergs_for_mass_spreading)) call find_orientation_using_iceberg_bonds(grd,berg,orientation)
     if (bergs%hexagonal_icebergs) static_berg=berg%static_berg  !Change this to use_old_restart=false when this is merged in
     
 
@@ -3124,7 +3112,7 @@ integer :: stderrunit
         !this is only called once in Verlet stepping.
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
           call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 1.0*berg%mass_scaling,berg%length*berg%width, &
-                         bergs%use_old_spreading, bergs%hexagonal_icebergs,static_berg )
+                         bergs%use_old_spreading, bergs%hexagonal_icebergs,orientation,static_berg )
 
         ! Calling the acceleration   (note that the velocity is converted to u_star inside the accel script)
         call accel(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, ax1, ay1, axn, ayn, bxn, byn) !axn, ayn, bxn, byn - Added by Alon
@@ -3205,7 +3193,7 @@ real :: x3, xdot3, xddot3, y3, ydot3, yddot3, xddot3n, yddot3n
 real :: x4, xdot4, xddot4, y4, ydot4, yddot4, xddot4n, yddot4n
 real :: xn, xdotn, xddotn, yn, ydotn, yddotn, xddotnn, yddotnn
 real :: dt, dt_2, dt_6, dydl
-real :: static_berg
+real :: static_berg,orientation
 integer :: i1,j1,i2,j2,i3,j3,i4,j4
 integer :: stderrunit
 logical :: bounced, on_tangential_plane, error_flag
@@ -3233,6 +3221,8 @@ logical :: bounced, on_tangential_plane, error_flag
     dt_6=dt/6.
     
     static_berg=0.  !Initializing
+    orientation=bergs%initial_orientation
+    if ((bergs%iceberg_bonds_on) .and. (bergs%rotate_icebergs_for_mass_spreading)) call find_orientation_using_iceberg_bonds(grd,berg,orientation) !Not sure if this works with Runge Kutta
     if (bergs%hexagonal_icebergs) static_berg=berg%static_berg  !Change this to use_old_restart=false when this is merged in
 
         i=berg%ine
@@ -3245,7 +3235,7 @@ logical :: bounced, on_tangential_plane, error_flag
         i1=i;j1=j
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
           call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, &
-                         bergs%use_old_spreading, bergs%hexagonal_icebergs,static_berg )
+                         bergs%use_old_spreading, bergs%hexagonal_icebergs,orientation,static_berg )
 
         ! Loading past accelerations - Alon
         axn=berg%axn; ayn=berg%ayn !Alon
@@ -3284,7 +3274,7 @@ logical :: bounced, on_tangential_plane, error_flag
         i2=i; j2=j
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
           call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, &
-                         bergs%use_old_spreading, bergs%hexagonal_icebergs,static_berg )
+                         bergs%use_old_spreading, bergs%hexagonal_icebergs,orientation,static_berg )
         ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon2,lat2,x2,y2)
         if (.not.error_flag) then
           if (debug .and. .not. is_point_in_cell(bergs%grd, lon2, lat2, i, j)) error_flag=.true.
@@ -3341,7 +3331,7 @@ logical :: bounced, on_tangential_plane, error_flag
         i3=i; j3=j
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
           call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, &
-                         bergs%use_old_spreading, bergs%hexagonal_icebergs,static_berg )
+                         bergs%use_old_spreading, bergs%hexagonal_icebergs,orientation,static_berg )
         ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon3,lat3,x3,y3)
         if (.not.error_flag) then
           if (debug .and. .not. is_point_in_cell(bergs%grd, lon3, lat3, i, j)) error_flag=.true.
@@ -3473,7 +3463,7 @@ logical :: bounced, on_tangential_plane, error_flag
         call adjust_index_and_ground(grd, lonn, latn, uveln, vveln, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
           call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, &
-                         bergs%use_old_spreading, bergs%hexagonal_icebergs,static_berg )
+                         bergs%use_old_spreading, bergs%hexagonal_icebergs,orientation,static_berg )
   
         if (.not.error_flag) then
           if (.not. is_point_in_cell(bergs%grd, lonn, latn, i, j)) error_flag=.true.
