@@ -1065,19 +1065,15 @@ type(iceberg), pointer :: this, next
 real, parameter :: perday=1./86400.
 integer :: grdi, grdj
 real :: orientation, static_berg
-integer :: extra_cell
 
   ! For convenience
   grd=>bergs%grd
   
   !Initializing static_berg
   static_berg=0.
-  extra_cell=0
-  if ((bergs%iceberg_bonds_on) .and. (bergs%rotate_icebergs_for_mass_spreading))  extra_cell=1
 
   ! Thermodynamics of first halo row is calculated, so that spread mass to ocean works correctly
-  ! Thermodynamics of first second halo row is calculated if orientation is being found using bonds 
-  do grdj = grd%jsc-1-extra_cell,grd%jec+1+extra_cell ; do grdi = grd%isc-1-extra_cell,grd%iec+1+extra_cell  
+  do grdj = grd%jsc-1,grd%jec+1 ; do grdi = grd%isc-1,grd%iec+1  
     this=>bergs%list(grdi,grdj)%first
     do while(associated(this))
       if (debug) call check_position(grd, this, 'thermodynamics (top)')
@@ -1253,7 +1249,6 @@ integer :: extra_cell
                       this%length*this%width, bergs%use_old_spreading, bergs%hexagonal_icebergs,orientation,static_berg)
         endif
       endif
-    
       this=>next
     enddo
   enddo ; enddo
@@ -1840,14 +1835,15 @@ subroutine rotate_and_translate(px,py,theta,x0,y0)
   ! Arguments
   real, intent(in) :: x0,y0,theta
   real, intent(inout) :: px,py
+  real :: px_temp,py_temp
 
   !Rotation
-  px = ( cos(theta*pi/180)*px) + (sin(theta*pi/180)*py)
-  py = (-sin(theta*pi/180)*px) + (cos(theta*pi/180)*py)
+  px_temp = ( cos(theta*pi/180)*px) + (sin(theta*pi/180)*py)
+  py_temp = (-sin(theta*pi/180)*px) + (cos(theta*pi/180)*py)
  
   !Translation
-  px= px + x0
-  py= py + y0
+  px= px_temp + x0
+  py= py_temp + y0
 end subroutine rotate_and_translate
 
 subroutine Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex ,Area_Q1, Area_Q2, Area_Q3, Area_Q4)
