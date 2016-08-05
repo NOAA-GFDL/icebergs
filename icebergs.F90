@@ -649,6 +649,13 @@ endif
   ! Interpolate gridded fields to berg     - Note: It should be possible to move this to evolve, so that it only needs to be called once. !!!!
   call interp_flds(grd, i, j, xi, yj, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi)
 
+
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  !Temporary for messing around
+  !ssh_x=0.
+  !ssh_y=0.
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
   if ((grd%grid_is_latlon) .and. (.not. bergs%use_f_plane)) then
      f_cori=(2.*omega)*sin(pi_180*lat)
   else
@@ -695,7 +702,11 @@ endif
   ! Weighted drag coefficients
   c_ocn=rho_seawater/M*(0.5*Cd_wv*W*(D_hi)+Cd_wh*W*L)
   c_atm=rho_air     /M*(0.5*Cd_av*W*F     +Cd_ah*W*L)
-  c_ice=rho_ice     /M*(0.5*Cd_iv*W*hi              )
+  if (abs(hi).eq.0.) then
+    c_ice=0.
+  else
+    c_ice=rho_ice     /M*(0.5*Cd_iv*W*hi              )
+  endif
   if (abs(ui)+abs(vi).eq.0.) c_ice=0.
 
 !Turning drag off for testing - Alon
@@ -997,6 +1008,13 @@ endif
     call print_berg(stderrunit,berg,'diamonds, accel, large accel')
   endif
 
+  !Used for testing the ocean response to fixed iceberg motion.
+  if (bergs%override_iceberg_velocities) then
+    ax  = 0.0;  ay  = 0.0;
+    axn = 0.0;  ayn = 0.0;
+    bxn = 0.0;  byn = 0.0;
+  endif
+
   contains
 
   subroutine dump_locfld(grd,i0,j0,A,lbl)
@@ -1232,8 +1250,13 @@ real :: orientation, static_berg
       else ! Diagnose mass distribution on grid
         if (grd%id_virtual_area>0)&
              & grd%virtual_area(i,j)=grd%virtual_area(i,j)+(Wn*Ln+Abits)*this%mass_scaling ! m^2
-        if (grd%id_mass>0 .or. bergs%add_weight_to_ocean)&
+        if ((grd%id_mass>0 .or. bergs%add_weight_to_ocean) .or. ((grd%id_u_iceberg>0) .or. (grd%id_v_iceberg>0)))   &
              & grd%mass(i,j)=grd%mass(i,j)+Mnew/grd%area(i,j)*this%mass_scaling ! kg/m2
+        !Finding the average iceberg velocity in a grid cell (mass weighted)
+        if (grd%id_u_iceberg>0 )&
+             & grd%u_iceberg(i,j)=grd%u_iceberg(i,j)+((Mnew/grd%area(i,j)*this%mass_scaling)*this%uvel) ! kg/m2
+        if (grd%id_v_iceberg>0 )&
+             & grd%v_iceberg(i,j)=grd%v_iceberg(i,j)+((Mnew/grd%area(i,j)*this%mass_scaling)*this%vvel) ! kg/m2
         if (grd%id_bergy_mass>0 .or. bergs%add_weight_to_ocean)&
              & grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+nMbits/grd%area(i,j)*this%mass_scaling ! kg/m2
         if (bergs%add_weight_to_ocean .and. .not. bergs%time_average_weight) then
@@ -1252,6 +1275,16 @@ real :: orientation, static_berg
       this=>next
     enddo
   enddo ; enddo
+  
+  !Scaling the gridded iceberg velocity by the iceberg mass
+  if ((grd%id_u_iceberg>0) .or. (grd%id_v_iceberg>0)) then
+    do j = grd%jsc,grd%jec ; do i = grd%isc,grd%iec  
+      if ((grd%id_u_iceberg>0 ).and. (grd%mass(i,j)>0.))  &
+        & grd%u_iceberg(i,j)=grd%u_iceberg(i,j)/grd%mass(i,j)
+      if ((grd%id_v_iceberg>0 ).and. (grd%mass(i,j)>0.))  &
+        & grd%v_iceberg(i,j)=grd%v_iceberg(i,j)/grd%mass(i,j)
+    enddo; enddo
+  endif
 
 end subroutine thermodynamics
 
@@ -2123,6 +2156,7 @@ integer :: iyr, imon, iday, ihr, imin, isec, k
 type(icebergs_gridded), pointer :: grd
 logical :: lerr, sample_traj, write_traj, lbudget, lverbose, check_bond_quality 
 real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass,grdd_spread_mass
+real :: grdd_u_iceberg, grdd_v_iceberg
 integer :: i, j, Iu, ju, iv, Jv, Iu_off, ju_off, iv_off, Jv_off
 real :: mask
 real, dimension(:,:), allocatable :: uC_tmp, vC_tmp
@@ -2154,6 +2188,8 @@ integer :: stderrunit
   grd%bergy_melt(:,:)=0.
   grd%bergy_mass(:,:)=0.
   grd%spread_mass(:,:)=0.
+  grd%u_iceberg(:,:)=0.
+  grd%v_iceberg(:,:)=0.
   grd%mass(:,:)=0.
 
   if (bergs%add_weight_to_ocean) grd%mass_on_ocean(:,:,:)=0.
@@ -2226,7 +2262,7 @@ integer :: stderrunit
       grd%uo(I,J) = mask * 0.5*(uo(Iu,ju)+uo(Iu,ju+1))
       grd%ui(I,J) = mask * 0.5*(ui(Iu,ju)+ui(Iu,ju+1))
       grd%vo(I,J) = mask * 0.5*(vo(iv,Jv)+vo(iv+1,Jv))
-      grd%vi(I,J) = mask * 0.5*(vi(iv,Jv)+vo(iv+1,Jv))
+      grd%vi(I,J) = mask * 0.5*(vi(iv,Jv)+vi(iv+1,Jv)) !There was a bug here.
     enddo ; enddo
   else
     call error_mesg('diamonds, iceberg_run', 'Unrecognized value of stagger!', FATAL)
@@ -2411,6 +2447,10 @@ integer :: stderrunit
     lerr=send_data(grd%id_bergy_mass, grd%bergy_mass(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_spread_mass>0) &
     lerr=send_data(grd%id_spread_mass, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (grd%id_u_iceberg>0) &
+    lerr=send_data(grd%id_u_iceberg, grd%u_iceberg(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (grd%id_v_iceberg>0) &
+    lerr=send_data(grd%id_v_iceberg, grd%v_iceberg(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_mass>0) &
     lerr=send_data(grd%id_mass, grd%mass(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_stored_ice>0) &
@@ -2483,6 +2523,8 @@ integer :: stderrunit
     bergs%icebergs_mass_end=sum_mass(bergs,justbergs=.true.)
     bergs%bergy_mass_end=sum_mass(bergs,justbits=.true.)
     bergs%spread_mass_end=sum_mass(bergs) !Not sure what this is
+    bergs%u_iceberg_end=sum_mass(bergs) !Not sure what this is
+    bergs%v_iceberg_end=sum_mass(bergs) !Not sure what this is
     bergs%floating_heat_end=sum_heat(bergs)
     grd%tmpc(:,:)=0.;
     call mpp_clock_end(bergs%clock); call mpp_clock_end(bergs%clock_dia) ! To enable calling of public s/r
@@ -2496,6 +2538,8 @@ integer :: stderrunit
     call mpp_sum(bergs%icebergs_mass_end)
     call mpp_sum(bergs%bergy_mass_end)
     call mpp_sum(bergs%spread_mass_end)
+    call mpp_sum(bergs%u_iceberg_end)
+    call mpp_sum(bergs%v_iceberg_end)
     call mpp_sum(bergs%floating_heat_end)
     call mpp_sum(bergs%returned_mass_on_ocean)
     call mpp_sum(bergs%nbergs_end)
@@ -2973,7 +3017,6 @@ logical :: bounced, interactive_icebergs_on, Runge_not_Verlet
   do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
     berg=>bergs%list(grdi,grdj)%first
     do while (associated(berg)) ! loop over all bergs
-
       if (berg%static_berg .lt. 0.5) then  !Only allow non-static icebergs to evolve
  
         !Checking it everything is ok:
@@ -3001,6 +3044,12 @@ logical :: bounced, interactive_icebergs_on, Runge_not_Verlet
           if (.not.Runge_not_Verlet) then 
             call verlet_stepping(bergs,berg, axn, ayn, bxn, byn, uveln, vveln)
           endif 
+
+          !Used for testing the ocean response to fixed iceberg motion.
+          if (bergs%override_iceberg_velocities) then
+            uveln  = bergs%u_override
+            vveln  = bergs%v_override
+          endif
 
         ! Saving all the iceberg variables.
         berg%axn=axn 

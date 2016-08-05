@@ -116,6 +116,8 @@ type :: icebergs_gridded
   real, dimension(:,:), pointer :: bergy_melt=>null() ! Melting rate of bergy bits (kg/s/m^2)
   real, dimension(:,:), pointer :: bergy_mass=>null() ! Mass distribution of bergy bits (kg/s/m^2)
   real, dimension(:,:), pointer :: spread_mass=>null() ! Mass of icebergs after spreading (kg/s/m^2)
+  real, dimension(:,:), pointer :: u_iceberg=>null() ! Average iceberg velocity in grid cell (mass weighted - but not spread mass weighted)
+  real, dimension(:,:), pointer :: v_iceberg=>null() ! Average iceberg velocity in grid cell (mass weighted - but not spread mass weighted)
   real, dimension(:,:), pointer :: virtual_area=>null() ! Virtual surface coverage by icebergs (m^2)
   real, dimension(:,:), pointer :: mass=>null() ! Mass distribution (kg/m^2)
   real, dimension(:,:,:), pointer :: mass_on_ocean=>null() ! Mass distribution partitioned by neighbor (kg/m^2)
@@ -135,7 +137,7 @@ type :: icebergs_gridded
   integer :: id_mass=-1, id_ui=-1, id_vi=-1, id_ua=-1, id_va=-1, id_sst=-1, id_cn=-1, id_hi=-1
   integer :: id_bergy_src=-1, id_bergy_melt=-1, id_bergy_mass=-1, id_berg_melt=-1
   integer :: id_mass_on_ocn=-1, id_ssh=-1, id_fax=-1, id_fay=-1,  id_spread_mass=-1
-  integer :: id_count=-1, id_chksum=-1
+  integer :: id_count=-1, id_chksum=-1, id_u_iceberg=-1, id_v_iceberg=-1
 
   real :: clipping_depth=0. ! The effective depth at which to clip the weight felt by the ocean [m].
 
@@ -206,6 +208,8 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   real :: bergy_bit_erosion_fraction ! Fraction of erosion melt flux to divert to bergy bits
   real :: sicn_shift ! Shift of sea-ice concentration in erosion flux modulation (0<sicn_shift<1)
   real :: lat_ref=0. ! Reference latitude for f-plane (when this option is on)
+  real :: u_override=0.0 ! Overrides the u velocity of icebergs (for ocean testing)
+  real :: v_override=0.0 ! Overrides the v velocity of icebergs (for ocean testing)
   real :: initial_orientation=0. ! Iceberg orientaion relative to this angle (in degrees). Used for hexagonal mass spreading.
   real, dimension(:), pointer :: initial_mass, distribution, mass_scaling
   real, dimension(:), pointer :: initial_thickness, initial_width, initial_length
@@ -215,6 +219,7 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
   logical :: time_average_weight=.false. ! Time average the weight on the ocean
   logical :: Runge_not_Verlet=.True.  !True=Runge Kuttai, False=Verlet.   
+  logical :: override_iceberg_velocities=.False.  !Allows you to set a fixed iceberg velocity for all non-static icebergs.
   logical :: use_f_plane=.False.  !Flag to use a f-plane for the rotation
   logical :: rotate_icebergs_for_mass_spreading=.True.  !Flag allows icebergs to rotate for spreading their mass (in hexagonal spreading mode)
   logical :: set_melt_rates_to_zero=.False.  !Sets all melt rates to zero, for testing purposes (thermodynamics routine is still run)
@@ -251,6 +256,8 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   real :: icebergs_mass_start=0., icebergs_mass_end=0.
   real :: bergy_mass_start=0., bergy_mass_end=0.
   real :: spread_mass_start=0., spread_mass_end=0.
+  real :: u_iceberg_start=0., u_iceberg_end=0.
+  real :: v_iceberg_start=0., v_iceberg_end=0.
   real :: returned_mass_on_ocean=0.
   real :: net_melt=0., berg_melt=0., bergy_src=0., bergy_melt=0.
   integer :: nbergs_calved=0, nbergs_melted=0, nbergs_start=0, nbergs_end=0
@@ -323,6 +330,8 @@ real :: LoW_ratio=1.5 ! Initial ratio L/W for newly calved icebergs
 real :: bergy_bit_erosion_fraction=0. ! Fraction of erosion melt flux to divert to bergy bits
 real :: sicn_shift=0. ! Shift of sea-ice concentration in erosion flux modulation (0<sicn_shift<1)
 real :: lat_ref=0. ! Reference latitude for f-plane (when this option is on)
+real :: u_override=0.0 ! Overrides the u velocity of icebergs (for ocean testing)
+real :: v_override=0.0 ! Overrides the v velocity of icebergs (for ocean testing)
 real :: Lx=360. ! Length of domain in x direction, used for periodicity (use a huge number for non-periodic)
 real :: initial_orientation=0. ! Iceberg orientaion relative to this angle (in degrees). Used for hexagonal mass spreading.
 logical :: use_operator_splitting=.true. ! Use first order operator splitting for thermodynamics
@@ -332,6 +341,7 @@ logical :: time_average_weight=.false. ! Time average the weight on the ocean
 real :: speed_limit=0. ! CFL speed limit for a berg
 real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
 logical :: Runge_not_Verlet=.True.  !True=Runge Kutta, False=Verlet.  - Added by Alon 
+logical :: override_iceberg_velocities=.False.  !Allows you to set a fixed iceberg velocity for all non-static icebergs.
 logical :: use_f_plane=.False.  !Flag to use a f-plane for the rotation
 logical :: grid_is_latlon=.True.  !True means that the grid is specified in lat lon, and uses to radius of the earth to convert to distance
 logical :: grid_is_regular=.True. !Flag to say whether point in cell can be found assuming regular cartesian grid
@@ -362,7 +372,8 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, halo_debugging, hexagonal_icebergs, &
          time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_icebergs_on, critical_interaction_damping_on, &
          old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj, &
-         allow_bergs_to_roll,set_melt_rates_to_zero,lat_ref,initial_orientation,rotate_icebergs_for_mass_spreading,grid_is_latlon,Lx,use_f_plane,use_old_spreading, grid_is_regular,Lx,use_f_plane
+         allow_bergs_to_roll,set_melt_rates_to_zero,lat_ref,initial_orientation,rotate_icebergs_for_mass_spreading,grid_is_latlon,Lx,use_f_plane,use_old_spreading, &
+         grid_is_regular,Lx,use_f_plane,override_iceberg_velocities,u_override,v_override
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -476,6 +487,8 @@ real :: Total_mass  !Added by Alon
   allocate( grd%bergy_melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_melt(:,:)=0.
   allocate( grd%bergy_mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_mass(:,:)=0.
   allocate( grd%spread_mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_mass(:,:)=0.
+  allocate( grd%u_iceberg(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%u_iceberg(:,:)=0.
+  allocate( grd%v_iceberg(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%v_iceberg(:,:)=0.
   allocate( grd%virtual_area(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%virtual_area(:,:)=0.
   allocate( grd%mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%mass(:,:)=0.
   allocate( grd%mass_on_ocean(grd%isd:grd%ied, grd%jsd:grd%jed, 9) ); grd%mass_on_ocean(:,:,:)=0.
@@ -722,9 +735,12 @@ if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffe
   bergs%time_average_weight=time_average_weight
   bergs%speed_limit=speed_limit
   bergs%Runge_not_Verlet=Runge_not_Verlet   
+  bergs%override_iceberg_velocities=override_iceberg_velocities 
   bergs%use_f_plane=use_f_plane 
   bergs%rotate_icebergs_for_mass_spreading=rotate_icebergs_for_mass_spreading 
   bergs%lat_ref=lat_ref
+  bergs%u_override=u_override
+  bergs%v_override=v_override
   bergs%initial_orientation=initial_orientation
   bergs%set_melt_rates_to_zero=set_melt_rates_to_zero 
   bergs%allow_bergs_to_roll=allow_bergs_to_roll 
@@ -781,6 +797,10 @@ if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffe
      'Bergy bit density field', 'kg/(m^2)')
   grd%id_spread_mass=register_diag_field('icebergs', 'spread_mass', axes, Time, &
      'Iceberg mass after spreading', 'kg/(m^2)')
+  grd%id_u_iceberg=register_diag_field('icebergs', 'u_iceberg', axes, Time, &
+     'Iceberg u velocity (m/s)')
+  grd%id_v_iceberg=register_diag_field('icebergs', 'v_iceberg', axes, Time, &
+     'Iceberg v velocity (m/s)')
   grd%id_virtual_area=register_diag_field('icebergs', 'virtual_area', axes, Time, &
      'Virtual coverage by icebergs', 'm^2')
   grd%id_mass=register_diag_field('icebergs', 'mass', axes, Time, &
@@ -3732,6 +3752,8 @@ character(len=*) :: label
   call grd_chksum2(grd, grd%bergy_melt, 'bergy_melt')
   call grd_chksum2(grd, grd%bergy_mass, 'bergy_mass')
   call grd_chksum2(grd, grd%bergy_mass, 'spread_mass')
+  call grd_chksum2(grd, grd%bergy_mass, 'u_iceberg')
+  call grd_chksum2(grd, grd%bergy_mass, 'v_iceberg')
   call grd_chksum2(grd, grd%virtual_area, 'varea')
   call grd_chksum2(grd, grd%floating_melt, 'floating_melt')
   call grd_chksum2(grd, grd%berg_melt, 'berg_melt')
