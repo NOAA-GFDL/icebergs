@@ -219,6 +219,7 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
   logical :: time_average_weight=.false. ! Time average the weight on the ocean
   logical :: Runge_not_Verlet=.True.  !True=Runge Kuttai, False=Verlet.   
+  logical :: add_iceberg_thickness_to_SSH=.False.  !Adds the iceberg contribution to SSH.   
   logical :: override_iceberg_velocities=.False.  !Allows you to set a fixed iceberg velocity for all non-static icebergs.
   logical :: use_f_plane=.False.  !Flag to use a f-plane for the rotation
   logical :: rotate_icebergs_for_mass_spreading=.True.  !Flag allows icebergs to rotate for spreading their mass (in hexagonal spreading mode)
@@ -341,6 +342,7 @@ logical :: time_average_weight=.false. ! Time average the weight on the ocean
 real :: speed_limit=0. ! CFL speed limit for a berg
 real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
 logical :: Runge_not_Verlet=.True.  !True=Runge Kutta, False=Verlet.  - Added by Alon 
+logical :: add_iceberg_thickness_to_SSH=.False.  !Adds the iceberg contribution to SSH.   
 logical :: override_iceberg_velocities=.False.  !Allows you to set a fixed iceberg velocity for all non-static icebergs.
 logical :: use_f_plane=.False.  !Flag to use a f-plane for the rotation
 logical :: grid_is_latlon=.True.  !True means that the grid is specified in lat lon, and uses to radius of the earth to convert to distance
@@ -373,7 +375,7 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_icebergs_on, critical_interaction_damping_on, &
          old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj, &
          allow_bergs_to_roll,set_melt_rates_to_zero,lat_ref,initial_orientation,rotate_icebergs_for_mass_spreading,grid_is_latlon,Lx,use_f_plane,use_old_spreading, &
-         grid_is_regular,Lx,use_f_plane,override_iceberg_velocities,u_override,v_override
+         grid_is_regular,Lx,use_f_plane,override_iceberg_velocities,u_override,v_override,add_iceberg_thickness_to_SSH
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -735,6 +737,7 @@ if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffe
   bergs%time_average_weight=time_average_weight
   bergs%speed_limit=speed_limit
   bergs%Runge_not_Verlet=Runge_not_Verlet   
+  bergs%add_iceberg_thickness_to_SSH=add_iceberg_thickness_to_SSH  
   bergs%override_iceberg_velocities=override_iceberg_velocities 
   bergs%use_f_plane=use_f_plane 
   bergs%rotate_icebergs_for_mass_spreading=rotate_icebergs_for_mass_spreading 
@@ -3314,11 +3317,19 @@ real :: Lx_2
   Lx_2=Lx/2.
 
   sum_sign_dot_prod4=.false.
-  xx=modulo(x-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x to within Lx_2 of x0
-  xx0=modulo(x0-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x0 to within Lx_2of xx
-  xx1=modulo(x1-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x1 to within Lx_2of xx
-  xx2=modulo(x2-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x2 to within Lx_2of xx
-  xx3=modulo(x3-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x3 to within Lx_2of xx
+  if (Lx .ge. 1E14 ) then
+    xx=x
+    xx0=x0
+    xx1=x1
+    xx2=x2
+    xx3=x3
+  else
+    xx=modulo(x-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x to within Lx_2 of x0
+    xx0=modulo(x0-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x0 to within Lx_2of xx
+    xx1=modulo(x1-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x1 to within Lx_2of xx
+    xx2=modulo(x2-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x2 to within Lx_2of xx
+    xx3=modulo(x3-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x3 to within Lx_2of xx
+  endif
 
   l0=(xx-xx0)*(y1-y0)-(y-y0)*(xx1-xx0)
   l1=(xx-xx1)*(y2-y1)-(y-y1)*(xx2-xx1)
@@ -3374,12 +3385,21 @@ real :: Lx_2
   Lx_2=Lx/2.
 
   sum_sign_dot_prod5=.false.
-  xx=modulo(x-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x to within Lx_2of x0
-  xx0=modulo(x0-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x0 to within Lx_2of xx
-  xx1=modulo(x1-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x1 to within Lx_2of xx
-  xx2=modulo(x2-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x2 to within Lx_2of xx
-  xx3=modulo(x3-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x3 to within Lx_2of xx
-  xx4=modulo(x4-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x4 to within Lx_2of xx
+  if (Lx .ge. 1E14 ) then
+    xx=x
+    xx0=x0
+    xx1=x1
+    xx2=x2
+    xx3=x3
+    xx4=x4
+  else
+    xx=modulo(x-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x to within Lx_2of x0
+    xx0=modulo(x0-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x0 to within Lx_2 of xx
+    xx1=modulo(x1-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x1 to within Lx_2 of xx
+    xx2=modulo(x2-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x2 to within Lx_2 of xx
+    xx3=modulo(x3-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x3 to within Lx_2 of xx
+    xx4=modulo(x4-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x4 to within Lx_2 of xx
+  endif
 
   l0=(xx-xx0)*(y1-y0)-(y-y0)*(xx1-xx0)
   l1=(xx-xx1)*(y2-y1)-(y-y1)*(xx2-xx1)
@@ -3430,6 +3450,15 @@ real :: Lx, dx,dy
 
   ! Get the stderr unit number
   stderrunit=stderr()
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  if (present(explain)) then
+    if(explain) then
+    write(stderrunit,'(a,2f12.6)') 'pos_within_cell: x ',x
+    print *,'x',x
+    write(stderrunit,'(a,2f12.6)') 'pos_within_cell: y ',y
+    endif
+  endif
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   Lx=grd%Lx
   pos_within_cell=.false.; xi=-999.; yj=-999.
   if (i-1<grd%isd) return
@@ -3449,22 +3478,33 @@ real :: Lx, dx,dy
 
   if (present(explain)) then
     if(explain) then
-    write(stderrunit,'(a,4f12.6)') 'pos_within_cell: x1..x4 ',x1,x2,x3,x4
-    write(stderrunit,'(a,2f12.6)') 'pos_within_cell: x',x
-    write(stderrunit,'(a,4f12.6)') 'pos_within_cell: y1..y4 ',y1,y2,y3,y4
-    write(stderrunit,'(a,2f12.6)') 'pos_within_cell: y',y
+    write(stderrunit,'(a,4f12.6)') 'pos_within_cell: x1..x4 ',x1, x2, x3, x4
+    write(stderrunit,'(a,2f12.6)') 'pos_within_cell: x ',x
+    write(stderrunit,'(a,4f12.6)') 'pos_within_cell: y1..y4 ',y1, y2, y3, y4
+    write(stderrunit,'(a,2f12.6)') 'pos_within_cell: y ',y
     endif
   endif
 
   !This part only works for a regular cartesian grid. For more complex grids, we
   !should use calc_xiyj
   if ((.not. grd%grid_is_latlon) .and. (grd%grid_is_regular))  then
-    dx=(grd%lon(i  ,j  )-grd%lon(i-1  ,j  ))
-    dy=(grd%lat(i  ,j  )-grd%lat(i  ,j-1  ))
+    dx=abs((grd%lon(i  ,j  )-grd%lon(i-1  ,j  )))
+    dy=abs((grd%lat(i  ,j  )-grd%lat(i  ,j-1  )))
     x1=grd%lon(i  ,j  )-(dx/2)
     y1=grd%lat(i  ,j  )-(dy/2)
     xi=((x-x1)/dx)+0.5
     yj=((y-y1)/dy)+0.5
+
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  if (present(explain)) then
+    if(explain) then
+    write(stderrunit,'(a,4f12.6)') 'One more time, xi,yi',xi,yj
+    write(stderrunit,'(a,4f12.6)') 'One more time, x1 ',x1
+    write(stderrunit,'(a,4f12.6)') 'One more time, dx,dy',dx, dy
+    write(stderrunit,'(a,4f12.6)') 'One more time, x-x1,',x-x1-1000.
+    endif
+  endif
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   elseif ((max(y1,y2,y3,y4)<89.999) .or.(.not. grd%grid_is_latlon)) then
     call calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, x, y, xi, yj, Lx, explain=explain)
   else

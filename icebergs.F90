@@ -141,9 +141,29 @@ subroutine unit_testing()
 ! Arguments
 
 call hexagon_test()
+call point_in_triangle_test()
 
 end subroutine unit_testing
 
+subroutine point_in_triangle_test()
+! Arguments
+real :: Ax,Ay,Bx,By,Cx,Cy  !Position of icebergs
+logical :: fail_unit_test
+integer :: stderrunit
+  
+  ! Get the stderr unit number.
+  stderrunit = stderr()
+  Ax= -2.695732526092343E-012
+  Ay=0.204344508198090
+  Bx=-2.695750202346321E-012
+  By= -8.433062639672301E-002
+  Cx=0.249999999997304
+  Cy=6.000694090068343E-002
+
+  fail_unit_test=(.not. point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,0.,0.))
+  if (fail_unit_test) call error_mesg('diamonds, hexagon unit testing:', 'Point in triangle test does not pass!', FATAL)
+
+end subroutine point_in_triangle_test
 
 subroutine hexagon_test()
 ! Arguments
@@ -1558,7 +1578,8 @@ logical function point_is_on_the_line(Ax,Ay,Bx,By,qx,qy)
   ! Arguments
   real, intent(in) :: Ax,Ay,Bx,By,qx,qy
   real :: tol, dxc,dyc,dxl,dyl,cross
-    tol=1.e-12;
+    !tol=1.e-12;
+    tol=0.0;
     dxc = qx - Ax;
     dyc = qy - Ay;
     dxl = Bx - Ax;
@@ -1791,8 +1812,11 @@ subroutine Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy,Area_triangle,
       Key_quadrant=2
     elseif ((px.lt. 0.) .and. (qy.lt. 0.)) then !Third quadrant
       Key_quadrant=3;  
-    else  !#Forth quadrant
+    elseif ((px.ge. 0.) .and. (qy.lt. 0.)) then !Forth quadrant
       Key_quadrant=4 
+    else  !
+      call error_mesg('diamonds, iceberg_run', 'None of the quadrants are Key', WARNING)
+      write(stderrunit,*) 'diamonds, Triangle, px,qy', px,qy
     endif
          
   else  !At least one quadrant is empty, and this can be used to find the areas in the other quadrant.  Assigning quadrants. Key_quadrant is the empty quadrant.
@@ -1849,14 +1873,14 @@ subroutine Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy,Area_triangle,
   if (Error>tol) then
     call error_mesg('diamonds, triangle spreading', 'Triangle not evaluated accurately!!', WARNING)
     !if (mpp_pe().eq.mpp_root_pe()) then
-    if (mpp_pe().eq. 0) then
+    if (mpp_pe().eq. 20) then
       write(stderrunit,*) 'diamonds, Triangle corners:',Ax,Ay,Bx,By,Cx,Cy
+      write(stderrunit,*) 'diamonds, Triangle, Full Area', Area_Q1+ Area_Q2+ Area_Q3+ Area_Q4
       write(stderrunit,*) 'diamonds, Triangle, Areas', Area_Q1,  Area_Q2 , Area_Q3,  Area_Q4
       write(stderrunit,*) 'diamonds, Triangle, Areas', Error
-      write(stderrunit,*) 'diamonds, point in triangle',(point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,0.,0.)),Key_quadrant
+      write(stderrunit,*) 'diamonds, Key quadrant',Key_quadrant,Area_key_quadrant
+      write(stderrunit,*) 'diamonds, point in triangle',(point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,0.,0.))
       write(stderrunit,*) 'diamonds, halves',Area_Upper,Area_Lower,Area_Right,Area_Left
-
-
     endif
   endif
 
@@ -2187,7 +2211,7 @@ integer :: stderrunit
   grd%bergy_src(:,:)=0.
   grd%bergy_melt(:,:)=0.
   grd%bergy_mass(:,:)=0.
-  grd%spread_mass(:,:)=0.
+  !grd%spread_mass(:,:)=0.  !Don't zero this out yet, because we can first use this an add it onto the SSH
   grd%u_iceberg(:,:)=0.
   grd%v_iceberg(:,:)=0.
   grd%mass(:,:)=0.
@@ -2309,8 +2333,18 @@ integer :: stderrunit
  !grd%ua(grd%isc:grd%iec,grd%jsc:grd%jec)=sign(sqrt(abs(tauxa(:,:))/0.01),tauxa(:,:))  ! Note rough conversion from stress to speed
  !grd%va(grd%isc:grd%iec,grd%jsc:grd%jec)=sign(sqrt(abs(tauya(:,:))/0.01),tauya(:,:))  ! Note rough conversion from stress to speed
   call mpp_update_domains(grd%ua, grd%va, grd%domain, gridtype=BGRID_NE)
+
   ! Copy sea surface height and temperature(resides on A grid)
   grd%ssh(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=ssh(:,:)
+  if (bergs%add_iceberg_thickness_to_SSH) then
+    !We might need to make sure spread_mass is defined on halos (or this might be done automatically. I need to look into this)
+    do i=grd%isd,grd%ied ; do j=grd%jsd,grd%jed
+      if (grd%area(i,j)>0) then
+        grd%ssh(i,j) =   ((grd%spread_mass(i,j)/grd%area(i,j))*(bergs%rho_bergs/rho_seawater))  !Is this an appropriate sea water density to use? Should be freezing point.
+      endif
+    enddo ;enddo
+  endif
+
   call mpp_update_domains(grd%ssh, grd%domain)
   grd%sst(grd%isc:grd%iec,grd%jsc:grd%jec)=sst(:,:)-273.15 ! Note convert from Kelvin to Celsius
   call mpp_update_domains(grd%sst, grd%domain)
@@ -2404,7 +2438,8 @@ integer :: stderrunit
 
   !Update diagnostic of iceberg mass spread on ocean
   if (grd%id_spread_mass>0) then
-          within_iceberg_model=.True.
+    grd%spread_mass(:,:)=0.
+    within_iceberg_model=.True.
     call icebergs_incr_mass(bergs, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec),within_iceberg_model) 
   endif
 
@@ -3863,6 +3898,7 @@ integer :: stderrunit
       if (grd%msk(i,j)==0.) stop 'diamonds, adjust: Berg is in land! This should not happen...'
     endif
     lret=pos_within_cell(grd, lon, lat, i, j, xi, yj) ! Update xi and yj
+
   enddo
  !if (debug) then
  !  if (abs(i-i0)>2) then
@@ -3874,8 +3910,8 @@ integer :: stderrunit
  !endif
 
   if (.not.bounced.and.lret.and.grd%msk(i,j)>0.) return ! Landed in ocean without bouncing so all is well
+
   if (.not.bounced.and..not.lret) then ! This implies the berg traveled many cells without getting far enough
-                                       ! OR that it did not move at all (round-off problem)
     if (debug) then
       write(stderrunit,*) 'diamonds, adjust: lon0, lat0=',lon0,lat0
       write(stderrunit,*) 'diamonds, adjust: xi0, yj0=',xi0,yj0
@@ -3888,6 +3924,7 @@ integer :: stderrunit
       lret=pos_within_cell(grd, lon, lat, i, j, xi, yj,explain=.true.)
       write(stderrunit,*) 'diamonds, adjust: lret=',lret
     endif
+
     if (abs(i-i0)+abs(j-j0)==0) then
       if (use_roundoff_fix) then
         ! This is a special case due to round off where is_point_in_cell()
@@ -3906,6 +3943,24 @@ integer :: stderrunit
       lret=pos_within_cell(grd, lon, lat, inm, jnm, xi, yj,explain=.true.)
     else
       call error_mesg('diamonds, adjust', 'Berg iterated many times without bouncing!', WARNING)
+       !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!11
+     if (iceberg_num .eq. 29217) then 
+         write(stderrunit,*) 'iceberg_num',iceberg_num, mpp_pe(), bounced
+         write(stderrunit,*) ' lon, lat',lon, lat
+         write(stderrunit,*) ' i,j',i,j
+         write(stderrunit,*) ' xi,yj',xi,yj
+      write(stderrunit,*) 'diamonds, adjust: lon0, lat0=',lon0,lat0
+      write(stderrunit,*) 'diamonds, adjust: xi0, yj0=',xi0,yj0
+      write(stderrunit,*) 'diamonds, adjust: i0,j0=',i0,j0 
+      write(stderrunit,*) 'diamonds, adjust: lon, lat=',lon,lat
+      write(stderrunit,*) 'diamonds, adjust: xi,yj=',xi,yj 
+      write(stderrunit,*) 'diamonds, adjust: i,j=',i,j
+      write(stderrunit,*) 'diamonds, adjust: inm,jnm=',inm,jnm
+      write(stderrunit,*) 'diamonds, adjust: icount=',icount
+      lret=pos_within_cell(grd, lon, lat, i, j, xi, yj,explain=.true.)
+      write(stderrunit,*) 'diamonds, adjust: lret=',lret
+    endif
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!11
     endif
   endif
 !  if (xi>1.) xi=1.-posn_eps    !Alon
