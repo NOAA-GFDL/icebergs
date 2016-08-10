@@ -713,6 +713,7 @@ else
 endif
 if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffer used for abrevated traj
 
+
  ! Parameters
   bergs%dt=dt
   bergs%traj_sample_hrs=traj_sample_hrs
@@ -1002,7 +1003,7 @@ if (halo_debugging) then
   do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
-      write(stderrunit,*) 'A', this%iceberg_num, mpp_pe(), this%halo_berg, grdi, grdj
+        write(stderrunit,*) 'A', this%iceberg_num, mpp_pe(), this%halo_berg, grdi, grdj
       this=>this%next
     enddo
   enddo; enddo
@@ -1256,6 +1257,7 @@ if (halo_debugging) then
       this=>this%next
     enddo
   enddo; enddo
+  call show_all_bonds(bergs)
 endif
 
 end subroutine update_halo_icebergs
@@ -2494,13 +2496,16 @@ type(bond) , pointer :: current_bond
       current_bond=>berg%first_bond
       do while (associated(current_bond)) ! loop over all bonds
         print *, 'Show Bond1 :', berg%iceberg_num, current_bond%other_berg_num, current_bond%other_berg_ine, current_bond%other_berg_jne,  mpp_pe()
+        !print *, 'Current:', berg%iceberg_num, berg%ine, berg%jne,berg%halo_berg, mpp_pe()
         if  (associated(current_bond%other_berg)) then
           if (current_bond%other_berg%iceberg_num .ne. current_bond%other_berg_num) then
-            print *, 'Bond matching', berg%iceberg_num,current_bond%other_berg%iceberg_num, current_bond%other_berg_num, mpp_pe()
+            print *, 'Bond matching', berg%iceberg_num,current_bond%other_berg%iceberg_num, current_bond%other_berg_num,\
+            berg%halo_berg,current_bond%other_berg%halo_berg ,mpp_pe()
             call error_mesg('diamonds, show all bonds:', 'The bonds are not matching properly!', FATAL)
           endif
         else
-            print *, 'This bond has an non-assosiated other berg :', berg%iceberg_num, current_bond%other_berg_num, current_bond%other_berg_ine, current_bond%other_berg_jne,  mpp_pe()
+            print *, 'This bond has an non-assosiated other berg :', berg%iceberg_num, current_bond%other_berg_num,&
+            current_bond%other_berg_ine, current_bond%other_berg_jne, berg%halo_berg,  mpp_pe()
         endif
         current_bond=>current_bond%next_bond
       enddo
@@ -2541,7 +2546,7 @@ bond_matched=.false.
           if ( (i.gt. grd%isd-1) .and. (i .lt. grd%ied+1) .and. (j .gt. grd%jsd-1) .and. (j .lt. grd%jed+1)) then
             other_berg=>bergs%list(i,j)%first
             do while (associated(other_berg)) ! loop over all other bergs
-              if (other_berg%iceberg_num == current_bond%other_berg_num) then
+              if (other_berg%iceberg_num .eq. current_bond%other_berg_num) then
                 current_bond%other_berg=>other_berg
                 other_berg=>null()
                 bond_matched=.true. 
@@ -2559,7 +2564,7 @@ bond_matched=.false.
                 .and. ((grdi_inner .ne. i) .or. (grdj_inner .ne. j)) ) then
                   other_berg=>bergs%list(grdi_inner,grdj_inner)%first
                   do while (associated(other_berg)) ! loop over all other bergs
-                    if (other_berg%iceberg_num == current_bond%other_berg_num) then
+                    if (other_berg%iceberg_num .eq. current_bond%other_berg_num) then
                       current_bond%other_berg=>other_berg
                       other_berg=>null()
                       bond_matched=.true.  
@@ -2632,12 +2637,13 @@ integer :: stderrunit
   do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
     berg=>bergs%list(grdi,grdj)%first
     do while (associated(berg)) ! loop over all bergs
+
       current_bond=>berg%first_bond
       do while (associated(current_bond)) ! loop over all bonds
         number_of_bonds=number_of_bonds+1
 
         ! ##### Beginning Quality Check on Bonds ######
-!      print *, 'Quality check', mpp_pe(), berg%iceberg_num
+        !      print *, 'Quality check', mpp_pe(), berg%iceberg_num
         if (quality_check) then
           num_unmatched_bonds=0
           num_unassosiated_bond_pairs=0
@@ -2645,10 +2651,9 @@ integer :: stderrunit
           other_berg=>current_bond%other_berg
           if (associated(other_berg)) then
             other_berg_bond=>other_berg%first_bond
-          
             do while (associated(other_berg_bond))  !loops over the icebergs in the other icebergs bond list           
               if (associated(other_berg_bond%other_berg)) then
-                if (other_berg_bond%other_berg%iceberg_num==berg%iceberg_num) then
+                if (other_berg_bond%other_berg%iceberg_num .eq.berg%iceberg_num) then
                   bond_is_good=.True.  !Bond_is_good becomes true when the corresponding bond is found
                 endif
               endif                 
@@ -2671,12 +2676,11 @@ integer :: stderrunit
           endif
         endif
         ! ##### Ending Quality Check on Bonds ######
-
         current_bond=>current_bond%next_bond
-        enddo !End of loop over current bonds
-        berg=>berg%next
-      enddo ! End of loop over all bergs
-    enddo; enddo !End of loop over all grid cells
+      enddo !End of loop over current bonds
+      berg=>berg%next
+    enddo ! End of loop over all bergs
+  enddo; enddo !End of loop over all grid cells
 
     number_of_bonds_all_pe=number_of_bonds
     call mpp_sum(number_of_bonds_all_pe)
@@ -2703,7 +2707,7 @@ integer :: stderrunit
           write(*,'(2a)') 'diamonds, Bonds parnters not located!!!! PE=', mpp_pe()
         endif
       endif
-      if ((num_unmatched_bonds_all_pe == 0)  .and. (num_unassosiated_bond_pairs_all_pe == 0)) then
+      if ((num_unmatched_bonds_all_pe .eq. 0)  .and. (num_unassosiated_bond_pairs_all_pe .eq. 0)) then
         if (mpp_pe().eq.mpp_root_pe()) then
                 write(stderrunit,*)  "Total number of bonds is: ", number_of_bonds_all_PE, "All iceberg bonds are connected and working well"
         endif
@@ -3450,15 +3454,6 @@ real :: Lx, dx,dy
 
   ! Get the stderr unit number
   stderrunit=stderr()
-  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  if (present(explain)) then
-    if(explain) then
-    write(stderrunit,'(a,2f12.6)') 'pos_within_cell: x ',x
-    print *,'x',x
-    write(stderrunit,'(a,2f12.6)') 'pos_within_cell: y ',y
-    endif
-  endif
-  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   Lx=grd%Lx
   pos_within_cell=.false.; xi=-999.; yj=-999.
   if (i-1<grd%isd) return
@@ -3495,16 +3490,6 @@ real :: Lx, dx,dy
     xi=((x-x1)/dx)+0.5
     yj=((y-y1)/dy)+0.5
 
-  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  if (present(explain)) then
-    if(explain) then
-    write(stderrunit,'(a,4f12.6)') 'One more time, xi,yi',xi,yj
-    write(stderrunit,'(a,4f12.6)') 'One more time, x1 ',x1
-    write(stderrunit,'(a,4f12.6)') 'One more time, dx,dy',dx, dy
-    write(stderrunit,'(a,4f12.6)') 'One more time, x-x1,',x-x1-1000.
-    endif
-  endif
-  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   elseif ((max(y1,y2,y3,y4)<89.999) .or.(.not. grd%grid_is_latlon)) then
     call calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, x, y, xi, yj, Lx, explain=explain)
   else

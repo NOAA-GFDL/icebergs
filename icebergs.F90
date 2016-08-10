@@ -128,8 +128,8 @@ integer :: stdlogunit, stderrunit
     endif
     call update_halo_icebergs(bergs)
     call connect_all_bonds(bergs)
-    check_bond_quality=.True.
     nbonds=0
+    check_bond_quality=.True.
     call count_bonds(bergs, nbonds,check_bond_quality)
   endif
 
@@ -668,13 +668,6 @@ endif
 
   ! Interpolate gridded fields to berg     - Note: It should be possible to move this to evolve, so that it only needs to be called once. !!!!
   call interp_flds(grd, i, j, xi, yj, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi)
-
-
-  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  !Temporary for messing around
-  !ssh_x=0.
-  !ssh_y=0.
-  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
   if ((grd%grid_is_latlon) .and. (.not. bergs%use_f_plane)) then
      f_cori=(2.*omega)*sin(pi_180*lat)
@@ -1307,7 +1300,6 @@ real :: orientation, static_berg
   endif
 
 end subroutine thermodynamics
-
 
 subroutine find_orientation_using_iceberg_bonds(grd,berg,orientation)
   ! Arguments
@@ -2408,7 +2400,6 @@ integer :: stderrunit
   if (debug) call bergs_chksum(bergs, 'run bergs (evolved)',ignore_halo_violation=.true.)
   if (debug) call checksum_gridded(bergs%grd, 's/r run after evolve')
   call mpp_clock_end(bergs%clock_mom)
-
 
   ! Send bergs to other PEs
   call mpp_clock_begin(bergs%clock_com)
@@ -3943,24 +3934,6 @@ integer :: stderrunit
       lret=pos_within_cell(grd, lon, lat, inm, jnm, xi, yj,explain=.true.)
     else
       call error_mesg('diamonds, adjust', 'Berg iterated many times without bouncing!', WARNING)
-       !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!11
-     if (iceberg_num .eq. 29217) then 
-         write(stderrunit,*) 'iceberg_num',iceberg_num, mpp_pe(), bounced
-         write(stderrunit,*) ' lon, lat',lon, lat
-         write(stderrunit,*) ' i,j',i,j
-         write(stderrunit,*) ' xi,yj',xi,yj
-      write(stderrunit,*) 'diamonds, adjust: lon0, lat0=',lon0,lat0
-      write(stderrunit,*) 'diamonds, adjust: xi0, yj0=',xi0,yj0
-      write(stderrunit,*) 'diamonds, adjust: i0,j0=',i0,j0 
-      write(stderrunit,*) 'diamonds, adjust: lon, lat=',lon,lat
-      write(stderrunit,*) 'diamonds, adjust: xi,yj=',xi,yj 
-      write(stderrunit,*) 'diamonds, adjust: i,j=',i,j
-      write(stderrunit,*) 'diamonds, adjust: inm,jnm=',inm,jnm
-      write(stderrunit,*) 'diamonds, adjust: icount=',icount
-      lret=pos_within_cell(grd, lon, lat, i, j, xi, yj,explain=.true.)
-      write(stderrunit,*) 'diamonds, adjust: lret=',lret
-    endif
-    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!11
     endif
   endif
 !  if (xi>1.) xi=1.-posn_eps    !Alon
