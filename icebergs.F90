@@ -77,6 +77,7 @@ subroutine icebergs_init(bergs, &
              cos_rot, sin_rot, ocean_depth, maskmap, fractional_area)
 ! Arguments
 type(icebergs), pointer :: bergs
+type(icebergs_gridded), pointer :: grd => null()
 integer, intent(in) :: gni, gnj, layout(2), io_layout(2), axes(2)
 integer, intent(in) :: dom_x_flags, dom_y_flags
 real, intent(in) :: dt
@@ -102,7 +103,7 @@ integer :: stdlogunit, stderrunit
              dt, Time, ice_lon, ice_lat, ice_wet, ice_dx, ice_dy, ice_area, &
              cos_rot, sin_rot, ocean_depth=ocean_depth, maskmap=maskmap, fractional_area=fractional_area)
 
-  call unit_testing()
+  call unit_testing(bergs)
 
   call mpp_clock_begin(bergs%clock_ior)
   call ice_bergs_io_init(bergs,io_layout)
@@ -137,13 +138,33 @@ end subroutine icebergs_init
 
 
 ! ##############################################################################
-subroutine unit_testing()
+subroutine unit_testing(bergs)
 ! Arguments
+type(icebergs), pointer :: bergs
 
 call hexagon_test()
 call point_in_triangle_test()
+call basal_melt_test(bergs)
 
 end subroutine unit_testing
+
+subroutine basal_melt_test(bergs)
+  ! Arguments
+  type(icebergs), pointer :: bergs
+  real :: dvo,lat,salt,temp, basal_melt, thickness
+  logical :: Use_three_equation_model
+
+  if (mpp_pe() .eq. mpp_root_pe() ) print *, 'Begining Basal Melting Unit Test'
+  dvo=0.2 ;lat=0.0 ; salt=35.0 ; temp=2.0 ;thickness=100.
+  Use_three_equation_model=.False.
+  call find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thickness,basal_melt)
+  if (mpp_pe() .eq. mpp_root_pe()) print *, 'Two equation model basal_melt =',basal_melt
+
+  Use_three_equation_model=.True.
+  call find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thickness,basal_melt)
+   if (mpp_pe() .eq. mpp_root_pe()) print *, 'Three equation model basal_melt =',basal_melt
+
+end subroutine basal_melt_test
 
 subroutine point_in_triangle_test()
 ! Arguments
@@ -1300,6 +1321,329 @@ real :: orientation, static_berg
   endif
 
 end subroutine thermodynamics
+
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+subroutine find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thickness,basal_melt)
+  ! Arguments
+  type(icebergs), pointer :: bergs
+  ! Local variables
+  real , intent(out) :: basal_melt !Melt rate underneath the icebergs
+  real , intent(in) :: dvo !Speed of iceberg relative to ocean mixed layer
+  real , intent(in) :: salt !Salinity of mixed layer
+  real , intent(in) :: temp !Temperature of mixed layer
+  real , intent(in) :: lat !Latitude (for boundary layer calculation)
+  real , intent(in) :: thickness !Ice thickness - needed to work out the pressure below the ice
+  logical , intent(in) :: Use_three_equation_model !True uses the 3 equation model, False uses the 2 equation model.
+  
+  ! Local variables
+  real :: utide, ustar_bg, ustar, f_cori, absf,tfreeze
+  real :: Hml !Mixed layer depth
+
+  !These could also be useful output variables if needed.
+  real :: t_flux, exch_vel_t, exch_vel_s,tflux_shelf,lprec 
+ 
+  real ::  Rhoml   ! Ocean mixed layer density in kg m-3.
+  real ::  p_int   ! The pressure at the ice-ocean interface, in Pa.
+
+  real, parameter :: VK    = 0.40     ! Von Karman's constant - dimensionless
+  real :: ZETA_N = 0.052   ! The fraction of the boundary layer over which the
+                           ! viscosity is linearly increasing. (Was 1/8. Why?)
+  real, parameter :: RC    = 0.20     ! critical flux Richardson number.
+  real :: I_ZETA_N  ! The inverse of ZETA_N.
+  real :: I_LF  ! Inverse of Latent Heat of fusion (J kg-1)
+  real :: I_VK      ! The inverse of VK.
+  real :: PR, SC    ! The Prandtl number and Schmidt number, nondim.
+!
+  ! 3 equation formulation variables
+  real :: Sbdry     !   Salinities in the ocean at the interface with the
+  real :: Sbdry_it  ! the ice shelf, in PSU.
+  real :: dS_it     ! The interface salinity change during an iteration, in PSU.
+  real :: hBL_neut  ! The neutral boundary layer thickness, in m.
+  real :: hBL_neut_h_molec ! The ratio of the neutral boundary layer thickness
+                           ! to the molecular boundary layer thickness, ND.
+  real :: wT_flux ! The vertical fluxes of heat and buoyancy just inside the
+  real :: wB_flux ! ocean, in C m s-1 and m2 s-3, ###CURRENTLY POSITIVE UPWARD.
+  real :: dB_dS  ! The derivative of buoyancy with salinity, in m s-2 PSU-1.
+  real :: dB_dT  ! The derivative of buoyancy with temperature, in m s-2 C-1.
+  real :: I_n_star, n_star_term
+  real :: dIns_dwB  ! The partial derivative of I_n_star with wB_flux, in ???.
+  real :: dT_ustar, dS_ustar
+  real :: ustar_h
+  real :: Gam_turb
+  real :: Gam_mol_t, Gam_mol_s
+  real :: RhoCp
+  real :: I_RhoLF
+  real :: Rho0
+  real :: ln_neut
+  real :: mass_exch
+  real :: Sb_min, Sb_max
+  real :: dS_min, dS_max
+  real :: density_ice
+!
+  ! Variables used in iterating for wB_flux.
+  real :: wB_flux_new, DwB, dDwB_dwB_in
+  real :: I_Gam_T, I_Gam_S
+  real :: dG_dwB, iDens
+  logical :: Sb_min_set, Sb_max_set
+
+  real, parameter :: c2_3 = 2.0/3.0
+  integer ::  it1, it3
+ 
+  !Parameters copied ice shelf module defaults (could be entered in the namelist later)
+  real, parameter ::  dR0_dT = -0.038357 ! Partial derivative of the mixed layer density with temperature, in units of kg m-3 K-1. 
+  real, parameter ::  dR0_dS = 0.805876 ! Partial derivative of the mixed layer density with salinity, in units of kg m-3 psu-1.
+  real, parameter ::  RHO_T0_S0 = 999.910681 ! Density of water with T=0, S=0 for linear EOS
+  real, parameter :: Salin_Ice =0.0 !Salinity of ice
+  real, parameter :: Temp_Ice = -15.0 !Salinity of ice
+  real, parameter :: kd_molec_salt=  8.02e-10 !The molecular diffusivity of salt in sea water at the freezing point
+  real, parameter :: kd_molec_temp=  1.41e-7 !The molecular diffusivity of heat in sea water at the freezing point
+  real, parameter :: kv_molec=  1.95e-6 !The molecular molecular kinimatic viscosity of sea water at the freezing point
+  real, parameter :: Cp_Ice =  2009.0 !Specific heat capacity of ice, taking from HJ99 (Holland and Jenkins 1999)
+  real, parameter :: Cp_ml =  3974.0 !Specific heat capacity of mixed layer, taking from HJ99 (Holland and Jenkins 1999)
+  real, parameter :: LF =  3.335e5 !Latent heat of fusion, taken from HJ99 (Holland and Jenkins 1999)
+  real, parameter :: cdrag =  1.5e-3 !Momentum Drag coef, taken from HJ99 (Holland and Jenkins 1999)
+  real, parameter :: gamma_t =  0.0 ! Exchange velcoity used in 2 equation model. Whn gamma_t is >0, the exchange velocity is independ of u_star. 
+                                  ! When gamma_t=0.0, then gamma_t is not used, and the exchange velocity is found using u_star.
+  real, parameter :: p_atm =  101325 ! Average atmospheric pressure (Pa) - from Google. 
+  
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  density_ice = bergs%rho_bergs
+  Rho0=rho_seawater  !Note that the ice shelf code has a default of Rho0=1035
+  utide=0.     ! Tidal speeds, set to zero for now.
+  ustar_bg=0.001 !Background u_star under iceshelf. This should be linked to a value felt by the ocean boundary layer
+  Hml =10.      !Mixed layer depth. This is an approximate value. It looks like the code is not sensitive to it (since it enters in log(Hml)
+  p_int= p_atm+(gravity*thickness*density_ice)    ! The pressure at the ice-ocean interface, in Pa.
+  
+  ! Find the ocean mixed layer density in kg m-3.
+  call calculate_density(temp, salt, p_int, Rhoml, Rho_T0_S0, dR0_dT, dR0_dS)
+
+  ! This routine finds the melt at the base of the icebergs using the 2 equation
+  ! model or 3 equation model. This code is adapted from the ice shelf code. Once
+  ! the iceberg model is inside the ocean model, we should use the same code. 
+
+  I_ZETA_N = 1.0 / ZETA_N
+  I_RhoLF = 1.0/(Rho0*LF)
+  I_LF = 1.0 / LF
+  SC = kv_molec/kd_molec_salt
+  PR = kv_molec/kd_molec_temp
+  I_VK = 1.0/VK
+  RhoCp = Rho0 * Cp_ml
+
+  !first calculate molecular component  
+  Gam_mol_t = 12.5 * (PR**c2_3) - 6
+  Gam_mol_s = 12.5 * (SC**c2_3) - 6
+
+  iDens = 1.0/Rho0
+
+  !Preparing the mixed layer properties for use in both 2 and 3 equation version
+  ustar = cdrag*(dvo  + utide)
+  ustar_h = MAX(ustar_bg, ustar)
+
+  ! Estimate the neutral ocean boundary layer thickness as the minimum of the
+  ! reported ocean mixed layer thickness and the neutral Ekman depth.
+  !(Note that in Dan's code, f is spread over adjacent grid cells)
+  if ((bergs%grd%grid_is_latlon) .and. (.not. bergs%use_f_plane)) then
+     f_cori=(2.*omega)*sin(pi_180*lat)
+  else
+     f_cori=(2.*omega)*sin(pi_180*bergs%lat_ref)
+  endif
+  absf = abs(f_cori)  !Absolute value of the Coriolis parameter
+  if ((absf*Hml <= VK*ustar_h) .or. (absf.eq.0.))  then 
+    hBL_neut = Hml
+  else 
+    hBL_neut = (VK*ustar_h) / absf 
+  endif
+  hBL_neut_h_molec = ZETA_N * ((hBL_neut * ustar_h) / (5.0 * Kv_molec))
+  ln_neut = 0.0 ; if (hBL_neut_h_molec > 1.0) ln_neut = log(hBL_neut_h_molec)
+
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  if (.not. Use_three_equation_model) then
+    ! In the 2-equation form, the mixed layer turbulent exchange velocity
+    ! is specified and large enough that the ocean salinity at the interface
+    ! is about the same as the boundary layer salinity.
+    ! Alon: I have adapted the code so that the turbulent exchange velocoty is not constant, but rather proportional to the frictional velocity. 
+    ! This should give you the same answers as the 3 equation model when salinity gradients in the mixed layer are zero (I think/hope)
+
+    call calculate_TFreeze(salt, p_int, tfreeze)
+
+    Gam_turb = I_VK * (ln_neut + (0.5 * I_ZETA_N - 1.0))
+    I_Gam_T = 1.0 / (Gam_mol_t + Gam_turb)
+
+    exch_vel_t= ustar_h * I_Gam_T
+    if (gamma_t>0.0) exch_vel_t = gamma_t  !Option to set the exchange to a constant, independent of the frictional velocity (as was previously coded)
+    wT_flux = exch_vel_t *(temp - tfreeze)
+
+    t_flux  = RhoCp * wT_flux
+    tflux_shelf = 0.0
+    lprec = I_LF * t_flux
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  else  ! Use 3 equation model
+    ! 3 equation model solves for the melt rates iteratively. This is not working right now, because we don't have access to the mixed layer 
+    ! temperature and salinty gradients
+
+
+    ! Guess sss as the iteration starting point for the boundary salinity.
+    Sbdry = salt ; Sb_max_set = .false. ; Sb_min_set = .false.
+
+    ! Determine the mixed layer buoyancy flux, wB_flux.      
+    dB_dS = (gravity / Rhoml) * dR0_dS
+    dB_dT = (gravity / Rhoml) * dR0_dT
+
+    do it1 = 1,20
+      ! Determine the potential temperature at the ice-ocean interface.
+      call calculate_TFreeze(Sbdry, p_int, tfreeze)
+
+      dT_ustar = (temp - tfreeze) * ustar_h
+      dS_ustar = (salt - Sbdry) * ustar_h
+
+      ! First, determine the buoyancy flux assuming no effects of stability
+      ! on the turbulence.  Following H & J '99, this limit also applies
+      ! when the buoyancy flux is destabilizing.
+
+      Gam_turb = I_VK * (ln_neut + (0.5 * I_ZETA_N - 1.0))
+      I_Gam_T = 1.0 / (Gam_mol_t + Gam_turb)
+      I_Gam_S = 1.0 / (Gam_mol_s + Gam_turb)
+      wT_flux = dT_ustar * I_Gam_T
+      wB_flux = dB_dS * (dS_ustar * I_Gam_S) + dB_dT * wT_flux
+
+      if (wB_flux > 0.0) then
+        ! The buoyancy flux is stabilizing and will reduce the tubulent
+        ! fluxes, and iteration is required.
+        n_star_term = (ZETA_N/RC) * (hBL_neut * VK) / ustar_h**3
+        do it3 = 1,30
+          ! n_star <= 1.0 is the ratio of working boundary layer thickness
+          ! to the neutral thickness.
+          ! hBL = n_star*hBL_neut ; hSub = 1/8*n_star*hBL
+          I_n_star = sqrt(1.0 + n_star_term * wB_flux)
+          dIns_dwB = 0.5 * n_star_term / I_n_star
+          if (hBL_neut_h_molec > I_n_star**2) then
+            Gam_turb = I_VK * ((ln_neut - 2.0*log(I_n_star)) + &
+                       (0.5*I_ZETA_N*I_n_star - 1.0))
+            dG_dwB =  I_VK * ( -2.0 / I_n_star + (0.5 * I_ZETA_N)) * dIns_dwB
+          else
+            !   The layer dominated by molecular viscosity is smaller than
+            ! the assumed boundary layer.  This should be rare!
+            Gam_turb = I_VK * (0.5 * I_ZETA_N*I_n_star - 1.0)
+            dG_dwB = I_VK * (0.5 * I_ZETA_N) * dIns_dwB
+          endif
+
+          I_Gam_T = 1.0 / (Gam_mol_t + Gam_turb)
+          I_Gam_S = 1.0 / (Gam_mol_s + Gam_turb)
+          wT_flux = dT_ustar * I_Gam_T
+          wB_flux_new = dB_dS * (dS_ustar * I_Gam_S) + dB_dT * wT_flux
+
+          ! Find the root where dwB = 0.0
+          DwB = wB_flux_new - wB_flux
+          if (abs(wB_flux_new - wB_flux) < &
+            1e-4*(abs(wB_flux_new) + abs(wB_flux))) exit
+
+          dDwB_dwB_in = -dG_dwB * (dB_dS * (dS_ustar * I_Gam_S**2) + &
+                                         dB_dT * (dT_ustar * I_Gam_T**2)) - 1.0
+          ! This is Newton's method without any bounds. ( ### SHOULD BOUNDS BE NEEDED?)
+          wB_flux_new = wB_flux - DwB / dDwB_dwB_in
+        enddo !it3
+      endif
+
+      t_flux  = RhoCp * wT_flux
+      exch_vel_t = ustar_h * I_Gam_T
+      exch_vel_s = ustar_h * I_Gam_S
+
+      if (t_flux <= 0.0) then  ! Freezing occurs, so zero ice heat flux.
+        lprec = I_LF * t_flux
+        tflux_shelf = 0.0
+      else
+      !no conduction/perfect insulator
+      tflux_shelf = 0.0
+      lprec = I_LF * t_flux
+      ! With melting, from H&J 1999, eqs (31) & (26)...
+      !   Q_ice ~= cp_ice * (Temp_Ice-T_freeze) * lprec
+      !   RhoLF*lprec = Q_ice + t_flux
+      !   lprec = (t_flux) / (LF + cp_ice * (T_freeze-Temp_Ice))
+      !   lprec = t_flux /  (LF + Cp_ice * (tfreeze - Temp_Ice))
+      !   tflux_shelf = t_flux - LF*lprec
+      !other options: dTi/dz linear through shelf
+      !            dTi_dz = (Temp_Ice - tfreeze)/draft
+      !            tflux_shelf = - Rho_Ice * Cp_ice * KTI * dTi_dz
+      endif
+
+      mass_exch = exch_vel_s * Rho0
+      Sbdry_it = (salt * mass_exch + Salin_Ice * lprec) / (mass_exch + lprec)
+      dS_it = Sbdry_it - Sbdry
+      if (abs(dS_it) < 1e-4*(0.5*(salt + Sbdry + 1.e-10))) exit
+
+      if (dS_it < 0.0) then ! Sbdry is now the upper bound.
+        if (Sb_max_set .and. (Sbdry > Sb_max)) &
+          call error_mesg('diamonds,Find basal melt', 'shelf_calc_flux: Irregular iteration for Sbdry (max).' ,FATAL)
+        Sb_max = Sbdry ; dS_max = dS_it ; Sb_max_set = .true.
+      else ! Sbdry is now the lower bound.
+        if (Sb_min_set .and. (Sbdry < Sb_min)) &
+          call error_mesg('diamonds,Find basal melt', 'shelf_calc_flux: Irregular iteration for Sbdry (min).' ,FATAL)
+        Sb_min = Sbdry ; dS_min = dS_it ; Sb_min_set = .true.
+      endif
+      if (Sb_min_set .and. Sb_max_set) then
+        ! Use the false position method for the next iteration.
+        Sbdry = Sb_min + (Sb_max-Sb_min) * (dS_min / (dS_min - dS_max))
+      else
+        Sbdry = Sbdry_it
+      endif
+      Sbdry = Sbdry_it
+    enddo !it1
+  endif
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ! melt in m/s (melts of ice melted per second)
+  basal_melt = lprec /density_ice
+
+contains
+
+  subroutine calculate_TFreeze(S, pres, T_Fr)
+    !Arguments
+    real,    intent(in)  :: S, pres
+    real,    intent(out) :: T_Fr
+    real, parameter :: dTFr_dp    = -7.53E-08    !DTFREEZE_DP in MOM_input
+    real, parameter :: dTFr_dS    = -0.0573      !DTFREEZE_DS in MOM_input
+    real, parameter :: TFr_S0_P0  =0.0832        !TFREEZE_S0_P0 in MOM_input
+    !    This subroutine computes the freezing point potential temparature
+    !  (in deg C) from salinity (in psu), and pressure (in Pa) using a simple
+    !  linear expression, with coefficients passed in as arguments.
+    !  Copied from subroutine calculate_TFreeze_linear_scalar (in MOM/equation_of_state)
+    !
+    ! Arguments: S - salinity in PSU.
+    !  (in)      pres - pressure in Pa.
+    !  (out)     T_Fr - Freezing point potential temperature in deg C.
+    !  (in)      TFr_S0_P0 - The freezing point at S=0, p=0, in deg C.
+    !  (in)      dTFr_dS - The derivatives of freezing point with salinity, in
+    !                      deg C PSU-1.
+    !  (in)      dTFr_dp - The derivatives of freezing point with pressure, in
+    !                      deg C Pa-1.
+    T_Fr = (TFr_S0_P0 + dTFr_dS*S) + dTFr_dp*pres
+  end subroutine calculate_TFreeze
+
+  subroutine calculate_density(T, S, pressure, rho, Rho_T0_S0, dRho_dT, dRho_dS)
+    !Arguments
+    real,    intent(in)  :: T, S, pressure
+    real,    intent(out) :: rho
+    real,    intent(in)  :: Rho_T0_S0, dRho_dT, dRho_dS
+    ! *  This subroutine computes the density of sea water with a trivial  *
+    ! *  linear equation of state (in kg/m^3) from salinity (sal in psu),  *
+    ! *  potential temperature (T in deg C), and pressure in Pa.           *
+    !    Copied from subroutine calculate_density_scalar_linear (in MOM/equation_of_state)
+    ! *                                                                    *
+    ! * Arguments: T - potential temperature relative to the surface in C. *
+    ! *  (in)      S - salinity in PSU.                                    *
+    ! *  (in)      pressure - pressure in Pa.                              *
+    ! *  (out)     rho - in situ density in kg m-3.                        *
+    ! *  (in)      start - the starting point in the arrays.               *
+    ! *  (in)      npts - the number of values to calculate.               *
+    ! *  (in)      Rho_T0_S0 - The density at T=0, S=0, in kg m-3.         *
+    ! *  (in)      dRho_dT - The derivatives of density with temperature   *
+    ! *  (in)      dRho_dS - and salinity, in kg m-3 C-1 and kg m-3 psu-1. *
+    rho = Rho_T0_S0 + dRho_dT*T + dRho_dS*S
+  end subroutine calculate_density
+
+end subroutine find_basal_melt
+!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 subroutine find_orientation_using_iceberg_bonds(grd,berg,orientation)
   ! Arguments
