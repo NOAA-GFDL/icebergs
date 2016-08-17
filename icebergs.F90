@@ -1117,6 +1117,7 @@ type(iceberg), pointer :: this, next
 real, parameter :: perday=1./86400.
 integer :: grdi, grdj
 real :: orientation, static_berg
+real :: SSS !Temporarily here
 
   ! For convenience
   grd=>bergs%grd
@@ -1129,7 +1130,6 @@ real :: orientation, static_berg
     this=>bergs%list(grdi,grdj)%first
     do while(associated(this))
       if (debug) call check_position(grd, this, 'thermodynamics (top)')
-  
       call interp_flds(grd, this%ine, this%jne, this%xi, this%yj, this%uo, this%vo, &
               this%ui, this%vi, this%ua, this%va, this%ssh_x, this%ssh_y, this%sst, &
               this%cn, this%hi)
@@ -1157,6 +1157,16 @@ real :: orientation, static_berg
           *perday ! convert to m/s
       Me=max( 1./12.*(SST+2.)*Ss*(1+cos(pi*(IC**3))) ,0.) &! Wave erosion
           *perday ! convert to m/s
+
+      !For icebergs acting as ice shelves 
+      if (bergs%melt_icebergs_as_ice_shelf) then
+        Mv=0.0
+        Mb=0.0
+        Me=0.0
+        SSS=33.  !Temporarily here.
+        call find_basal_melt(bergs,dvo,this%lat,SSS,SST,bergs%Use_three_equation_model,T,Mb)
+        Mb=max(Mb,0.)
+      endif
 
       if (bergs%set_melt_rates_to_zero) then
         Mv=0.0
@@ -1267,13 +1277,29 @@ real :: orientation, static_berg
           end if
         endif
       endif
-  
-      ! Store the new state of iceberg (with L>W)
-      this%mass=Mnew
-      this%mass_of_bits=nMbits
-      this%thickness=Tn
-      this%width=min(Wn,Ln)
-      this%length=max(Wn,Ln)
+ 
+
+       !This option allows iceberg melt fluxes to enter the ocean without the icebergs changing shape
+       if (bergs%Iceberg_melt_without_decay) then
+         Mnew=this%mass
+         nMbits=this%mass_of_bits
+         Tn=this%thickness
+         Wn=this%width
+         Ln=this%length
+         if (bergs%bergy_bit_erosion_fraction>0.) then
+           Mbits=this%mass_of_bits ! mass of bergy bits (kg)
+           nMbits=Mbits
+           Lbits=min(L,W,T,40.) ! assume bergy bits are smallest dimension or 40 meters
+           Abits=(Mbits/bergs%rho_bergs)/Lbits ! Effective bottom area (assuming T=Lbits)
+         endif
+      else
+        ! Store the new state of iceberg (with L>W)
+        this%mass=Mnew
+        this%mass_of_bits=nMbits
+        this%thickness=Tn
+        this%width=min(Wn,Ln)
+        this%length=max(Wn,Ln)
+      endif
       next=>this%next
   
       ! Did berg completely melt?
@@ -2771,11 +2797,25 @@ integer :: stderrunit
     call write_trajectory(bergs%trajectories, bergs%save_short_traj)
   endif
 
-  !Update diagnostic of iceberg mass spread on ocean
-  if (grd%id_spread_mass>0) then
+  !Update diagnostic of iceberg mass spread on ocean,MP1 
+  if ( (grd%id_spread_mass>0) .or. (bergs%find_melt_using_spread_mass) ) then
+    if ((bergs%find_melt_using_spread_mass) ) then
+      grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec)=grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)  !Temporarily using the variable calving for storing old mass (not sure better way)
+    endif
     grd%spread_mass(:,:)=0.
     within_iceberg_model=.True.
     call icebergs_incr_mass(bergs, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec),within_iceberg_model) 
+    if (bergs%find_melt_using_spread_mass) then
+     do i=grd%isc,grd%iec ; do j=grd%jsc,grd%jec
+       if (grd%area(i,j)>0.0) then
+         grd%floating_melt(i,j)=max((grd%floating_melt(i,j) - grd%spread_mass(i,j))/(bergs%dt),0.0)
+         !grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)=grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec)*HLF !Not 100% sure this is correct.
+         grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)=grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec)*0.0 !Not 100% sure this is correct.
+       else
+         grd%floating_melt(i,j)=0.0
+       endif
+     enddo ;enddo
+    endif
   endif
 
   ! Gridded diagnostics

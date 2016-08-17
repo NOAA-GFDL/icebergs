@@ -219,6 +219,10 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
   logical :: time_average_weight=.false. ! Time average the weight on the ocean
   logical :: Runge_not_Verlet=.True.  !True=Runge Kuttai, False=Verlet.   
+  logical :: find_melt_using_spread_mass=.False.  !If true, then the model calculates ice loss by looping at the spread_mass before and after.
+  logical :: Use_three_equation_model=.True.  !Uses 3 equation model for melt when ice shelf type thermodynamics are used.
+  logical :: melt_icebergs_as_ice_shelf=.False.  !Uses iceshelf type thermodynamics
+  logical :: Iceberg_melt_without_decay=.False.  !Allows icebergs meltwater fluxes to enter the ocean, without the iceberg decaying or changing shape.
   logical :: add_iceberg_thickness_to_SSH=.False.  !Adds the iceberg contribution to SSH.   
   logical :: override_iceberg_velocities=.False.  !Allows you to set a fixed iceberg velocity for all non-static icebergs.
   logical :: use_f_plane=.False.  !Flag to use a f-plane for the rotation
@@ -342,6 +346,10 @@ logical :: time_average_weight=.false. ! Time average the weight on the ocean
 real :: speed_limit=0. ! CFL speed limit for a berg
 real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
 logical :: Runge_not_Verlet=.True.  !True=Runge Kutta, False=Verlet.  - Added by Alon 
+logical :: find_melt_using_spread_mass=.False.  !If true, then the model calculates ice loss by looping at the spread_mass before and after.
+logical :: Use_three_equation_model=.True.  !Uses 3 equation model for melt when ice shelf type thermodynamics are used.
+logical :: melt_icebergs_as_ice_shelf=.False.  !Uses iceshelf type thermodynamics
+logical :: Iceberg_melt_without_decay=.False.  !Allows icebergs meltwater fluxes to enter the ocean, without the iceberg decaying or changing shape.
 logical :: add_iceberg_thickness_to_SSH=.False.  !Adds the iceberg contribution to SSH.   
 logical :: override_iceberg_velocities=.False.  !Allows you to set a fixed iceberg velocity for all non-static icebergs.
 logical :: use_f_plane=.False.  !Flag to use a f-plane for the rotation
@@ -375,7 +383,8 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_icebergs_on, critical_interaction_damping_on, &
          old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj, &
          allow_bergs_to_roll,set_melt_rates_to_zero,lat_ref,initial_orientation,rotate_icebergs_for_mass_spreading,grid_is_latlon,Lx,use_f_plane,use_old_spreading, &
-         grid_is_regular,Lx,use_f_plane,override_iceberg_velocities,u_override,v_override,add_iceberg_thickness_to_SSH
+         grid_is_regular,Lx,use_f_plane,override_iceberg_velocities,u_override,v_override,add_iceberg_thickness_to_SSH,Iceberg_melt_without_decay,melt_icebergs_as_ice_shelf, &
+         Use_three_equation_model,find_melt_using_spread_mass 
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -738,6 +747,10 @@ if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffe
   bergs%time_average_weight=time_average_weight
   bergs%speed_limit=speed_limit
   bergs%Runge_not_Verlet=Runge_not_Verlet   
+  bergs%find_melt_using_spread_mass=find_melt_using_spread_mass 
+  bergs%Use_three_equation_model=Use_three_equation_model 
+  bergs%melt_icebergs_as_ice_shelf=melt_icebergs_as_ice_shelf 
+  bergs%Iceberg_melt_without_decay=Iceberg_melt_without_decay 
   bergs%add_iceberg_thickness_to_SSH=add_iceberg_thickness_to_SSH  
   bergs%override_iceberg_velocities=override_iceberg_velocities 
   bergs%use_f_plane=use_f_plane 
