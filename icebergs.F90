@@ -1109,13 +1109,14 @@ end subroutine interp_flds
 ! ##############################################################################
 
 subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh, sst, calving_hflx, cn, hi, &
-                        stagger, stress_stagger)
+                        stagger, stress_stagger,sss)
 ! Arguments
 type(icebergs), pointer :: bergs
 type(time_type), intent(in) :: time
 real, dimension(:,:), intent(inout) :: calving, calving_hflx
 real, dimension(:,:), intent(in) :: uo, vo, ui, vi, tauxa, tauya, ssh, sst, cn, hi
 integer,    optional, intent(in) :: stagger, stress_stagger
+real, dimension(:,:), optional, intent(in) ::  sss
 ! Local variables
 integer :: iyr, imon, iday, ihr, imin, isec, k
 type(icebergs_gridded), pointer :: grd
