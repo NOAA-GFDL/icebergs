@@ -1396,7 +1396,7 @@ type(xyt), pointer :: trajectory
 ! Local variables
 integer :: iret, ncid, i_dim, i
 integer :: lonid, latid, yearid, dayid, uvelid, vvelid, iceberg_numid
-integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid
+integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid, sssid
 integer :: cnid, hiid
 integer :: mid, did, wid, lid, mbid, hdid
 character(len=37) :: filename
@@ -1534,6 +1534,7 @@ logical :: io_is_in_append_mode
         sshxid = inq_varid(ncid, 'ssh_x')
         sshyid = inq_varid(ncid, 'ssh_y')
         sstid = inq_varid(ncid, 'sst')
+        sssid = inq_varid(ncid, 'sss')
         cnid = inq_varid(ncid, 'cn')
         hiid = inq_varid(ncid, 'hi')
       endif
@@ -1566,6 +1567,7 @@ logical :: io_is_in_append_mode
         sshxid = def_var(ncid, 'ssh_x', NF_DOUBLE, i_dim)
         sshyid = def_var(ncid, 'ssh_y', NF_DOUBLE, i_dim)
         sstid = def_var(ncid, 'sst', NF_DOUBLE, i_dim)
+        sssid = def_var(ncid, 'sss', NF_DOUBLE, i_dim)
         cnid = def_var(ncid, 'cn', NF_DOUBLE, i_dim)
         hiid = def_var(ncid, 'hi', NF_DOUBLE, i_dim)
       endif
@@ -1619,6 +1621,8 @@ logical :: io_is_in_append_mode
         call put_att(ncid, sshyid, 'units', 'non-dim')
         call put_att(ncid, sstid, 'long_name', 'sea surface temperature')
         call put_att(ncid, sstid, 'units', 'degrees_C')
+        call put_att(ncid, sssid, 'long_name', 'sea surface salinity')
+        call put_att(ncid, sssid, 'units', 'psu')
         call put_att(ncid, cnid, 'long_name', 'sea ice concentration')
         call put_att(ncid, cnid, 'units', 'none')
         call put_att(ncid, hiid, 'long_name', 'sea ice thickness')
@@ -1661,6 +1665,7 @@ logical :: io_is_in_append_mode
         call put_double(ncid, sshxid, i, this%ssh_x)
         call put_double(ncid, sshyid, i, this%ssh_y)
         call put_double(ncid, sstid, i, this%sst)
+        call put_double(ncid, sssid, i, this%sss)
         call put_double(ncid, cnid, i, this%cn)
         call put_double(ncid, hiid, i, this%hi)
       endif

@@ -16,7 +16,7 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 implicit none ; private
 
 integer :: buffer_width=27 !Changed from 20 to 28 by Alon 
-integer :: buffer_width_traj=30  !Changed from 23 by Alon
+integer :: buffer_width_traj=31  !Changed from 23 by Alon
 !integer, parameter :: buffer_width=26 !Changed from 20 to 26 by Alon 
 !integer, parameter :: buffer_width_traj=29  !Changed from 23 by Alon
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
@@ -103,6 +103,7 @@ type :: icebergs_gridded
   real, dimension(:,:), pointer :: va=>null() ! Atmosphere meridional flow (m/s)
   real, dimension(:,:), pointer :: ssh=>null() ! Sea surface height (m)
   real, dimension(:,:), pointer :: sst=>null() ! Sea surface temperature (oC)
+  real, dimension(:,:), pointer :: sss=>null() ! Sea surface salinity (psu)
   real, dimension(:,:), pointer :: cn=>null() ! Sea-ice concentration (0 to 1)
   real, dimension(:,:), pointer :: hi=>null() ! Sea-ice thickness (m)
   real, dimension(:,:), pointer :: calving=>null() ! Calving mass rate [frozen runoff] (kg/s) (into stored ice)
@@ -137,7 +138,7 @@ type :: icebergs_gridded
   integer :: id_mass=-1, id_ui=-1, id_vi=-1, id_ua=-1, id_va=-1, id_sst=-1, id_cn=-1, id_hi=-1
   integer :: id_bergy_src=-1, id_bergy_melt=-1, id_bergy_mass=-1, id_berg_melt=-1
   integer :: id_mass_on_ocn=-1, id_ssh=-1, id_fax=-1, id_fay=-1,  id_spread_mass=-1
-  integer :: id_count=-1, id_chksum=-1, id_u_iceberg=-1, id_v_iceberg=-1
+  integer :: id_count=-1, id_chksum=-1, id_u_iceberg=-1, id_v_iceberg=-1, id_sss=-1
 
   real :: clipping_depth=0. ! The effective depth at which to clip the weight felt by the ocean [m].
 
@@ -147,7 +148,7 @@ type :: xyt
   real :: lon, lat, day
   real :: mass, thickness, width, length, uvel, vvel
   real :: axn, ayn, bxn, byn, uvel_old, vvel_old, lat_old, lon_old  !Explicit and implicit accelerations !Alon 
-  real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi, halo_berg, static_berg
+  real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, sss, cn, hi, halo_berg, static_berg
   real :: mass_of_bits, heat_density
   integer :: year, iceberg_num
   type(xyt), pointer :: next=>null()
@@ -167,7 +168,7 @@ type :: iceberg
   integer :: ine, jne ! nearest index in NE direction (for convenience)
   real :: xi, yj ! Non-dimensional coords within current cell (0..1)
   ! Environment variables (as seen by the iceberg)
-  real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi
+  real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, sss, cn, hi
   type(xyt), pointer :: trajectory=>null()
   type(bond), pointer :: first_bond=>null()  !First element of bond list.
 end type iceberg
@@ -219,6 +220,7 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
   logical :: time_average_weight=.false. ! Time average the weight on the ocean
   logical :: Runge_not_Verlet=.True.  !True=Runge Kuttai, False=Verlet.   
+  logical :: use_mixed_layer_salinity_for_thermo=.False.  !If true, then model uses ocean salinity for 3 and 2 equation melt model.
   logical :: find_melt_using_spread_mass=.False.  !If true, then the model calculates ice loss by looping at the spread_mass before and after.
   logical :: Use_three_equation_model=.True.  !Uses 3 equation model for melt when ice shelf type thermodynamics are used.
   logical :: melt_icebergs_as_ice_shelf=.False.  !Uses iceshelf type thermodynamics
@@ -346,6 +348,7 @@ logical :: time_average_weight=.false. ! Time average the weight on the ocean
 real :: speed_limit=0. ! CFL speed limit for a berg
 real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
 logical :: Runge_not_Verlet=.True.  !True=Runge Kutta, False=Verlet.  - Added by Alon 
+logical :: use_mixed_layer_salinity_for_thermo=.False.  !If true, then model uses ocean salinity for 3 and 2 equation melt model.
 logical :: find_melt_using_spread_mass=.False.  !If true, then the model calculates ice loss by looping at the spread_mass before and after.
 logical :: Use_three_equation_model=.True.  !Uses 3 equation model for melt when ice shelf type thermodynamics are used.
 logical :: melt_icebergs_as_ice_shelf=.False.  !Uses iceshelf type thermodynamics
@@ -384,7 +387,7 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj, &
          allow_bergs_to_roll,set_melt_rates_to_zero,lat_ref,initial_orientation,rotate_icebergs_for_mass_spreading,grid_is_latlon,Lx,use_f_plane,use_old_spreading, &
          grid_is_regular,Lx,use_f_plane,override_iceberg_velocities,u_override,v_override,add_iceberg_thickness_to_SSH,Iceberg_melt_without_decay,melt_icebergs_as_ice_shelf, &
-         Use_three_equation_model,find_melt_using_spread_mass 
+         Use_three_equation_model,find_melt_using_spread_mass,use_mixed_layer_salinity_for_thermo 
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -513,6 +516,7 @@ real :: Total_mass  !Added by Alon
   allocate( grd%va(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%va(:,:)=0.
   allocate( grd%ssh(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%ssh(:,:)=0.
   allocate( grd%sst(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%sst(:,:)=0.
+  allocate( grd%sss(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%sss(:,:)=0.
   allocate( grd%cn(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%cn(:,:)=0.
   allocate( grd%hi(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%hi(:,:)=0.
   allocate( grd%tmp(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%tmp(:,:)=0.
@@ -747,6 +751,7 @@ if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffe
   bergs%time_average_weight=time_average_weight
   bergs%speed_limit=speed_limit
   bergs%Runge_not_Verlet=Runge_not_Verlet   
+  bergs%use_mixed_layer_salinity_for_thermo=use_mixed_layer_salinity_for_thermo 
   bergs%find_melt_using_spread_mass=find_melt_using_spread_mass 
   bergs%Use_three_equation_model=Use_three_equation_model 
   bergs%melt_icebergs_as_ice_shelf=melt_icebergs_as_ice_shelf 
@@ -846,6 +851,8 @@ if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffe
      'Atmos meridional component of velocity', 'm s^-1')
   grd%id_sst=register_diag_field('icebergs', 'sst', axes, Time, &
      'Sea surface temperature', 'degrees_C')
+  grd%id_sss=register_diag_field('icebergs', 'sss', axes, Time, &
+     'Sea surface salinity', 'psu')
   grd%id_cn=register_diag_field('icebergs', 'cn', axes, Time, &
      'Sea ice concentration', '(fraction)')
   grd%id_hi=register_diag_field('icebergs', 'hi', axes, Time, &
@@ -1945,6 +1952,7 @@ end subroutine send_bergs_to_other_pes
       buff%data(28,n)=traj%byn !Alon
       buff%data(29,n)=traj%halo_berg !Alon
       buff%data(30,n)=traj%static_berg !Alon
+      buff%data(31,n)=traj%sss
     endif
 
   end subroutine pack_traj_into_buffer2
@@ -1992,6 +2000,7 @@ end subroutine send_bergs_to_other_pes
       traj%byn=buff%data(28,n) !Alon
       traj%halo_berg=buff%data(29,n) !Alon
       traj%static_berg=buff%data(30,n) !Alon
+      traj%sss=buff%data(31,n)
     endif
     call append_posn(first, traj)
 
@@ -2810,6 +2819,7 @@ integer :: grdi, grdj
       posn%ssh_x=this%ssh_x
       posn%ssh_y=this%ssh_y
       posn%sst=this%sst
+      posn%sss=this%sss
       posn%cn=this%cn
       posn%hi=this%hi
       posn%axn=this%axn
@@ -3773,6 +3783,7 @@ character(len=*) :: label
   call grd_chksum2(grd, grd%vi, 'vi')
   call grd_chksum2(grd, grd%ssh, 'ssh')
   call grd_chksum2(grd, grd%sst, 'sst')
+  call grd_chksum2(grd, grd%sss, 'sss')
   call grd_chksum2(grd, grd%hi, 'hi')
   call grd_chksum2(grd, grd%cn, 'cn')
   call grd_chksum2(grd, grd%calving, 'calving')

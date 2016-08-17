@@ -638,7 +638,7 @@ real, intent(inout) :: axn, ayn, bxn, byn ! Added implicit and explicit accelera
 logical, optional :: debug_flag
 ! Local variables
 type(icebergs_gridded), pointer :: grd
-real :: uo, vo, ui, vi, ua, va, uwave, vwave, ssh_x, ssh_y, sst, cn, hi
+real :: uo, vo, ui, vi, ua, va, uwave, vwave, ssh_x, ssh_y, sst, sss, cn, hi
 real :: f_cori, T, D, W, L, M, F
 real :: drag_ocn, drag_atm, drag_ice, wave_rad
 real :: c_ocn, c_atm, c_ice
@@ -688,7 +688,7 @@ endif
   grd=>bergs%grd
 
   ! Interpolate gridded fields to berg     - Note: It should be possible to move this to evolve, so that it only needs to be called once. !!!!
-  call interp_flds(grd, i, j, xi, yj, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi)
+  call interp_flds(grd, i, j, xi, yj, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, sss, cn, hi)
 
   if ((grd%grid_is_latlon) .and. (.not. bergs%use_f_plane)) then
      f_cori=(2.*omega)*sin(pi_180*lat)
@@ -1029,6 +1029,7 @@ endif
     call dump_locfld(grd,i,j,grd%msk,'MSK')
     call dump_locfld(grd,i,j,grd%ssh,'SSH')
     call dump_locfld(grd,i,j,grd%sst,'SST')
+    call dump_locfld(grd,i,j,grd%sss,'SSS')
     call dump_locvel(grd,i,j,grd%uo,'Uo')
     call dump_locvel(grd,i,j,grd%vo,'Vo')
     call dump_locvel(grd,i,j,grd%ua,'Ua')
@@ -1132,8 +1133,9 @@ real :: SSS !Temporarily here
       if (debug) call check_position(grd, this, 'thermodynamics (top)')
       call interp_flds(grd, this%ine, this%jne, this%xi, this%yj, this%uo, this%vo, &
               this%ui, this%vi, this%ua, this%va, this%ssh_x, this%ssh_y, this%sst, &
-              this%cn, this%hi)
+              this%sss,this%cn, this%hi)
       SST=this%sst
+      SSS=this%sss
       IC=min(1.,this%cn+bergs%sicn_shift) ! Shift sea-ice concentration 
       M=this%mass
       T=this%thickness ! total thickness
@@ -1163,7 +1165,7 @@ real :: SSS !Temporarily here
         Mv=0.0
         Mb=0.0
         Me=0.0
-        SSS=33.  !Temporarily here.
+        if (.not. bergs%use_mixed_layer_salinity_for_thermo)  SSS=35.0  
         call find_basal_melt(bergs,dvo,this%lat,SSS,SST,bergs%Use_three_equation_model,T,Mb)
         Mb=max(Mb,0.)
       endif
@@ -2371,12 +2373,12 @@ subroutine Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex ,Area_Q
 end subroutine Hexagon_into_quadrants_using_triangles
 
 
-subroutine interp_flds(grd, i, j, xi, yj, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi)
+subroutine interp_flds(grd, i, j, xi, yj, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, sss, cn, hi)
 ! Arguments
 type(icebergs_gridded), pointer :: grd
 integer, intent(in) :: i, j
 real, intent(in) :: xi, yj
-real, intent(out) :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, cn, hi
+real, intent(out) :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, sss, cn, hi
 ! Local variables
 real :: cos_rot, sin_rot
 #ifdef USE_OLD_SSH_GRADIENT
@@ -2422,6 +2424,7 @@ integer :: ii, jj
   ! These fields are cell centered (A-grid) and would
   ! best be interpolated using PLM. For now we use PCM!
   sst=grd%sst(i,j) ! A-grid
+  sss=grd%sss(i,j) ! A-grid
   cn=grd%cn(i,j) ! A-grid
   hi=grd%hi(i,j) ! A-grid
     
@@ -2479,10 +2482,10 @@ integer :: ii, jj
 
   if (((((uo.ne.uo) .or. (vo.ne.vo)) .or. ((ui.ne.ui) .or. (vi.ne.vi))) .or. &
        (((ua.ne.ua) .or. (va.ne.va)) .or. ((ssh_x.ne.ssh_x) .or. (ssh_y.ne.ssh_y)))) .or. &
-       (((sst.ne. sst) .or. (cn.ne.cn)) .or. (hi.ne. hi))) then
+       (((sst.ne. sst) .or. (sss.ne. sss) .or. (cn.ne.cn)) .or. (hi.ne. hi))) then
     write(stderrunit,*) 'diamonds, Error in interpolate: uo,vo,ui,vi',uo, vo, ui, vi
     write(stderrunit,*) 'diamonds, Error in interpolate: ua,va,ssh_x,ssh_y', ua, va, ssh_x, ssh_y
-    write(stderrunit,*) 'diamonds, Error in interpolate: sst,cn,hi', sst, cn, hi, mpp_pe()
+    write(stderrunit,*) 'diamonds, Error in interpolate: sst,cn,hi', sst, sss, cn, hi, mpp_pe()
     call error_mesg('diamonds, interp fields', 'field interpaolations has NaNs', FATAL)
 
   endif 
@@ -2530,7 +2533,7 @@ end subroutine interp_flds
 ! ##############################################################################
 
 subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh, sst, calving_hflx, cn, hi, &
-                        stagger, stress_stagger,sss)
+                        stagger, stress_stagger, sss)
 ! Arguments
 type(icebergs), pointer :: bergs
 type(time_type), intent(in) :: time
@@ -2716,6 +2719,16 @@ integer :: stderrunit
   call mpp_update_domains(grd%cn, grd%domain)
   grd%hi(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=hi(:,:)
   call mpp_update_domains(grd%hi, grd%domain)
+  
+  !Adding gridded salinity.
+  if (present(sss)) then
+    grd%sss(grd%isc:grd%iec,grd%jsc:grd%jec)=sss(:,:)
+  else
+    grd%sss(grd%isc:grd%iec,grd%jsc:grd%jec)=-1.0
+    if ((bergs%use_mixed_layer_salinity_for_thermo) .and. (bergs%melt_icebergs_as_ice_shelf))  then
+      call error_mesg('diamonds, icebergs_run', 'Can not use salinity for thermo. Ocean ML salinity not present!', FATAL)
+    endif
+  endif
 
  !Make sure that gridded values agree with mask  (to get ride of NaN values)
   do i=grd%isd,grd%ied ; do j=grd%jsd,grd%jed
@@ -2724,8 +2737,8 @@ integer :: stderrunit
       grd%ua(i,j) = 0.0 ;  grd%va(i,j) = 0.0
       grd%uo(i,j) = 0.0 ;  grd%vo(i,j) = 0.0
       grd%ui(i,j) = 0.0 ;  grd%vi(i,j) = 0.0
-      grd%sst(i,j) = 0.0;  grd%cn(i,j) = 0.0
-      grd%hi(i,j) = 0.0
+      grd%sst(i,j)= 0.0;  grd%sss(i,j)= 0.0  
+      grd%cn(i,j) = 0.0 ;  grd%hi(i,j) = 0.0
     endif
     if (grd%ua(i,j) .ne. grd%ua(i,j)) grd%ua(i,j)=0.
     if (grd%va(i,j) .ne. grd%va(i,j)) grd%va(i,j)=0.
@@ -2734,6 +2747,7 @@ integer :: stderrunit
     if (grd%ui(i,j) .ne. grd%ui(i,j)) grd%ui(i,j)=0.
     if (grd%vi(i,j) .ne. grd%vi(i,j)) grd%vi(i,j)=0.
     if (grd%sst(i,j) .ne. grd%sst(i,j)) grd%sst(i,j)=0.
+    if (grd%sss(i,j) .ne. grd%sss(i,j)) grd%sss(i,j)=0.
     if (grd%cn(i,j) .ne. grd%cn(i,j)) grd%cn(i,j)=0.
     if (grd%hi(i,j) .ne. grd%hi(i,j)) grd%hi(i,j)=0.
   enddo; enddo
@@ -2834,6 +2848,8 @@ integer :: stderrunit
     lerr=send_data(grd%id_va, grd%va(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_sst>0) &
     lerr=send_data(grd%id_sst, grd%sst(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (grd%id_sss>0) &
+    lerr=send_data(grd%id_sss, grd%sss(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_cn>0) &
     lerr=send_data(grd%id_cn, grd%cn(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_hi>0) &
@@ -3597,6 +3613,7 @@ integer :: stderrunit
          call print_fld(grd, grd%msk, 'msk')
          call print_fld(grd, grd%ssh, 'ssh')
          call print_fld(grd, grd%sst, 'sst')
+         call print_fld(grd, grd%sss, 'sss')
          call print_fld(grd, grd%hi, 'hi')
          write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
          write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
@@ -3739,6 +3756,7 @@ logical :: bounced, on_tangential_plane, error_flag
          call print_fld(grd, grd%msk, 'msk')
          call print_fld(grd, grd%ssh, 'ssh')
          call print_fld(grd, grd%sst, 'sst')
+         call print_fld(grd, grd%sss, 'sss')
          call print_fld(grd, grd%hi, 'hi')
          write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
          write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
@@ -3796,6 +3814,7 @@ logical :: bounced, on_tangential_plane, error_flag
          call print_fld(grd, grd%msk, 'msk')
          call print_fld(grd, grd%ssh, 'ssh')
          call print_fld(grd, grd%sst, 'sst')
+         call print_fld(grd, grd%sss, 'sss')
          call print_fld(grd, grd%hi, 'hi')
          write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
          write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
@@ -3852,6 +3871,7 @@ logical :: bounced, on_tangential_plane, error_flag
          call print_fld(grd, grd%msk, 'msk')
          call print_fld(grd, grd%ssh, 'ssh')
          call print_fld(grd, grd%sst, 'sst')
+         call print_fld(grd, grd%sss, 'sss')
          call print_fld(grd, grd%hi, 'hi')
          write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
          write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
@@ -3928,6 +3948,7 @@ logical :: bounced, on_tangential_plane, error_flag
          call print_fld(grd, grd%msk, 'msk')
          call print_fld(grd, grd%ssh, 'ssh')
          call print_fld(grd, grd%sst, 'sst')
+         call print_fld(grd, grd%sss, 'sss')
          call print_fld(grd, grd%hi, 'hi')
          write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
          write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
@@ -4485,6 +4506,7 @@ type(iceberg), pointer :: this, next
   deallocate(bergs%grd%va)
   deallocate(bergs%grd%ssh)
   deallocate(bergs%grd%sst)
+  deallocate(bergs%grd%sss)
   deallocate(bergs%grd%cn)
   deallocate(bergs%grd%hi)
   deallocate(bergs%grd%domain)
