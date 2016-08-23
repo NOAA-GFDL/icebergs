@@ -152,16 +152,17 @@ subroutine basal_melt_test(bergs)
   ! Arguments
   type(icebergs), pointer :: bergs
   real :: dvo,lat,salt,temp, basal_melt, thickness
+  integer :: iceberg_num
   logical :: Use_three_equation_model
 
   if (mpp_pe() .eq. mpp_root_pe() ) print *, 'Begining Basal Melting Unit Test'
-  dvo=0.2 ;lat=0.0 ; salt=35.0 ; temp=2.0 ;thickness=100.
+  dvo=0.2 ;lat=0.0 ; salt=35.0 ; temp=2.0 ;thickness=100.; iceberg_num=0
   Use_three_equation_model=.False.
-  call find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thickness,basal_melt)
+  call find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thickness,basal_melt,iceberg_num)
   if (mpp_pe() .eq. mpp_root_pe()) print *, 'Two equation model basal_melt =',basal_melt
 
   Use_three_equation_model=.True.
-  call find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thickness,basal_melt)
+  call find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thickness,basal_melt,iceberg_num)
    if (mpp_pe() .eq. mpp_root_pe()) print *, 'Three equation model basal_melt =',basal_melt
 
 end subroutine basal_melt_test
@@ -1166,7 +1167,7 @@ real :: SSS !Temporarily here
         Mb=0.0
         Me=0.0
         if (.not. bergs%use_mixed_layer_salinity_for_thermo)  SSS=35.0  
-        call find_basal_melt(bergs,dvo,this%lat,SSS,SST,bergs%Use_three_equation_model,T,Mb)
+        call find_basal_melt(bergs,dvo,this%lat,SSS,SST,bergs%Use_three_equation_model,T,Mb,this%iceberg_num)
         Mb=max(Mb,0.)
       endif
 
@@ -1352,7 +1353,7 @@ end subroutine thermodynamics
 
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-subroutine find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thickness,basal_melt)
+subroutine find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thickness,basal_melt,iceberg_num)
   ! Arguments
   type(icebergs), pointer :: bergs
   ! Local variables
@@ -1361,6 +1362,7 @@ subroutine find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thic
   real , intent(in) :: salt !Salinity of mixed layer
   real , intent(in) :: temp !Temperature of mixed layer
   real , intent(in) :: lat !Latitude (for boundary layer calculation)
+  integer , intent(in) :: iceberg_num !Iceberg number, used for debugging (error messages)
   real , intent(in) :: thickness !Ice thickness - needed to work out the pressure below the ice
   logical , intent(in) :: Use_three_equation_model !True uses the 3 equation model, False uses the 2 equation model.
   
@@ -1414,6 +1416,7 @@ subroutine find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thic
   real :: I_Gam_T, I_Gam_S
   real :: dG_dwB, iDens
   logical :: Sb_min_set, Sb_max_set
+  logical :: out_of_bounds
 
   real, parameter :: c2_3 = 2.0/3.0
   integer ::  it1, it3
@@ -1486,33 +1489,14 @@ subroutine find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thic
   ln_neut = 0.0 ; if (hBL_neut_h_molec > 1.0) ln_neut = log(hBL_neut_h_molec)
 
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  if (.not. Use_three_equation_model) then
-    ! In the 2-equation form, the mixed layer turbulent exchange velocity
-    ! is specified and large enough that the ocean salinity at the interface
-    ! is about the same as the boundary layer salinity.
-    ! Alon: I have adapted the code so that the turbulent exchange velocoty is not constant, but rather proportional to the frictional velocity. 
-    ! This should give you the same answers as the 3 equation model when salinity gradients in the mixed layer are zero (I think/hope)
-
-    call calculate_TFreeze(salt, p_int, tfreeze)
-
-    Gam_turb = I_VK * (ln_neut + (0.5 * I_ZETA_N - 1.0))
-    I_Gam_T = 1.0 / (Gam_mol_t + Gam_turb)
-
-    exch_vel_t= ustar_h * I_Gam_T
-    if (gamma_t>0.0) exch_vel_t = gamma_t  !Option to set the exchange to a constant, independent of the frictional velocity (as was previously coded)
-    wT_flux = exch_vel_t *(temp - tfreeze)
-
-    t_flux  = RhoCp * wT_flux
-    tflux_shelf = 0.0
-    lprec = I_LF * t_flux
-  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  else  ! Use 3 equation model
+  if (Use_three_equation_model) then   ! Use 3 equation model
     ! 3 equation model solves for the melt rates iteratively. This is not working right now, because we don't have access to the mixed layer 
     ! temperature and salinty gradients
 
 
     ! Guess sss as the iteration starting point for the boundary salinity.
     Sbdry = salt ; Sb_max_set = .false. ; Sb_min_set = .false.
+    out_of_bounds=.false.
 
     ! Determine the mixed layer buoyancy flux, wB_flux.      
     dB_dS = (gravity / Rhoml) * dR0_dS
@@ -1601,12 +1585,24 @@ subroutine find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thic
       if (abs(dS_it) < 1e-4*(0.5*(salt + Sbdry + 1.e-10))) exit
 
       if (dS_it < 0.0) then ! Sbdry is now the upper bound.
-        if (Sb_max_set .and. (Sbdry > Sb_max)) &
-          call error_mesg('diamonds,Find basal melt', 'shelf_calc_flux: Irregular iteration for Sbdry (max).' ,FATAL)
+        if (Sb_max_set .and. (Sbdry > Sb_max)) then
+          if (debug) then
+            call error_mesg('diamonds,Find basal melt', 'shelf_calc_flux: Irregular iteration for Sbdry (max).' ,WARNING)
+            print *, 'Sbdry error: iceberg_num,dvo,temp,salt,lat,thickness :',iceberg_num,dvo,temp,salt,lat,thickness
+          endif
+          out_of_bounds=.true.
+          exit
+        endif
         Sb_max = Sbdry ; dS_max = dS_it ; Sb_max_set = .true.
       else ! Sbdry is now the lower bound.
-        if (Sb_min_set .and. (Sbdry < Sb_min)) &
-          call error_mesg('diamonds,Find basal melt', 'shelf_calc_flux: Irregular iteration for Sbdry (min).' ,FATAL)
+        if (Sb_min_set .and. (Sbdry < Sb_min)) then
+          if (debug) then
+            call error_mesg('diamonds,Find basal melt', 'shelf_calc_flux: Irregular iteration for Sbdry (min).' ,WARNING)
+            print *, 'Sbdry error: iceberg_num,dvo,temp,salt,lat,thickness :',iceberg_num,dvo,temp,salt,lat,thickness
+          endif
+          out_of_bounds=.true.
+          exit
+        endif
         Sb_min = Sbdry ; dS_min = dS_it ; Sb_min_set = .true.
       endif
       if (Sb_min_set .and. Sb_max_set) then
@@ -1618,7 +1614,30 @@ subroutine find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thic
       Sbdry = Sbdry_it
     enddo !it1
   endif
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  if ((.not. Use_three_equation_model) .or. (out_of_bounds)) then
+    ! In the 2-equation form, the mixed layer turbulent exchange velocity
+    ! is specified and large enough that the ocean salinity at the interface
+    ! is about the same as the boundary layer salinity.
+    ! Alon: I have adapted the code so that the turbulent exchange velocoty is not constant, but rather proportional to the frictional velocity. 
+    ! This should give you the same answers as the 3 equation model when salinity gradients in the mixed layer are zero (I think/hope)
+    ! Use 2-equation model when 3 equation version fails.
+
+    call calculate_TFreeze(salt, p_int, tfreeze)
+
+    Gam_turb = I_VK * (ln_neut + (0.5 * I_ZETA_N - 1.0))
+    I_Gam_T = 1.0 / (Gam_mol_t + Gam_turb)
+
+    exch_vel_t= ustar_h * I_Gam_T
+    if (gamma_t>0.0) exch_vel_t = gamma_t  !Option to set the exchange to a constant, independent of the frictional velocity (as was previously coded)
+    wT_flux = exch_vel_t *(temp - tfreeze)
+
+    t_flux  = RhoCp * wT_flux
+    tflux_shelf = 0.0
+    lprec = I_LF * t_flux
+    endif
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   ! melt in m/s (melts of ice melted per second)
   basal_melt = lprec /density_ice
 
