@@ -1177,19 +1177,30 @@ integer :: stderrunit
        'diamonds: y,m,d=',iyr, imon, iday,' h,m,s=', ihr, imin, isec, &
        ' yr,yrdy=', bergs%current_year, bergs%current_yearday
 
-  ! Adapt calving flux from coupler for use here
+
  !call sanitize_field(grd%calving,1.e20)
   tmpsum=sum( calving(:,:)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
   bergs%net_calving_received=bergs%net_calving_received+tmpsum*bergs%dt
-  grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec)=calving(:,:) ! Units of kg/m2/s
+
+  ! Adapt calving heat flux from coupler
+  grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)=calving_hflx(:,:) & ! Units of W/m2
+       *grd%msk(grd%isc:grd%iec,grd%jsc:grd%jec)
+  
+  ! Adapt calving flux from coupler for use here
+  grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec)=calving(:,:) & ! Units of kg/m2/s
+       *grd%msk(grd%isc:grd%iec,grd%jsc:grd%jec)
+
+  ! Running means of calving and calving_hflx
+  call get_running_mean_calving(bergs, grd%calving, grd%calving_hflx)
+  calving(:,:)=grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec) ! Copy back from grd%calving if using running-mean
+  calving_hflx(:,:)=grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)
+
   grd%calving(:,:)=grd%calving(:,:)*grd%msk(:,:)*grd%area(:,:) ! Convert to kg/s
   tmpsum=sum( grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec) )
   bergs%net_incoming_calving=bergs%net_incoming_calving+tmpsum*bergs%dt
   if (grd%id_calving>0) &
     lerr=send_data(grd%id_calving, grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
 
-  ! Adapt calving heat flux from coupler
-  grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)=calving_hflx(:,:) ! Units of W/m2
   grd%calving_hflx(:,:)=grd%calving_hflx(:,:)*grd%msk(:,:) ! Mask (just in case)
   if (grd%id_calving_hflx_in>0) &
     lerr=send_data(grd%id_calving_hflx_in, grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
@@ -1368,6 +1379,10 @@ integer :: stderrunit
     lerr=send_data(grd%id_mass, grd%mass(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_stored_ice>0) &
     lerr=send_data(grd%id_stored_ice, grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:), Time)
+  if (grd%id_rmean_calving>0) &
+    lerr=send_data(grd%id_rmean_calving, grd%rmean_calving(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (grd%id_rmean_calving_hflx>0) &
+    lerr=send_data(grd%id_rmean_calving_hflx, grd%rmean_calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_real_calving>0) &
     lerr=send_data(grd%id_real_calving, grd%real_calving(grd%isc:grd%iec,grd%jsc:grd%jec,:), Time)
   if (grd%id_ssh>0) &
@@ -1412,6 +1427,8 @@ integer :: stderrunit
   bergs%net_outgoing_calving_heat=bergs%net_outgoing_calving_heat+tmpsum*bergs%dt ! Units of J
   if (lbudget) then
     bergs%stored_end=sum( grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:) )
+    bergs%rmean_calving_end=sum( grd%rmean_calving(grd%isc:grd%iec,grd%jsc:grd%jec) )
+    bergs%rmean_calving_hflx_end=sum( grd%rmean_calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec) )
     bergs%stored_heat_end=sum( grd%stored_heat(grd%isc:grd%iec,grd%jsc:grd%jec) )
     bergs%floating_mass_end=sum_mass(bergs%first)
     bergs%icebergs_mass_end=sum_mass(bergs%first,justbergs=.true.)
@@ -1612,6 +1629,49 @@ integer :: stderrunit
                       'error',((endval-startval)-(inval-outval))
   200 format("diamonds: ",a19,10(a18,"=",i14,x,:,","))
   end subroutine report_ibudget
+
+  subroutine get_running_mean_calving(bergs,calving,calving_hflx)
+  ! Arguments
+  type(icebergs), pointer :: bergs
+  real, dimension(:,:), intent(inout) :: calving, calving_hflx
+  ! Local variables
+  real :: alpha  !Parameter used for calving relaxation time stepping.  (0<=alpha<1)
+  real :: tau  !Relaxation timescale in seconds
+  real :: beta  ! = 1-alpha (0<=beta<1)
+  !This subroutine takes in the new calving and calving_hflx, and uses them to time step a running-mean_calving value
+  !The time stepping uses a time scale tau. When tau is equal to zero, the
+  !running mean is exactly equal to the new calving value.
+
+  ! For the first time-step, initialize the running mean with the current data
+  if (.not. bergs%grd%rmean_calving_initialized) then
+    bergs%grd%rmean_calving(:,:)=calving(:,:)
+    bergs%grd%rmean_calving_initialized=.true.
+  endif
+  if (.not. bergs%grd%rmean_calving_hflx_initialized) then
+    bergs%grd%rmean_calving_hflx(:,:)=calving_hflx(:,:)
+    bergs%grd%rmean_calving_hflx_initialized=.true.
+  endif
+
+  !Applying "Newton cooling" with timescale tau, to smooth out the calving field.
+  tau=bergs%tau_calving/(365.*24*60*60) !Converting time scale from years to seconds
+  alpha=tau/(tau+bergs%dt)
+  if (alpha==0.) return ! Avoids unnecessary copying of arrays
+  if (alpha>0.5) then ! beta is small
+    beta=bergs%dt/(tau+bergs%dt)
+    alpha=1.-beta
+  else ! alpha is small
+    beta=1.-alpha
+  endif
+
+  ! For non-negative alpha and beta, these expressions for the running means are sign preserving
+  bergs%grd%rmean_calving(:,:)=beta*calving(:,:) + alpha*bergs%grd%rmean_calving(:,:)
+  bergs%grd%rmean_calving_hflx(:,:)=beta*calving_hflx(:,:) + alpha*bergs%grd%rmean_calving_hflx(:,:)
+
+  !Setting calving used by the iceberg model equal to the running mean
+  calving(:,:)=bergs%grd%rmean_calving(:,:)
+  calving_hflx(:,:)=bergs%grd%rmean_calving_hflx(:,:)
+
+  end subroutine get_running_mean_calving
 
 end subroutine icebergs_run
 
@@ -2792,6 +2852,8 @@ type(iceberg), pointer :: this, next
   deallocate(bergs%grd%tmp)
   deallocate(bergs%grd%tmpc)
   deallocate(bergs%grd%stored_ice)
+  deallocate(bergs%grd%rmean_calving)
+  deallocate(bergs%grd%rmean_calving_hflx)
   deallocate(bergs%grd%real_calving)
   deallocate(bergs%grd%uo)
   deallocate(bergs%grd%vo)

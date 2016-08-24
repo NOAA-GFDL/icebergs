@@ -111,19 +111,23 @@ type :: icebergs_gridded
   real, dimension(:,:), pointer :: tmp=>null() ! Temporary work space
   real, dimension(:,:), pointer :: tmpc=>null() ! Temporary work space
   real, dimension(:,:,:), pointer :: stored_ice=>null() ! Accumulated ice mass flux at calving locations (kg)
+  real, dimension(:,:), pointer :: rmean_calving=>null() ! Running mean for ice calving
+  real, dimension(:,:), pointer :: rmean_calving_hflx=>null() ! Running mean for ice calving
   real, dimension(:,:), pointer :: stored_heat=>null() ! Heat content of stored ice (J)
   real, dimension(:,:,:), pointer :: real_calving=>null() ! Calving rate into iceberg class at calving locations (kg/s)
   real, dimension(:,:), pointer :: iceberg_heat_content=>null() ! Distributed heat content of bergs (J/m^2)
   real, dimension(:,:), pointer :: parity_x=>null() ! X component of vector point from i,j to i+1,j+1 (for detecting tri-polar fold)
   real, dimension(:,:), pointer :: parity_y=>null() ! Y component of vector point from i,j to i+1,j+1 (for detecting tri-polar fold)
   integer, dimension(:,:), pointer :: iceberg_counter_grd=>null() ! Counts icebergs created for naming purposes
+  logical :: rmean_calving_initialized = .false. ! True if rmean_calving(:,:) has been filled with meaningful data
+  logical :: rmean_calving_hflx_initialized = .false. ! True if rmean_calving_hflx(:,:) has been filled with meaningful data
   ! Diagnostics handles
   integer :: id_uo=-1, id_vo=-1, id_calving=-1, id_stored_ice=-1, id_accum=-1, id_unused=-1, id_floating_melt=-1
   integer :: id_melt_buoy=-1, id_melt_eros=-1, id_melt_conv=-1, id_virtual_area=-1, id_real_calving=-1
   integer :: id_calving_hflx_in=-1, id_stored_heat=-1, id_melt_hflx=-1, id_heat_content=-1
   integer :: id_mass=-1, id_ui=-1, id_vi=-1, id_ua=-1, id_va=-1, id_sst=-1, id_cn=-1, id_hi=-1
   integer :: id_bergy_src=-1, id_bergy_melt=-1, id_bergy_mass=-1, id_berg_melt=-1
-  integer :: id_mass_on_ocn=-1, id_ssh=-1, id_fax=-1, id_fay=-1
+  integer :: id_mass_on_ocn=-1, id_ssh=-1, id_fax=-1, id_fay=-1,  id_rmean_calving=-1, id_rmean_calving_hflx=-1
 
   real :: clipping_depth=0. ! The effective depth at which to clip the weight felt by the ocean [m].
 
@@ -192,6 +196,7 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   logical :: critical_interaction_damping_on=.true.  !Sets the damping on relative iceberg velocity to critical value - Added by Alon 
   logical :: read_old_restarts=.true. ! If true, read restarts prior to grid_of_lists and iceberg_num innovation
   real :: speed_limit=0. ! CFL speed limit for a berg [m/s]
+  real :: tau_calving=0. ! Time scale for smoothing out calving field (years)
   real :: tip_parameter=0. ! parameter to override iceberg rollilng critica ratio (use zero to get parameter directly from ice and seawater densities) 
   real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
   type(buffer), pointer :: obuffer_n=>null(), ibuffer_n=>null()
@@ -205,6 +210,8 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   real :: net_incoming_calving_heat=0., net_outgoing_calving_heat=0.
   real :: net_incoming_calving_heat_used=0., net_heat_to_bergs=0.
   real :: stored_start=0., stored_end=0.
+  real :: rmean_calving_start=0., rmean_calving_end=0.
+  real :: rmean_calving_hflx_start=0., rmean_calving_hflx_end=0.
   real :: stored_heat_start=0., stored_heat_end=0., net_heat_to_ocean=0.
   real :: net_calving_used=0., net_calving_to_bergs=0.
   real :: floating_mass_start=0., floating_mass_end=0.
@@ -284,6 +291,7 @@ logical :: add_weight_to_ocean=.true. ! Add weight of icebergs + bits to ocean
 logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
 logical :: time_average_weight=.false. ! Time average the weight on the ocean
 real :: speed_limit=0. ! CFL speed limit for a berg
+real :: tau_calving=0. ! Time scale for smoothing out calving field (years)
 real :: tip_parameter=0. ! parameter to override iceberg rollilng critica ratio (use zero to get parameter directly from ice and seawater densities
 real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
 logical :: Runge_not_Verlet=.True.  !True=Runge Kutta, False=Verlet.  - Added by Alon 
@@ -304,7 +312,7 @@ namelist /icebergs_nml/ verbose, budget, halo, traj_sample_hrs, initial_mass, tr
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, tip_parameter, &
          time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_icebergs_on, critical_interaction_damping_on, &
          old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj, &
-         read_old_restarts
+         read_old_restarts,tau_calving
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -415,6 +423,8 @@ real :: Total_mass  !Added by Alon
   allocate( grd%mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%mass(:,:)=0.
   allocate( grd%mass_on_ocean(grd%isd:grd%ied, grd%jsd:grd%jed, 9) ); grd%mass_on_ocean(:,:,:)=0.
   allocate( grd%stored_ice(grd%isd:grd%ied, grd%jsd:grd%jed, nclasses) ); grd%stored_ice(:,:,:)=0.
+  allocate( grd%rmean_calving(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%rmean_calving(:,:)=0.
+  allocate( grd%rmean_calving_hflx(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%rmean_calving_hflx(:,:)=0.
   allocate( grd%real_calving(grd%isd:grd%ied, grd%jsd:grd%jed, nclasses) ); grd%real_calving(:,:,:)=0.
   allocate( grd%uo(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%uo(:,:)=0.
   allocate( grd%vo(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%vo(:,:)=0.
@@ -557,6 +567,7 @@ endif
   bergs%passive_mode=passive_mode
   bergs%time_average_weight=time_average_weight
   bergs%speed_limit=speed_limit
+  bergs%tau_calving=tau_calving
   bergs%tip_parameter=tip_parameter
   bergs%Runge_not_Verlet=Runge_not_Verlet   !Alon
   bergs%use_updated_rolling_scheme=use_updated_rolling_scheme  !Alon
@@ -615,6 +626,10 @@ endif
      'Accumulated ice mass by class', 'kg')
   grd%id_real_calving=register_diag_field('icebergs', 'real_calving', axes3d, Time, &
      'Calving into iceberg class', 'kg/s')
+  grd%id_rmean_calving=register_diag_field('icebergs', 'running_mean_calving', axes, Time, &
+     'Running mean of calving', 'kg/s')
+  grd%id_rmean_calving_hflx=register_diag_field('icebergs', 'running_mean_calving_hflx', axes, Time, &
+     'Running mean of calving heat flux', 'J/s')
   grd%id_uo=register_diag_field('icebergs', 'uo', axes, Time, &
      'Ocean zonal component of velocity', 'm s^-1')
   grd%id_vo=register_diag_field('icebergs', 'vo', axes, Time, &
@@ -2593,6 +2608,8 @@ character(len=*) :: label
   call grd_chksum2(grd, grd%mass, 'mass')
   call grd_chksum3(grd, grd%mass_on_ocean, 'mass_on_ocean')
   call grd_chksum3(grd, grd%stored_ice, 'stored_ice')
+  call grd_chksum2(grd, grd%rmean_calving, 'rmean_calving')
+  call grd_chksum2(grd, grd%rmean_calving_hflx, 'rmean_calving_hflx')
   call grd_chksum2(grd, grd%stored_heat, 'stored_heat')
   call grd_chksum2(grd, grd%melt_buoy, 'melt_b')
   call grd_chksum2(grd, grd%melt_eros, 'melt_e')

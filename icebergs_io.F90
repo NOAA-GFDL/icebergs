@@ -306,6 +306,10 @@ integer, allocatable, dimension(:) :: ine,       &
   call write_data(filename, 'stored_heat', bergs%grd%stored_heat, bergs%grd%domain)
   !call grd_chksum2(bergs%grd, bergs%grd%iceberg_counter_grd, 'write iceberg_counter_grd')
   call write_data(filename, 'iceberg_counter_grd', bergs%grd%iceberg_counter_grd, bergs%grd%domain)
+  call grd_chksum2(bergs%grd, bergs%grd%rmean_calving, 'write mean calving')
+  call write_data(filename, 'rmean_calving', bergs%grd%rmean_calving, bergs%grd%domain)
+  call grd_chksum2(bergs%grd, bergs%grd%rmean_calving_hflx, 'write mean calving_hflx')
+  call write_data(filename, 'rmean_calving_hflx', bergs%grd%rmean_calving_hflx, bergs%grd%domain)
   contains
 
   function last_berg(berg)
@@ -1006,6 +1010,24 @@ type(randomNumberStream) :: rns
      'diamonds, read_restart_calving: stored_heat WAS NOT FOUND in the file. Setting to 0.'
       grd%stored_heat(:,:)=0.
     endif
+    if (field_exist(filename, 'rmean_calving')) then
+      if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
+       'diamonds, read_restart_calving: reading rmean_calving from restart file.'
+      call read_data(filename, 'rmean_calving', grd%rmean_calving, grd%domain)
+      grd%rmean_calving_initialized=.true.
+    else
+      if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
+     'diamonds, read_restart_calving: rmean_calving WAS NOT FOUND in the file. Setting to 0.'
+    endif
+    if (field_exist(filename, 'rmean_calving_hflx')) then
+      if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
+       'diamonds, read_restart_calving: reading rmean_calving_hflx from restart file.'
+      call read_data(filename, 'rmean_calving_hflx', grd%rmean_calving_hflx, grd%domain)
+      grd%rmean_calving_hflx_initialized=.true.
+    else
+      if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
+     'diamonds, read_restart_calving: rmean_calving_hflx WAS NOT FOUND in the file. Setting to 0.'
+    endif
     if (field_exist(filename, 'iceberg_counter_grd')) then
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
        'diamonds, read_restart_calving: reading iceberg_counter_grd from restart file.'
@@ -1046,8 +1068,12 @@ type(randomNumberStream) :: rns
 
   call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'read_restart_calving, stored_ice')
   call grd_chksum2(bergs%grd, bergs%grd%stored_heat, 'read_restart_calving, stored_heat')
+  call grd_chksum2(bergs%grd, bergs%grd%rmean_calving, 'read_restart_calving, rmean_calving')
+  call grd_chksum2(bergs%grd, bergs%grd%rmean_calving_hflx, 'read_restart_calving, rmean_calving_hflx')
 
   bergs%stored_start=sum( grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:) )
+  bergs%rmean_calving_start=sum( grd%rmean_calving(grd%isc:grd%iec,grd%jsc:grd%jec) )
+  bergs%rmean_calving_hflx_start=sum( grd%rmean_calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec) )
   call mpp_sum( bergs%stored_start )
   bergs%stored_heat_start=sum( grd%stored_heat(grd%isc:grd%iec,grd%jsc:grd%jec) )
   call mpp_sum( bergs%stored_heat_start )
