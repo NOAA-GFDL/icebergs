@@ -1191,9 +1191,11 @@ integer :: stderrunit
        *grd%msk(grd%isc:grd%iec,grd%jsc:grd%jec)
 
   ! Running means of calving and calving_hflx
-  call get_running_mean_calving(bergs, grd%calving, grd%calving_hflx)
-  calving(:,:)=grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec) ! Copy back from grd%calving if using running-mean
-  calving_hflx(:,:)=grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)
+  if (bergs%tau_calving>0.) then
+    call get_running_mean_calving(bergs, grd%calving, grd%calving_hflx)
+    calving(:,:)=grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec) ! Copy back from grd%calving if using running-mean
+    calving_hflx(:,:)=grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)
+  endif
 
   grd%calving(:,:)=grd%calving(:,:)*grd%msk(:,:)*grd%area(:,:) ! Convert to kg/s
   tmpsum=sum( grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec) )

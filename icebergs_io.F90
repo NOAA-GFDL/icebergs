@@ -306,10 +306,12 @@ integer, allocatable, dimension(:) :: ine,       &
   call write_data(filename, 'stored_heat', bergs%grd%stored_heat, bergs%grd%domain)
   !call grd_chksum2(bergs%grd, bergs%grd%iceberg_counter_grd, 'write iceberg_counter_grd')
   call write_data(filename, 'iceberg_counter_grd', bergs%grd%iceberg_counter_grd, bergs%grd%domain)
-  call grd_chksum2(bergs%grd, bergs%grd%rmean_calving, 'write mean calving')
-  call write_data(filename, 'rmean_calving', bergs%grd%rmean_calving, bergs%grd%domain)
-  call grd_chksum2(bergs%grd, bergs%grd%rmean_calving_hflx, 'write mean calving_hflx')
-  call write_data(filename, 'rmean_calving_hflx', bergs%grd%rmean_calving_hflx, bergs%grd%domain)
+  if (bergs%tau_calving>0.) then
+    call grd_chksum2(bergs%grd, bergs%grd%rmean_calving, 'write mean calving')
+    call write_data(filename, 'rmean_calving', bergs%grd%rmean_calving, bergs%grd%domain)
+    call grd_chksum2(bergs%grd, bergs%grd%rmean_calving_hflx, 'write mean calving_hflx')
+    call write_data(filename, 'rmean_calving_hflx', bergs%grd%rmean_calving_hflx, bergs%grd%domain)
+  endif
   contains
 
   function last_berg(berg)
