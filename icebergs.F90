@@ -1177,10 +1177,13 @@ integer :: stderrunit
        'diamonds: y,m,d=',iyr, imon, iday,' h,m,s=', ihr, imin, isec, &
        ' yr,yrdy=', bergs%current_year, bergs%current_yearday
 
+
   ! Adapt calving flux from coupler for use here
  !call sanitize_field(grd%calving,1.e20)
   tmpsum=sum( calving(:,:)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
   bergs%net_calving_received=bergs%net_calving_received+tmpsum*bergs%dt
+  
+  call get_running_mean_calving(bergs,calving,calving_hflx)
   grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec)=calving(:,:) ! Units of kg/m2/s
   grd%calving(:,:)=grd%calving(:,:)*grd%msk(:,:)*grd%area(:,:) ! Convert to kg/s
   tmpsum=sum( grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec) )
@@ -1368,6 +1371,10 @@ integer :: stderrunit
     lerr=send_data(grd%id_mass, grd%mass(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_stored_ice>0) &
     lerr=send_data(grd%id_stored_ice, grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:), Time)
+  if (grd%id_mean_calving>0) &
+    lerr=send_data(grd%id_mean_calving, grd%mean_calving(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (grd%id_mean_calving_hflx>0) &
+    lerr=send_data(grd%id_mean_calving_hflx, grd%mean_calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_real_calving>0) &
     lerr=send_data(grd%id_real_calving, grd%real_calving(grd%isc:grd%iec,grd%jsc:grd%jec,:), Time)
   if (grd%id_ssh>0) &
@@ -1412,6 +1419,8 @@ integer :: stderrunit
   bergs%net_outgoing_calving_heat=bergs%net_outgoing_calving_heat+tmpsum*bergs%dt ! Units of J
   if (lbudget) then
     bergs%stored_end=sum( grd%stored_ice(grd%isc:grd%iec,grd%jsc:grd%jec,:) )
+    bergs%mean_calving_end=sum( grd%mean_calving(grd%isc:grd%iec,grd%jsc:grd%jec) )
+    bergs%mean_calving_hflx_end=sum( grd%mean_calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec) )
     bergs%stored_heat_end=sum( grd%stored_heat(grd%isc:grd%iec,grd%jsc:grd%jec) )
     bergs%floating_mass_end=sum_mass(bergs%first)
     bergs%icebergs_mass_end=sum_mass(bergs%first,justbergs=.true.)
@@ -1612,6 +1621,35 @@ integer :: stderrunit
                       'error',((endval-startval)-(inval-outval))
   200 format("diamonds: ",a19,10(a18,"=",i14,x,:,","))
   end subroutine report_ibudget
+
+  subroutine get_running_mean_calving(bergs,calving,calving_hflx)
+  ! Arguments
+  type(icebergs), pointer :: bergs
+  real, dimension(:,:), intent(inout) :: calving, calving_hflx
+  ! Local variables
+  real ::  alpha  !Parameter used for calving relaxation time stepping.  (0<=alpha<1)
+  real ::  tau  !Relaxation timescale in seconds
+  !This subroutine takes in the new calving and calving_hflx, and uses them to time step a mean_calving value
+  !The time stepping uses a time scale tau. When tau is equal to zero, the
+  !running mean is exactly equal to the new calving value. 
+  !In the first iteration (or if the running mean is not yet set), then alpha is set to zero  (this is done using the 999. trick)
+
+  !Applying "Newton cooling" with timescale tau, to smooth out the calving field.
+  tau=bergs%tau_calving/(365.*24*60*60) !Converting time scale from years to seconds
+  alpha=tau/(tau+bergs%dt)
+  if ((maxval(bergs%grd%mean_calving).eq.999.0) .or. (maxval(bergs%grd%mean_calving_hflx).eq.999.0)) alpha=0.0  !Special case for first time step.
+  bergs%grd%mean_calving=calving + alpha*(bergs%grd%mean_calving-calving)
+  bergs%grd%mean_calving_hflx=calving + alpha*(bergs%grd%mean_calving_hflx-calving)
+  
+  !Removing negative values
+  bergs%grd%mean_calving=max(bergs%grd%mean_calving,0.)
+  bergs%grd%mean_calving_hflx=max(bergs%grd%mean_calving_hflx,0.)
+
+  !Setting calving used by the iceberg model equal to the running mean
+  calving=bergs%grd%mean_calving
+  calving_hflx=bergs%grd%mean_calving_hflx
+  
+  end subroutine get_running_mean_calving
 
 end subroutine icebergs_run
 
@@ -2792,6 +2830,7 @@ type(iceberg), pointer :: this, next
   deallocate(bergs%grd%tmp)
   deallocate(bergs%grd%tmpc)
   deallocate(bergs%grd%stored_ice)
+  deallocate(bergs%grd%mean_calving)
   deallocate(bergs%grd%real_calving)
   deallocate(bergs%grd%uo)
   deallocate(bergs%grd%vo)
