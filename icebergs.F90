@@ -2831,6 +2831,7 @@ type(iceberg), pointer :: this, next
   deallocate(bergs%grd%tmpc)
   deallocate(bergs%grd%stored_ice)
   deallocate(bergs%grd%mean_calving)
+  deallocate(bergs%grd%mean_calving_hflx)
   deallocate(bergs%grd%real_calving)
   deallocate(bergs%grd%uo)
   deallocate(bergs%grd%vo)
