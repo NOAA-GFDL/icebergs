@@ -693,6 +693,7 @@ type(time_type), intent(in) :: Time
 type(iceberg), pointer :: this
 integer :: iyr, imon, iday, ihr, imin, isec, yr_offset
 real :: latest_start_year, berg_start_year
+real :: current_time_val
 
   call get_date(Time, iyr, imon, iday, ihr, imin, isec)
   latest_start_year=iyr-99999
@@ -708,7 +709,9 @@ real :: latest_start_year, berg_start_year
   enddo
   call mpp_max(latest_start_year)
 
-  if (latest_start_year<=float(iyr)+yearday(imon, iday, ihr, imin, isec)/367.) return ! No conflicts!
+  current_time_val=float(iyr)+yearday(imon, iday, ihr, imin, isec)/367.
+  if (latest_start_year<=current_time_val) return ! No conflicts!
+  !if (latest_start_year<=float(iyr)+yearday(imon, iday, ihr, imin, isec)/367.) return ! No conflicts!
 
   yr_offset=int(latest_start_year+1.)-iyr
   if (mpp_pe().eq.mpp_root_pe()) write(*,'(a,i8,a)') &

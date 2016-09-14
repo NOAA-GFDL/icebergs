@@ -298,6 +298,7 @@ integer, allocatable, dimension(:) :: ine,       &
 
   ! Write stored ice
   filename='RESTART/calving.res.nc'
+  if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stderrunit,'(2a)') 'diamonds, write_restart: writing ',filename
 
   call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'write stored_ice')
   call write_data(filename, 'stored_ice', bergs%grd%stored_ice, bergs%grd%domain)
@@ -473,11 +474,6 @@ integer :: stderrunit, iNg, jNg, i, j
       localberg%start_lat=get_double(ncid, start_latid, k)
       localberg%start_year=get_int(ncid, start_yearid, k)
       if (bergs%read_old_restarts) then
-        ! This emulates the iceberg counter used at calving sites but uses the restart position instead
-        !i = localberg%ine
-        !j = localberg%jne
-        !localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i+(iNg*(j-1)))  ! unique number for each iceberg
-        !grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
         localberg%iceberg_num=-1
       else
         localberg%iceberg_num=get_int(ncid, iceberg_numid, k)
@@ -799,15 +795,7 @@ integer, allocatable, dimension(:) :: ine,       &
       localberg%start_lon=start_lon(k)
       localberg%start_lat=start_lat(k)
       localberg%start_year=start_year(k)
-      !if (bergs%read_old_restarts) then
-      !  ! This emulates the iceberg counter used at calving sites but uses the restart position instead
-      !  !i = localberg%ine
-      !  !j = localberg%jne
-      !  !localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i+(iNg*(j-1)))  ! unique number for each iceberg
-      !  !grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
-      !else
-        localberg%iceberg_num=iceberg_num(k)
-      !endif
+      localberg%iceberg_num=iceberg_num(k)
       localberg%start_day=start_day(k)
       localberg%start_mass=start_mass(k)
       localberg%mass_scaling=mass_scaling(k)
@@ -907,47 +895,34 @@ contains
         localberg%mass_scaling=bergs%mass_scaling(1)
         localberg%mass_of_bits=0.
         localberg%heat_density=0.
+        localberg%axn=0. !Alon
+        localberg%ayn=0. !Alon
+        localberg%uvel_old=0. !Alon
+        localberg%vvel_old=0. !Alon
+        localberg%bxn=0. !Alon
+        localberg%byn=0. !Alon
+
+        !Berg A
         localberg%uvel=1.
         localberg%vvel=0.
-        localberg%axn=0. !Alon
-        localberg%ayn=0. !Alon
-        localberg%uvel_old=0. !Alon
-        localberg%vvel_old=0. !Alon
-        localberg%bxn=0. !Alon
-        localberg%byn=0. !Alon
         localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
         grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
         call add_new_berg_to_list(bergs%first, localberg)
+        !Berg B
         localberg%uvel=-1.
         localberg%vvel=0.
-        localberg%axn=0. !Alon
-        localberg%ayn=0. !Alon
-        localberg%uvel_old=0. !Alon
-        localberg%vvel_old=0. !Alon
-        localberg%bxn=0. !Alon
-        localberg%byn=0. !Alon
         localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
         grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
         call add_new_berg_to_list(bergs%first, localberg)
+        !Berg C
         localberg%uvel=0.
         localberg%vvel=1.
-        localberg%axn=0. !Alon
-        localberg%ayn=0. !Alon
-        localberg%uvel_old=0. !Alon
-        localberg%vvel_old=0. !Alon
-        localberg%bxn=0. !Alon
-        localberg%byn=0. !Alon
         localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
         grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
         call add_new_berg_to_list(bergs%first, localberg)
+        !Berg D
         localberg%uvel=0.
         localberg%vvel=-1.
-        localberg%axn=0. !Alon
-        localberg%ayn=0. !Alon
-        localberg%uvel_old=0. !Alon
-        localberg%vvel_old=0. !Alon
-        localberg%bxn=0. !Alon
-        localberg%byn=0. !Alon
         localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
         grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
         call add_new_berg_to_list(bergs%first, localberg)
