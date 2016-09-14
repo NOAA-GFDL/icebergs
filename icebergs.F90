@@ -1839,11 +1839,7 @@ integer :: stderrunit
           grd%stored_ice(i,j,k)=grd%stored_ice(i,j,k)-calved_to_berg
           calving_to_bergs=calving_to_bergs+calved_to_berg
           grd%real_calving(i,j,k)=grd%real_calving(i,j,k)+calved_to_berg/bergs%dt
-
-          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
           ddt=ddt-bergs%dt*2./17. ! Minor offset to start day (negative offsets)
-          !ddt=ddt+bergs%dt*2./17. ! Minor offset to start day
-          !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
           icnt=icnt+1
           bergs%nbergs_calved=bergs%nbergs_calved+1
           bergs%nbergs_calved_by_class(k)=bergs%nbergs_calved_by_class(k)+1

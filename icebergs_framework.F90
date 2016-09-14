@@ -711,7 +711,6 @@ real :: current_time_val
 
   current_time_val=float(iyr)+yearday(imon, iday, ihr, imin, isec)/367.
   if (latest_start_year<=current_time_val) return ! No conflicts!
-  !if (latest_start_year<=float(iyr)+yearday(imon, iday, ihr, imin, isec)/367.) return ! No conflicts!
 
   yr_offset=int(latest_start_year+1.)-iyr
   if (mpp_pe().eq.mpp_root_pe()) write(*,'(a,i8,a)') &
