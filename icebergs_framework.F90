@@ -117,11 +117,13 @@ type :: icebergs_gridded
   real, dimension(:,:), pointer :: bergy_melt=>null() ! Melting rate of bergy bits (kg/s/m^2)
   real, dimension(:,:), pointer :: bergy_mass=>null() ! Mass distribution of bergy bits (kg/s/m^2)
   real, dimension(:,:), pointer :: spread_mass=>null() ! Mass of icebergs after spreading (kg/s/m^2)
+  real, dimension(:,:), pointer :: spread_area=>null() ! Area of icebergs after spreading (m^2/s/m^2)
   real, dimension(:,:), pointer :: u_iceberg=>null() ! Average iceberg velocity in grid cell (mass weighted - but not spread mass weighted)
   real, dimension(:,:), pointer :: v_iceberg=>null() ! Average iceberg velocity in grid cell (mass weighted - but not spread mass weighted)
   real, dimension(:,:), pointer :: virtual_area=>null() ! Virtual surface coverage by icebergs (m^2)
   real, dimension(:,:), pointer :: mass=>null() ! Mass distribution (kg/m^2)
-  real, dimension(:,:,:), pointer :: mass_on_ocean=>null() ! Mass distribution partitioned by neighbor (kg/m^2)
+  real, dimension(:,:,:), pointer :: mass_on_ocean=>null() ! Mass distribution partitioned by neighbor (kg/m^2)   - Alon:I think that this actually has units of kg
+  real, dimension(:,:,:), pointer :: area_on_ocean=>null() ! Area distribution partitioned by neighbor (m^2/m^2)  - Alon:I think that this actually has units of m^2
   real, dimension(:,:), pointer :: tmp=>null() ! Temporary work space
   real, dimension(:,:), pointer :: tmpc=>null() ! Temporary work space
   real, dimension(:,:,:), pointer :: stored_ice=>null() ! Accumulated ice mass flux at calving locations (kg)
@@ -136,8 +138,9 @@ type :: icebergs_gridded
   integer :: id_melt_buoy=-1, id_melt_eros=-1, id_melt_conv=-1, id_virtual_area=-1, id_real_calving=-1
   integer :: id_calving_hflx_in=-1, id_stored_heat=-1, id_melt_hflx=-1, id_heat_content=-1
   integer :: id_mass=-1, id_ui=-1, id_vi=-1, id_ua=-1, id_va=-1, id_sst=-1, id_cn=-1, id_hi=-1
-  integer :: id_bergy_src=-1, id_bergy_melt=-1, id_bergy_mass=-1, id_berg_melt=-1
-  integer :: id_mass_on_ocn=-1, id_ssh=-1, id_fax=-1, id_fay=-1,  id_spread_mass=-1
+  integer :: id_bergy_src=-1,   id_bergy_melt=-1, id_bergy_mass=-1, id_berg_melt=-1
+  integer :: id_mass_on_ocn=-1, id_area_on_ocn=-1, id_spread_mass=-1, id_spread_area=-1
+  integer :: id_ssh=-1, id_fax=-1, id_fay=-1
   integer :: id_count=-1, id_chksum=-1, id_u_iceberg=-1, id_v_iceberg=-1, id_sss=-1
 
   real :: clipping_depth=0. ! The effective depth at which to clip the weight felt by the ocean [m].
@@ -263,9 +266,11 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   real :: icebergs_mass_start=0., icebergs_mass_end=0.
   real :: bergy_mass_start=0., bergy_mass_end=0.
   real :: spread_mass_start=0., spread_mass_end=0.
+  real :: spread_area_start=0., spread_area_end=0.
   real :: u_iceberg_start=0., u_iceberg_end=0.
   real :: v_iceberg_start=0., v_iceberg_end=0.
   real :: returned_mass_on_ocean=0.
+  real :: returned_area_on_ocean=0.
   real :: net_melt=0., berg_melt=0., bergy_src=0., bergy_melt=0.
   integer :: nbergs_calved=0, nbergs_melted=0, nbergs_start=0, nbergs_end=0
   integer :: nspeeding_tickets=0
@@ -501,11 +506,13 @@ real :: Total_mass  !Added by Alon
   allocate( grd%bergy_melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_melt(:,:)=0.
   allocate( grd%bergy_mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_mass(:,:)=0.
   allocate( grd%spread_mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_mass(:,:)=0.
+  allocate( grd%spread_area(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_area(:,:)=0.
   allocate( grd%u_iceberg(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%u_iceberg(:,:)=0.
   allocate( grd%v_iceberg(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%v_iceberg(:,:)=0.
   allocate( grd%virtual_area(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%virtual_area(:,:)=0.
   allocate( grd%mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%mass(:,:)=0.
   allocate( grd%mass_on_ocean(grd%isd:grd%ied, grd%jsd:grd%jed, 9) ); grd%mass_on_ocean(:,:,:)=0.
+  allocate( grd%area_on_ocean(grd%isd:grd%ied, grd%jsd:grd%jed, 9) ); grd%area_on_ocean(:,:,:)=0.
   allocate( grd%stored_ice(grd%isd:grd%ied, grd%jsd:grd%jed, nclasses) ); grd%stored_ice(:,:,:)=0.
   allocate( grd%real_calving(grd%isd:grd%ied, grd%jsd:grd%jed, nclasses) ); grd%real_calving(:,:,:)=0.
   allocate( grd%uo(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%uo(:,:)=0.
@@ -819,6 +826,8 @@ if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffe
      'Bergy bit density field', 'kg/(m^2)')
   grd%id_spread_mass=register_diag_field('icebergs', 'spread_mass', axes, Time, &
      'Iceberg mass after spreading', 'kg/(m^2)')
+  grd%id_spread_area=register_diag_field('icebergs', 'spread_area', axes, Time, &
+     'Iceberg area after spreading', 'm^2/(m^2)')
   grd%id_u_iceberg=register_diag_field('icebergs', 'u_iceberg', axes, Time, &
      'Iceberg u velocity (m/s)')
   grd%id_v_iceberg=register_diag_field('icebergs', 'v_iceberg', axes, Time, &
@@ -829,6 +838,8 @@ if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffe
      'Iceberg density field', 'kg/(m^2)')
   grd%id_mass_on_ocn=register_diag_field('icebergs', 'mass_on_ocean', axes, Time, &
      'Iceberg density field felt by ocean', 'kg/(m^2)')
+  grd%id_area_on_ocn=register_diag_field('icebergs', 'area_on_ocean', axes, Time, &
+     'Iceberg area field felt by ocean', 'm^2/(m^2)')
   grd%id_stored_ice=register_diag_field('icebergs', 'stored_ice', axes3d, Time, &
      'Accumulated ice mass by class', 'kg')
   grd%id_real_calving=register_diag_field('icebergs', 'real_calving', axes3d, Time, &
@@ -3792,6 +3803,7 @@ character(len=*) :: label
   ! state
   call grd_chksum2(grd, grd%mass, 'mass')
   call grd_chksum3(grd, grd%mass_on_ocean, 'mass_on_ocean')
+  call grd_chksum3(grd, grd%area_on_ocean, 'area_on_ocean')
   call grd_chksum3(grd, grd%stored_ice, 'stored_ice')
   call grd_chksum2(grd, grd%stored_heat, 'stored_heat')
   call grd_chksum2(grd, grd%melt_buoy, 'melt_b')
@@ -3800,9 +3812,10 @@ character(len=*) :: label
   call grd_chksum2(grd, grd%bergy_src, 'bergy_src')
   call grd_chksum2(grd, grd%bergy_melt, 'bergy_melt')
   call grd_chksum2(grd, grd%bergy_mass, 'bergy_mass')
-  call grd_chksum2(grd, grd%bergy_mass, 'spread_mass')
-  call grd_chksum2(grd, grd%bergy_mass, 'u_iceberg')
-  call grd_chksum2(grd, grd%bergy_mass, 'v_iceberg')
+  call grd_chksum2(grd, grd%spread_mass, 'spread_mass')
+  call grd_chksum2(grd, grd%spread_area, 'spread_area')
+  call grd_chksum2(grd, grd%u_iceberg, 'u_iceberg')
+  call grd_chksum2(grd, grd%v_iceberg, 'v_iceberg')
   call grd_chksum2(grd, grd%virtual_area, 'varea')
   call grd_chksum2(grd, grd%floating_melt, 'floating_melt')
   call grd_chksum2(grd, grd%berg_melt, 'berg_melt')

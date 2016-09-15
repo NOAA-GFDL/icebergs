@@ -1766,7 +1766,7 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
   real, intent(in) :: theta
   real, optional, intent(in) :: static_berg
   ! Local variables
-  real :: xL, xC, xR, yD, yC, yU, Mass, L
+  real :: xL, xC, xR, yD, yC, yU, Mass, L, Area_scaled
   real :: yDxL, yDxC, yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR
   real :: S, H, origin_x, origin_y, x0, y0
   real :: Area_Q1,Area_Q2 , Area_Q3,Area_Q4, Area_hex
@@ -1912,6 +1912,7 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
     fraction_used=1.  !Static icebergs do not share their mass with the boundary (this to initialize icebergs in regular arrangements against boundaries)
   endif
 
+  !Spreading the iceberg mass onto the ocean
   grd%mass_on_ocean(i,j,1)=grd%mass_on_ocean(i,j,1)+(yDxL*Mass/fraction_used)
   grd%mass_on_ocean(i,j,2)=grd%mass_on_ocean(i,j,2)+(yDxC*Mass/fraction_used)
   grd%mass_on_ocean(i,j,3)=grd%mass_on_ocean(i,j,3)+(yDxR*Mass/fraction_used)
@@ -1922,6 +1923,17 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
   grd%mass_on_ocean(i,j,8)=grd%mass_on_ocean(i,j,8)+(yUxC*Mass/fraction_used)
   grd%mass_on_ocean(i,j,9)=grd%mass_on_ocean(i,j,9)+(yUxR*Mass/fraction_used)
 
+  !Spreading the iceberg area onto the ocean
+  Area_scaled=Area*scaling
+  grd%area_on_ocean(i,j,1)=grd%area_on_ocean(i,j,1)+(yDxL*Area_scaled/fraction_used)
+  grd%area_on_ocean(i,j,2)=grd%area_on_ocean(i,j,2)+(yDxC*Area_scaled/fraction_used)
+  grd%area_on_ocean(i,j,3)=grd%area_on_ocean(i,j,3)+(yDxR*Area_scaled/fraction_used)
+  grd%area_on_ocean(i,j,4)=grd%area_on_ocean(i,j,4)+(yCxL*Area_scaled/fraction_used)
+  grd%area_on_ocean(i,j,5)=grd%area_on_ocean(i,j,5)+(yCxC*Area_scaled/fraction_used)
+  grd%area_on_ocean(i,j,6)=grd%area_on_ocean(i,j,6)+(yCxR*Area_scaled/fraction_used)
+  grd%area_on_ocean(i,j,7)=grd%area_on_ocean(i,j,7)+(yUxL*Area_scaled/fraction_used)
+  grd%area_on_ocean(i,j,8)=grd%area_on_ocean(i,j,8)+(yUxC*Area_scaled/fraction_used)
+  grd%area_on_ocean(i,j,9)=grd%area_on_ocean(i,j,9)+(yUxR*Area_scaled/fraction_used)
 
 end subroutine spread_mass_across_ocean_cells
 
@@ -2564,7 +2576,7 @@ real, dimension(:,:), optional, intent(in) :: sss
 integer :: iyr, imon, iday, ihr, imin, isec, k
 type(icebergs_gridded), pointer :: grd
 logical :: lerr, sample_traj, write_traj, lbudget, lverbose, check_bond_quality 
-real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass,grdd_spread_mass
+real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass,grdd_spread_mass, grdd_spread_area
 real :: grdd_u_iceberg, grdd_v_iceberg
 integer :: i, j, Iu, ju, iv, Jv, Iu_off, ju_off, iv_off, Jv_off
 real :: mask
@@ -2572,7 +2584,7 @@ real, dimension(:,:), allocatable :: uC_tmp, vC_tmp
 integer :: vel_stagger, str_stagger
 real, dimension(:,:), allocatable :: iCount
 integer :: nbonds
-logical :: within_iceberg_model
+!logical :: within_iceberg_model
 
 integer :: stderrunit
 
@@ -2597,11 +2609,13 @@ integer :: stderrunit
   grd%bergy_melt(:,:)=0.
   grd%bergy_mass(:,:)=0.
   !grd%spread_mass(:,:)=0.  !Don't zero this out yet, because we can first use this an add it onto the SSH
+  grd%spread_area(:,:)=0. 
   grd%u_iceberg(:,:)=0.
   grd%v_iceberg(:,:)=0.
   grd%mass(:,:)=0.
 
   if (bergs%add_weight_to_ocean) grd%mass_on_ocean(:,:,:)=0.
+  if (bergs%add_weight_to_ocean) grd%area_on_ocean(:,:,:)=0.
   grd%virtual_area(:,:)=0.
 
   ! Manage time
@@ -2831,25 +2845,28 @@ integer :: stderrunit
     call write_trajectory(bergs%trajectories, bergs%save_short_traj)
   endif
 
-  !Update diagnostic of iceberg mass spread on ocean,MP1 
-  if ( (grd%id_spread_mass>0) .or. (bergs%find_melt_using_spread_mass) ) then
-    if ((bergs%find_melt_using_spread_mass) ) then
-      grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec)=grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)  !Temporarily using the variable calving for storing old mass (not sure better way)
-    endif
+  !Using spread_mass_to_ocean to calculate melt rates (if this option is chosen)
+  !within_iceberg_model=.True.
+  if (bergs%find_melt_using_spread_mass) then
+    grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec)=grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)  !Temporarily using the variable calving for storing old mass (not sure better way)
     grd%spread_mass(:,:)=0.
-    within_iceberg_model=.True.
-    call icebergs_incr_mass(bergs, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec),within_iceberg_model) 
-    if (bergs%find_melt_using_spread_mass) then
-     do i=grd%isc,grd%iec ; do j=grd%jsc,grd%jec
-       if (grd%area(i,j)>0.0) then
-         grd%floating_melt(i,j)=max((grd%floating_melt(i,j) - grd%spread_mass(i,j))/(bergs%dt),0.0)
-         !grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)=grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec)*HLF !Not 100% sure this is correct.
-         grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)=grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec)*0.0 !Not 100% sure this is correct.
-       else
-         grd%floating_melt(i,j)=0.0
-       endif
-     enddo ;enddo
-    endif
+    call icebergs_incr_mass(bergs, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec),within_iceberg_model=.True.) 
+    do i=grd%isc,grd%iec ; do j=grd%jsc,grd%jec
+      if (grd%area(i,j)>0.0) then
+        grd%floating_melt(i,j)=max((grd%floating_melt(i,j) - grd%spread_mass(i,j))/(bergs%dt),0.0)
+        !grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)=grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec)*HLF !Not 100% sure this is correct.
+        grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)=grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec)*0.0 !Not 100% sure this is correct.
+      else
+        grd%floating_melt(i,j)=0.0
+      endif
+    enddo ;enddo
+  elseif  (grd%id_spread_mass>0) then   !Update diagnostic of iceberg mass spread on ocean
+    grd%spread_mass(:,:)=0.
+    call icebergs_incr_mass(bergs, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec),within_iceberg_model=.True.) 
+  endif
+  if ( (grd%id_spread_area>0) ) then  !Update diagnostic of iceberg area spread on ocean
+    grd%spread_area(:,:)=0.
+    call icebergs_incr_mass(bergs, grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec),within_iceberg_model=.True.,spread_area_not_mass=.True.) 
   endif
 
   ! Gridded diagnostics
@@ -2893,6 +2910,8 @@ integer :: stderrunit
     lerr=send_data(grd%id_bergy_mass, grd%bergy_mass(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_spread_mass>0) &
     lerr=send_data(grd%id_spread_mass, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (grd%id_spread_area>0) &
+    lerr=send_data(grd%id_spread_area, grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_u_iceberg>0) &
     lerr=send_data(grd%id_u_iceberg, grd%u_iceberg(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_v_iceberg>0) &
@@ -2968,15 +2987,22 @@ integer :: stderrunit
     bergs%floating_mass_end=sum_mass(bergs)
     bergs%icebergs_mass_end=sum_mass(bergs,justbergs=.true.)
     bergs%bergy_mass_end=sum_mass(bergs,justbits=.true.)
-    bergs%spread_mass_end=sum_mass(bergs) !Not sure what this is
-    bergs%u_iceberg_end=sum_mass(bergs) !Not sure what this is
-    bergs%v_iceberg_end=sum_mass(bergs) !Not sure what this is
+    !bergs%spread_mass_end=sum_mass(bergs) !Not sure what this is
+    !bergs%spread_area_end=sum_mass(bergs) !Not sure what this is
+    !bergs%u_iceberg_end=sum_mass(bergs) !Not sure what this is
+    !bergs%v_iceberg_end=sum_mass(bergs) !Not sure what this is
     bergs%floating_heat_end=sum_heat(bergs)
     grd%tmpc(:,:)=0.;
+    !Finding spread mass
     call mpp_clock_end(bergs%clock); call mpp_clock_end(bergs%clock_dia) ! To enable calling of public s/r
     call icebergs_incr_mass(bergs, grd%tmpc)
     call mpp_clock_begin(bergs%clock_dia); call mpp_clock_begin(bergs%clock) ! To enable calling of public s/r
     bergs%returned_mass_on_ocean=sum( grd%tmpc(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
+    !Finding spread area
+    call mpp_clock_end(bergs%clock); call mpp_clock_end(bergs%clock_dia) ! To enable calling of public s/r
+    call icebergs_incr_mass(bergs, grd%tmpc,spread_area_not_mass=.true.)
+    call mpp_clock_begin(bergs%clock_dia); call mpp_clock_begin(bergs%clock) ! To enable calling of public s/r
+    bergs%returned_area_on_ocean=sum( grd%tmpc(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
     bergs%nbergs_end=count_bergs(bergs)
     call mpp_sum(bergs%stored_end)
     call mpp_sum(bergs%stored_heat_end)
@@ -2984,6 +3010,7 @@ integer :: stderrunit
     call mpp_sum(bergs%icebergs_mass_end)
     call mpp_sum(bergs%bergy_mass_end)
     call mpp_sum(bergs%spread_mass_end)
+    call mpp_sum(bergs%spread_area_end)
     call mpp_sum(bergs%u_iceberg_end)
     call mpp_sum(bergs%v_iceberg_end)
     call mpp_sum(bergs%floating_heat_end)
@@ -3014,6 +3041,8 @@ integer :: stderrunit
     call mpp_sum(grdd_bergy_mass)
     grdd_spread_mass=sum( grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
     call mpp_sum(grdd_spread_mass)
+    grdd_spread_area=sum( grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
+    call mpp_sum(grdd_spread_area)
     if (mpp_pe().eq.mpp_root_pe()) then
  100 format("diamonds: ",a19,3(a18,"=",es14.7,x,a2,:,","),a12,i8)
  200 format("diamonds: ",a19,10(a18,"=",es14.7,x,a2,:,","))
@@ -3022,6 +3051,7 @@ integer :: stderrunit
       call report_state('icebergs','kg','',bergs%icebergs_mass_start,'',bergs%icebergs_mass_end,'')
       call report_state('bits','kg','',bergs%bergy_mass_start,'',bergs%bergy_mass_end,'')
       call report_state('spread icebergs','kg','',bergs%spread_mass_start,'',bergs%spread_mass_end,'')
+      call report_state('spread icebergs','m^2','',bergs%spread_area_start,'',bergs%spread_area_end,'')
       call report_istate('berg #','',bergs%nbergs_start,'',bergs%nbergs_end,'')
       call report_ibudget('berg #','calved',bergs%nbergs_calved, &
                                    'melted',bergs%nbergs_melted, &
@@ -3044,6 +3074,7 @@ integer :: stderrunit
                                                     bergs%stored_end+bergs%floating_mass_end)
       call report_consistant('iceberg mass','kg','gridded',grdd_berg_mass,'bergs',bergs%icebergs_mass_end)
       call report_consistant('spread mass','kg','gridded',grdd_spread_mass,'bergs',bergs%spread_mass_end)
+      call report_consistant('spread area','kg','gridded',grdd_spread_area,'bergs',bergs%spread_area_end)
       call report_consistant('bits mass','kg','gridded',grdd_bergy_mass,'bits',bergs%bergy_mass_end)
       call report_consistant('wieght','kg','returned',bergs%returned_mass_on_ocean,'floating',bergs%floating_mass_end)
       call report_state('net heat','J','',bergs%stored_heat_start+bergs%floating_heat_start,'',&
@@ -3080,6 +3111,7 @@ integer :: stderrunit
     bergs%icebergs_mass_start=bergs%icebergs_mass_end
     bergs%bergy_mass_start=bergs%bergy_mass_end
     bergs%spread_mass_start=bergs%spread_mass_end
+    bergs%spread_area_start=bergs%spread_area_end
     bergs%net_calving_used=0.
     bergs%net_calving_to_bergs=0.
     bergs%net_heat_to_bergs=0.
@@ -3186,23 +3218,43 @@ end subroutine icebergs_run
 
 ! ##############################################################################
 
-subroutine icebergs_incr_mass(bergs, mass, within_iceberg_model, Time)
+subroutine icebergs_incr_mass(bergs, mass, within_iceberg_model, Time, spread_area_not_mass)
 ! Arguments
 type(icebergs), pointer :: bergs
 real, dimension(bergs%grd%isc:bergs%grd%iec,bergs%grd%jsc:bergs%grd%jec), intent(inout) :: mass
 type(time_type), intent(in), optional :: Time
 logical, intent(in), optional :: within_iceberg_model
-logical :: within_model
+logical, intent(in), optional :: spread_area_not_mass
 ! Local variables
+logical :: within_model
+logical :: spread_area !Logical flag which allows you to spread area over ocean (instead of mass)
 integer :: i, j
 type(icebergs_gridded), pointer :: grd
 real :: dmda
 logical :: lerr
+real, dimension(bergs%grd%isd:bergs%grd%ied, bergs%grd%jsd:bergs%grd%jed,9) :: var_on_ocean   !Variable being spread onto the ocean  (mass or area)
 integer :: stderrunit
 
   ! Get the stderr unit number
   stderrunit = stderr()
+  ! For convenience
+  grd=>bergs%grd
+
+  !var_on_ocean(:,:,:)=0.
   
+  !Decide whether area of mass are being spread across grid cells (default spread mass)
+  spread_area=.False. 
+  if (present(spread_area_not_mass)) then 
+    if (spread_area_not_mass) then 
+      spread_area=.True. 
+    endif
+  endif
+  if (spread_area) then 
+    var_on_ocean(:,:,:)=grd%area_on_ocean(:,:,:)
+  else
+    var_on_ocean(:,:,:)=grd%mass_on_ocean(:,:,:)
+  endif
+
   
   within_model=.False.
   if (present(within_iceberg_model)) then 
@@ -3216,8 +3268,6 @@ integer :: stderrunit
     call mpp_clock_begin(bergs%clock_int)
   endif
 
-  ! For convenience
-  grd=>bergs%grd
 
   ! Add iceberg+bits mass field to non-haloed SIS field (kg/m^2)
  !mass(:,:)=mass(:,:)+( grd%mass(grd%isc:grd%iec,grd%jsc:grd%jec) &
@@ -3228,7 +3278,7 @@ integer :: stderrunit
     call grd_chksum2(grd, grd%tmp, 'mass in (incr)')
   endif
 
-  call mpp_update_domains(grd%mass_on_ocean, grd%domain)
+  call mpp_update_domains(var_on_ocean, grd%domain)
   if (.not. old_bug_rotated_weights) then
     do j=grd%jsd, grd%jed; do i=grd%isd, grd%ied
       if (grd%parity_x(i,j)<0.) then
@@ -3236,19 +3286,19 @@ integer :: stderrunit
         ! (i.e. a 180 degree rotation). In general, we should handle
         ! +/- 90 degree rotations as well but in CM2*-class models
         ! this is not necessary. -aja
-        dmda=grd%mass_on_ocean(i,j,9); grd%mass_on_ocean(i,j,9)=grd%mass_on_ocean(i,j,1); grd%mass_on_ocean(i,j,1)=dmda
-        dmda=grd%mass_on_ocean(i,j,8); grd%mass_on_ocean(i,j,8)=grd%mass_on_ocean(i,j,2); grd%mass_on_ocean(i,j,2)=dmda
-        dmda=grd%mass_on_ocean(i,j,7); grd%mass_on_ocean(i,j,7)=grd%mass_on_ocean(i,j,3); grd%mass_on_ocean(i,j,3)=dmda
-        dmda=grd%mass_on_ocean(i,j,6); grd%mass_on_ocean(i,j,6)=grd%mass_on_ocean(i,j,4); grd%mass_on_ocean(i,j,4)=dmda
+        dmda=var_on_ocean(i,j,9); var_on_ocean(i,j,9)=var_on_ocean(i,j,1); var_on_ocean(i,j,1)=dmda
+        dmda=var_on_ocean(i,j,8); var_on_ocean(i,j,8)=var_on_ocean(i,j,2); var_on_ocean(i,j,2)=dmda
+        dmda=var_on_ocean(i,j,7); var_on_ocean(i,j,7)=var_on_ocean(i,j,3); var_on_ocean(i,j,3)=dmda
+        dmda=var_on_ocean(i,j,6); var_on_ocean(i,j,6)=var_on_ocean(i,j,4); var_on_ocean(i,j,4)=dmda
       endif
     enddo; enddo
   endif
   do j=grd%jsc, grd%jec; do i=grd%isc, grd%iec
-    dmda=grd%mass_on_ocean(i,j,5) &
-         + ( ( (grd%mass_on_ocean(i-1,j-1,9)+grd%mass_on_ocean(i+1,j+1,1))   &
-         +     (grd%mass_on_ocean(i+1,j-1,7)+grd%mass_on_ocean(i-1,j+1,3)) ) &
-         +   ( (grd%mass_on_ocean(i-1,j  ,6)+grd%mass_on_ocean(i+1,j  ,4))   &
-         +     (grd%mass_on_ocean(i  ,j-1,8)+grd%mass_on_ocean(i  ,j+1,2)) ) )
+    dmda=var_on_ocean(i,j,5) &
+         + ( ( (var_on_ocean(i-1,j-1,9)+var_on_ocean(i+1,j+1,1))   &
+         +     (var_on_ocean(i+1,j-1,7)+var_on_ocean(i-1,j+1,3)) ) &
+         +   ( (var_on_ocean(i-1,j  ,6)+var_on_ocean(i+1,j  ,4))   &
+         +     (var_on_ocean(i  ,j-1,8)+var_on_ocean(i  ,j+1,2)) ) )
     if (grd%area(i,j)>0) dmda=dmda/grd%area(i,j)*grd%msk(i,j)
 
     if (.not.(within_model)) then
@@ -3256,16 +3306,27 @@ integer :: stderrunit
     else
       mass(i,j)=dmda
     endif
-    if (grd%id_mass_on_ocn>0) grd%tmp(i,j)=dmda
+    if ((grd%id_area_on_ocn>0).and.(spread_area)) grd%tmp(i,j)=dmda
+    if ((grd%id_mass_on_ocn>0).and.(.not. spread_area)) grd%tmp(i,j)=dmda
   enddo; enddo
-  if (present(Time).and. (grd%id_mass_on_ocn>0)) &
-    lerr=send_data(grd%id_mass_on_ocn, grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  
+  if (spread_area) then
+    if (present(Time).and. (grd%id_area_on_ocn>0)) &
+      lerr=send_data(grd%id_area_on_ocn, grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  else
+    if (present(Time).and. (grd%id_mass_on_ocn>0)) &
+      lerr=send_data(grd%id_mass_on_ocn, grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  endif
 
   if (debug) then
     grd%tmp(:,:)=0.; grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec)=mass
-    call grd_chksum3(grd, grd%mass_on_ocean, 'mass bergs (incr)')
-    call grd_chksum2(grd, grd%tmp, 'mass out (incr)')
-
+    if (.not. spread_area) then
+      call grd_chksum3(grd, grd%mass_on_ocean, 'mass bergs (incr)')
+      call grd_chksum2(grd, grd%tmp, 'mass out (incr)')
+    else
+      call grd_chksum3(grd, grd%area_on_ocean, 'area bergs (incr)')
+      call grd_chksum2(grd, grd%tmp, 'area out (incr)')
+    endif
   endif
 
   if (.not.(within_model)) then
@@ -4510,9 +4571,11 @@ type(iceberg), pointer :: this, next
   deallocate(bergs%grd%bergy_melt)
   deallocate(bergs%grd%bergy_mass)
   deallocate(bergs%grd%spread_mass)
+  deallocate(bergs%grd%spread_area)
   deallocate(bergs%grd%virtual_area)
   deallocate(bergs%grd%mass)
   deallocate(bergs%grd%mass_on_ocean)
+  deallocate(bergs%grd%area_on_ocean)
   deallocate(bergs%grd%tmp)
   deallocate(bergs%grd%tmpc)
   deallocate(bergs%grd%stored_ice)
