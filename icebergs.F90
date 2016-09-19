@@ -1114,6 +1114,7 @@ real :: M, T, W, L, SST, Vol, Ln, Wn, Tn, nVol, IC, Dn
 real :: Mv, Me, Mb, melt, dvo, dva, dM, Ss, dMe, dMb, dMv
 real :: Mnew, Mnew1, Mnew2, Hocean
 real :: Mbits, nMbits, dMbitsE, dMbitsM, Lbits, Abits, Mbb
+real :: ustar_h, ustar
 integer :: i,j, stderrunit
 type(iceberg), pointer :: this, next
 real, parameter :: perday=1./86400.
@@ -1316,10 +1317,8 @@ real :: SSS !Temporarily here
         if ((grd%id_mass>0 .or. bergs%add_weight_to_ocean) .or. ((grd%id_u_iceberg>0) .or. (grd%id_v_iceberg>0)))   &
              & grd%mass(i,j)=grd%mass(i,j)+Mnew/grd%area(i,j)*this%mass_scaling ! kg/m2
         !Finding the average iceberg velocity in a grid cell (mass weighted)
-        if (grd%id_u_iceberg>0 )&
-             & grd%u_iceberg(i,j)=grd%u_iceberg(i,j)+((Mnew/grd%area(i,j)*this%mass_scaling)*this%uvel) ! kg/m2
-        if (grd%id_v_iceberg>0 )&
-             & grd%v_iceberg(i,j)=grd%v_iceberg(i,j)+((Mnew/grd%area(i,j)*this%mass_scaling)*this%vvel) ! kg/m2
+        grd%u_iceberg(i,j)=grd%u_iceberg(i,j)+((Mnew/grd%area(i,j)*this%mass_scaling)*this%uvel) ! kg/m2
+        grd%v_iceberg(i,j)=grd%v_iceberg(i,j)+((Mnew/grd%area(i,j)*this%mass_scaling)*this%vvel) ! kg/m2
         if (grd%id_bergy_mass>0 .or. bergs%add_weight_to_ocean)&
              & grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+nMbits/grd%area(i,j)*this%mass_scaling ! kg/m2
         if (bergs%add_weight_to_ocean .and. .not. bergs%time_average_weight) then
@@ -1339,15 +1338,23 @@ real :: SSS !Temporarily here
     enddo
   enddo ; enddo
   
-  !Scaling the gridded iceberg velocity by the iceberg mass
-  if ((grd%id_u_iceberg>0) .or. (grd%id_v_iceberg>0)) then
-    do j = grd%jsc,grd%jec ; do i = grd%isc,grd%iec  
-      if ((grd%id_u_iceberg>0 ).and. (grd%mass(i,j)>0.))  &
-        & grd%u_iceberg(i,j)=grd%u_iceberg(i,j)/grd%mass(i,j)
-      if ((grd%id_v_iceberg>0 ).and. (grd%mass(i,j)>0.))  &
-        & grd%v_iceberg(i,j)=grd%v_iceberg(i,j)/grd%mass(i,j)
-    enddo; enddo
-  endif
+  !Scaling the gridded iceberg velocity by the iceberg mass 
+  do j = grd%jsc,grd%jec ; do i = grd%isc,grd%iec  
+    if (grd%mass(i,j)>0.) then
+      grd%u_iceberg(i,j)=grd%u_iceberg(i,j)/grd%mass(i,j)
+      grd%v_iceberg(i,j)=grd%v_iceberg(i,j)/grd%mass(i,j)
+    else
+      grd%u_iceberg(i,j)=0. ; grd%v_iceberg(i,j)=0.
+    endif
+  enddo; enddo
+  
+  !Calculating ustar_iceberg (gridded)
+  do j = grd%jsc,grd%jec ; do i = grd%isc,grd%iec  
+    dvo=sqrt((grd%u_iceberg(i,j)-grd%uo(i,j))**2+(grd%v_iceberg(i,j)-grd%vo(i,j))**2)
+    ustar = sqrt(bergs%cdrag_icebergs*(dvo**2  + bergs%utide_icebergs**2))
+    ustar_h = max(bergs%ustar_icebergs_bg, ustar)
+    grd%ustar_iceberg(i,j)=ustar_h
+  enddo; enddo
 
 end subroutine thermodynamics
 
@@ -1367,7 +1374,7 @@ subroutine find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thic
   logical , intent(in) :: Use_three_equation_model !True uses the 3 equation model, False uses the 2 equation model.
   
   ! Local variables
-  real :: utide, ustar_bg, ustar, f_cori, absf,tfreeze
+  real :: ustar, f_cori, absf,tfreeze
   real :: Hml !Mixed layer depth
 
   !These could also be useful output variables if needed.
@@ -1433,7 +1440,6 @@ subroutine find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thic
   real, parameter :: Cp_Ice =  2009.0 !Specific heat capacity of ice, taking from HJ99 (Holland and Jenkins 1999)
   real, parameter :: Cp_ml =  3974.0 !Specific heat capacity of mixed layer, taking from HJ99 (Holland and Jenkins 1999)
   real, parameter :: LF =  3.335e5 !Latent heat of fusion, taken from HJ99 (Holland and Jenkins 1999)
-  real, parameter :: cdrag =  1.5e-3 !Momentum Drag coef, taken from HJ99 (Holland and Jenkins 1999)
   real, parameter :: gamma_t =  0.0 ! Exchange velcoity used in 2 equation model. Whn gamma_t is >0, the exchange velocity is independ of u_star. 
                                   ! When gamma_t=0.0, then gamma_t is not used, and the exchange velocity is found using u_star.
   real, parameter :: p_atm =  101325 ! Average atmospheric pressure (Pa) - from Google. 
@@ -1441,8 +1447,6 @@ subroutine find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thic
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   density_ice = bergs%rho_bergs
   Rho0=rho_seawater  !Note that the ice shelf code has a default of Rho0=1035
-  utide=0.     ! Tidal speeds, set to zero for now.
-  ustar_bg=0.001 !Background u_star under iceshelf. This should be linked to a value felt by the ocean boundary layer
   Hml =10.      !Mixed layer depth. This is an approximate value. It looks like the code is not sensitive to it (since it enters in log(Hml)
   p_int= p_atm+(gravity*thickness*density_ice)    ! The pressure at the ice-ocean interface, in Pa.
   
@@ -1468,8 +1472,8 @@ subroutine find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thic
   iDens = 1.0/Rho0
 
   !Preparing the mixed layer properties for use in both 2 and 3 equation version
-  ustar = cdrag*(dvo  + utide)
-  ustar_h = MAX(ustar_bg, ustar)
+  ustar = bergs%cdrag_icebergs*(dvo  + bergs%utide_icebergs)
+  ustar_h = max(bergs%ustar_icebergs_bg, ustar)
 
   ! Estimate the neutral ocean boundary layer thickness as the minimum of the
   ! reported ocean mixed layer thickness and the neutral Ekman depth.
@@ -2577,7 +2581,7 @@ integer :: iyr, imon, iday, ihr, imin, isec, k
 type(icebergs_gridded), pointer :: grd
 logical :: lerr, sample_traj, write_traj, lbudget, lverbose, check_bond_quality 
 real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass,grdd_spread_mass, grdd_spread_area
-real :: grdd_u_iceberg, grdd_v_iceberg
+real :: grdd_u_iceberg, grdd_v_iceberg, grdd_ustar_iceberg
 integer :: i, j, Iu, ju, iv, Jv, Iu_off, ju_off, iv_off, Jv_off
 real :: mask
 real, dimension(:,:), allocatable :: uC_tmp, vC_tmp
@@ -2612,6 +2616,7 @@ integer :: stderrunit
   grd%spread_area(:,:)=0. 
   grd%u_iceberg(:,:)=0.
   grd%v_iceberg(:,:)=0.
+  grd%ustar_iceberg(:,:)=0.
   grd%mass(:,:)=0.
 
   if (bergs%add_weight_to_ocean) grd%mass_on_ocean(:,:,:)=0.
@@ -2916,6 +2921,8 @@ integer :: stderrunit
     lerr=send_data(grd%id_u_iceberg, grd%u_iceberg(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_v_iceberg>0) &
     lerr=send_data(grd%id_v_iceberg, grd%v_iceberg(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (grd%id_ustar_iceberg>0) &
+    lerr=send_data(grd%id_ustar_iceberg, grd%ustar_iceberg(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_mass>0) &
     lerr=send_data(grd%id_mass, grd%mass(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_stored_ice>0) &
@@ -3013,6 +3020,7 @@ integer :: stderrunit
     call mpp_sum(bergs%spread_area_end)
     call mpp_sum(bergs%u_iceberg_end)
     call mpp_sum(bergs%v_iceberg_end)
+    call mpp_sum(bergs%ustar_iceberg_end)
     call mpp_sum(bergs%floating_heat_end)
     call mpp_sum(bergs%returned_mass_on_ocean)
     call mpp_sum(bergs%nbergs_end)
