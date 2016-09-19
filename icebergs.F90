@@ -1877,7 +1877,11 @@ integer :: stderrunit
           newberg%start_lon=newberg%lon
           newberg%start_lat=newberg%lat
           newberg%start_year=bergs%current_year
-          newberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i+(iNg*(j-1)))  ! unique number for each iceberg
+          if (.not. bergs%read_old_restarts) then
+            newberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i+(iNg*(j-1)))  ! unique number for each iceberg
+          else
+            newberg%iceberg_num=-1
+          endif
           newberg%start_day=bergs%current_yearday+ddt/86400.
           newberg%start_mass=bergs%initial_mass(k)
           newberg%mass_scaling=bergs%mass_scaling(k)
@@ -1897,7 +1901,7 @@ integer :: stderrunit
           grd%stored_ice(i,j,k)=grd%stored_ice(i,j,k)-calved_to_berg
           calving_to_bergs=calving_to_bergs+calved_to_berg
           grd%real_calving(i,j,k)=grd%real_calving(i,j,k)+calved_to_berg/bergs%dt
-          ddt=ddt+bergs%dt*2./17. ! Minor offset to start day
+          ddt=ddt-bergs%dt*2./17. ! Minor offset to start day (negative offsets)
           icnt=icnt+1
           bergs%nbergs_calved=bergs%nbergs_calved+1
           bergs%nbergs_calved_by_class(k)=bergs%nbergs_calved_by_class(k)+1
