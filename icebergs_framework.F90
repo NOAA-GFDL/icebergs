@@ -1274,9 +1274,6 @@ type(icebergs_gridded), pointer :: grd
 integer :: i, nbergs_start, nbergs_end
 integer :: stderrunit
 integer :: grdi, grdj
-logical :: force_app
-
-force_app=.true.
 
   ! Get the stderr unit number
   stderrunit = stderr()
@@ -1347,7 +1344,7 @@ force_app=.true.
       call increase_ibuffer(bergs%ibuffer_w, nbergs_rcvd_from_w)
       call mpp_recv(bergs%ibuffer_w%data, nbergs_rcvd_from_w*buffer_width, grd%pe_W, tag=COMM_TAG_2)
       do i=1, nbergs_rcvd_from_w
-        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_w, i, grd, force_app, bergs%max_bonds  )
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_w, i, grd, max_bonds_in=bergs%max_bonds  )
       enddo
     endif
   else
@@ -1365,7 +1362,7 @@ force_app=.true.
       call increase_ibuffer(bergs%ibuffer_e, nbergs_rcvd_from_e)
       call mpp_recv(bergs%ibuffer_e%data, nbergs_rcvd_from_e*buffer_width, grd%pe_E, tag=COMM_TAG_4)
       do i=1, nbergs_rcvd_from_e
-        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_e, i, grd, force_app,  bergs%max_bonds)
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_e, i, grd, max_bonds_in=bergs%max_bonds)
       enddo
     endif
   else
@@ -1440,7 +1437,7 @@ force_app=.true.
       call increase_ibuffer(bergs%ibuffer_s, nbergs_rcvd_from_s)
       call mpp_recv(bergs%ibuffer_s%data, nbergs_rcvd_from_s*buffer_width, grd%pe_S, tag=COMM_TAG_6)
       do i=1, nbergs_rcvd_from_s
-        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_s, i, grd, force_app, bergs%max_bonds ) 
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_s, i, grd, max_bonds_in=bergs%max_bonds )
       enddo
     endif
   else
@@ -1466,7 +1463,7 @@ force_app=.true.
          call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_8)
       endif
       do i=1, nbergs_rcvd_from_n
-        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_n, i, grd,force_app, bergs%max_bonds)
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_n, i, grd, max_bonds_in=bergs%max_bonds)
       enddo
     endif
   else
@@ -1673,7 +1670,7 @@ end subroutine send_bergs_to_other_pes
   integer :: other_berg_num, other_berg_ine, other_berg_jne
   integer :: counter, k, max_bonds
   integer :: stderrunit
-  logical :: force_app = .false.
+  logical :: force_app
   logical :: quick
 
   ! Get the stderr unit number
@@ -1682,6 +1679,7 @@ end subroutine send_bergs_to_other_pes
   quick=.false.
   max_bonds=0
   if (present(max_bonds_in)) max_bonds=max_bonds_in
+  force_app = .false.
   if(present(force_append)) force_app = force_append
      
     localberg%lon=buff%data(1,n)
@@ -2131,8 +2129,9 @@ type(iceberg), pointer :: first, newberg
 logical, intent(in), optional :: quick
 ! Local variables
 type(iceberg), pointer :: this, prev
-logical :: quickly = .false.
+logical :: quickly
 
+  quickly = .false.
 
   if (associated(first)) then
     if (.not. parallel_reprod .or. quickly) then
@@ -3943,6 +3942,7 @@ integer :: grdi, grdj
 
   nbergs=count_bergs(bergs)
   call mpp_max(nbergs)
+  nbergs = max(nbergs, 1)
   allocate( fld( nbergs, 19 ) ) !Changed from 11 to 19 by Alon
   allocate( fld2( nbergs, 19 ) ) !Changed from 11 to 19 by Alon
   allocate( icnt( grd%isd:grd%ied, grd%jsd:grd%jed ) )
