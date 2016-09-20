@@ -231,6 +231,7 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   logical :: interactive_icebergs_on=.false.  !Turn on/off interactions between icebergs  - Added by Alon 
   logical :: critical_interaction_damping_on=.true.  !Sets the damping on relative iceberg velocity to critical value - Added by Alon 
   logical :: use_old_spreading=.true. ! If true, spreads iceberg mass as if the berg is one grid cell wide
+  integer :: debug_iceberg_with_id = -1 ! If positive, monitors a berg with this id
   real :: speed_limit=0. ! CFL speed limit for a berg [m/s]
   real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
   type(buffer), pointer :: obuffer_n=>null(), ibuffer_n=>null()
@@ -356,13 +357,15 @@ real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10,
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim) , 
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
 real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
+integer :: debug_iceberg_with_id = -1 ! If positive, monitors a berg with this id
 namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,Static_icebergs,  &
          distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef, radial_damping_coef, tangental_damping_coef, only_interactive_forces, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, iceberg_bonds_on, manually_initialize_bonds, ignore_missing_restart_bergs, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, halo_debugging, hexagonal_icebergs, &
          time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_icebergs_on, critical_interaction_damping_on, &
          old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj, &
-         allow_bergs_to_roll,set_melt_rates_to_zero,lat_ref,initial_orientation,rotate_icebergs_for_mass_spreading,grid_is_regular,grid_is_latlon,Lx,use_f_plane, use_old_spreading
+         allow_bergs_to_roll,set_melt_rates_to_zero,lat_ref,initial_orientation,rotate_icebergs_for_mass_spreading,grid_is_regular,grid_is_latlon,Lx,use_f_plane, use_old_spreading, &
+         debug_iceberg_with_id
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -738,6 +741,7 @@ if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffe
   bergs%grounding_fraction=grounding_fraction
   bergs%add_weight_to_ocean=add_weight_to_ocean
   bergs%use_old_spreading=use_old_spreading
+  bergs%debug_iceberg_with_id=debug_iceberg_with_id
   allocate( bergs%initial_mass(nclasses) ); bergs%initial_mass(:)=initial_mass(:)
   allocate( bergs%distribution(nclasses) ); bergs%distribution(:)=distribution(:)
   allocate( bergs%mass_scaling(nclasses) ); bergs%mass_scaling(:)=mass_scaling(:)
@@ -1284,6 +1288,8 @@ force_app=.true.
     nbergs_start=count_bergs(bergs)
   endif
 
+  if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'send_bergs_to_other_pes (top)')
+
   ! Find number of bergs that headed east/west
   nbergs_to_send_e=0
   nbergs_to_send_w=0
@@ -1466,6 +1472,8 @@ force_app=.true.
   else
     nbergs_rcvd_from_n=0
   endif
+
+  if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'send_bergs_to_other_pes (end)')
 
   if (debug) then
     nbergs_end=count_bergs(bergs)
@@ -2091,6 +2099,32 @@ end subroutine check_for_duplicates
 
 ! ##############################################################################
 
+subroutine monitor_a_berg(bergs, label)
+! Arguments
+type(icebergs), pointer :: bergs
+character(len=*) :: label
+! Local variables
+type(iceberg), pointer :: this
+integer :: grdi, grdj
+integer :: stderrunit
+
+  if (bergs%debug_iceberg_with_id<0) return
+  stderrunit=stderr() ! Get the stderr unit number
+
+  do grdj = bergs%grd%jsd,bergs%grd%jed ; do grdi = bergs%grd%isd,bergs%grd%ied
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+      if (this%iceberg_num == bergs%debug_iceberg_with_id) then
+        call print_berg(stderrunit, this, 'MONITOR: '//label, grdi, grdj)
+      endif
+      this=>this%next
+    enddo
+  enddo ; enddo
+
+end subroutine monitor_a_berg
+
+! ##############################################################################
+
 subroutine insert_berg_into_list(first, newberg, quick)
 ! Arguments
 type(iceberg), pointer :: first, newberg
@@ -2311,16 +2345,21 @@ end subroutine destroy_iceberg
 
 ! ##############################################################################
 
-subroutine print_berg(iochan, berg, label)
+subroutine print_berg(iochan, berg, label, il, jl)
 ! Arguments
 integer, intent(in) :: iochan
 type(iceberg), pointer :: berg
 character(len=*) :: label
+integer, optional, intent(in) :: il, jl !< Indices of cell berg should be in
 ! Local variables
 
-  write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,") start lon,lat,yr,day,mass=",2f10.4,i5,f7.2,es12.4)') &
+  write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,") start lon,lat,yr,#,day,mass,hb=",2f10.4,i5,i12,f7.2,es12.4,f5.1)') &
     label, mpp_pe(), berg%start_lon, berg%start_lat, &
-    berg%start_year, berg%iceberg_num, berg%start_day, berg%start_mass
+    berg%start_year, berg%iceberg_num, berg%start_day, berg%start_mass, berg%halo_berg
+  if (present(il).and.present(jl)) then
+    write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,a,2i5,3(a,2f10.4),a,2l2)') &
+      label, mpp_pe(), ') List i,j=',il,jl
+  endif
   write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,a,2i5,3(a,2f10.4),a,2l2)') &
     label, mpp_pe(), ') i,j=',berg%ine, berg%jne, &
     ' xi,yj=', berg%xi, berg%yj, &
@@ -3592,11 +3631,12 @@ end function pos_within_cell
 
 ! ##############################################################################
 
-subroutine check_position(grd, berg, label)
+subroutine check_position(grd, berg, label, il, jl)
 ! Arguments
 type(icebergs_gridded), pointer :: grd
 type(iceberg), pointer :: berg
 character(len=*) :: label
+integer, optional, intent(in) :: il, jl !< Indices of cell berg should be in
 ! Local variables
 real :: xi, yj
 logical :: lret
@@ -3609,8 +3649,12 @@ integer :: stderrunit
   if (xi.ne.berg%xi.or.yj.ne.berg%yj) then
     write(stderrunit,'("diamonds: check_position (",i4,") b%x,x,-=",3(es12.4,x),a)') mpp_pe(),berg%xi,xi,berg%xi-xi,label
     write(stderrunit,'("diamonds: check_position (",i4,") b%y,y,-=",3(es12.4,x),a)') mpp_pe(),berg%yj,yj,berg%yj-yj,label
-    call print_berg(stderrunit, berg, 'check_position')
-    call error_mesg('diamonds, check_position','berg has inconsistent xi,yj!',FATAL)
+    call print_berg(stderrunit, berg, 'check_position', il, jl)
+    call error_mesg('diamonds, check_position, '//trim(label),'berg has inconsistent xi,yj!',FATAL)
+  endif
+  if (grd%msk(berg%ine, berg%jne)==0.) then
+    call print_berg(stderrunit, berg, 'check_position, '//trim(label), il, jl)
+    call error_mesg('diamonds, check_position, '//trim(label),'berg is in a land cell!',FATAL)
   endif
 
 end subroutine check_position
