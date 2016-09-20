@@ -82,6 +82,7 @@ type :: icebergs_gridded
   integer :: isg, ieg, jsg, jeg ! Indices of global domain
   integer :: my_pe, pe_N, pe_S, pe_E, pe_W ! MPI PE idenLx ! Length of domain, for periodic boundary condition (Ly to be adde later if needed)
   logical :: grid_is_latlon !Flag to say whether the coordinate is in lat lon degrees, or meters
+  logical :: grid_is_regular !Flag to say whether point in cell can be found assuming regular cartesian grid
   real :: Lx !Length of the domain in x direction
   real, dimension(:,:), pointer :: lon=>null() ! Longitude of cell corners
   real, dimension(:,:), pointer :: lat=>null() ! Latitude of cell corners
@@ -333,6 +334,7 @@ real :: grounding_fraction=0. ! Fraction of water column depth at which groundin
 logical :: Runge_not_Verlet=.True.  !True=Runge Kutta, False=Verlet.  - Added by Alon 
 logical :: use_f_plane=.False.  !Flag to use a f-plane for the rotation
 logical :: grid_is_latlon=.True.  !True means that the grid is specified in lat lon, and uses to radius of the earth to convert to distance
+logical :: grid_is_regular=.True. !Flag to say whether point in cell can be found assuming regular cartesian grid
 logical :: rotate_icebergs_for_mass_spreading=.True.  !Flag allows icebergs to rotate for spreading their mass (in hexagonal spreading mode)
 logical :: set_melt_rates_to_zero=.False.  !Sets all melt rates to zero, for testing purposes (thermodynamics routine is still run)
 logical :: allow_bergs_to_roll=.True. !Allows icebergs to roll over when rolling conditions are met
@@ -360,7 +362,7 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, halo_debugging, hexagonal_icebergs, &
          time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_icebergs_on, critical_interaction_damping_on, &
          old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj, &
-         allow_bergs_to_roll,set_melt_rates_to_zero,lat_ref,initial_orientation,rotate_icebergs_for_mass_spreading,grid_is_latlon,Lx,use_f_plane, use_old_spreading
+         allow_bergs_to_roll,set_melt_rates_to_zero,lat_ref,initial_orientation,rotate_icebergs_for_mass_spreading,grid_is_regular,grid_is_latlon,Lx,use_f_plane, use_old_spreading
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -702,6 +704,7 @@ if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffe
   bergs%grd%halo=halo
   bergs%grd%Lx=Lx
   bergs%grd%grid_is_latlon=grid_is_latlon  
+  bergs%grd%grid_is_regular=grid_is_regular 
   bergs%max_bonds=max_bonds
   bergs%rho_bergs=rho_bergs
   bergs%spring_coef=spring_coef
@@ -3400,7 +3403,7 @@ logical, intent(in), optional :: explain
 ! Local variables
 real :: x1,y1,x2,y2,x3,y3,x4,y4,xx,yy,fac
 integer :: stderrunit
-real :: Lx
+real :: Lx, dx,dy
 
   ! Get the stderr unit number
   stderrunit=stderr()
@@ -3430,7 +3433,16 @@ real :: Lx
     endif
   endif
 
-  if ((max(y1,y2,y3,y4)<89.999).or. (.not. grd%grid_is_latlon) ) then
+  !This part only works for a regular cartesian grid. For more complex grids, we
+  !should use calc_xiyj
+  if ((.not. grd%grid_is_latlon) .and. (grd%grid_is_regular))  then
+    dx=(grd%lon(i  ,j  )-grd%lon(i-1  ,j  ))
+    dy=(grd%lat(i  ,j  )-grd%lat(i  ,j-1  ))
+    x1=grd%lon(i  ,j  )-(dx/2)
+    y1=grd%lat(i  ,j  )-(dy/2)
+    xi=((x-x1)/dx)+0.5
+    yj=((y-y1)/dy)+0.5
+  elseif ((max(y1,y2,y3,y4)<89.999) .or.(.not. grd%grid_is_latlon)) then
     call calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, x, y, xi, yj, Lx, explain=explain)
   else
     if (debug) write(stderrunit,*) 'diamonds, pos_within_cell: working in tangential plane!'
@@ -3508,6 +3520,7 @@ real :: Lx
   if (present(explain)) then
      if(explain) expl=.true.
   endif
+
   alpha=x2-x1
   delta=y2-y1
   beta=x4-x1
