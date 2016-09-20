@@ -1285,7 +1285,7 @@ force_app=.true.
   grd=>bergs%grd
 
   if (debug) then
-    nbergs_start=count_bergs(bergs)
+    nbergs_start=count_bergs(bergs, with_halos=.true.)
   endif
 
   if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'send_bergs_to_other_pes (top)')
@@ -1476,7 +1476,7 @@ force_app=.true.
   if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'send_bergs_to_other_pes (end)')
 
   if (debug) then
-    nbergs_end=count_bergs(bergs)
+    nbergs_end=count_bergs(bergs, with_halos=.true.)
     i=nbergs_rcvd_from_n+nbergs_rcvd_from_s+nbergs_rcvd_from_e+nbergs_rcvd_from_w &
      -nbergs_to_send_n-nbergs_to_send_s-nbergs_to_send_e-nbergs_to_send_w
     if (nbergs_end-(nbergs_start+i).ne.0) then
@@ -1501,7 +1501,7 @@ force_app=.true.
     do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
       this=>bergs%list(grdi,grdj)%first
       do while (associated(this))
-        call check_position(grd, this, 'exchange (bot)')
+        call check_position(grd, this, 'exchange (bot)', grdi, grdj)
         if (this%ine.lt.bergs%grd%isc .or. &
             this%ine.gt.bergs%grd%iec .or. &
             this%jne.lt.bergs%grd%jsc .or. &
