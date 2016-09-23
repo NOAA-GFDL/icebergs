@@ -116,15 +116,19 @@ type :: icebergs_gridded
   real, dimension(:,:), pointer :: bergy_src=>null() ! Mass flux from berg erosion into bergy bits (kg/s/m^2)
   real, dimension(:,:), pointer :: bergy_melt=>null() ! Melting rate of bergy bits (kg/s/m^2)
   real, dimension(:,:), pointer :: bergy_mass=>null() ! Mass distribution of bergy bits (kg/s/m^2)
-  real, dimension(:,:), pointer :: spread_mass=>null() ! Mass of icebergs after spreading (kg/s/m^2)
-  real, dimension(:,:), pointer :: spread_area=>null() ! Area of icebergs after spreading (m^2/s/m^2)
+  real, dimension(:,:), pointer :: spread_mass=>null() ! Mass of icebergs after spreading (kg/m^2)
+  real, dimension(:,:), pointer :: spread_area=>null() ! Area of icebergs after spreading (m^2/m^2)
   real, dimension(:,:), pointer :: u_iceberg=>null() ! Average iceberg velocity in grid cell (mass weighted - but not spread mass weighted)
   real, dimension(:,:), pointer :: v_iceberg=>null() ! Average iceberg velocity in grid cell (mass weighted - but not spread mass weighted)
-  real, dimension(:,:), pointer :: ustar_iceberg=>null() ! Frictional velocity below icebergs to be passed to ocean (mass weighted - but not spread mass weighted)
+  real, dimension(:,:), pointer :: spread_uvel=>null() ! Average iceberg velocity in grid cell (spread area weighted)
+  real, dimension(:,:), pointer :: spread_vvel=>null() ! Average iceberg velocity in grid cell (spread area weighted)
+  real, dimension(:,:), pointer :: ustar_iceberg=>null() ! Frictional velocity below icebergs to be passed to ocean
   real, dimension(:,:), pointer :: virtual_area=>null() ! Virtual surface coverage by icebergs (m^2)
   real, dimension(:,:), pointer :: mass=>null() ! Mass distribution (kg/m^2)
-  real, dimension(:,:,:), pointer :: mass_on_ocean=>null() ! Mass distribution partitioned by neighbor (kg/m^2)   - Alon:I think that this actually has units of kg
-  real, dimension(:,:,:), pointer :: area_on_ocean=>null() ! Area distribution partitioned by neighbor (m^2/m^2)  - Alon:I think that this actually has units of m^2
+  real, dimension(:,:,:), pointer :: mass_on_ocean=>null() ! Mass distribution partitioned by neighbor (kg)  
+  real, dimension(:,:,:), pointer :: area_on_ocean=>null() ! Area distribution partitioned by neighbor (m^2)  
+  real, dimension(:,:,:), pointer :: Uvel_on_ocean=>null() ! zonal velocity distribution partitioned by neighbor (m^2* m/s)  
+  real, dimension(:,:,:), pointer :: Vvel_on_ocean=>null() ! meridional momentum distribution partitioned by neighbor (m^2 m/s)  
   real, dimension(:,:), pointer :: tmp=>null() ! Temporary work space
   real, dimension(:,:), pointer :: tmpc=>null() ! Temporary work space
   real, dimension(:,:,:), pointer :: stored_ice=>null() ! Accumulated ice mass flux at calving locations (kg)
@@ -143,6 +147,7 @@ type :: icebergs_gridded
   integer :: id_mass_on_ocn=-1, id_area_on_ocn=-1, id_spread_mass=-1, id_spread_area=-1
   integer :: id_ssh=-1, id_fax=-1, id_fay=-1
   integer :: id_count=-1, id_chksum=-1, id_u_iceberg=-1, id_v_iceberg=-1, id_sss=-1, id_ustar_iceberg
+  integer :: id_spread_uvel=-1, id_spread_vvel=-1
 
   real :: clipping_depth=0. ! The effective depth at which to clip the weight felt by the ocean [m].
 
@@ -227,6 +232,7 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
   logical :: time_average_weight=.false. ! Time average the weight on the ocean
   logical :: Runge_not_Verlet=.True.  !True=Runge Kuttai, False=Verlet.   
+  logical :: pass_fields_to_ocean_model=.False. !Iceberg area, mass and ustar fields are prepared to pass to ocean model
   logical :: use_mixed_layer_salinity_for_thermo=.False.  !If true, then model uses ocean salinity for 3 and 2 equation melt model.
   logical :: find_melt_using_spread_mass=.False.  !If true, then the model calculates ice loss by looping at the spread_mass before and after.
   logical :: Use_three_equation_model=.True.  !Uses 3 equation model for melt when ice shelf type thermodynamics are used.
@@ -273,6 +279,8 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   real :: spread_area_start=0., spread_area_end=0.
   real :: u_iceberg_start=0., u_iceberg_end=0.
   real :: v_iceberg_start=0., v_iceberg_end=0.
+  real :: spread_uvel_start=0., spread_uvel_end=0.
+  real :: spread_vvel_start=0., spread_vvel_end=0.
   real :: ustar_iceberg_start=0., ustar_iceberg_end=0.
   real :: returned_mass_on_ocean=0.
   real :: returned_area_on_ocean=0.
@@ -361,6 +369,7 @@ logical :: time_average_weight=.false. ! Time average the weight on the ocean
 real :: speed_limit=0. ! CFL speed limit for a berg
 real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
 logical :: Runge_not_Verlet=.True.  !True=Runge Kutta, False=Verlet.  - Added by Alon 
+logical :: pass_fields_to_ocean_model=.False. !Iceberg area, mass and ustar fields are prepared to pass to ocean model
 logical :: use_mixed_layer_salinity_for_thermo=.False.  !If true, then model uses ocean salinity for 3 and 2 equation melt model.
 logical :: find_melt_using_spread_mass=.False.  !If true, then the model calculates ice loss by looping at the spread_mass before and after.
 logical :: Use_three_equation_model=.True.  !Uses 3 equation model for melt when ice shelf type thermodynamics are used.
@@ -400,7 +409,7 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj, &
          allow_bergs_to_roll,set_melt_rates_to_zero,lat_ref,initial_orientation,rotate_icebergs_for_mass_spreading,grid_is_latlon,Lx,use_f_plane,use_old_spreading, &
          grid_is_regular,Lx,use_f_plane,override_iceberg_velocities,u_override,v_override,add_iceberg_thickness_to_SSH,Iceberg_melt_without_decay,melt_icebergs_as_ice_shelf, &
-         Use_three_equation_model,find_melt_using_spread_mass,use_mixed_layer_salinity_for_thermo,utide_icebergs,ustar_icebergs_bg,cdrag_icebergs
+         Use_three_equation_model,find_melt_using_spread_mass,use_mixed_layer_salinity_for_thermo,utide_icebergs,ustar_icebergs_bg,cdrag_icebergs, pass_fields_to_ocean_model
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -517,11 +526,15 @@ real :: Total_mass  !Added by Alon
   allocate( grd%spread_area(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_area(:,:)=0.
   allocate( grd%u_iceberg(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%u_iceberg(:,:)=0.
   allocate( grd%v_iceberg(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%v_iceberg(:,:)=0.
+  allocate( grd%spread_uvel(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_uvel(:,:)=0.
+  allocate( grd%spread_vvel(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_vvel(:,:)=0.
   allocate( grd%ustar_iceberg(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%ustar_iceberg(:,:)=0.
   allocate( grd%virtual_area(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%virtual_area(:,:)=0.
   allocate( grd%mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%mass(:,:)=0.
   allocate( grd%mass_on_ocean(grd%isd:grd%ied, grd%jsd:grd%jed, 9) ); grd%mass_on_ocean(:,:,:)=0.
   allocate( grd%area_on_ocean(grd%isd:grd%ied, grd%jsd:grd%jed, 9) ); grd%area_on_ocean(:,:,:)=0.
+  allocate( grd%Uvel_on_ocean(grd%isd:grd%ied, grd%jsd:grd%jed, 9) ); grd%Uvel_on_ocean(:,:,:)=0.
+  allocate( grd%Vvel_on_ocean(grd%isd:grd%ied, grd%jsd:grd%jed, 9) ); grd%Vvel_on_ocean(:,:,:)=0.
   allocate( grd%stored_ice(grd%isd:grd%ied, grd%jsd:grd%jed, nclasses) ); grd%stored_ice(:,:,:)=0.
   allocate( grd%real_calving(grd%isd:grd%ied, grd%jsd:grd%jed, nclasses) ); grd%real_calving(:,:,:)=0.
   allocate( grd%uo(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%uo(:,:)=0.
@@ -767,6 +780,7 @@ if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffe
   bergs%time_average_weight=time_average_weight
   bergs%speed_limit=speed_limit
   bergs%Runge_not_Verlet=Runge_not_Verlet   
+  bergs%pass_fields_to_ocean_model=pass_fields_to_ocean_model 
   bergs%ustar_icebergs_bg=ustar_icebergs_bg   
   bergs%utide_icebergs=utide_icebergs  
   bergs%cdrag_icebergs=cdrag_icebergs  
@@ -844,16 +858,20 @@ if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffe
      'Iceberg u velocity (m/s)')
   grd%id_v_iceberg=register_diag_field('icebergs', 'v_iceberg', axes, Time, &
      'Iceberg v velocity (m/s)')
+  grd%id_spread_uvel=register_diag_field('icebergs', 'spread_uvel', axes, Time, &
+     'Iceberg u velocity spread (m/s)')
+  grd%id_spread_vvel=register_diag_field('icebergs', 'spread_vvel', axes, Time, &
+     'Iceberg v velocity spread (m/s)')
   grd%id_ustar_iceberg=register_diag_field('icebergs', 'ustar_iceberg', axes, Time, &
      'Iceberg frictional velocity (m/s)')
   grd%id_virtual_area=register_diag_field('icebergs', 'virtual_area', axes, Time, &
      'Virtual coverage by icebergs', 'm^2')
   grd%id_mass=register_diag_field('icebergs', 'mass', axes, Time, &
      'Iceberg density field', 'kg/(m^2)')
-  grd%id_mass_on_ocn=register_diag_field('icebergs', 'mass_on_ocean', axes, Time, &
-     'Iceberg density field felt by ocean', 'kg/(m^2)')
-  grd%id_area_on_ocn=register_diag_field('icebergs', 'area_on_ocean', axes, Time, &
-     'Iceberg area field felt by ocean', 'm^2/(m^2)')
+!  grd%id_mass_on_ocn=register_diag_field('icebergs', 'mass_on_ocean', axes, Time, &
+!     'Iceberg density field felt by ocean', 'kg/(m^2)')
+!  grd%id_area_on_ocn=register_diag_field('icebergs', 'area_on_ocean', axes, Time, &
+!     'Iceberg area field felt by ocean', 'm^2/(m^2)')
   grd%id_stored_ice=register_diag_field('icebergs', 'stored_ice', axes3d, Time, &
      'Accumulated ice mass by class', 'kg')
   grd%id_real_calving=register_diag_field('icebergs', 'real_calving', axes3d, Time, &
@@ -3818,6 +3836,8 @@ character(len=*) :: label
   call grd_chksum2(grd, grd%mass, 'mass')
   call grd_chksum3(grd, grd%mass_on_ocean, 'mass_on_ocean')
   call grd_chksum3(grd, grd%area_on_ocean, 'area_on_ocean')
+  call grd_chksum3(grd, grd%Uvel_on_ocean, 'Uvel_on_ocean')
+  call grd_chksum3(grd, grd%Vvel_on_ocean, 'Vvel_on_ocean')
   call grd_chksum3(grd, grd%stored_ice, 'stored_ice')
   call grd_chksum2(grd, grd%stored_heat, 'stored_heat')
   call grd_chksum2(grd, grd%melt_buoy, 'melt_b')
@@ -3830,6 +3850,8 @@ character(len=*) :: label
   call grd_chksum2(grd, grd%spread_area, 'spread_area')
   call grd_chksum2(grd, grd%u_iceberg, 'u_iceberg')
   call grd_chksum2(grd, grd%v_iceberg, 'v_iceberg')
+  call grd_chksum2(grd, grd%spread_uvel, 'spread_uvel')
+  call grd_chksum2(grd, grd%spread_vvel, 'spread_vvel')
   call grd_chksum2(grd, grd%ustar_iceberg, 'ustar_iceberg')
   call grd_chksum2(grd, grd%virtual_area, 'varea')
   call grd_chksum2(grd, grd%floating_melt, 'floating_melt')
