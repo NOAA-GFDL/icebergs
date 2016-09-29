@@ -148,6 +148,7 @@ type :: icebergs_gridded
   integer :: id_ssh=-1, id_fax=-1, id_fay=-1
   integer :: id_count=-1, id_chksum=-1, id_u_iceberg=-1, id_v_iceberg=-1, id_sss=-1, id_ustar_iceberg
   integer :: id_spread_uvel=-1, id_spread_vvel=-1
+  integer :: id_melt_m_per_year=-1
 
   real :: clipping_depth=0. ! The effective depth at which to clip the weight felt by the ocean [m].
 
@@ -224,6 +225,8 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   real :: ustar_icebergs_bg=0.001 ! Background u_star under icebergs. This should be linked to a value felt by the ocean boundary layer
   real :: cdrag_icebergs =  1.5e-3 !Momentum Drag coef, taken from HJ99  (Holland and Jenkins 1999)
   real :: initial_orientation=0. ! Iceberg orientaion relative to this angle (in degrees). Used for hexagonal mass spreading.
+  real :: Gamma_T_3EQ=0.022 ! Nondimensional heat-transfer coefficient
+  logical :: const_gamma=.True. !If true uses a constant heat tranfer coefficient, from which the salt transfer is calculated
   real, dimension(:), pointer :: initial_mass, distribution, mass_scaling
   real, dimension(:), pointer :: initial_thickness, initial_width, initial_length
   logical :: restarted=.false. ! Indicate whether we read state from a restart or not
@@ -362,6 +365,8 @@ real :: initial_orientation=0. ! Iceberg orientaion relative to this angle (in d
 real :: utide_icebergs= 0.      ! Tidal speeds, set to zero for now.
 real :: ustar_icebergs_bg=0.001 ! Background u_star under icebergs. This should be linked to a value felt by the ocean boundary layer
 real :: cdrag_icebergs =  1.5e-3 !Momentum Drag coef, taken from HJ99  (Holland and Jenkins 1999)
+real :: Gamma_T_3EQ=0.022 ! Nondimensional heat-transfer coefficient
+logical :: const_gamma=.True. !If true uses a constant heat tranfer coefficient, from which the salt transfer is calculated
 logical :: use_operator_splitting=.true. ! Use first order operator splitting for thermodynamics
 logical :: add_weight_to_ocean=.true. ! Add weight of icebergs + bits to ocean
 logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
@@ -409,7 +414,8 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj, &
          allow_bergs_to_roll,set_melt_rates_to_zero,lat_ref,initial_orientation,rotate_icebergs_for_mass_spreading,grid_is_latlon,Lx,use_f_plane,use_old_spreading, &
          grid_is_regular,Lx,use_f_plane,override_iceberg_velocities,u_override,v_override,add_iceberg_thickness_to_SSH,Iceberg_melt_without_decay,melt_icebergs_as_ice_shelf, &
-         Use_three_equation_model,find_melt_using_spread_mass,use_mixed_layer_salinity_for_thermo,utide_icebergs,ustar_icebergs_bg,cdrag_icebergs, pass_fields_to_ocean_model
+         Use_three_equation_model,find_melt_using_spread_mass,use_mixed_layer_salinity_for_thermo,utide_icebergs,ustar_icebergs_bg,cdrag_icebergs, pass_fields_to_ocean_model, &
+         const_gamma, Gamma_T_3EQ
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -780,6 +786,8 @@ if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffe
   bergs%time_average_weight=time_average_weight
   bergs%speed_limit=speed_limit
   bergs%Runge_not_Verlet=Runge_not_Verlet   
+  bergs%const_gamma=const_gamma 
+  bergs%Gamma_T_3EQ=Gamma_T_3EQ
   bergs%pass_fields_to_ocean_model=pass_fields_to_ocean_model 
   bergs%ustar_icebergs_bg=ustar_icebergs_bg   
   bergs%utide_icebergs=utide_icebergs  
@@ -836,6 +844,8 @@ if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffe
      'Unused calving mass rate', 'kg/s')
   grd%id_floating_melt=register_diag_field('icebergs', 'melt', axes, Time, &
      'Melt rate of icebergs + bits', 'kg/(m^2*s)')
+  grd%id_melt_m_per_year=register_diag_field('icebergs', 'melt_m_per_year', axes, Time, &
+     'Melt rate of icebergs + bits (m/yr)', 'm/yr')
   grd%id_berg_melt=register_diag_field('icebergs', 'berg_melt', axes, Time, &
      'Melt rate of icebergs', 'kg/(m^2*s)')
   grd%id_melt_buoy=register_diag_field('icebergs', 'melt_buoy', axes, Time, &

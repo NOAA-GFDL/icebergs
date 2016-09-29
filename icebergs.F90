@@ -1532,9 +1532,14 @@ subroutine find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thic
       ! on the turbulence.  Following H & J '99, this limit also applies
       ! when the buoyancy flux is destabilizing.
 
-      Gam_turb = I_VK * (ln_neut + (0.5 * I_ZETA_N - 1.0))
-      I_Gam_T = 1.0 / (Gam_mol_t + Gam_turb)
-      I_Gam_S = 1.0 / (Gam_mol_s + Gam_turb)
+      if (bergs%const_gamma) then ! if using a constant gamma_T
+        I_Gam_T = bergs%Gamma_T_3EQ
+        I_Gam_S = bergs%Gamma_T_3EQ/35.
+      else
+        Gam_turb = I_VK * (ln_neut + (0.5 * I_ZETA_N - 1.0))
+        I_Gam_T = 1.0 / (Gam_mol_t + Gam_turb)
+        I_Gam_S = 1.0 / (Gam_mol_s + Gam_turb)
+      endif
       wT_flux = dT_ustar * I_Gam_T
       wB_flux = dB_dS * (dS_ustar * I_Gam_S) + dB_dT * wT_flux
 
@@ -1559,8 +1564,14 @@ subroutine find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thic
             dG_dwB = I_VK * (0.5 * I_ZETA_N) * dIns_dwB
           endif
 
-          I_Gam_T = 1.0 / (Gam_mol_t + Gam_turb)
-          I_Gam_S = 1.0 / (Gam_mol_s + Gam_turb)
+          if (bergs%const_gamma) then ! if using a constant gamma_T
+            I_Gam_T = bergs%Gamma_T_3EQ
+            I_Gam_S = bergs%Gamma_T_3EQ/35.
+          else
+            I_Gam_T = 1.0 / (Gam_mol_t + Gam_turb)
+            I_Gam_S = 1.0 / (Gam_mol_s + Gam_turb)
+          endif
+
           wT_flux = dT_ustar * I_Gam_T
           wB_flux_new = dB_dS * (dS_ustar * I_Gam_S) + dB_dT * wT_flux
 
@@ -2612,7 +2623,7 @@ real :: mask
 real, dimension(:,:), allocatable :: uC_tmp, vC_tmp
 integer :: vel_stagger, str_stagger
 real, dimension(:,:), allocatable :: iCount
-real, dimension(bergs%grd%isc:bergs%grd%iec,bergs%grd%jsc:bergs%grd%jec)  :: ustar_berg, area_berg, spread_mass_old
+real, dimension(bergs%grd%isd:bergs%grd%ied,bergs%grd%jsd:bergs%grd%jed)  :: ustar_berg, area_berg, spread_mass_old
 integer :: nbonds
 !logical :: within_iceberg_model
 
@@ -2884,10 +2895,11 @@ integer :: stderrunit
   !Using spread_mass_to_ocean to calculate melt rates (if this option is chosen)
   !within_iceberg_model=.True.
   if (bergs%find_melt_using_spread_mass) then
-    spread_mass_old=grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)
+    !spread_mass_old=grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)
+    spread_mass_old(:,:)=grd%spread_mass(:,:)
     grd%spread_mass(:,:)=0.
     call icebergs_incr_mass(bergs, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec),within_iceberg_model=.True.) 
-    do i=grd%isc,grd%iec ; do j=grd%jsc,grd%jec
+    do i=grd%isd,grd%ied ; do j=grd%jsd,grd%jed
       if (grd%area(i,j)>0.0) then
         grd%floating_melt(i,j)=max((spread_mass_old(i,j) - grd%spread_mass(i,j))/(bergs%dt),0.0)
         grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)=grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec)*HLF !Not 100% sure this is correct.
@@ -2927,6 +2939,8 @@ integer :: stderrunit
     lerr=send_data(grd%id_hi, grd%hi(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_floating_melt>0) &
     lerr=send_data(grd%id_floating_melt, grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (grd%id_melt_m_per_year>0) &
+    lerr=send_data(grd%id_melt_m_per_year, grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec)* (86400.0*365.0/bergs%rho_bergs), Time)
   if (grd%id_berg_melt>0) &
     lerr=send_data(grd%id_berg_melt, grd%berg_melt(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_melt_buoy>0) &
@@ -3000,8 +3014,10 @@ integer :: stderrunit
     where (grd%area(grd%isc:grd%iec,grd%jsc:grd%jec)>0.)
       calving(:,:)=grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec)/grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) &
                   +grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec)
-      ustar_berg(:,:)=grd%ustar_iceberg(grd%isc:grd%iec,grd%jsc:grd%jec)
-      area_berg(:,:)=grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec)
+      !ustar_berg(:,:)=grd%ustar_iceberg(grd%isc:grd%iec,grd%jsc:grd%jec)
+      !area_berg(:,:)=grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec)
+      ustar_berg(:,:)=grd%ustar_iceberg(:,:)
+      area_berg(:,:)=grd%spread_area(:,:)
     elsewhere
       calving(:,:)=0.
       ustar_berg(:,:)=0.
