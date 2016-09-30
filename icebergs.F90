@@ -2671,11 +2671,11 @@ integer :: stderrunit
   bergs%current_yearday=yearday(imon, iday, ihr, imin, isec)
   ! Turn on sampling of trajectories, verbosity, budgets
   sample_traj=.false.
-  if (bergs%traj_sample_hrs>0) then
+  if ( (bergs%traj_sample_hrs>0)  .and. (.not. bergs%ignore_traj) ) then
      if (mod(24*iday+ihr,bergs%traj_sample_hrs).eq.0) sample_traj=.true.
   end if
   write_traj=.false.
-  if (bergs%traj_write_hrs>0) then
+  if ((bergs%traj_write_hrs>0) .and. (.not. bergs%ignore_traj))  then
      if (mod(24*iday+ihr,bergs%traj_write_hrs).eq.0) write_traj=.true.
   end if
   lverbose=.false.
@@ -2869,7 +2869,9 @@ integer :: stderrunit
   ! Send bergs to other PEs
   call mpp_clock_begin(bergs%clock_com)
   if (bergs%iceberg_bonds_on)  call  bond_address_update(bergs)
+
   call send_bergs_to_other_pes(bergs)
+  if ((bergs%interactive_icebergs_on) .or. (bergs%iceberg_bonds_on)) &
   call update_halo_icebergs(bergs)
   if (bergs%iceberg_bonds_on)  call connect_all_bonds(bergs)
   if (debug) call bergs_chksum(bergs, 'run bergs (exchanged)')
@@ -4609,6 +4611,7 @@ type(iceberg), pointer :: this, next
   ! Delete bergs and structures
   call move_all_trajectories(bergs, delete_bergs=.true.)
 
+  if (.not. bergs%ignore_traj) &
   call write_trajectory(bergs%trajectories, bergs%save_short_traj)
 
   deallocate(bergs%grd%lon)

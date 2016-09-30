@@ -29,7 +29,7 @@ use ice_bergs_framework, only: find_cell,find_cell_by_search,count_bergs,is_poin
 use ice_bergs_framework, only: count_bonds, form_a_bond, find_individual_iceberg
 use ice_bergs_framework, only: push_posn
 use ice_bergs_framework, only: add_new_berg_to_list,destroy_iceberg
-use ice_bergs_framework, only: increase_ibuffer,increase_ibuffer_traj,grd_chksum2,grd_chksum3
+use ice_bergs_framework, only: increase_ibuffer,grd_chksum2,grd_chksum3
 use ice_bergs_framework, only: sum_mass,sum_heat,bilin
 !params !Niki: write a subroutine to get these
 use ice_bergs_framework, only: nclasses, buffer_width, buffer_width_traj
@@ -1444,7 +1444,7 @@ logical :: io_is_in_append_mode
         from_pe=io_tile_pelist(np)
         call mpp_recv(ntrajs_rcvd_io, glen=1, from_pe=from_pe, tag=COMM_TAG_11)
         if (ntrajs_rcvd_io .gt. 0) then
-           call increase_ibuffer_traj(ibuffer_io, ntrajs_rcvd_io)
+           call increase_ibuffer(ibuffer_io, ntrajs_rcvd_io,buffer_width_traj)
            call mpp_recv(ibuffer_io%data, ntrajs_rcvd_io*buffer_width_traj,from_pe=from_pe, tag=COMM_TAG_12)
            do i=1, ntrajs_rcvd_io
               call unpack_traj_from_buffer2(traj4io, ibuffer_io, i, save_short_traj)

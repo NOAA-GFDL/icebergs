@@ -59,7 +59,7 @@ public send_bergs_to_other_pes
 public update_halo_icebergs
 public pack_berg_into_buffer2, unpack_berg_from_buffer2
 public pack_traj_into_buffer2, unpack_traj_from_buffer2
-public increase_buffer, increase_ibuffer, increase_ibuffer_traj, increase_buffer_traj
+public increase_ibuffer 
 public add_new_berg_to_list, count_out_of_order, check_for_duplicates
 public insert_berg_into_list, create_iceberg, delete_iceberg_from_list, destroy_iceberg
 public print_fld,print_berg, print_bergs,record_posn, push_posn, append_posn, check_position
@@ -253,6 +253,7 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   logical :: only_interactive_forces=.False.  !Icebergs only feel interactive forces, and not ocean, wind... 
   logical :: halo_debugging=.False.  !Use for debugging halos (remove when its working) 
   logical :: save_short_traj=.True.  !True saves only lon,lat,time,iceberg_num in iceberg_trajectory.nc 
+  logical :: ignore_traj=.False.  !If true, then model does not traj trajectory data at all 
   logical :: iceberg_bonds_on=.False.  !True=Allow icebergs to have bonds, False=don't allow. 
   logical :: manually_initialize_bonds=.False.  !True= Bonds are initialize manually. 
   logical :: use_new_predictive_corrective =.False.  !Flag to use Bob's predictive corrective iceberg scheme- Added by Alon 
@@ -394,6 +395,7 @@ logical :: Static_icebergs=.False.  !True= icebergs do no move
 logical :: only_interactive_forces=.False.  !Icebergs only feel interactive forces, and not ocean, wind... 
 logical :: halo_debugging=.False.  !Use for debugging halos (remove when its working) 
 logical :: save_short_traj=.True.  !True saves only lon,lat,time,iceberg_num in iceberg_trajectory.nc 
+logical :: ignore_traj=.False.  !If true, then model does not traj trajectory data at all 
 logical :: iceberg_bonds_on=.False.  !True=Allow icebergs to have bonds, False=don't allow. 
 logical :: manually_initialize_bonds=.False.  !True= Bonds are initialize manually. 
 logical :: use_new_predictive_corrective =.False.  !Flag to use Bob's predictive corrective iceberg scheme- Added by Alon 
@@ -415,7 +417,7 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          allow_bergs_to_roll,set_melt_rates_to_zero,lat_ref,initial_orientation,rotate_icebergs_for_mass_spreading,grid_is_latlon,Lx,use_f_plane,use_old_spreading, &
          grid_is_regular,Lx,use_f_plane,override_iceberg_velocities,u_override,v_override,add_iceberg_thickness_to_SSH,Iceberg_melt_without_decay,melt_icebergs_as_ice_shelf, &
          Use_three_equation_model,find_melt_using_spread_mass,use_mixed_layer_salinity_for_thermo,utide_icebergs,ustar_icebergs_bg,cdrag_icebergs, pass_fields_to_ocean_model, &
-         const_gamma, Gamma_T_3EQ
+         const_gamma, Gamma_T_3EQ, ignore_traj
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -760,6 +762,7 @@ else
   buffer_width=buffer_width+(max_bonds*3) ! Increase buffer width to include bonds being passed between processors 
 endif
 if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffer used for abrevated traj
+if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files should be ignored
 
 
  ! Parameters
@@ -767,6 +770,7 @@ if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffe
   bergs%traj_sample_hrs=traj_sample_hrs
   bergs%traj_write_hrs=traj_write_hrs
   bergs%save_short_traj=save_short_traj
+  bergs%ignore_traj=ignore_traj
   bergs%verbose_hrs=verbose_hrs
   bergs%grd%halo=halo
   bergs%grd%Lx=Lx
@@ -1070,7 +1074,6 @@ halo_debugging=bergs%halo_debugging
  ! For convenience
    grd=>bergs%grd
 
-
 !For debugging, MP1
 if (halo_debugging) then
   do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
@@ -1185,7 +1188,7 @@ endif
       write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_w,' from',grd%pe_W,' (W) !!!!!!!!!!!!!!!!!!!!!!'
     endif
     if (nbergs_rcvd_from_w.gt.0) then
-      call increase_ibuffer(bergs%ibuffer_w, nbergs_rcvd_from_w)
+      call increase_ibuffer(bergs%ibuffer_w, nbergs_rcvd_from_w,buffer_width)
       call mpp_recv(bergs%ibuffer_w%data, nbergs_rcvd_from_w*buffer_width, grd%pe_W, tag=COMM_TAG_2)
       do i=1, nbergs_rcvd_from_w
         call unpack_berg_from_buffer2(bergs, bergs%ibuffer_w, i, grd, max_bonds_in=bergs%max_bonds )
@@ -1203,7 +1206,7 @@ endif
       write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_e,' from',grd%pe_E,' (E) !!!!!!!!!!!!!!!!!!!!!!'
     endif
     if (nbergs_rcvd_from_e.gt.0) then
-      call increase_ibuffer(bergs%ibuffer_e, nbergs_rcvd_from_e)
+      call increase_ibuffer(bergs%ibuffer_e, nbergs_rcvd_from_e,buffer_width)
       call mpp_recv(bergs%ibuffer_e%data, nbergs_rcvd_from_e*buffer_width, grd%pe_E, tag=COMM_TAG_4)
       do i=1, nbergs_rcvd_from_e
         call unpack_berg_from_buffer2(bergs, bergs%ibuffer_e, i, grd, max_bonds_in=bergs%max_bonds )
@@ -1282,7 +1285,7 @@ endif
       write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_s,' from',grd%pe_S,' (S) !!!!!!!!!!!!!!!!!!!!!!'
     endif
     if (nbergs_rcvd_from_s.gt.0) then
-      call increase_ibuffer(bergs%ibuffer_s, nbergs_rcvd_from_s)
+      call increase_ibuffer(bergs%ibuffer_s, nbergs_rcvd_from_s,buffer_width)
       call mpp_recv(bergs%ibuffer_s%data, nbergs_rcvd_from_s*buffer_width, grd%pe_S, tag=COMM_TAG_6)
       do i=1, nbergs_rcvd_from_s
         call unpack_berg_from_buffer2(bergs, bergs%ibuffer_s, i, grd, max_bonds_in=bergs%max_bonds  )
@@ -1304,7 +1307,7 @@ endif
       write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_n,' from',grd%pe_N,' (N) !!!!!!!!!!!!!!!!!!!!!!'
     endif
     if (nbergs_rcvd_from_n.gt.0) then
-      call increase_ibuffer(bergs%ibuffer_n, nbergs_rcvd_from_n)
+      call increase_ibuffer(bergs%ibuffer_n, nbergs_rcvd_from_n,buffer_width)
       if(folded_north_on_pe) then
          call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_10)
       else
@@ -1333,12 +1336,54 @@ if (halo_debugging) then
   call show_all_bonds(bergs)
 endif
 
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!Debugging!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!111
+  if (debug) then
+    nbergs_end=count_bergs(bergs)
+    i=nbergs_rcvd_from_n+nbergs_rcvd_from_s+nbergs_rcvd_from_e+nbergs_rcvd_from_w &
+     -nbergs_to_send_n-nbergs_to_send_s-nbergs_to_send_e-nbergs_to_send_w
+    if (nbergs_end-(nbergs_start+i).ne.0) then
+      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_end=',nbergs_end,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_start=',nbergs_start,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: delta=',i,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: error=',nbergs_end-(nbergs_start+i),' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_to_send_n=',nbergs_to_send_n,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_to_send_s=',nbergs_to_send_s,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_to_send_e=',nbergs_to_send_e,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_to_send_w=',nbergs_to_send_w,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_rcvd_from_n=',nbergs_rcvd_from_n,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_rcvd_from_s=',nbergs_rcvd_from_s,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_rcvd_from_e=',nbergs_rcvd_from_e,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_rcvd_from_w=',nbergs_rcvd_from_w,' on PE',mpp_pe()
+      !call error_mesg('diamonds, update_halos:', 'We lost some bergs!', FATAL)
+    endif
+  endif
+  if (debug) then
+    i=0
+    do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
+      this=>bergs%list(grdi,grdj)%first
+      do while (associated(this))
+        call check_position(grd, this, 'exchange (bot)')
+        if (this%ine.lt.bergs%grd%isc .or. &
+            this%ine.gt.bergs%grd%iec .or. &
+            this%jne.lt.bergs%grd%jsc .or. &
+            this%jne.gt.bergs%grd%jec) i=i+1
+        this=>this%next
+      enddo ! while
+    enddo ; enddo
+    call mpp_sum(i)
+    if (i>0 .and. mpp_pe()==mpp_root_pe()) then
+      write(stderrunit,'(a,i4)') 'diamonds, update_halos: # of bergs outside computational domain = ',i
+      call error_mesg('diamonds, update_halos:', 'there are bergs still in halos!', FATAL)
+    endif ! root_pe
+  endif ! debug
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!Debugging!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!111
+
 end subroutine update_halo_icebergs
 
 
 
-
-!contains
 subroutine delete_all_bergs_in_list(bergs,grdj,grdi)
   type(icebergs), pointer :: bergs
   ! Local variables
@@ -1353,7 +1398,6 @@ subroutine delete_all_bergs_in_list(bergs,grdj,grdi)
   enddo
   bergs%list(grdi,grdj)%first=>null()
 end  subroutine delete_all_bergs_in_list
-
 
 
 ! #############################################################################
@@ -1439,7 +1483,7 @@ force_app=.true.
       write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_w,' from',grd%pe_W,' (W) !!!!!!!!!!!!!!!!!!!!!!'
     endif
     if (nbergs_rcvd_from_w.gt.0) then
-      call increase_ibuffer(bergs%ibuffer_w, nbergs_rcvd_from_w)
+      call increase_ibuffer(bergs%ibuffer_w, nbergs_rcvd_from_w,buffer_width)
       call mpp_recv(bergs%ibuffer_w%data, nbergs_rcvd_from_w*buffer_width, grd%pe_W, tag=COMM_TAG_2)
       do i=1, nbergs_rcvd_from_w
         call unpack_berg_from_buffer2(bergs, bergs%ibuffer_w, i, grd, force_app, bergs%max_bonds  )
@@ -1457,7 +1501,7 @@ force_app=.true.
       write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_e,' from',grd%pe_E,' (E) !!!!!!!!!!!!!!!!!!!!!!'
     endif
     if (nbergs_rcvd_from_e.gt.0) then
-      call increase_ibuffer(bergs%ibuffer_e, nbergs_rcvd_from_e)
+      call increase_ibuffer(bergs%ibuffer_e, nbergs_rcvd_from_e,buffer_width)
       call mpp_recv(bergs%ibuffer_e%data, nbergs_rcvd_from_e*buffer_width, grd%pe_E, tag=COMM_TAG_4)
       do i=1, nbergs_rcvd_from_e
         call unpack_berg_from_buffer2(bergs, bergs%ibuffer_e, i, grd, force_app,  bergs%max_bonds)
@@ -1532,7 +1576,7 @@ force_app=.true.
       write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_s,' from',grd%pe_S,' (S) !!!!!!!!!!!!!!!!!!!!!!'
     endif
     if (nbergs_rcvd_from_s.gt.0) then
-      call increase_ibuffer(bergs%ibuffer_s, nbergs_rcvd_from_s)
+      call increase_ibuffer(bergs%ibuffer_s, nbergs_rcvd_from_s,buffer_width)
       call mpp_recv(bergs%ibuffer_s%data, nbergs_rcvd_from_s*buffer_width, grd%pe_S, tag=COMM_TAG_6)
       do i=1, nbergs_rcvd_from_s
         call unpack_berg_from_buffer2(bergs, bergs%ibuffer_s, i, grd, force_app, bergs%max_bonds ) 
@@ -1554,7 +1598,7 @@ force_app=.true.
       write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_n,' from',grd%pe_N,' (N) !!!!!!!!!!!!!!!!!!!!!!'
     endif
     if (nbergs_rcvd_from_n.gt.0) then
-      call increase_ibuffer(bergs%ibuffer_n, nbergs_rcvd_from_n)
+      call increase_ibuffer(bergs%ibuffer_n, nbergs_rcvd_from_n,buffer_width)
       if(folded_north_on_pe) then
          call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_10)
       else
@@ -1628,8 +1672,8 @@ end subroutine send_bergs_to_other_pes
     if (present(max_bonds_in)) max_bonds=max_bonds_in
 
 
-    if (.not.associated(buff)) call increase_buffer(buff,delta_buf)
-    if (n>buff%size) call increase_buffer(buff,delta_buf)
+    if (.not.associated(buff)) call increase_ibuffer(buff,n,buffer_width)
+    if (n>buff%size) call increase_ibuffer(buff,n,buffer_width)
 
     buff%data(1,n)=berg%lon
     buff%data(2,n)=berg%lat
@@ -1719,33 +1763,6 @@ end subroutine send_bergs_to_other_pes
 
   end subroutine clear_berg_from_partners_bonds
 
-
-
-  subroutine increase_buffer(old,delta)
-  ! Arguments
-  type(buffer), pointer :: old
-  integer, intent(in) :: delta
-  ! Local variables
-  type(buffer), pointer :: new
-  integer :: new_size
-
-    if (.not.associated(old)) then
-      new_size=delta
-    else
-      new_size=old%size+delta
-    endif
-    allocate(new)
-    allocate(new%data(buffer_width,new_size))
-    new%size=new_size
-    if (associated(old)) then
-      new%data(:,1:old%size)=old%data(:,1:old%size)
-      deallocate(old%data)
-      deallocate(old)
-    endif
-    old=>new
-   !write(stderr(),*) 'diamonds, increase_buffer',mpp_pe(),' increased to',new_size
-
-  end subroutine increase_buffer
 
   subroutine unpack_berg_from_buffer2(bergs, buff, n,grd, force_append, max_bonds_in)
   ! Arguments
@@ -1867,29 +1884,33 @@ end subroutine send_bergs_to_other_pes
 
   end subroutine unpack_berg_from_buffer2
 
-  subroutine increase_ibuffer(old,delta)
+  subroutine increase_ibuffer(old,num_bergs,width)
   ! Arguments
   type(buffer), pointer :: old
-  integer, intent(in) :: delta
+  integer, intent(in) :: num_bergs,width
   ! Local variables
   type(buffer), pointer :: new
   integer :: new_size, old_size
+  !This routine checks if the buffer size is smaller than nbergs
+  !If it is, the buffer size is increased by delta_buf
+  !The buffer increases by more than 1 so that the buffer does not have to increase every time
 
     if (.not.associated(old)) then
-      new_size=delta+delta_buf
+      new_size=num_bergs+delta_buf
       old_size=0
     else
       old_size=old%size
-      if (delta<old%size) then
-        new_size=old%size+delta
+      if (num_bergs<old%size) then
+        new_size=old%size
       else
-        new_size=delta+delta_buf
+        new_size=num_bergs+delta_buf
       endif
     endif
 
     if (old_size.ne.new_size) then
       allocate(new)
-      allocate(new%data(buffer_width,new_size))
+      !allocate(new%data(buffer_width,new_size))
+      allocate(new%data(width,new_size))
       new%size=new_size
       if (associated(old)) then
         new%data(:,1:old%size)=old%data(:,1:old%size)
@@ -1902,67 +1923,6 @@ end subroutine send_bergs_to_other_pes
 
   end subroutine increase_ibuffer
 
-  subroutine increase_ibuffer_traj(old,delta)
-  ! Arguments
-  type(buffer), pointer :: old
-  integer, intent(in) :: delta
-  ! Local variables
-  type(buffer), pointer :: new
-  integer :: new_size, old_size
-
-    if (.not.associated(old)) then
-      new_size=delta+delta_buf
-      old_size=0
-    else
-      old_size=old%size
-      if (delta<old%size) then
-        new_size=old%size+delta
-      else
-        new_size=delta+delta_buf
-      endif
-    endif
-
-    if (old_size.ne.new_size) then
-      allocate(new)
-      allocate(new%data(buffer_width_traj,new_size))
-      new%size=new_size
-      if (associated(old)) then
-        new%data(:,1:old%size)=old%data(:,1:old%size)
-        deallocate(old%data)
-        deallocate(old)
-      endif
-      old=>new
-     !write(stderr(),*) 'diamonds, increase_ibuffer',mpp_pe(),' increased to',new_size
-    endif
-
-  end subroutine increase_ibuffer_traj
-
-  subroutine increase_buffer_traj(old,delta)
-  ! Arguments
-  type(buffer), pointer :: old
-  integer, intent(in) :: delta
-  ! Local variables
-  type(buffer), pointer :: new
-  integer :: new_size
-
-    if (.not.associated(old)) then
-      new_size=delta
-    else
-      new_size=old%size+delta
-    endif
-    allocate(new)
-    allocate(new%data(buffer_width_traj,new_size))
-    new%size=new_size
-    if (associated(old)) then
-      new%data(:,1:old%size)=old%data(:,1:old%size)
-      deallocate(old%data)
-      deallocate(old)
-    endif
-    old=>new
-   !write(stderr(),*) 'diamonds, increase_buffer',mpp_pe(),' increased to',new_size
-
-  end subroutine increase_buffer_traj
-
   subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj)
   ! Arguments
   type(xyt), pointer :: traj
@@ -1971,8 +1931,8 @@ end subroutine send_bergs_to_other_pes
   logical, intent(in) :: save_short_traj
   ! Local variables
 
-    if (.not.associated(buff)) call increase_buffer_traj(buff,delta_buf)
-    if (n>buff%size) call increase_buffer_traj(buff,delta_buf)
+    if (.not.associated(buff)) call increase_ibuffer(buff,n,buffer_width_traj)
+    if (n>buff%size) call increase_ibuffer(buff,n,buffer_width_traj)
 
     buff%data(1,n)=traj%lon
     buff%data(2,n)=traj%lat
@@ -2855,36 +2815,39 @@ integer :: grdi, grdj
       posn%lat=this%lat
       posn%year=bergs%current_year
       posn%day=bergs%current_yearday
-      posn%uvel=this%uvel
-      posn%vvel=this%vvel
-      posn%mass=this%mass
-      posn%mass_of_bits=this%mass_of_bits
-      posn%heat_density=this%heat_density
-      posn%thickness=this%thickness
-      posn%width=this%width
-      posn%length=this%length
-      posn%uo=this%uo
-      posn%vo=this%vo
-      posn%ui=this%ui
-      posn%vi=this%vi
-      posn%ua=this%ua
-      posn%va=this%va
-      posn%ssh_x=this%ssh_x
-      posn%ssh_y=this%ssh_y
-      posn%sst=this%sst
-      posn%sss=this%sss
-      posn%cn=this%cn
-      posn%hi=this%hi
-      posn%axn=this%axn
-      posn%ayn=this%ayn
-      posn%bxn=this%bxn
-      posn%byn=this%byn
-      posn%uvel_old=this%uvel_old
-      posn%vvel_old=this%vvel_old
-      posn%lon_old=this%lon_old
-      posn%lat_old=this%lat_old
-      posn%halo_berg=this%halo_berg
-      posn%static_berg=this%static_berg
+      posn%iceberg_num=posn%iceberg_num
+      if (.not. bergs%save_short_traj) then !Not totally sure that this is correct
+        posn%uvel=this%uvel
+        posn%vvel=this%vvel
+        posn%mass=this%mass
+        posn%mass_of_bits=this%mass_of_bits
+        posn%heat_density=this%heat_density
+        posn%thickness=this%thickness
+        posn%width=this%width
+        posn%length=this%length
+        posn%uo=this%uo
+        posn%vo=this%vo
+        posn%ui=this%ui
+        posn%vi=this%vi
+        posn%ua=this%ua
+        posn%va=this%va
+        posn%ssh_x=this%ssh_x
+        posn%ssh_y=this%ssh_y
+        posn%sst=this%sst
+        posn%sss=this%sss
+        posn%cn=this%cn
+        posn%hi=this%hi
+        posn%axn=this%axn
+        posn%ayn=this%ayn
+        posn%bxn=this%bxn
+        posn%byn=this%byn
+        posn%uvel_old=this%uvel_old
+        posn%vvel_old=this%vvel_old
+        posn%lon_old=this%lon_old
+        posn%lat_old=this%lat_old
+        posn%halo_berg=this%halo_berg
+        posn%static_berg=this%static_berg
+      endif
   
       call push_posn(this%trajectory, posn)
   
@@ -2944,6 +2907,8 @@ type(iceberg), pointer :: berg
 type(xyt), pointer :: next, last
 type(xyt) :: vals
 
+  if (bergs%ignore_traj) return
+
   ! If the trajectory is empty, ignore it
   if (.not.associated(berg%trajectory)) return
 
@@ -2985,6 +2950,8 @@ logical, optional, intent(in) :: delete_bergs
 type(iceberg), pointer :: this, next
 logical :: delete_bergs_after_moving_traj
 integer :: grdi, grdj
+  
+  if (bergs%ignore_traj) return
 
   delete_bergs_after_moving_traj = .false.
   if (present(delete_bergs)) delete_bergs_after_moving_traj = delete_bergs
