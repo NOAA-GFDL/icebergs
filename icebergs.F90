@@ -1109,7 +1109,7 @@ end subroutine interp_flds
 ! ##############################################################################
 
 subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh, sst, calving_hflx, cn, hi, &
-                        stagger, stress_stagger,sss)
+                        stagger, stress_stagger,sss,mass_berg, ustar_berg, area_berg)
 ! Arguments
 type(icebergs), pointer :: bergs
 type(time_type), intent(in) :: time
@@ -1117,6 +1117,7 @@ real, dimension(:,:), intent(inout) :: calving, calving_hflx
 real, dimension(:,:), intent(in) :: uo, vo, ui, vi, tauxa, tauya, ssh, sst, cn, hi
 integer,    optional, intent(in) :: stagger, stress_stagger
 real, dimension(:,:), optional, intent(in) ::  sss
+real, dimension(:,:), optional, intent(inout) ::  mass_berg, ustar_berg, area_berg
 ! Local variables
 integer :: iyr, imon, iday, ihr, imin, isec, k
 type(icebergs_gridded), pointer :: grd
@@ -1152,6 +1153,10 @@ integer :: stderrunit
   grd%mass(:,:)=0.
   if (bergs%add_weight_to_ocean) grd%mass_on_ocean(:,:,:)=0.
   grd%virtual_area(:,:)=0.
+
+  mass_berg(:,:)=3.0
+  ustar_berg(:,:)=2.0
+  area_berg(:,:)=1.0
 
   ! Manage time
   call get_date(time, iyr, imon, iday, ihr, imin, isec)
