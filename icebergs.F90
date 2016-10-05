@@ -41,6 +41,7 @@ use ice_bergs_framework, only: orig_read  ! Remove when backward compatibility n
 use ice_bergs_io,        only: ice_bergs_io_init,write_restart,write_trajectory
 use ice_bergs_io,        only: read_restart_bergs,read_restart_bergs_orig,read_restart_calving
 use ice_bergs_io,        only: read_restart_bonds
+use ice_bergs_io,        only: read_ocean_depth
 
 implicit none ; private
 
@@ -119,6 +120,9 @@ integer :: stdlogunit, stderrunit
   call mpp_clock_end(bergs%clock_ior)
 
   if (really_debug) call print_bergs(stderrunit,bergs,'icebergs_init, initial status')
+  
+  !Reading ocean depth from a file
+  if (bergs%read_ocean_depth_from_file) call read_ocean_depth(bergs%grd)
 
   if (bergs%iceberg_bonds_on) then
     call update_halo_icebergs(bergs)
@@ -1172,9 +1176,15 @@ real :: SSS !Temporarily here
         Me=0.0
         if (.not. bergs%use_mixed_layer_salinity_for_thermo)  SSS=35.0  
         call find_basal_melt(bergs,dvo,this%lat,SSS,SST,bergs%Use_three_equation_model,T,Mb,this%iceberg_num)
-        Mb=max(Mb,0.)
+        Mb=max(Mb,0.) !No refreezing allowed for now
+        !Set melt to zero if ocean is too thin.
+        if ((bergs%melt_cutoff >=0.) .and. (bergs%apply_thickness_cutoff_to_bergs_melt)) then
+          if ((grd%ocean_depth(i,j)-this%thickness) < bergs%melt_cutoff) then
+            Mb=0.
+          endif
+        endif
       endif
-
+            
       if (bergs%set_melt_rates_to_zero) then
         Mv=0.0
         Mb=0.0
@@ -2656,6 +2666,7 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass,grdd_spread_mass
 real :: grdd_u_iceberg, grdd_v_iceberg, grdd_ustar_iceberg, grdd_spread_uvel, grdd_spread_vvel
 integer :: i, j, Iu, ju, iv, Jv, Iu_off, ju_off, iv_off, Jv_off
 real :: mask
+real :: ave_thickness
 real, dimension(:,:), allocatable :: uC_tmp, vC_tmp
 integer :: vel_stagger, str_stagger
 real, dimension(:,:), allocatable :: iCount
@@ -2758,6 +2769,9 @@ integer :: stderrunit
     lerr=send_data(grd%id_calving_hflx_in, grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   tmpsum=sum( grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
   bergs%net_incoming_calving_heat=bergs%net_incoming_calving_heat+tmpsum*bergs%dt ! Units of J
+
+  if (grd%id_ocean_depth>0) &
+    lerr=send_data(grd%id_ocean_depth, grd%ocean_depth(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
 
   if (vel_stagger == BGRID_NE) then
     ! Copy ocean and ice velocities. They are already on B-grid u-points.
@@ -2966,6 +2980,18 @@ integer :: stderrunit
     grd%spread_area(:,:)=0.
     call icebergs_incr_mass(bergs, grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec),within_iceberg_model=.True.,field_name_in='area') 
   endif
+  if (bergs%apply_thickness_cutoff_to_gridded_melt) then
+    do i=grd%isd,grd%ied ; do j=grd%jsd,grd%jed
+      if ((bergs%melt_cutoff >=0.) .and. (grd%spread_area(i,j)>0.)) then
+        ave_thickness=grd%spread_mass(i,j)/(grd%spread_area(i,j)*bergs%rho_bergs) 
+        if ((grd%ocean_depth(i,j)-ave_thickness) < bergs%melt_cutoff) then
+          grd%floating_melt(i,j)=0.0
+          grd%calving_hflx(i,j)=0.0
+        endif
+      endif
+    enddo ;enddo
+  endif
+
 
   ! Gridded diagnostics
   if (grd%id_uo>0) &

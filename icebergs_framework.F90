@@ -154,6 +154,7 @@ type :: icebergs_gridded
   integer :: id_count=-1, id_chksum=-1, id_u_iceberg=-1, id_v_iceberg=-1, id_sss=-1, id_ustar_iceberg
   integer :: id_spread_uvel=-1, id_spread_vvel=-1
   integer :: id_melt_m_per_year=-1
+  integer :: id_ocean_depth=-1
 
   real :: clipping_depth=0. ! The effective depth at which to clip the weight felt by the ocean [m].
 
@@ -231,6 +232,7 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   real :: cdrag_icebergs =  1.5e-3 !Momentum Drag coef, taken from HJ99  (Holland and Jenkins 1999)
   real :: initial_orientation=0. ! Iceberg orientaion relative to this angle (in degrees). Used for hexagonal mass spreading.
   real :: Gamma_T_3EQ=0.022 ! Nondimensional heat-transfer coefficient
+  real :: melt_cutoff=-1.0 !Minimum ocean thickness for melting to occur (is not applied for values < 0)
   logical :: const_gamma=.True. !If true uses a constant heat tranfer coefficient, from which the salt transfer is calculated
   real, dimension(:), pointer :: initial_mass, distribution, mass_scaling
   real, dimension(:), pointer :: initial_thickness, initial_width, initial_length
@@ -240,6 +242,8 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
   logical :: time_average_weight=.false. ! Time average the weight on the ocean
   logical :: Runge_not_Verlet=.True.  !True=Runge Kuttai, False=Verlet.  - Added by Alon 
+  logical :: apply_thickness_cutoff_to_gridded_melt=.False.  !Prevents melt for ocean thickness below melt_cuttoff (applied to gridded melt fields)
+  logical :: apply_thickness_cutoff_to_bergs_melt=.False.  !Prevents melt for ocean thickness below melt_cuttoff (applied to bergs)
   logical :: use_updated_rolling_scheme=.false. ! True to use the aspect ratio based rolling scheme rather than incorrect version of WM scheme   (set tip_parameter=1000. for correct WM scheme)
   logical :: read_old_restarts=.true. ! If true, read restarts prior to grid_of_lists and iceberg_num innovation
   logical :: pass_fields_to_ocean_model=.False. !Iceberg area, mass and ustar fields are prepared to pass to ocean model
@@ -267,6 +271,7 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   logical :: interactive_icebergs_on=.false.  !Turn on/off interactions between icebergs  - Added by Alon 
   logical :: critical_interaction_damping_on=.true.  !Sets the damping on relative iceberg velocity to critical value - Added by Alon 
   logical :: use_old_spreading=.true. ! If true, spreads iceberg mass as if the berg is one grid cell wide
+  logical :: read_ocean_depth_from_file=.false. ! If true, ocean depth is read from a file.
   integer :: debug_iceberg_with_id = -1 ! If positive, monitors a berg with this id
 
   real :: speed_limit=0. ! CFL speed limit for a berg [m/s]
@@ -380,6 +385,7 @@ real :: utide_icebergs= 0.      ! Tidal speeds, set to zero for now.
 real :: ustar_icebergs_bg=0.001 ! Background u_star under icebergs. This should be linked to a value felt by the ocean boundary layer
 real :: cdrag_icebergs =  1.5e-3 !Momentum Drag coef, taken from HJ99  (Holland and Jenkins 1999)
 real :: Gamma_T_3EQ=0.022 ! Nondimensional heat-transfer coefficient
+real :: melt_cutoff=-1.0 !Minimum ocean thickness for melting to occur (is not applied for values < 0)
 logical :: const_gamma=.True. !If true uses a constant heat tranfer coefficient, from which the salt transfer is calculated
 logical :: use_operator_splitting=.true. ! Use first order operator splitting for thermodynamics
 logical :: add_weight_to_ocean=.true. ! Add weight of icebergs + bits to ocean
@@ -390,6 +396,8 @@ real :: tau_calving=0. ! Time scale for smoothing out calving field (years)
 real :: tip_parameter=0. ! parameter to override iceberg rollilng critica ratio (use zero to get parameter directly from ice and seawater densities
 real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
 logical :: Runge_not_Verlet=.True.  !True=Runge Kutta, False=Verlet.  - Added by Alon 
+logical :: apply_thickness_cutoff_to_gridded_melt=.False.  !Prevents melt for ocean thickness below melt_cuttoff (applied to gridded melt fields)
+logical :: apply_thickness_cutoff_to_bergs_melt=.False.  !Prevents melt for ocean thickness below melt_cuttoff (applied to bergs)
 logical :: use_updated_rolling_scheme=.false. ! Use the corrected Rolling Scheme rather than the erronios one
 logical :: pass_fields_to_ocean_model=.False. !Iceberg area, mass and ustar fields are prepared to pass to ocean model
 logical :: use_mixed_layer_salinity_for_thermo=.False.  !If true, then model uses ocean salinity for 3 and 2 equation melt model.
@@ -421,6 +429,7 @@ logical :: do_unit_tests=.false. ! Conduct some unit tests
 logical :: input_freq_distribution=.false. ! Flag to show if input distribution is freq or mass dist (=1 if input is a freq dist, =0 to use an input mass dist)
 logical :: read_old_restarts=.true. ! If true, read restarts prior to grid_of_lists and iceberg_num innovations
 logical :: use_old_spreading=.true. ! If true, spreads iceberg mass as if the berg is one grid cell wide
+logical :: read_ocean_depth_from_file=.false. ! If true, ocean depth is read from a file.
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim) , 
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
@@ -437,7 +446,8 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          allow_bergs_to_roll,set_melt_rates_to_zero,lat_ref,initial_orientation,rotate_icebergs_for_mass_spreading,grid_is_latlon,Lx,use_f_plane,use_old_spreading, &
          grid_is_regular,override_iceberg_velocities,u_override,v_override,add_iceberg_thickness_to_SSH,Iceberg_melt_without_decay,melt_icebergs_as_ice_shelf, &
          Use_three_equation_model,find_melt_using_spread_mass,use_mixed_layer_salinity_for_thermo,utide_icebergs,ustar_icebergs_bg,cdrag_icebergs, pass_fields_to_ocean_model, &
-         const_gamma, Gamma_T_3EQ, ignore_traj, debug_iceberg_with_id,use_updated_rolling_scheme, tip_parameter, read_old_restarts, tau_calving
+         const_gamma, Gamma_T_3EQ, ignore_traj, debug_iceberg_with_id,use_updated_rolling_scheme, tip_parameter, read_old_restarts, tau_calving, read_ocean_depth_from_file, melt_cutoff,&
+         apply_thickness_cutoff_to_gridded_melt, apply_thickness_cutoff_to_bergs_melt
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -614,7 +624,7 @@ real :: Total_mass  !Added by Alon
     if(fractional_area) grd%area(is:ie,js:je)=ice_area(:,:) *(4.*pi*radius*radius)
   endif
   if(present(ocean_depth)) grd%ocean_depth(is:ie,js:je)=ocean_depth(:,:)
-
+  
   ! Copy data declared on ice model data domain
   is=grd%isc-1; ie=grd%iec+1; js=grd%jsc-1; je=grd%jec+1
   grd%dx(is:ie,js:je)=ice_dx(:,:)
@@ -815,6 +825,10 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
   bergs%tip_parameter=tip_parameter
   bergs%use_updated_rolling_scheme=use_updated_rolling_scheme  !Alon
   bergs%Runge_not_Verlet=Runge_not_Verlet   
+  bergs%apply_thickness_cutoff_to_bergs_melt=apply_thickness_cutoff_to_bergs_melt
+  bergs%apply_thickness_cutoff_to_gridded_melt=apply_thickness_cutoff_to_gridded_melt
+  bergs%melt_cutoff=melt_cutoff 
+  bergs%read_ocean_depth_from_file=read_ocean_depth_from_file
   bergs%const_gamma=const_gamma 
   bergs%Gamma_T_3EQ=Gamma_T_3EQ
   bergs%pass_fields_to_ocean_model=pass_fields_to_ocean_model 
@@ -952,6 +966,8 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
      'X-stress on ice from atmosphere', 'N m^-2')
   grd%id_fay=register_diag_field('icebergs', 'tauy', axes, Time, &
      'Y-stress on ice from atmosphere', 'N m^-2')
+  grd%id_ocean_depth=register_diag_field('icebergs', 'Depth', axes, Time, &
+     'Ocean Depth', 'm')
 
   ! Static fields
   id_class=register_static_field('icebergs', 'lon', axes, &
@@ -966,8 +982,8 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
   id_class=register_static_field('icebergs', 'mask', axes, &
                'wet point mask', 'none')
   if (id_class>0) lerr=send_data(id_class, grd%msk(grd%isc:grd%iec,grd%jsc:grd%jec))
-  id_class=register_static_field('icebergs', 'ocean_depth', axes, &
-               'ocean depth', 'm')
+  id_class=register_static_field('icebergs', 'ocean_depth_static', axes, &
+               'ocean depth static', 'm')
   if (id_class>0) lerr=send_data(id_class, grd%ocean_depth(grd%isc:grd%iec,grd%jsc:grd%jec))
 
   if (debug) then
@@ -991,7 +1007,6 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
   call mpp_clock_end(bergs%clock)
 
 end subroutine ice_bergs_framework_init
-
 ! ##############################################################################
 
 subroutine offset_berg_dates(bergs,Time)

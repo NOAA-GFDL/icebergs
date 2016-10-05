@@ -44,6 +44,7 @@ include 'netcdf.inc'
 public ice_bergs_io_init
 public read_restart_bergs,read_restart_bergs_orig,write_restart,write_trajectory
 public read_restart_calving, read_restart_bonds
+public read_ocean_depth
 
 !Local Vars
 integer, parameter :: file_format_major_version=0
@@ -1415,6 +1416,36 @@ type(randomNumberStream) :: rns
   call mpp_sum( bergs%floating_heat_start )
 
 end subroutine read_restart_calving
+
+! ##############################################################################
+
+subroutine read_ocean_depth(grd)
+! Arguments
+! Local variables
+character(len=37) :: filename 
+type(icebergs_gridded), pointer :: grd
+
+  ! Read stored ice
+  filename=trim(restart_input_dir)//'topog.nc'
+  if (file_exist(filename)) then
+    if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') &
+     'diamonds, read_ocean_depth: reading ',filename
+    if (field_exist(filename, 'depth')) then
+      if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
+       'diamonds, read_restart_calving: reading stored_heat from restart file.'
+      call read_data(filename, 'depth', grd%ocean_depth, grd%domain)
+    else
+      if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
+     'diamonds, read_restart_calving: stored_heat WAS NOT FOUND in the file. Setting to 0.'
+      !grd%ocean_depth(:,:)=0.
+    endif
+  else
+    if (mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
+     'diamonds, read_ocean_depth: Ocean depth file (topog.nc) not present)'
+  endif
+
+  !call grd_chksum2(bergs%grd, bergs%grd%ocean_depth, 'read_ocean_depth, ocean_depth')
+end subroutine read_ocean_depth
 
 ! ##############################################################################
 
