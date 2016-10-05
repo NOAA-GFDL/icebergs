@@ -2710,9 +2710,9 @@ integer :: stderrunit
   ustar_berg0(:,:)=0.
   area_berg0(:,:)=0.
 
-  mass_berg(:,:)=3.0
-  ustar_berg(:,:)=2.0
-  area_berg(:,:)=1.0
+  mass_berg(:,:)=0.0
+  ustar_berg(:,:)=0.0
+  area_berg(:,:)=0.0
 
 
   if (bergs%add_weight_to_ocean) grd%mass_on_ocean(:,:,:)=0.
