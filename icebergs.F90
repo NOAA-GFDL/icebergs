@@ -2650,7 +2650,7 @@ end subroutine interp_flds
 ! ##############################################################################
 
 subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh, sst, calving_hflx, cn, hi, &
-                        stagger, stress_stagger,sss)
+                        stagger, stress_stagger,sss,mass_berg, ustar_berg, area_berg)
 ! Arguments
 type(icebergs), pointer :: bergs
 type(time_type), intent(in) :: time
@@ -2658,6 +2658,8 @@ real, dimension(:,:), intent(inout) :: calving, calving_hflx
 real, dimension(:,:), intent(in) :: uo, vo, ui, vi, tauxa, tauya, ssh, sst, cn, hi
 integer,    optional, intent(in) :: stagger, stress_stagger
 real, dimension(:,:), optional, intent(in) :: sss
+real, dimension(:,:), optional, intent(inout) ::  mass_berg, ustar_berg, area_berg
+
 ! Local variables
 integer :: iyr, imon, iday, ihr, imin, isec, k
 type(icebergs_gridded), pointer :: grd
@@ -2670,7 +2672,7 @@ real :: ave_thickness
 real, dimension(:,:), allocatable :: uC_tmp, vC_tmp
 integer :: vel_stagger, str_stagger
 real, dimension(:,:), allocatable :: iCount
-real, dimension(bergs%grd%isd:bergs%grd%ied,bergs%grd%jsd:bergs%grd%jed)  :: ustar_berg, area_berg, spread_mass_old
+real, dimension(bergs%grd%isd:bergs%grd%ied,bergs%grd%jsd:bergs%grd%jed)  :: ustar_berg0, area_berg0, spread_mass_old
 integer :: nbonds
 !logical :: within_iceberg_model
 
@@ -2705,8 +2707,13 @@ integer :: stderrunit
   grd%ustar_iceberg(:,:)=0.
   grd%mass(:,:)=0.
  
-  ustar_berg(:,:)=0.
-  area_berg(:,:)=0.
+  ustar_berg0(:,:)=0.
+  area_berg0(:,:)=0.
+
+  mass_berg(:,:)=3.0
+  ustar_berg(:,:)=2.0
+  area_berg(:,:)=1.0
+
 
   if (bergs%add_weight_to_ocean) grd%mass_on_ocean(:,:,:)=0.
   if (bergs%add_weight_to_ocean) grd%area_on_ocean(:,:,:)=0.
@@ -2972,10 +2979,12 @@ integer :: stderrunit
         grd%floating_melt(i,j)=0.0
       endif
     enddo ;enddo
-  elseif  ((grd%id_spread_mass>0) .or. (bergs%pass_fields_to_ocean_model)) then   !Update diagnostic of iceberg mass spread on ocean
+  !elseif  ((grd%id_spread_mass>0) .or. (bergs%pass_fields_to_ocean_model)) then   !Update diagnostic of iceberg mass spread on ocean
+  else   !Update iceberg mass spread on ocean
     grd%spread_mass(:,:)=0.
     call icebergs_incr_mass(bergs, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec),within_iceberg_model=.True.) 
   endif
+
   if ( (grd%id_spread_area>0)  .or. (bergs%pass_fields_to_ocean_model)) then  !Update diagnostic of iceberg area spread on ocean
     grd%spread_area(:,:)=0.
     call icebergs_incr_mass(bergs, grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec),within_iceberg_model=.True.,field_name_in='area') 
@@ -2991,7 +3000,7 @@ integer :: stderrunit
       endif
     enddo ;enddo
   endif
-
+   
 
   ! Gridded diagnostics
   if (grd%id_uo>0) &
@@ -3095,16 +3104,19 @@ integer :: stderrunit
     where (grd%area(grd%isc:grd%iec,grd%jsc:grd%jec)>0.)
       calving(:,:)=grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec)/grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) &
                   +grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec)
-      !ustar_berg(:,:)=grd%ustar_iceberg(grd%isc:grd%iec,grd%jsc:grd%jec)
-      !area_berg(:,:)=grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec)
-      ustar_berg(:,:)=grd%ustar_iceberg(:,:)
-      area_berg(:,:)=grd%spread_area(:,:)
+      !ustar_berg0(:,:)=grd%ustar_iceberg(grd%isc:grd%iec,grd%jsc:grd%jec)
+      !area_berg0(:,:)=grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec)
+      ustar_berg0(:,:)=grd%ustar_iceberg(:,:)
+      area_berg0(:,:)=grd%spread_area(:,:)
     elsewhere
       calving(:,:)=0.
-      ustar_berg(:,:)=0.
-      area_berg(:,:)=0.
+      ustar_berg0(:,:)=0.
+      area_berg0(:,:)=0.
     end where
     calving_hflx(:,:)=grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)
+    mass_berg(:,:)=grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)
+    area_berg(:,:)=grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec)
+    ustar_berg(:,:)=grd%ustar_iceberg(grd%isc:grd%iec,grd%jsc:grd%jec)
   endif
   call mpp_clock_end(bergs%clock_int)
 
