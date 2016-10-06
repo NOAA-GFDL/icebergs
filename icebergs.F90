@@ -2672,7 +2672,8 @@ real :: ave_thickness
 real, dimension(:,:), allocatable :: uC_tmp, vC_tmp
 integer :: vel_stagger, str_stagger
 real, dimension(:,:), allocatable :: iCount
-real, dimension(bergs%grd%isd:bergs%grd%ied,bergs%grd%jsd:bergs%grd%jed)  :: ustar_berg0, area_berg0, spread_mass_old
+real, dimension(bergs%grd%isd:bergs%grd%ied,bergs%grd%jsd:bergs%grd%jed)  :: spread_mass_old
+!real, dimension(bergs%grd%isd:bergs%grd%ied,bergs%grd%jsd:bergs%grd%jed)  :: ustar_berg0, area_berg0
 integer :: nbonds
 !logical :: within_iceberg_model
 
@@ -2707,12 +2708,19 @@ integer :: stderrunit
   grd%ustar_iceberg(:,:)=0.
   grd%mass(:,:)=0.
  
-  ustar_berg0(:,:)=0.
-  area_berg0(:,:)=0.
+  !I belive that ustar_berg0 and area_berg0 are no longer needed
+  !ustar_berg0(:,:)=0.
+  !area_berg0(:,:)=0.
 
-  mass_berg(:,:)=0.0
-  ustar_berg(:,:)=0.0
-  area_berg(:,:)=0.0
+  if (present(mass_berg)) then !; if (allocated(mass_berg)) then
+    mass_berg(:,:)=0.0
+  endif !; endif
+  if (present(ustar_berg)) then !; if (allocated(ustar_berg)) then
+    ustar_berg(:,:)=0.0
+  endif !; endif
+  if (present(area_berg)) then !; if (allocated(area_berg)) then
+    area_berg(:,:)=0.0
+  endif !; endif
 
 
   if (bergs%add_weight_to_ocean) grd%mass_on_ocean(:,:,:)=0.
@@ -3104,19 +3112,23 @@ integer :: stderrunit
     where (grd%area(grd%isc:grd%iec,grd%jsc:grd%jec)>0.)
       calving(:,:)=grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec)/grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) &
                   +grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec)
-      !ustar_berg0(:,:)=grd%ustar_iceberg(grd%isc:grd%iec,grd%jsc:grd%jec)
-      !area_berg0(:,:)=grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec)
-      ustar_berg0(:,:)=grd%ustar_iceberg(:,:)
-      area_berg0(:,:)=grd%spread_area(:,:)
+      !ustar_berg0(:,:)=grd%ustar_iceberg(:,:)
+      !area_berg0(:,:)=grd%spread_area(:,:)
     elsewhere
       calving(:,:)=0.
-      ustar_berg0(:,:)=0.
-      area_berg0(:,:)=0.
+      !ustar_berg0(:,:)=0.
+      !area_berg0(:,:)=0.
     end where
     calving_hflx(:,:)=grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)
-    mass_berg(:,:)=grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)
-    area_berg(:,:)=grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec)
-    ustar_berg(:,:)=grd%ustar_iceberg(grd%isc:grd%iec,grd%jsc:grd%jec)
+    if (present(mass_berg)) then !; if (allocated(mass_berg)) then
+      mass_berg(:,:)=grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)
+    endif !; endif
+    if (present(ustar_berg)) then !; if (allocated(ustar_berg)) then
+      ustar_berg(:,:)=grd%ustar_iceberg(grd%isc:grd%iec,grd%jsc:grd%jec)
+    endif !; endif
+    if (present(area_berg)) then !; if (allocated(area_berg)) then
+      area_berg(:,:)=grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec)
+    endif !; endif
   endif
   call mpp_clock_end(bergs%clock_int)
 
