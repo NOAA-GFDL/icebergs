@@ -1154,16 +1154,6 @@ integer :: stderrunit
   if (bergs%add_weight_to_ocean) grd%mass_on_ocean(:,:,:)=0.
   grd%virtual_area(:,:)=0.
 
-  if (present(mass_berg)) then
-          mass_berg(:,:)=0.0
-  endif
-  if (present(ustar_berg)) then
-          ustar_berg(:,:)=1.0
-  endif
-  if (present(area_berg)) then
-          area_berg(:,:)=2.0
-  endif
-
   ! Manage time
   call get_date(time, iyr, imon, iday, ihr, imin, isec)
   bergs%current_year=iyr
@@ -1429,6 +1419,17 @@ integer :: stderrunit
             mass_berg(:,:)=grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)
     endif
   endif
+  
+  if (present(area_berg)) then
+    area_berg(:,:)=0.5
+  endif
+  !if (present(mass_berg)) then
+  !  mass_berg(:,:)=0.0
+  !endif
+  if (present(ustar_berg)) then
+    ustar_berg(:,:)=0.02
+  endif
+  
   call mpp_clock_end(bergs%clock_int)
 
   ! Diagnose budgets
