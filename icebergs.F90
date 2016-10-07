@@ -1109,7 +1109,7 @@ end subroutine interp_flds
 ! ##############################################################################
 
 subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh, sst, calving_hflx, cn, hi, &
-                        stagger, stress_stagger,sss)
+                        stagger, stress_stagger, sss, mass_berg, ustar_berg, area_berg)
 ! Arguments
 type(icebergs), pointer :: bergs
 type(time_type), intent(in) :: time
@@ -1117,6 +1117,7 @@ real, dimension(:,:), intent(inout) :: calving, calving_hflx
 real, dimension(:,:), intent(in) :: uo, vo, ui, vi, tauxa, tauya, ssh, sst, cn, hi
 integer,    optional, intent(in) :: stagger, stress_stagger
 real, dimension(:,:), optional, intent(in) ::  sss
+real, dimension(:,:), optional, pointer ::  mass_berg, ustar_berg, area_berg
 ! Local variables
 integer :: iyr, imon, iday, ihr, imin, isec, k
 type(icebergs_gridded), pointer :: grd
@@ -1400,6 +1401,10 @@ integer :: stderrunit
   if (really_debug) call print_bergs(stderrunit,bergs,'icebergs_run, status')
   call mpp_clock_end(bergs%clock_dia)
 
+  !Making sure that spread_mass has the correct mass
+  grd%spread_mass(:,:)=0.0
+  call icebergs_incr_mass(bergs, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec), within_iceberg_model=.True.)
+
   ! Return what ever calving we did not use and additional icebergs melt
   call mpp_clock_begin(bergs%clock_int)
   if (.not. bergs%passive_mode) then
@@ -1410,7 +1415,13 @@ integer :: stderrunit
       calving(:,:)=0.
     end where
     calving_hflx(:,:)=grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)
+    if (present(mass_berg)) then
+      if (associated(mass_berg) .and. .not.bergs%passive_mode) then
+        mass_berg(:,:)=grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)
+      endif
+    endif
   endif
+  
   call mpp_clock_end(bergs%clock_int)
 
   ! Diagnose budgets
@@ -1680,23 +1691,32 @@ end subroutine icebergs_run
 
 ! ##############################################################################
 
-subroutine icebergs_incr_mass(bergs, mass, Time)
+subroutine icebergs_incr_mass(bergs, mass, within_iceberg_model, Time)
 ! Arguments
 type(icebergs), pointer :: bergs
 real, dimension(bergs%grd%isc:bergs%grd%iec,bergs%grd%jsc:bergs%grd%jec), intent(inout) :: mass
+logical, intent(in), optional :: within_iceberg_model
 type(time_type), intent(in), optional :: Time
 ! Local variables
 integer :: i, j
 type(icebergs_gridded), pointer :: grd
 real :: dmda
 logical :: lerr
+logical :: within_model
 
   if (.not. associated(bergs)) return
 
   if (.not. bergs%add_weight_to_ocean) return
 
-  call mpp_clock_begin(bergs%clock)
-  call mpp_clock_begin(bergs%clock_int)
+  within_model=.False.
+  if (present(within_iceberg_model)) then 
+    within_model=within_iceberg_model
+  endif
+
+  if (.not.(within_model)) then
+    call mpp_clock_begin(bergs%clock)
+    call mpp_clock_begin(bergs%clock_int)
+  endif
 
   ! For convenience
   grd=>bergs%grd
@@ -1733,7 +1753,14 @@ logical :: lerr
          +   ( (grd%mass_on_ocean(i-1,j  ,6)+grd%mass_on_ocean(i+1,j  ,4))   &
          +     (grd%mass_on_ocean(i  ,j-1,8)+grd%mass_on_ocean(i  ,j+1,2)) ) )
     if (grd%area(i,j)>0) dmda=dmda/grd%area(i,j)*grd%msk(i,j)
-    if (.not. bergs%passive_mode) mass(i,j)=mass(i,j)+dmda
+
+    if (within_model) then
+      mass(i,j)=mass(i,j)+dmda
+    else
+      if (.not. bergs%passive_mode) mass(i,j)=mass(i,j)+dmda
+    endif
+
+    !if (.not. bergs%passive_mode) mass(i,j)=mass(i,j)+dmda
     if (grd%id_mass_on_ocn>0) grd%tmp(i,j)=dmda
   enddo; enddo
   if (present(Time).and. (grd%id_mass_on_ocn>0)) &
@@ -1745,8 +1772,10 @@ logical :: lerr
     call grd_chksum2(grd, grd%tmp, 'mass out (incr)')
   endif
 
-  call mpp_clock_end(bergs%clock_int)
-  call mpp_clock_end(bergs%clock)
+  if (.not.(within_model)) then
+    call mpp_clock_end(bergs%clock_int)
+    call mpp_clock_end(bergs%clock)
+  endif
 
 end subroutine icebergs_incr_mass
 

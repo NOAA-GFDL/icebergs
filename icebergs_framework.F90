@@ -105,6 +105,9 @@ type :: icebergs_gridded
   real, dimension(:,:), pointer :: bergy_src=>null() ! Mass flux from berg erosion into bergy bits (kg/s/m^2)
   real, dimension(:,:), pointer :: bergy_melt=>null() ! Melting rate of bergy bits (kg/s/m^2)
   real, dimension(:,:), pointer :: bergy_mass=>null() ! Mass distribution of bergy bits (kg/s/m^2)
+  real, dimension(:,:), pointer :: spread_mass=>null() ! Mass of icebergs after spreading (kg/m^2)
+  real, dimension(:,:), pointer :: spread_area=>null() ! Area of icebergs  after spreading (m^2/m^2)
+  real, dimension(:,:), pointer :: ustar_iceberg=>null() ! Frictional velocity below icebergs to be passed to ocean
   real, dimension(:,:), pointer :: virtual_area=>null() ! Virtual surface coverage by icebergs (m^2)
   real, dimension(:,:), pointer :: mass=>null() ! Mass distribution (kg/m^2)
   real, dimension(:,:,:), pointer :: mass_on_ocean=>null() ! Mass distribution partitioned by neighbor (kg/m^2)
@@ -419,6 +422,9 @@ real :: Total_mass  !Added by Alon
   allocate( grd%bergy_src(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_src(:,:)=0.
   allocate( grd%bergy_melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_melt(:,:)=0.
   allocate( grd%bergy_mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_mass(:,:)=0.
+  allocate( grd%spread_mass(grd%isd:grd%ied, grd%jsd:grd%jed) );  grd%spread_mass(:,:)=0.
+  allocate( grd%spread_area(grd%isd:grd%ied, grd%jsd:grd%jed) );  grd%spread_area(:,:)=0.
+  allocate( grd%ustar_iceberg(grd%isd:grd%ied, grd%jsd:grd%jed) );grd%ustar_iceberg(:,:)=0.
   allocate( grd%virtual_area(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%virtual_area(:,:)=0.
   allocate( grd%mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%mass(:,:)=0.
   allocate( grd%mass_on_ocean(grd%isd:grd%ied, grd%jsd:grd%jed, 9) ); grd%mass_on_ocean(:,:,:)=0.
