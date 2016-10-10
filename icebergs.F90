@@ -1533,7 +1533,7 @@ subroutine find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thic
   iDens = 1.0/Rho0
 
   !Preparing the mixed layer properties for use in both 2 and 3 equation version
-  ustar = bergs%cdrag_icebergs*(dvo  + bergs%utide_icebergs)
+  ustar = sqrt(bergs%cdrag_icebergs*(dvo**2  + bergs%utide_icebergs**2))
   ustar_h = max(bergs%ustar_icebergs_bg, ustar)
 
   ! Estimate the neutral ocean boundary layer thickness as the minimum of the
