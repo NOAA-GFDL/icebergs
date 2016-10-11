@@ -1846,7 +1846,8 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
   real :: yDxL, yDxC, yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR
   real :: S, H, origin_x, origin_y, x0, y0
   real :: Area_Q1,Area_Q2 , Area_Q3,Area_Q4, Area_hex
-  real :: fraction_used
+  real :: fraction_used !fraction of iceberg mass included (part of the mass near the boundary is discarded sometimes)
+  real :: I_fraction_used !Inverse of fraction used
   real :: tol
   real, parameter :: rho_seawater=1035.
   integer :: stderrunit
@@ -1902,6 +1903,8 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
     yUxR=yU*xR*grd%msk(i+1,j+1)
     yCxC=1.-( ((yDxL+yUxR)+(yDxR+yUxL)) + ((yCxL+yCxR)+(yDxC+yUxC)) )
     
+    fraction_used=1.  !rectangular bergs do share mass with boundaries (all mass is included in cells)
+
   else !Spread mass as if elements area hexagonal
 
     if (grd%area(i,j)>0) then
@@ -1976,53 +1979,51 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
         call error_mesg('diamonds, hexagonal spreading', 'All the mass is not being used!!!', FATAL)
       endif
 
-  endif
         
-  !Scale each cell by (1/fraction_used) in order to redisribute ice mass which landed up on the land, back into the ocean
-  !Note that for the square elements, the mass has already been reassigned, so fraction_used shoule be equal to 1 aready
-  fraction_used= ((yDxL*grd%msk(i-1,j-1)) + (yDxC*grd%msk(i  ,j-1))  +(yDxR*grd%msk(i+1,j-1)) +(yCxL*grd%msk(i-1,j  )) +  (yCxR*grd%msk(i+1,j  ))&
-                 +(yUxL*grd%msk(i-1,j+1)) +(yUxC*grd%msk(i  ,j+1))   +(yUxR*grd%msk(i+1,j+1)) + (yCxC**grd%msk(i,j)))
-
-  if ((hexagonal_icebergs) .and.  (static_berg .eq. 1)) then
-    !Change this to use_old_restart=false when this is merged in
-    fraction_used=1.  !Static icebergs do not share their mass with the boundary (this to initialize icebergs in regular arrangements against boundaries)
+    !Scale each cell by (1/fraction_used) in order to redisribute ice mass which landed up on the land, back into the ocean
+    !Note that for the square elements, the mass has already been reassigned, so fraction_used shoule be equal to 1 aready
+    fraction_used= ((yDxL*grd%msk(i-1,j-1)) + (yDxC*grd%msk(i  ,j-1))  +(yDxR*grd%msk(i+1,j-1)) +(yCxL*grd%msk(i-1,j  )) +  (yCxR*grd%msk(i+1,j  ))&
+                   +(yUxL*grd%msk(i-1,j+1)) +(yUxC*grd%msk(i  ,j+1))   +(yUxR*grd%msk(i+1,j+1)) + (yCxC**grd%msk(i,j)))
+    if  (static_berg .eq. 1)  fraction_used=1.  !Static icebergs do not share their mass with the boundary
+                                                ! (this allows us to easily  initialize hexagonal icebergs in regular arrangements against boundaries)
   endif
+  I_fraction_used=1./fraction_used !Invert this so that the arithmatec reprocudes
 
   !Spreading the iceberg mass onto the ocean
   call spread_variable_across_cells(grd, grd%mass_on_ocean, Mass, i ,j, &
-             yDxL, yDxC,yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR, fraction_used)
+             yDxL, yDxC,yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR, I_fraction_used)
   !Spreading the iceberg area onto the ocean
   call spread_variable_across_cells(grd, grd%area_on_ocean, Area*scaling , i ,j, &
-             yDxL, yDxC,yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR,fraction_used)
+             yDxL, yDxC,yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR,I_fraction_used)
   !Spreading the iceberg x momentum onto the ocean
   call spread_variable_across_cells(grd,grd%Uvel_on_ocean, uvel*Area*scaling , i ,j, &
-             yDxL, yDxC,yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR, fraction_used)
+             yDxL, yDxC,yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR, I_fraction_used)
   !Spreading the iceberg y momentum onto the ocean
   call spread_variable_across_cells(grd,grd%Vvel_on_ocean, vvel*Area*scaling , i ,j, &
-             yDxL, yDxC,yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR, fraction_used)
+             yDxL, yDxC,yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR, I_fraction_used)
   
 end subroutine spread_mass_across_ocean_cells
 
 subroutine spread_variable_across_cells(grd, variable_on_ocean, Var,i,j, &
-           yDxL, yDxC,yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR,fraction_used)
+           yDxL, yDxC,yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR,I_fraction_used)
   ! Arguments
   type(icebergs_gridded), pointer, intent(in) :: grd
   real, dimension(grd%isd:grd%ied, grd%jsd:grd%jed, 9), intent(inout) :: variable_on_ocean 
   real, intent(in) :: Var !Variable to be spread accross cell
   real, intent(in) :: yDxL, yDxC, yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR !Weights
-  real, intent(in) :: fraction_used !Amount of iceberg used
+  real, intent(in) :: I_fraction_used !Amount of iceberg used (inverse)
   integer, intent(in) :: i, j
 
   !Spreading the iceberg mass onto the ocean
-  variable_on_ocean(i,j,1)=variable_on_ocean(i,j,1)+(yDxL*Var/fraction_used)
-  variable_on_ocean(i,j,2)=variable_on_ocean(i,j,2)+(yDxC*Var/fraction_used)
-  variable_on_ocean(i,j,3)=variable_on_ocean(i,j,3)+(yDxR*Var/fraction_used)
-  variable_on_ocean(i,j,4)=variable_on_ocean(i,j,4)+(yCxL*Var/fraction_used)
-  variable_on_ocean(i,j,5)=variable_on_ocean(i,j,5)+(yCxC*Var/fraction_used)
-  variable_on_ocean(i,j,6)=variable_on_ocean(i,j,6)+(yCxR*Var/fraction_used)
-  variable_on_ocean(i,j,7)=variable_on_ocean(i,j,7)+(yUxL*Var/fraction_used)
-  variable_on_ocean(i,j,8)=variable_on_ocean(i,j,8)+(yUxC*Var/fraction_used)
-  variable_on_ocean(i,j,9)=variable_on_ocean(i,j,9)+(yUxR*Var/fraction_used)
+  variable_on_ocean(i,j,1)=variable_on_ocean(i,j,1)+(yDxL*Var*I_fraction_used)
+  variable_on_ocean(i,j,2)=variable_on_ocean(i,j,2)+(yDxC*Var*I_fraction_used)
+  variable_on_ocean(i,j,3)=variable_on_ocean(i,j,3)+(yDxR*Var*I_fraction_used)
+  variable_on_ocean(i,j,4)=variable_on_ocean(i,j,4)+(yCxL*Var*I_fraction_used)
+  variable_on_ocean(i,j,5)=variable_on_ocean(i,j,5)+(yCxC*Var*I_fraction_used)
+  variable_on_ocean(i,j,6)=variable_on_ocean(i,j,6)+(yCxR*Var*I_fraction_used)
+  variable_on_ocean(i,j,7)=variable_on_ocean(i,j,7)+(yUxL*Var*I_fraction_used)
+  variable_on_ocean(i,j,8)=variable_on_ocean(i,j,8)+(yUxC*Var*I_fraction_used)
+  variable_on_ocean(i,j,9)=variable_on_ocean(i,j,9)+(yUxR*Var*I_fraction_used)
 
 end subroutine spread_variable_across_cells
 
@@ -2647,6 +2648,51 @@ integer :: ii, jj
 end subroutine interp_flds
 
 
+subroutine calculate_mass_on_ocean(bergs, spread_mass_old)
+! Arguments
+type(icebergs), pointer :: bergs
+type(iceberg), pointer :: berg
+type(icebergs_gridded), pointer :: grd
+real, dimension(:,:), optional, intent(out) :: spread_mass_old
+! Local variables
+integer :: grdj, grdi   
+real :: orientation
+
+  ! For convenience
+  grd=>bergs%grd
+
+  !Initialize fields
+  grd%mass_on_ocean(:,:,:)=0.
+  grd%area_on_ocean(:,:,:)=0.
+  grd%Uvel_on_ocean(:,:,:)=0.
+  grd%Vvel_on_ocean(:,:,:)=0.
+
+  do grdj = grd%jsc-1,grd%jec+1 ; do grdi = grd%isc-1,grd%iec+1  
+    berg=>bergs%list(grdi,grdj)%first
+    do while(associated(berg))
+    orientation=bergs%initial_orientation
+    if ((bergs%iceberg_bonds_on) .and. (bergs%rotate_icebergs_for_mass_spreading)) call find_orientation_using_iceberg_bonds(grd,berg,orientation)
+      call spread_mass_across_ocean_cells(grd, grdi, grdj, berg%xi, berg%yj, berg%mass,berg%mass_of_bits, berg%mass_scaling, &
+                berg%length*berg%width, bergs%use_old_spreading, bergs%hexagonal_icebergs,orientation,berg%static_berg,berg%uvel,berg%vvel)
+
+      berg=>berg%next
+    enddo
+  enddo ;enddo
+  call mpp_sync_self()
+
+  grd%spread_mass(:,:)=0.
+  call icebergs_incr_mass(bergs, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec),within_iceberg_model=.True.) 
+  spread_mass_old(:,:)=grd%spread_mass(:,:)
+
+  !Reset fields
+  grd%mass_on_ocean(:,:,:)=0.
+  grd%area_on_ocean(:,:,:)=0.
+  grd%Uvel_on_ocean(:,:,:)=0.
+  grd%Vvel_on_ocean(:,:,:)=0.
+
+end subroutine calculate_mass_on_ocean
+
+
 ! ##############################################################################
 
 subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh, sst, calving_hflx, cn, hi, &
@@ -2956,6 +3002,12 @@ integer :: stderrunit
   if (debug) call checksum_gridded(bergs%grd, 's/r run after exchange')
   call mpp_clock_end(bergs%clock_com)
 
+  
+  if (bergs%find_melt_using_spread_mass) then 
+    spread_mass_old(:,:)=0.
+    call calculate_mass_on_ocean(bergs, spread_mass_old)
+  endif
+
   ! Iceberg thermodynamics (melting) + rolling
   call mpp_clock_begin(bergs%clock_the)
   call thermodynamics(bergs)
@@ -2975,8 +3027,6 @@ integer :: stderrunit
   !Using spread_mass_to_ocean to calculate melt rates (if this option is chosen)
   !within_iceberg_model=.True.
   if (bergs%find_melt_using_spread_mass) then
-    !spread_mass_old=grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)
-    spread_mass_old(:,:)=grd%spread_mass(:,:)
     grd%spread_mass(:,:)=0.
     call icebergs_incr_mass(bergs, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec),within_iceberg_model=.True.) 
     do i=grd%isd,grd%ied ; do j=grd%jsd,grd%jed

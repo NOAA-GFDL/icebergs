@@ -2464,10 +2464,10 @@ integer, optional, intent(in) :: il, jl !< Indices of cell berg should be in
     label, mpp_pe(), berg%start_lon, berg%start_lat, &
     berg%start_year, berg%iceberg_num, berg%start_day, berg%start_mass, berg%halo_berg
   if (present(il).and.present(jl)) then
-    write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,a,2i5,3(a,2f10.4),a,2l2)') &
+    write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,a,2i5,3(a,2f14.8),a,2l2)') &
       label, mpp_pe(), ') List i,j=',il,jl
   endif
-  write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,a,2i5,3(a,2f10.4),a,2l2)') &
+  write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,a,2i5,3(a,2f14.8),a,2l2)') &
     label, mpp_pe(), ') i,j=',berg%ine, berg%jne, &
     ' xi,yj=', berg%xi, berg%yj, &
     ' lon,lat=', berg%lon, berg%lat, &
@@ -2477,7 +2477,7 @@ integer, optional, intent(in) :: il, jl !< Indices of cell berg should be in
     ' uvel_old,vvel_old=', berg%uvel_old, berg%vvel_old, &
     ' lon_old,lat_old=', berg%lon_old, berg%lat_old, &
     ' p,n=', associated(berg%prev), associated(berg%next)
-  write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,") ",6(a,2f10.4))') &
+  write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,") ",6(a,2f14.8))') &
     label, mpp_pe(), 'uo,vo=', berg%uo, berg%vo, 'ua,va=', berg%ua, berg%va, 'ui,vi=', berg%ui, berg%vi
 !Two lines above added by Alon
 end subroutine print_berg
