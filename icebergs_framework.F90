@@ -117,6 +117,7 @@ type :: icebergs_gridded
   real, dimension(:,:), pointer :: bergy_melt=>null() ! Melting rate of bergy bits (kg/s/m^2)
   real, dimension(:,:), pointer :: bergy_mass=>null() ! Mass distribution of bergy bits (kg/s/m^2)
   real, dimension(:,:), pointer :: spread_mass=>null() ! Mass of icebergs after spreading (kg/m^2)
+  real, dimension(:,:), pointer :: spread_mass_old=>null() ! Mass of icebergs after spreading old (kg/m^2)
   real, dimension(:,:), pointer :: spread_area=>null() ! Area of icebergs after spreading (m^2/m^2)
   real, dimension(:,:), pointer :: u_iceberg=>null() ! Average iceberg velocity in grid cell (mass weighted - but not spread mass weighted)
   real, dimension(:,:), pointer :: v_iceberg=>null() ! Average iceberg velocity in grid cell (mass weighted - but not spread mass weighted)
@@ -149,7 +150,7 @@ type :: icebergs_gridded
   integer :: id_mass=-1, id_ui=-1, id_vi=-1, id_ua=-1, id_va=-1, id_sst=-1, id_cn=-1, id_hi=-1
   integer :: id_bergy_src=-1, id_bergy_melt=-1, id_bergy_mass=-1, id_berg_melt=-1
   integer :: id_rmean_calving=-1, id_rmean_calving_hflx=-1
-  integer :: id_mass_on_ocn=-1, id_area_on_ocn=-1, id_spread_mass=-1, id_spread_area=-1
+  integer :: id_spread_mass=-1, id_spread_area=-1
   integer :: id_ssh=-1, id_fax=-1, id_fay=-1
   integer :: id_count=-1, id_chksum=-1, id_u_iceberg=-1, id_v_iceberg=-1, id_sss=-1, id_ustar_iceberg
   integer :: id_spread_uvel=-1, id_spread_vvel=-1
@@ -561,6 +562,7 @@ real :: Total_mass  !Added by Alon
   allocate( grd%bergy_melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_melt(:,:)=0.
   allocate( grd%bergy_mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_mass(:,:)=0.
   allocate( grd%spread_mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_mass(:,:)=0.
+  allocate( grd%spread_mass_old(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_mass_old(:,:)=0.
   allocate( grd%spread_area(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_area(:,:)=0.
   allocate( grd%u_iceberg(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%u_iceberg(:,:)=0.
   allocate( grd%v_iceberg(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%v_iceberg(:,:)=0.
@@ -924,10 +926,6 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
      'Virtual coverage by icebergs', 'm^2')
   grd%id_mass=register_diag_field('icebergs', 'mass', axes, Time, &
      'Iceberg density field', 'kg/(m^2)')
-!  grd%id_mass_on_ocn=register_diag_field('icebergs', 'mass_on_ocean', axes, Time, &
-!     'Iceberg density field felt by ocean', 'kg/(m^2)')
-!  grd%id_area_on_ocn=register_diag_field('icebergs', 'area_on_ocean', axes, Time, &
-!     'Iceberg area field felt by ocean', 'm^2/(m^2)')
   grd%id_stored_ice=register_diag_field('icebergs', 'stored_ice', axes3d, Time, &
      'Accumulated ice mass by class', 'kg')
   grd%id_real_calving=register_diag_field('icebergs', 'real_calving', axes3d, Time, &
