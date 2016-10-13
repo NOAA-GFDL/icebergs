@@ -1176,7 +1176,8 @@ real :: SSS !Temporarily here
         Mb=max(Mb,0.) !No refreezing allowed for now
         !Set melt to zero if ocean is too thin.
         if ((bergs%melt_cutoff >=0.) .and. (bergs%apply_thickness_cutoff_to_bergs_melt)) then
-          if ((grd%ocean_depth(i,j)-this%thickness) < bergs%melt_cutoff) then
+          Dn=(bergs%rho_bergs/rho_seawater)*this%thickness ! draught (keel depth)
+          if ((grd%ocean_depth(i,j)-Dn) < bergs%melt_cutoff) then
             Mb=0.
           endif
         endif
@@ -1386,7 +1387,7 @@ integer :: grdi, grdj
 real :: Hocean, Dn,Tn,dvo, mass_tmp 
 real :: ustar_h, ustar
 real :: orientation
-real :: ave_thickness
+real :: ave_thickness, ave_draft
 real, dimension(bergs%grd%isd:bergs%grd%ied,bergs%grd%jsd:bergs%grd%jed)  :: spread_mass_tmp
 real :: tmp
 
@@ -1466,7 +1467,8 @@ real :: tmp
     do i=grd%isd,grd%ied ; do j=grd%jsd,grd%jed
       if ((bergs%melt_cutoff >=0.) .and. (grd%spread_area(i,j)>0.)) then
         ave_thickness=grd%spread_mass(i,j)/(grd%spread_area(i,j)*bergs%rho_bergs) 
-        if ((grd%ocean_depth(i,j)-ave_thickness) < bergs%melt_cutoff) then
+        ave_draft=ave_thickness*(bergs%rho_bergs/rho_seawater)
+        if ((grd%ocean_depth(i,j)-ave_draft) < bergs%melt_cutoff) then
           grd%floating_melt(i,j)=0.0
           grd%calving_hflx(i,j)=0.0
         endif
