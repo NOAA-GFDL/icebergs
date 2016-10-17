@@ -871,6 +871,7 @@ contains
   integer :: iNg, jNg  !Total number of points gloablly in i and j direction
   type(iceberg) :: localberg ! NOT a pointer but an actual local variable
   integer :: iyr, imon, iday, ihr, imin, isec
+  logical :: lres
 
     ! For convenience
     grd=>bergs%grd
@@ -880,15 +881,16 @@ contains
     call get_date(Time, iyr, imon, iday, ihr, imin, isec)
 
     do j=grd%jsc,grd%jec; do i=grd%isc,grd%iec
-      if (grd%msk(i,j)>0. .and. abs(grd%latc(i,j))>60.) then
-        localberg%xi=0.5
-        localberg%yj=0.5
+      if (grd%msk(i,j)>0. .and. abs(grd%latc(i,j))>80.0) then
+        if (max(grd%lat(i,j),grd%lat(i-1,j),grd%lat(i,j-1),grd%lat(i-1,j-1))>89.999) cycle ! Cannot use this at Pole cells
+        localberg%xi=-999.
+        localberg%yj=-999.
         localberg%ine=i
         localberg%jne=j
-        localberg%lon=bilin(grd, grd%lon, i, j, localberg%xi, localberg%yj)
-        localberg%lat=bilin(grd, grd%lat, i, j, localberg%xi, localberg%yj)
-        localberg%lon_old=bilin(grd, grd%lon, i, j, localberg%xi, localberg%yj) !Alon
-        localberg%lat_old=bilin(grd, grd%lat, i, j, localberg%xi, localberg%yj) !Alon
+        localberg%lon=grd%lonc(i,j)
+        localberg%lat=grd%latc(i,j)
+        localberg%lon_old=localberg%lon
+        localberg%lat_old=localberg%lat
         localberg%mass=bergs%initial_mass(1)
         localberg%thickness=bergs%initial_thickness(1)
         localberg%width=bergs%initial_width(1)
@@ -909,26 +911,22 @@ contains
         localberg%byn=0. !Alon
 
         !Berg A
-        localberg%uvel=1.
-        localberg%vvel=0.
+        call loc_set_berg_pos(grd, 0.9, 0.5, 1., 0., localberg)
         localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
         grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
         call add_new_berg_to_list(bergs%first, localberg)
         !Berg B
-        localberg%uvel=-1.
-        localberg%vvel=0.
+        call loc_set_berg_pos(grd, 0.1, 0.5, -1., 0., localberg)
         localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
         grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
         call add_new_berg_to_list(bergs%first, localberg)
         !Berg C
-        localberg%uvel=0.
-        localberg%vvel=1.
+        call loc_set_berg_pos(grd, 0.5, 0.9, 0., 1., localberg)
         localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
         grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
         call add_new_berg_to_list(bergs%first, localberg)
         !Berg D
-        localberg%uvel=0.
-        localberg%vvel=-1.
+        call loc_set_berg_pos(grd, 0.5, 0.1, 0., -1., localberg)
         localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
         grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
         call add_new_berg_to_list(bergs%first, localberg)
@@ -941,6 +939,36 @@ contains
       write(*,'(a,i8,a)') 'diamonds, generate_bergs: ',bergs%nbergs_start,' were generated'
 
   end subroutine generate_bergs
+
+  subroutine loc_set_berg_pos(grd, xi, yj, uvel, vvel, berg)
+    type(icebergs_gridded), pointer :: grd
+    real, intent(in) :: xi, yj, uvel, vvel
+    type(iceberg), intent(inout) :: berg
+    integer :: i, j
+    logical :: lres
+    i = berg%ine ; j = berg%jne
+    if (max(grd%lat(i,j),grd%lat(i-1,j),grd%lat(i,j-1),grd%lat(i-1,j-1))>89.999) then
+      berg%lon=grd%lonc(i,j)
+      berg%lat=grd%latc(i,j)
+      berg%xi=0.5 ; berg%yj=0.5
+    else
+      berg%lon=bilin(grd, grd%lon, i, j, xi, yj)
+      berg%lat=bilin(grd, grd%lat, i, j, xi, yj)
+      berg%xi=xi ; berg%yj=yj
+    endif
+    berg%uvel=uvel ; berg%vvel=vvel
+    berg%lon_old=berg%lon ; berg%lat_old=berg%lat
+    berg%start_lon=berg%lon ; berg%start_lat=berg%lat
+    lres=pos_within_cell(grd, berg%lon, berg%lat, berg%ine, berg%jne, berg%xi, berg%yj)
+    if (.not. lres) then
+      lres=pos_within_cell(grd, berg%lon, berg%lat, berg%ine, berg%jne, berg%xi, berg%yj, explain=.true.)
+      write(0,*) lres, i, j, xi, yj, uvel, vvel
+      write(0,*) lres, berg%ine, berg%jne, berg%xi, berg%yj
+      write(0,*) 'bx=',berg%lon, 'gx=',grd%lon(i-1,j-1), grd%lon(i,j-1), grd%lon(i,j), grd%lon(i-1,j),'cx=', grd%lonc(i,j)
+      write(0,*) 'by=',berg%lat, 'gy=',grd%lat(i-1,j-1), grd%lat(i,j-1), grd%lat(i,j), grd%lat(i-1,j),'cy=', grd%latc(i,j)
+      stop 'generate_bergs, loc_set_berg_pos(): VERY FATAL!'
+    endif
+  end subroutine loc_set_berg_pos
   
 end subroutine read_restart_bergs
 ! ##############################################################################
