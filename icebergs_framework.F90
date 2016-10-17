@@ -1072,10 +1072,11 @@ end subroutine send_bergs_to_other_pes
   logical :: lres
   type(iceberg) :: localberg
   integer :: stderrunit
-  logical :: force_app = .false.
+  logical :: force_app
   ! Get the stderr unit number
   stderrunit = stderr()
 
+  force_app = .false.
   if(present(force_append)) force_app = force_append
      
     localberg%lon=buff%data(1,n)
