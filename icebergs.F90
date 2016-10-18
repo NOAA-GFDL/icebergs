@@ -1119,19 +1119,16 @@ real :: Mv, Me, Mb, melt, dvo, dva, dM, Ss, dMe, dMb, dMv
 real :: Mnew, Mnew1, Mnew2, Hocean
 real :: Mbits, nMbits, dMbitsE, dMbitsM, Lbits, Abits, Mbb
 real :: tip_parameter
-real :: ustar_h, ustar
 integer :: i,j, stderrunit
 type(iceberg), pointer :: this, next
 real, parameter :: perday=1./86400.
 integer :: grdi, grdj
-real :: orientation, static_berg
 real :: SSS !Temporarily here
 
   ! For convenience
   grd=>bergs%grd
   
-  !Initializing static_berg
-  static_berg=0.
+  !Initializing 
   grd%Uvel_on_ocean(:,:,:)=0.
   grd%Vvel_on_ocean(:,:,:)=0.
 
@@ -1179,7 +1176,8 @@ real :: SSS !Temporarily here
         Mb=max(Mb,0.) !No refreezing allowed for now
         !Set melt to zero if ocean is too thin.
         if ((bergs%melt_cutoff >=0.) .and. (bergs%apply_thickness_cutoff_to_bergs_melt)) then
-          if ((grd%ocean_depth(i,j)-this%thickness) < bergs%melt_cutoff) then
+          Dn=(bergs%rho_bergs/rho_seawater)*this%thickness ! draught (keel depth)
+          if ((grd%ocean_depth(i,j)-Dn) < bergs%melt_cutoff) then
             Mb=0.
           endif
         endif
@@ -1322,6 +1320,16 @@ real :: SSS !Temporarily here
 
        !This option allows iceberg melt fluxes to enter the ocean without the icebergs changing shape
        if (bergs%Iceberg_melt_without_decay) then
+         !In this case, the iceberg dimension are reset to their values before
+         !the thermodynamics are applied. 
+         !If the spread_mass is being used to calculate melt, we calculate this
+         !before reseting 
+         if (bergs%find_melt_using_spread_mass) then
+           if (Mnew>0.) then !If the berg still exists
+             call spread_mass_across_ocean_cells(bergs,this, i, j, this%xi, this%yj,Mnew , nMbits, this%mass_scaling, Ln*Wn,  Tn)
+           endif
+         endif
+         !Reset all the values
          Mnew=this%mass
          nMbits=this%mass_of_bits
          Tn=this%thickness
@@ -1329,7 +1337,6 @@ real :: SSS !Temporarily here
          Ln=this%length
          if (bergs%bergy_bit_erosion_fraction>0.) then
            Mbits=this%mass_of_bits ! mass of bergy bits (kg)
-           nMbits=Mbits
            Lbits=min(L,W,T,40.) ! assume bergy bits are smallest dimension or 40 meters
            Abits=(Mbits/bergs%rho_bergs)/Lbits ! Effective bottom area (assuming T=Lbits)
          endif
@@ -1348,63 +1355,11 @@ real :: SSS !Temporarily here
         call move_trajectory(bergs, this)
         call delete_iceberg_from_list(bergs%list(grdi,grdj)%first, this)
         bergs%nbergs_melted=bergs%nbergs_melted+1
-      else ! Diagnose mass distribution on grid
-        if (grd%id_virtual_area>0)&
-             & grd%virtual_area(i,j)=grd%virtual_area(i,j)+(Wn*Ln+Abits)*this%mass_scaling ! m^2
-        if ((grd%id_mass>0 .or. bergs%add_weight_to_ocean) .or. ((grd%id_u_iceberg>0) .or. (grd%id_v_iceberg>0)))   &
-             & grd%mass(i,j)=grd%mass(i,j)+Mnew/grd%area(i,j)*this%mass_scaling ! kg/m2
-        !Finding the average iceberg velocity in a grid cell (mass weighted)
-        grd%u_iceberg(i,j)=grd%u_iceberg(i,j)+((Mnew/grd%area(i,j)*this%mass_scaling)*this%uvel) ! kg/m2
-        grd%v_iceberg(i,j)=grd%v_iceberg(i,j)+((Mnew/grd%area(i,j)*this%mass_scaling)*this%vvel) ! kg/m2
-        if (grd%id_bergy_mass>0 .or. bergs%add_weight_to_ocean)&
-             & grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+nMbits/grd%area(i,j)*this%mass_scaling ! kg/m2
-        if (bergs%add_weight_to_ocean .and. .not. bergs%time_average_weight) then
-          if (bergs%grounding_fraction>0.) then
-            Hocean=bergs%grounding_fraction*(grd%ocean_depth(i,j)+grd%ssh(i,j))
-            if (Dn>Hocean) Mnew=Mnew*min(1.,Hocean/Dn)
-          endif
-
-          orientation=bergs%initial_orientation
-          if ((bergs%iceberg_bonds_on) .and. (bergs%rotate_icebergs_for_mass_spreading)) call find_orientation_using_iceberg_bonds(grd,this,orientation)
-          if (bergs%hexagonal_icebergs) static_berg=this%static_berg  !Change this to use_old_restart=false when this is merged in
-          call spread_mass_across_ocean_cells(grd, i, j, this%xi, this%yj, Mnew, nMbits, this%mass_scaling, &
-                      this%length*this%width, bergs%use_old_spreading, bergs%hexagonal_icebergs,orientation,static_berg,this%uvel,this%vvel)
-        endif
       endif
       this=>next
     enddo
   enddo ; enddo
-  
-  !Finding the average iceberg velocity in a cell to calculate u_star  
-  grd%spread_uvel(:,:)=0.
-  call icebergs_incr_mass(bergs, grd%spread_uvel(grd%isc:grd%iec,grd%jsc:grd%jec),within_iceberg_model=.True.,field_name_in='Uvel') 
-  grd%spread_vvel(:,:)=0.
-  call icebergs_incr_mass(bergs, grd%spread_vvel(grd%isc:grd%iec,grd%jsc:grd%jec),within_iceberg_model=.True.,field_name_in='Vvel') 
-  grd%spread_area(:,:)=0.
-  call icebergs_incr_mass(bergs, grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec),within_iceberg_model=.True.,field_name_in='area') 
-  
-  !Divdind the gridded iceberg momentum by the iceberg mass to get velocities
-  do j = grd%jsc,grd%jec ; do i = grd%isc,grd%iec  
-    if (grd%mass(i,j)>0.) then
-      grd%u_iceberg(i,j)=grd%u_iceberg(i,j)/grd%mass(i,j)
-      grd%v_iceberg(i,j)=grd%v_iceberg(i,j)/grd%mass(i,j)
-    else
-      grd%u_iceberg(i,j)=0. ; grd%v_iceberg(i,j)=0.
-    endif
-  enddo; enddo
-  
-  !Calculating ustar_iceberg (gridded)
-  grd%ustar_iceberg(:,:)=0.
-  if  ((grd%id_ustar_iceberg>0) .or. (bergs%pass_fields_to_ocean_model)) then   !Update diagnostic of iceberg mass spread on ocean
-    do j = grd%jsc,grd%jec ; do i = grd%isc,grd%iec  
-      !dvo=sqrt((grd%u_iceberg(i,j)-grd%uo(i,j))**2+(grd%v_iceberg(i,j)-grd%vo(i,j))**2)
-      dvo=sqrt((grd%spread_uvel(i,j)-grd%uo(i,j))**2+(grd%spread_vvel(i,j)-grd%vo(i,j))**2)
-      ustar = sqrt(bergs%cdrag_icebergs*(dvo**2  + bergs%utide_icebergs**2))
-      ustar_h = max(bergs%ustar_icebergs_bg, ustar)
-      if (grd%spread_area(i,j) ==0.0) ustar_h=0.
-        grd%ustar_iceberg(i,j)=ustar_h
-    enddo; enddo
-  endif
+
 
   contains
 
@@ -1419,6 +1374,108 @@ real :: SSS !Temporarily here
 
 end subroutine thermodynamics
 
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+subroutine create_gridded_icebergs_fields(bergs)
+! Arguments
+type(icebergs), pointer :: bergs
+! Local variables
+type(icebergs_gridded), pointer :: grd
+type(iceberg), pointer :: this
+integer i,j
+integer :: grdi, grdj
+real :: Hocean, Dn,Tn,dvo, mass_tmp 
+real :: ustar_h, ustar
+real :: orientation
+real :: ave_thickness, ave_draft
+real, dimension(bergs%grd%isd:bergs%grd%ied,bergs%grd%jsd:bergs%grd%jed)  :: spread_mass_tmp
+real :: tmp
+
+  ! For convenience
+  grd=>bergs%grd
+
+  spread_mass_tmp(:,:)=0. !Initializing temporary variable to use in iceberg melt calculation 
+
+  !Special case for icebergs not decaying, but mass diffence being used for melt rates
+  if ((bergs%find_melt_using_spread_mass) .and.  (bergs%Iceberg_melt_without_decay)) then
+    call sum_up_spread_fields(bergs, spread_mass_tmp(grd%isc:grd%iec,grd%jsc:grd%jec),'mass') 
+  endif
+ 
+  !Loop through icebergs and spread mass on ocean 
+  call calculate_mass_on_ocean(bergs, with_diagnostics=.true.)
+  
+  !Finding the spread fields 
+  if ((grd%id_spread_uvel>0)  .or. (bergs%pass_fields_to_ocean_model)) then 
+    grd%spread_uvel(:,:)=0.
+    call sum_up_spread_fields(bergs, grd%spread_uvel(grd%isc:grd%iec,grd%jsc:grd%jec), 'Uvel') 
+  endif
+  if ( (grd%id_spread_vvel>0)  .or. (bergs%pass_fields_to_ocean_model)) then 
+    grd%spread_vvel(:,:)=0.
+    call sum_up_spread_fields(bergs, grd%spread_vvel(grd%isc:grd%iec,grd%jsc:grd%jec), 'Vvel') 
+  endif
+  if ( (grd%id_spread_area>0)  .or. (bergs%pass_fields_to_ocean_model)) then 
+    grd%spread_area(:,:)=0.
+    call sum_up_spread_fields(bergs, grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec), 'area') 
+  endif
+  !Always find spread_mass since it is used for so many things.  
+  grd%spread_mass(:,:)=0.
+    call sum_up_spread_fields(bergs, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec),'mass') 
+  
+  !Using spread_mass_to_ocean to calculate melt rates (if this option is chosen)
+  if (bergs%find_melt_using_spread_mass) then
+    if (.not. bergs%Iceberg_melt_without_decay) &
+         spread_mass_tmp(grd%isc:grd%iec,grd%jsc:grd%jec)= grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)
+    do i=grd%isd,grd%ied ; do j=grd%jsd,grd%jed
+      if (grd%area(i,j)>0.0) then
+        grd%floating_melt(i,j)=max((grd%spread_mass_old(i,j) - spread_mass_tmp(i,j))/(bergs%dt),0.0)
+      else
+        grd%floating_melt(i,j)=0.0
+      endif
+    enddo ;enddo
+    grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)=grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec)*HLF !Not 100% sure this is correct.
+  endif
+
+  !Dividng the gridded iceberg momentum diagnostic by the iceberg mass to get velocities
+  if ((grd%id_u_iceberg>0) .or. (grd%id_v_iceberg>0)) then
+    do j = grd%jsc,grd%jec ; do i = grd%isc,grd%iec  
+      if (grd%mass(i,j)>0.) then
+        if (grd%id_u_iceberg>0) &
+          grd%u_iceberg(i,j)=grd%u_iceberg(i,j)/grd%mass(i,j)
+        if (grd%id_v_iceberg>0) &
+          grd%v_iceberg(i,j)=grd%v_iceberg(i,j)/grd%mass(i,j)
+      else
+        if (grd%id_u_iceberg>0)  grd%u_iceberg(i,j)=0. 
+        if (grd%id_v_iceberg>0)  grd%v_iceberg(i,j)=0. 
+      endif
+    enddo; enddo
+  endif
+  
+  !Calculating ustar_iceberg (gridded)
+  grd%ustar_iceberg(:,:)=0.
+  if  ((grd%id_ustar_iceberg>0) .or. (bergs%pass_fields_to_ocean_model)) then   !Update diagnostic of iceberg mass spread on ocean
+    do j = grd%jsc,grd%jec ; do i = grd%isc,grd%iec  
+      dvo=sqrt((grd%spread_uvel(i,j)-grd%uo(i,j))**2+(grd%spread_vvel(i,j)-grd%vo(i,j))**2)
+      ustar = sqrt(bergs%cdrag_icebergs*(dvo**2  + bergs%utide_icebergs**2))
+      ustar_h = max(bergs%ustar_icebergs_bg, ustar)
+      if (grd%spread_area(i,j) ==0.0) ustar_h=0.
+        grd%ustar_iceberg(i,j)=ustar_h
+    enddo; enddo
+  endif
+
+  !Only allowing melt in ocean above a minimum cutoff thickness
+  if (bergs%apply_thickness_cutoff_to_gridded_melt) then
+    do i=grd%isd,grd%ied ; do j=grd%jsd,grd%jed
+      if ((bergs%melt_cutoff >=0.) .and. (grd%spread_area(i,j)>0.)) then
+        ave_thickness=grd%spread_mass(i,j)/(grd%spread_area(i,j)*bergs%rho_bergs) 
+        ave_draft=ave_thickness*(bergs%rho_bergs/rho_seawater)
+        if ((grd%ocean_depth(i,j)-ave_draft) < bergs%melt_cutoff) then
+          grd%floating_melt(i,j)=0.0
+          grd%calving_hflx(i,j)=0.0
+        endif
+      endif
+    enddo ;enddo
+  endif
+end subroutine create_gridded_icebergs_fields
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 subroutine find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thickness,basal_melt,iceberg_num)
@@ -1832,15 +1889,14 @@ subroutine find_orientation_using_iceberg_bonds(grd,berg,orientation)
 
 end subroutine find_orientation_using_iceberg_bonds
 
-subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling, Area, use_old_spreading,hexagonal_icebergs,theta,static_berg,uvel,vvel)
+subroutine spread_mass_across_ocean_cells(bergs, berg, i, j, x, y, Mberg, Mbits, scaling, Area, Tn)
   ! Arguments
+  type(icebergs), pointer :: bergs
   type(icebergs_gridded), pointer :: grd
+  type(iceberg), pointer :: berg
   integer, intent(in) :: i, j
-  real, intent(in) :: x, y, Mberg, Mbits, scaling, Area,uvel,vvel
-  logical, intent(in) :: hexagonal_icebergs
-  logical, intent(in) :: use_old_spreading
-  real, intent(in) :: theta
-  real, optional, intent(in) :: static_berg
+  real, intent(in) :: x, y, Mberg, Mbits, scaling, Area
+  real, intent(in) :: Tn
   ! Local variables
   real :: xL, xC, xR, yD, yC, yU, Mass, L
   real :: yDxL, yDxC, yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR
@@ -1849,16 +1905,27 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
   real :: fraction_used !fraction of iceberg mass included (part of the mass near the boundary is discarded sometimes)
   real :: I_fraction_used !Inverse of fraction used
   real :: tol
+  real :: Dn, Hocean
   real, parameter :: rho_seawater=1035.
   integer :: stderrunit
   logical :: debug
+  real :: orientation, Mass_berg
 
   ! Get the stderr unit number
   stderrunit = stderr()
 
   tol=1.e-10
+  grd=>bergs%grd
+  Mass_berg=Mberg
 
-  Mass=(Mberg+Mbits)*scaling
+  !Trimming icebergs to account for grounded fraction.
+  if (bergs%grounding_fraction>0.) then
+    Hocean=bergs%grounding_fraction*(grd%ocean_depth(i,j)+grd%ssh(i,j))
+    Dn=(bergs%rho_bergs/rho_seawater)*Tn ! re-calculate draught (keel depth)
+    if (Dn>Hocean) Mass_berg=Mberg*min(1.,Hocean/Dn)
+  endif
+
+  Mass=(Mass_berg+Mbits)*scaling
   ! This line attempts to "clip" the weight felt by the ocean. The concept of
   ! clipping is non-physical and this step should be replaced by grounding.
   if (grd%clipping_depth>0.) Mass=min(Mass,grd%clipping_depth*grd%area(i,j)*rho_seawater)
@@ -1867,7 +1934,7 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
   yDxL=0.  ; yDxC=0. ; yDxR=0. ; yCxL=0. ; yCxR=0.
   yUxL=0.  ; yUxC=0. ; yUxR=0. ; yCxC=1.
 
-  if (.not. hexagonal_icebergs) then  !Treat icebergs as rectangles of size L:  (this is the default)
+  if (.not. bergs%hexagonal_icebergs) then  !Treat icebergs as rectangles of size L:  (this is the default)
     
     !L is the non dimensional length of the iceberg [  L=(Area of berg/ Area of grid cell)^0.5  ] or something like that.
     if (grd%area(i,j)>0) then
@@ -1876,7 +1943,7 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
       L=1.
     endif
   
-    if (use_old_spreading) then
+    if (bergs%use_old_spreading) then
       !Old version before icebergs were given size L
       xL=min(0.5, max(0., 0.5-x))
       xR=min(0.5, max(0., x-0.5))
@@ -1906,6 +1973,9 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
     fraction_used=1.  !rectangular bergs do share mass with boundaries (all mass is included in cells)
 
   else !Spread mass as if elements area hexagonal
+    
+    orientation=bergs%initial_orientation
+    if ((bergs%iceberg_bonds_on) .and. (bergs%rotate_icebergs_for_mass_spreading)) call find_orientation_using_iceberg_bonds(grd,berg,orientation)
 
     if (grd%area(i,j)>0) then
       H = min(( (sqrt(Area/(2.*sqrt(3.)))  / sqrt(grd%area(i,j)))),1.) ;  !Non dimensionalize element length by grid area. (This gives the non-dim Apothen of the hexagon)
@@ -1929,7 +1999,7 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
     x0=(x-origin_x)
     y0=(y-origin_y)
 
-    call Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4)
+    call Hexagon_into_quadrants_using_triangles(x0,y0,H,orientation,Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4)
     
     if (min(min(Area_Q1,Area_Q2),min(Area_Q3, Area_Q4)) <-tol) then
       call error_mesg('diamonds, hexagonal spreading', 'Intersection with hexagons should not be negative!!!', WARNING)
@@ -1975,7 +2045,7 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
         write(stderrunit,*) 'diamonds, hexagonal, H,x0,y0', H, x0 , y0
         write(stderrunit,*) 'diamonds, hexagonal, Areas',(Area_Q1+Area_Q2 + Area_Q3+Area_Q4), Area_Q1,  Area_Q2 , Area_Q3,  Area_Q4
         debug=.True.
-        !call Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4, debug)
+        !call Hexagon_into_quadrants_using_triangles(x0,y0,H,orientation,Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4, debug)
         call error_mesg('diamonds, hexagonal spreading', 'All the mass is not being used!!!', FATAL)
       endif
 
@@ -1984,7 +2054,7 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
     !Note that for the square elements, the mass has already been reassigned, so fraction_used shoule be equal to 1 aready
     fraction_used= ((yDxL*grd%msk(i-1,j-1)) + (yDxC*grd%msk(i  ,j-1))  +(yDxR*grd%msk(i+1,j-1)) +(yCxL*grd%msk(i-1,j  )) +  (yCxR*grd%msk(i+1,j  ))&
                    +(yUxL*grd%msk(i-1,j+1)) +(yUxC*grd%msk(i  ,j+1))   +(yUxR*grd%msk(i+1,j+1)) + (yCxC**grd%msk(i,j)))
-    if  (static_berg .eq. 1)  fraction_used=1.  !Static icebergs do not share their mass with the boundary
+    if  (berg%static_berg .eq. 1)  fraction_used=1.  !Static icebergs do not share their mass with the boundary
                                                 ! (this allows us to easily  initialize hexagonal icebergs in regular arrangements against boundaries)
   endif
   I_fraction_used=1./fraction_used !Invert this so that the arithmatec reprocudes
@@ -1996,10 +2066,10 @@ subroutine spread_mass_across_ocean_cells(grd, i, j, x, y, Mberg, Mbits, scaling
   call spread_variable_across_cells(grd, grd%area_on_ocean, Area*scaling , i ,j, &
              yDxL, yDxC,yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR,I_fraction_used)
   !Spreading the iceberg x momentum onto the ocean
-  call spread_variable_across_cells(grd,grd%Uvel_on_ocean, uvel*Area*scaling , i ,j, &
+  call spread_variable_across_cells(grd,grd%Uvel_on_ocean, berg%uvel*Area*scaling , i ,j, &
              yDxL, yDxC,yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR, I_fraction_used)
   !Spreading the iceberg y momentum onto the ocean
-  call spread_variable_across_cells(grd,grd%Vvel_on_ocean, vvel*Area*scaling , i ,j, &
+  call spread_variable_across_cells(grd,grd%Vvel_on_ocean, berg%vvel*Area*scaling , i ,j, &
              yDxL, yDxC,yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR, I_fraction_used)
   
 end subroutine spread_mass_across_ocean_cells
@@ -2648,15 +2718,15 @@ integer :: ii, jj
 end subroutine interp_flds
 
 
-subroutine calculate_mass_on_ocean(bergs, spread_mass_old)
+subroutine calculate_mass_on_ocean(bergs, with_diagnostics)
 ! Arguments
 type(icebergs), pointer :: bergs
 type(iceberg), pointer :: berg
 type(icebergs_gridded), pointer :: grd
-real, dimension(:,:), optional, intent(out) :: spread_mass_old
+logical, intent(in) :: with_diagnostics
 ! Local variables
 integer :: grdj, grdi   
-real :: orientation
+integer :: j, i   
 
   ! For convenience
   grd=>bergs%grd
@@ -2670,28 +2740,61 @@ real :: orientation
   do grdj = grd%jsc-1,grd%jec+1 ; do grdi = grd%isc-1,grd%iec+1  
     berg=>bergs%list(grdi,grdj)%first
     do while(associated(berg))
-    orientation=bergs%initial_orientation
-    if ((bergs%iceberg_bonds_on) .and. (bergs%rotate_icebergs_for_mass_spreading)) call find_orientation_using_iceberg_bonds(grd,berg,orientation)
-      call spread_mass_across_ocean_cells(grd, grdi, grdj, berg%xi, berg%yj, berg%mass,berg%mass_of_bits, berg%mass_scaling, &
-                berg%length*berg%width, bergs%use_old_spreading, bergs%hexagonal_icebergs,orientation,berg%static_berg,berg%uvel,berg%vvel)
+      i=berg%ine  ;     j=berg%jne
+      if (grd%area(i,j) > 0.) then
+        
+        !Increasing Mass on ocean
+        if ((bergs%add_weight_to_ocean .and. .not. bergs%time_average_weight) .or.(bergs%find_melt_using_spread_mass)) then
+          call spread_mass_across_ocean_cells(bergs, berg, berg%ine, berg%jne, berg%xi, berg%yj, berg%mass,berg%mass_of_bits, berg%mass_scaling, &
+                berg%length*berg%width, berg%thickness)
+        endif
 
+        !Calculated some iceberg diagnositcs  
+        if (with_diagnostics) call calculate_sum_over_bergs_diagnositcs(bergs,grd,berg,i,j)
+
+      endif
       berg=>berg%next
     enddo
   enddo ;enddo
-  call mpp_sync_self()
 
-  grd%spread_mass(:,:)=0.
-  call icebergs_incr_mass(bergs, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec),within_iceberg_model=.True.) 
-  spread_mass_old(:,:)=grd%spread_mass(:,:)
+  contains
 
-  !Reset fields
-  grd%mass_on_ocean(:,:,:)=0.
-  grd%area_on_ocean(:,:,:)=0.
-  grd%Uvel_on_ocean(:,:,:)=0.
-  grd%Vvel_on_ocean(:,:,:)=0.
+  subroutine calculate_sum_over_bergs_diagnositcs(bergs,grd,berg,i,j)
+  ! Arguments
+  type(icebergs), pointer :: bergs
+  type(iceberg), pointer :: berg
+  type(icebergs_gridded), pointer :: grd
+  integer, intent(in) :: i, j
+  ! Local variables
+  real ::  Abits, Lbits, Mbits
+
+           !Virtual area diagnostic
+           if (grd%id_virtual_area>0) then
+             if (bergs%bergy_bit_erosion_fraction>0.) then
+               Lbits=min(berg%length,berg%width,berg%thickness,40.) ! assume bergy bits are smallest dimension or 40 meters
+               Abits=(berg%mass_of_bits/bergs%rho_bergs)/Lbits ! Effective bottom area (assuming T=Lbits)
+             else
+               Abits=0.0
+             endif
+             grd%virtual_area(i,j)=grd%virtual_area(i,j)+(berg%width*berg%length+Abits)*berg%mass_scaling ! m^2
+           endif
+
+           !Mass diagnostic (also used in u_iceberg, v_iceberg
+           if ((grd%id_mass>0 ) .or. ((grd%id_u_iceberg>0) .or. (grd%id_v_iceberg>0)))   &
+                & grd%mass(i,j)=grd%mass(i,j)+berg%mass/grd%area(i,j)*berg%mass_scaling ! kg/m2
+
+           !Finding the average iceberg velocity in a grid cell (mass weighted)
+           if (grd%id_u_iceberg>0) &
+           grd%u_iceberg(i,j)=grd%u_iceberg(i,j)+((berg%mass/grd%area(i,j)*berg%mass_scaling)*berg%uvel) ! kg/m2
+           if (grd%id_v_iceberg>0) &
+           grd%v_iceberg(i,j)=grd%v_iceberg(i,j)+((berg%mass/grd%area(i,j)*berg%mass_scaling)*berg%vvel) ! kg/m2
+
+           !Mass of bergy bits
+           if (grd%id_bergy_mass>0 .or. bergs%add_weight_to_ocean)&
+                & grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+berg%mass_of_bits/grd%area(i,j)*berg%mass_scaling ! kg/m2
+ end subroutine calculate_sum_over_bergs_diagnositcs
 
 end subroutine calculate_mass_on_ocean
-
 
 ! ##############################################################################
 
@@ -2717,11 +2820,7 @@ real :: ave_thickness
 real, dimension(:,:), allocatable :: uC_tmp, vC_tmp
 integer :: vel_stagger, str_stagger
 real, dimension(:,:), allocatable :: iCount
-real, dimension(bergs%grd%isd:bergs%grd%ied,bergs%grd%jsd:bergs%grd%jed)  :: spread_mass_old
-!real, dimension(bergs%grd%isd:bergs%grd%ied,bergs%grd%jsd:bergs%grd%jed)  :: ustar_berg0, area_berg0
 integer :: nbonds
-!logical :: within_iceberg_model
-
 integer :: stderrunit
 
   ! Get the stderr unit number
@@ -2744,6 +2843,7 @@ integer :: stderrunit
   grd%bergy_src(:,:)=0.
   grd%bergy_melt(:,:)=0.
   grd%bergy_mass(:,:)=0.
+  grd%spread_mass_old(:,:)=0.  
   !grd%spread_mass(:,:)=0.  !Don't zero this out yet, because we can first use this an add it onto the SSH
   grd%spread_area(:,:)=0. 
   grd%u_iceberg(:,:)=0.
@@ -2752,25 +2852,21 @@ integer :: stderrunit
   grd%spread_vvel(:,:)=0.
   grd%ustar_iceberg(:,:)=0.
   grd%mass(:,:)=0.
- 
-  !I belive that ustar_berg0 and area_berg0 are no longer needed
-  !ustar_berg0(:,:)=0.
-  !area_berg0(:,:)=0.
-
-  if (present(mass_berg)) then !; if (allocated(mass_berg)) then
-    mass_berg(:,:)=0.0
-  endif !; endif
-  if (present(ustar_berg)) then !; if (allocated(ustar_berg)) then
-    ustar_berg(:,:)=0.0
-  endif !; endif
-  if (present(area_berg)) then !; if (allocated(area_berg)) then
-    area_berg(:,:)=0.0
-  endif !; endif
-
-
-  if (bergs%add_weight_to_ocean) grd%mass_on_ocean(:,:,:)=0.
-  if (bergs%add_weight_to_ocean) grd%area_on_ocean(:,:,:)=0.
   grd%virtual_area(:,:)=0.
+  
+  !Initializing _on_ocean_fields
+  grd%mass_on_ocean(:,:,:)=0. ;   grd%area_on_ocean(:,:,:)=0.
+  grd%Uvel_on_ocean(:,:,:)=0. ;   grd%Vvel_on_ocean(:,:,:)=0.
+
+  if (present(mass_berg)) then ;  if (associated(mass_berg)) then 
+    mass_berg(:,:)=0.0
+  endif ;  endif
+  if (present(ustar_berg)) then ; if (associated(ustar_berg)) then 
+    ustar_berg(:,:)=0.0
+  endif ;  endif
+  if (present(area_berg)) then ;  if (associated(area_berg)) then 
+    area_berg(:,:)=0.0
+  endif ;  endif
 
   ! Manage time
   call get_date(time, iyr, imon, iday, ihr, imin, isec)
@@ -3001,10 +3097,14 @@ integer :: stderrunit
   if (debug) call checksum_gridded(bergs%grd, 's/r run after exchange')
   call mpp_clock_end(bergs%clock_com)
 
-  
+  !Caculate mass on ocean before thermodynamics, to use in melt rate calculation
   if (bergs%find_melt_using_spread_mass) then 
-    spread_mass_old(:,:)=0.
-    call calculate_mass_on_ocean(bergs, spread_mass_old)
+    call calculate_mass_on_ocean(bergs, with_diagnostics=.false.)
+    grd%spread_mass_old(:,:)=0.
+    call sum_up_spread_fields(bergs,grd%spread_mass_old(grd%isc:grd%iec,grd%jsc:grd%jec), 'mass') 
+    !Reset fields
+    grd%mass_on_ocean(:,:,:)=0.  ;  grd%area_on_ocean(:,:,:)=0.
+    grd%Uvel_on_ocean(:,:,:)=0.  ;  grd%Vvel_on_ocean(:,:,:)=0.
   endif
 
   ! Iceberg thermodynamics (melting) + rolling
@@ -3014,6 +3114,8 @@ integer :: stderrunit
   if (debug) call checksum_gridded(bergs%grd, 's/r run after thermodynamics')
   call mpp_clock_end(bergs%clock_the)
 
+  !Creating gridded fields from new icebergs
+  call create_gridded_icebergs_fields(bergs)
 
   ! For each berg, record
   call mpp_clock_begin(bergs%clock_dia)
@@ -3022,42 +3124,6 @@ integer :: stderrunit
     call move_all_trajectories(bergs)
     call write_trajectory(bergs%trajectories, bergs%save_short_traj)
   endif
-
-  !Using spread_mass_to_ocean to calculate melt rates (if this option is chosen)
-  !within_iceberg_model=.True.
-  if (bergs%find_melt_using_spread_mass) then
-    grd%spread_mass(:,:)=0.
-    call icebergs_incr_mass(bergs, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec),within_iceberg_model=.True.) 
-    do i=grd%isd,grd%ied ; do j=grd%jsd,grd%jed
-      if (grd%area(i,j)>0.0) then
-        grd%floating_melt(i,j)=max((spread_mass_old(i,j) - grd%spread_mass(i,j))/(bergs%dt),0.0)
-        grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)=grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec)*HLF !Not 100% sure this is correct.
-      else
-        grd%floating_melt(i,j)=0.0
-      endif
-    enddo ;enddo
-  !elseif  ((grd%id_spread_mass>0) .or. (bergs%pass_fields_to_ocean_model)) then   !Update diagnostic of iceberg mass spread on ocean
-  else   !Update iceberg mass spread on ocean
-    grd%spread_mass(:,:)=0.
-    call icebergs_incr_mass(bergs, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec),within_iceberg_model=.True.) 
-  endif
-
-  if ( (grd%id_spread_area>0)  .or. (bergs%pass_fields_to_ocean_model)) then  !Update diagnostic of iceberg area spread on ocean
-    grd%spread_area(:,:)=0.
-    call icebergs_incr_mass(bergs, grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec),within_iceberg_model=.True.,field_name_in='area') 
-  endif
-  if (bergs%apply_thickness_cutoff_to_gridded_melt) then
-    do i=grd%isd,grd%ied ; do j=grd%jsd,grd%jed
-      if ((bergs%melt_cutoff >=0.) .and. (grd%spread_area(i,j)>0.)) then
-        ave_thickness=grd%spread_mass(i,j)/(grd%spread_area(i,j)*bergs%rho_bergs) 
-        if ((grd%ocean_depth(i,j)-ave_thickness) < bergs%melt_cutoff) then
-          grd%floating_melt(i,j)=0.0
-          grd%calving_hflx(i,j)=0.0
-        endif
-      endif
-    enddo ;enddo
-  endif
-   
 
   ! Gridded diagnostics
   if (grd%id_uo>0) &
@@ -3155,9 +3221,13 @@ integer :: stderrunit
 
   call mpp_clock_end(bergs%clock_dia)
 
+  !This is the point in the algorithem which determines which fields get passed to the ice model
+  !Return what ever calving we did not use and additional icebergs melt
+  
   !Making sure that spread_mass has the correct mass
-  grd%spread_mass(:,:)=0.0
-  call icebergs_incr_mass(bergs, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec), within_iceberg_model=.True.)
+  !grd%spread_mass(:,:)=0.0
+  !call icebergs_incr_mass(bergs, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec), within_iceberg_model=.True.)
+
 
   ! Return what ever calving we did not use and additional icebergs melt
   call mpp_clock_begin(bergs%clock_int)
@@ -3165,28 +3235,26 @@ integer :: stderrunit
     where (grd%area(grd%isc:grd%iec,grd%jsc:grd%jec)>0.)
       calving(:,:)=grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec)/grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) &
                   +grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec)
-      !ustar_berg0(:,:)=grd%ustar_iceberg(:,:)
-      !area_berg0(:,:)=grd%spread_area(:,:)
     elsewhere
       calving(:,:)=0.
-      !ustar_berg0(:,:)=0.
-      !area_berg0(:,:)=0.
     end where
     calving_hflx(:,:)=grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)
-    if (present(mass_berg)) then
-      if (associated(mass_berg) .and. .not.bergs%passive_mode) then
-        mass_berg(:,:)=grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)
+    !Return iceberg mass, area and ustar to pass on to ocean model
+    if (present(mass_berg)) then 
+      if (associated(mass_berg)) then
+        if (bergs%add_weight_to_ocean) &
+          mass_berg(:,:)=grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)
       endif
     endif
-    if (present(ustar_berg)) then
-      if (associated(ustar_berg) .and. .not.bergs%passive_mode) then
-      ustar_berg(:,:)=grd%ustar_iceberg(grd%isc:grd%iec,grd%jsc:grd%jec)
-      endif
+    if (present(ustar_berg)) then 
+      if (associated(ustar_berg)) then
+        ustar_berg(:,:)=grd%ustar_iceberg(grd%isc:grd%iec,grd%jsc:grd%jec)
+      endif 
     endif
-    if (present(area_berg)) then
-      if (associated(area_berg) .and. .not.bergs%passive_mode) then
+    if (present(area_berg)) then 
+      if (associated(area_berg)) then
         area_berg(:,:)=grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec)
-      endif
+      endif 
     endif
   endif
   
@@ -3223,12 +3291,12 @@ integer :: stderrunit
     grd%tmpc(:,:)=0.;
     !Finding spread mass
     call mpp_clock_end(bergs%clock); call mpp_clock_end(bergs%clock_dia) ! To enable calling of public s/r
-    call icebergs_incr_mass(bergs, grd%tmpc)
+    call sum_up_spread_fields(bergs, grd%tmpc, 'mass')
     call mpp_clock_begin(bergs%clock_dia); call mpp_clock_begin(bergs%clock) ! To enable calling of public s/r
     bergs%returned_mass_on_ocean=sum( grd%tmpc(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
     !Finding spread area
     call mpp_clock_end(bergs%clock); call mpp_clock_end(bergs%clock_dia) ! To enable calling of public s/r
-    call icebergs_incr_mass(bergs, grd%tmpc,field_name_in='area')
+    call sum_up_spread_fields(bergs, grd%tmpc, 'area')
     call mpp_clock_begin(bergs%clock_dia); call mpp_clock_begin(bergs%clock) ! To enable calling of public s/r
     bergs%returned_area_on_ocean=sum( grd%tmpc(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
     bergs%nbergs_end=count_bergs(bergs)
@@ -3492,21 +3560,52 @@ end subroutine icebergs_run
 
 ! ##############################################################################
 
-subroutine icebergs_incr_mass(bergs, mass, within_iceberg_model, Time, field_name_in)
+subroutine icebergs_incr_mass(bergs, mass, Time)
 ! Arguments
 type(icebergs), pointer :: bergs
-real, dimension(bergs%grd%isc:bergs%grd%iec,bergs%grd%jsc:bergs%grd%jec), intent(inout) :: mass
-logical, intent(in), optional :: within_iceberg_model
 type(time_type), intent(in), optional :: Time
-character(len=4), intent(in), optional :: field_name_in
+type(icebergs_gridded), pointer :: grd
+integer :: i, j
+logical :: lerr
+real, dimension(bergs%grd%isc:bergs%grd%iec,bergs%grd%jsc:bergs%grd%jec), intent(inout) :: mass
+
+!This routine is called from SIS, (and older versions of SIS2), but not within
+!the iceberg model. The routine adds the spread iceberg mass to mass provided
+!the add weight to ocean flag is on, and passive mode is off. It also appears to
+!play some role in diagnostics
+
+    if (.not. associated(bergs)) return
+    if (.not. bergs%add_weight_to_ocean) return
+  
+    ! For convenience
+    grd=>bergs%grd
+
+    !Start the clocks
+    call mpp_clock_begin(bergs%clock)
+    call mpp_clock_begin(bergs%clock_int)
+
+    do j=grd%jsc, grd%jec; do i=grd%isc, grd%iec
+      if (.not. bergs%passive_mode)   mass(i,j)=mass(i,j) + grd%spread_mass(i,j)
+    enddo  ;enddo
+    
+  !Stop the clocks
+  call mpp_clock_end(bergs%clock_int)
+  call mpp_clock_end(bergs%clock)
+
+end subroutine icebergs_incr_mass
+
+
+subroutine sum_up_spread_fields(bergs, field, field_name)
+! Arguments
+type(icebergs), pointer :: bergs
+real, dimension(bergs%grd%isc:bergs%grd%iec,bergs%grd%jsc:bergs%grd%jec), intent(out) :: field
+character(len=4), intent(in) :: field_name
 ! Local variables
-logical :: within_model
-character(len=4) :: field_name
 integer :: i, j
 type(icebergs_gridded), pointer :: grd
 real :: dmda
 logical :: lerr
-real, dimension(bergs%grd%isd:bergs%grd%ied, bergs%grd%jsd:bergs%grd%jed,9) :: var_on_ocean   !Variable being spread onto the ocean  (mass or area)
+real, dimension(bergs%grd%isd:bergs%grd%ied, bergs%grd%jsd:bergs%grd%jed,9) :: var_on_ocean   !Variable being spread onto the ocean  (mass, area, Uvel, Vvel)
 integer :: stderrunit
 
   ! Get the stderr unit number
@@ -3514,39 +3613,21 @@ integer :: stderrunit
   ! For convenience
   grd=>bergs%grd
 
-  !var_on_ocean(:,:,:)=0.
-  
-  !Deciding which varibale to spread across cells across grid cells (default spread mass)
-  field_name='mass'
-  if (present(field_name_in)) field_name=field_name_in 
+  field(:,:)=0.
+
+  !Deciding which varibale to spread across cells across grid cells
   if (field_name=='mass') var_on_ocean(:,:,:)=grd%mass_on_ocean(:,:,:)
   if (field_name=='area') var_on_ocean(:,:,:)=grd%area_on_ocean(:,:,:)
   if (field_name=='Uvel') var_on_ocean(:,:,:)=grd%Uvel_on_ocean(:,:,:)
   if (field_name=='Vvel') var_on_ocean(:,:,:)=grd%Vvel_on_ocean(:,:,:)
+  
+  !This line has been removed, for that routine can be used for other fields
+  !if (.not. bergs%add_weight_to_ocean) return
 
-  within_model=.False.
-  if (present(within_iceberg_model)) then 
-    within_model=within_iceberg_model
-  endif
-      
-  if (.not.(within_model)) then
-    if (.not. associated(bergs)) return
-    if (.not. bergs%add_weight_to_ocean) return
-    call mpp_clock_begin(bergs%clock)
-    call mpp_clock_begin(bergs%clock_int)
-  endif
-
-
-  ! Add iceberg+bits mass field to non-haloed SIS field (kg/m^2)
- !mass(:,:)=mass(:,:)+( grd%mass(grd%isc:grd%iec,grd%jsc:grd%jec) &
- !                    + grd%bergy_mass(grd%isc:grd%iec,grd%jsc:grd%jec) )
-
-  if (debug) then
-    grd%tmp(:,:)=0.; grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec)=mass
-    call grd_chksum2(grd, grd%tmp, 'mass in (incr)')
-  endif
-
+  !Update the halos of the var_on_ocean
   call mpp_update_domains(var_on_ocean, grd%domain)
+
+  !Rotatine when old_bug_rotated_weights is on  - we should remove this.
   if (.not. old_bug_rotated_weights) then
     do j=grd%jsd, grd%jed; do i=grd%isd, grd%ied
       if (grd%parity_x(i,j)<0.) then
@@ -3561,6 +3642,8 @@ integer :: stderrunit
       endif
     enddo; enddo
   endif
+
+  !Here we add the contribution of the 9 cells. This is the heart of the routine.
   do j=grd%jsc, grd%jec; do i=grd%isc, grd%iec
     dmda=var_on_ocean(i,j,5) &
          + ( ( (var_on_ocean(i-1,j-1,9)+var_on_ocean(i+1,j+1,1))   &
@@ -3572,41 +3655,20 @@ integer :: stderrunit
     !Make sure that area <=1.0
     if (field_name=='area') dmda=min(dmda,1.0)
 
-    if (.not.(within_model)) then
-      if (.not. bergs%passive_mode) mass(i,j)=mass(i,j)+dmda
-    else
-      mass(i,j)=dmda
-    endif
-    if ((grd%id_area_on_ocn>0).and.(field_name=='area')) grd%tmp(i,j)=dmda
-    if ((grd%id_mass_on_ocn>0).and.(field_name=='mass')) grd%tmp(i,j)=dmda
-
+    field(i,j)=dmda
   enddo; enddo
   
-  if (field_name=='mass') then
-    if (present(Time).and. (grd%id_mass_on_ocn>0)) &
-      lerr=send_data(grd%id_mass_on_ocn, grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  elseif (field_name=='area') then
-    if (present(Time).and. (grd%id_area_on_ocn>0)) &
-      lerr=send_data(grd%id_area_on_ocn, grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
-  endif
-
   if (debug) then
-    grd%tmp(:,:)=0.; grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec)=mass
+    grd%tmp(:,:)=0.; grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec)=field
     if (field_name=='mass') then
       call grd_chksum3(grd, grd%mass_on_ocean, 'mass bergs (incr)')
       call grd_chksum2(grd, grd%tmp, 'mass out (incr)')
-  elseif (field_name=='area') then
+    elseif (field_name=='area') then
       call grd_chksum3(grd, grd%area_on_ocean, 'area bergs (incr)')
       call grd_chksum2(grd, grd%tmp, 'area out (incr)')
     endif
-  endif
-
-  if (.not.(within_model)) then
-    call mpp_clock_end(bergs%clock_int)
-    call mpp_clock_end(bergs%clock)
-  endif
-
-end subroutine icebergs_incr_mass
+ endif
+end subroutine sum_up_spread_fields
 
 ! ##############################################################################
 
@@ -3901,7 +3963,7 @@ real :: x1,  y1, xddot1, yddot1, xi, yj
 real :: xdot3, ydot3
 real :: xdotn, ydotn
 real :: dt, dt_2, dt_6, dydl
-real :: static_berg, orientation
+real :: orientation
 logical :: bounced, on_tangential_plane, error_flag
 integer :: i, j 
 integer :: stderrunit
@@ -3924,11 +3986,8 @@ integer :: stderrunit
     dt=bergs%dt
     dt_2=0.5*dt
 
-    static_berg=0.  !Initializing
     orientation=bergs%initial_orientation
     if ((bergs%iceberg_bonds_on) .and. (bergs%rotate_icebergs_for_mass_spreading)) call find_orientation_using_iceberg_bonds(grd,berg,orientation)
-    if (bergs%hexagonal_icebergs) static_berg=berg%static_berg  !Change this to use_old_restart=false when this is merged in
-    
 
         lonn = berg%lon ;   latn = berg%lat
         axn  = berg%axn ;   ayn  = berg%ayn
@@ -3944,8 +4003,7 @@ integer :: stderrunit
         !Note, the mass scaling is equal to 1 (rather than 0.25 as in RK), since
         !this is only called once in Verlet stepping.
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 1.0*berg%mass_scaling,berg%length*berg%width, &
-                         bergs%use_old_spreading, bergs%hexagonal_icebergs,orientation,static_berg, berg%uvel, berg%vvel)
+          call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 1.0*berg%mass_scaling,berg%length*berg%width, berg%thickness)
 
         ! Calling the acceleration   (note that the velocity is converted to u_star inside the accel script)
         call accel(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, ax1, ay1, axn, ayn, bxn, byn) !axn, ayn, bxn, byn - Added by Alon
@@ -4027,7 +4085,6 @@ real :: x3, xdot3, xddot3, y3, ydot3, yddot3, xddot3n, yddot3n
 real :: x4, xdot4, xddot4, y4, ydot4, yddot4, xddot4n, yddot4n
 real :: xn, xdotn, xddotn, yn, ydotn, yddotn, xddotnn, yddotnn
 real :: dt, dt_2, dt_6, dydl
-real :: static_berg,orientation
 integer :: i1,j1,i2,j2,i3,j3,i4,j4
 integer :: stderrunit
 logical :: bounced, on_tangential_plane, error_flag
@@ -4054,11 +4111,6 @@ logical :: bounced, on_tangential_plane, error_flag
     dt_2=0.5*dt
     dt_6=dt/6.
     
-    static_berg=0.  !Initializing
-    orientation=bergs%initial_orientation
-    if ((bergs%iceberg_bonds_on) .and. (bergs%rotate_icebergs_for_mass_spreading)) call find_orientation_using_iceberg_bonds(grd,berg,orientation) !Not sure if this works with Runge Kutta
-    if (bergs%hexagonal_icebergs) static_berg=berg%static_berg  !Change this to use_old_restart=false when this is merged in
-
         i=berg%ine
         j=berg%jne
         xi=berg%xi
@@ -4068,8 +4120,7 @@ logical :: bounced, on_tangential_plane, error_flag
         if ((berg%lat>89.) .and. (bergs%grd%grid_is_latlon)) on_tangential_plane=.true.
         i1=i;j1=j
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, &
-                         bergs%use_old_spreading, bergs%hexagonal_icebergs,orientation,static_berg, berg%uvel, berg%vvel)
+          call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
 
         ! Loading past accelerations - Alon
         axn=berg%axn; ayn=berg%ayn !Alon
@@ -4107,8 +4158,7 @@ logical :: bounced, on_tangential_plane, error_flag
         call adjust_index_and_ground(grd, lon2, lat2, uvel2, vvel2, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)
         i2=i; j2=j
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, &
-                         bergs%use_old_spreading, bergs%hexagonal_icebergs,orientation,static_berg, berg%uvel, berg%vvel)
+          call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
         ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon2,lat2,x2,y2)
         if (.not.error_flag) then
           if (debug .and. .not. is_point_in_cell(bergs%grd, lon2, lat2, i, j)) error_flag=.true.
@@ -4165,8 +4215,7 @@ logical :: bounced, on_tangential_plane, error_flag
         call adjust_index_and_ground(grd, lon3, lat3, uvel3, vvel3, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)
         i3=i; j3=j
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, &
-                         bergs%use_old_spreading, bergs%hexagonal_icebergs,orientation,static_berg, berg%uvel, berg%vvel)
+          call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
         ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon3,lat3,x3,y3)
         if (.not.error_flag) then
           if (debug .and. .not. is_point_in_cell(bergs%grd, lon3, lat3, i, j)) error_flag=.true.
@@ -4299,8 +4348,7 @@ logical :: bounced, on_tangential_plane, error_flag
         i=i1;j=j1;xi=berg%xi;yj=berg%yj
         call adjust_index_and_ground(grd, lonn, latn, uveln, vveln, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)
         if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-          call spread_mass_across_ocean_cells(grd, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, &
-                         bergs%use_old_spreading, bergs%hexagonal_icebergs,orientation,static_berg, berg%uvel, berg%vvel)
+          call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
   
         if (.not.error_flag) then
           if (.not. is_point_in_cell(bergs%grd, lonn, latn, i, j)) error_flag=.true.
@@ -4858,6 +4906,7 @@ type(iceberg), pointer :: this, next
   deallocate(bergs%grd%bergy_melt)
   deallocate(bergs%grd%bergy_mass)
   deallocate(bergs%grd%spread_mass)
+  deallocate(bergs%grd%spread_mass_old)
   deallocate(bergs%grd%spread_area)
   deallocate(bergs%grd%virtual_area)
   deallocate(bergs%grd%mass)
