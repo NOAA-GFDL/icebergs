@@ -1233,7 +1233,7 @@ integer :: stderrunit
       grd%uo(I,J) = mask * 0.5*(uo(Iu,ju)+uo(Iu,ju+1))
       grd%ui(I,J) = mask * 0.5*(ui(Iu,ju)+ui(Iu,ju+1))
       grd%vo(I,J) = mask * 0.5*(vo(iv,Jv)+vo(iv+1,Jv))
-      grd%vi(I,J) = mask * 0.5*(vi(iv,Jv)+vo(iv+1,Jv))
+      grd%vi(I,J) = mask * 0.5*(vi(iv,Jv)+vi(iv+1,Jv))
     enddo ; enddo
   else
     call error_mesg('diamonds, iceberg_run', 'Unrecognized value of stagger!', FATAL)
