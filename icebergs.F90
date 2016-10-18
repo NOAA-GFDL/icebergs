@@ -2799,7 +2799,7 @@ end subroutine calculate_mass_on_ocean
 ! ##############################################################################
 
 subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh, sst, calving_hflx, cn, hi, &
-                        stagger, stress_stagger,sss,mass_berg, ustar_berg, area_berg)
+                        stagger, stress_stagger, sss, mass_berg, ustar_berg, area_berg)
 ! Arguments
 type(icebergs), pointer :: bergs
 type(time_type), intent(in) :: time
@@ -2808,7 +2808,6 @@ real, dimension(:,:), intent(in) :: uo, vo, ui, vi, tauxa, tauya, ssh, sst, cn, 
 integer,    optional, intent(in) :: stagger, stress_stagger
 real, dimension(:,:), optional, intent(in) :: sss
 real, dimension(:,:), optional, pointer ::  mass_berg, ustar_berg, area_berg
-
 ! Local variables
 integer :: iyr, imon, iday, ihr, imin, isec, k
 type(icebergs_gridded), pointer :: grd
@@ -2952,7 +2951,7 @@ integer :: stderrunit
       grd%uo(I,J) = mask * 0.5*(uo(Iu,ju)+uo(Iu,ju+1))
       grd%ui(I,J) = mask * 0.5*(ui(Iu,ju)+ui(Iu,ju+1))
       grd%vo(I,J) = mask * 0.5*(vo(iv,Jv)+vo(iv+1,Jv))
-      grd%vi(I,J) = mask * 0.5*(vi(iv,Jv)+vi(iv+1,Jv)) !There was a bug here.
+      grd%vi(I,J) = mask * 0.5*(vi(iv,Jv)+vi(iv+1,Jv))
     enddo ; enddo
   else
     call error_mesg('diamonds, iceberg_run', 'Unrecognized value of stagger!', FATAL)
@@ -3224,6 +3223,13 @@ integer :: stderrunit
 
   !This is the point in the algorithem which determines which fields get passed to the ice model
   !Return what ever calving we did not use and additional icebergs melt
+  
+  !Making sure that spread_mass has the correct mass
+  !grd%spread_mass(:,:)=0.0
+  !call icebergs_incr_mass(bergs, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec), within_iceberg_model=.True.)
+
+
+  ! Return what ever calving we did not use and additional icebergs melt
   call mpp_clock_begin(bergs%clock_int)
   if (.not. bergs%passive_mode) then
     where (grd%area(grd%isc:grd%iec,grd%jsc:grd%jec)>0.)
@@ -3234,17 +3240,24 @@ integer :: stderrunit
     end where
     calving_hflx(:,:)=grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)
     !Return iceberg mass, area and ustar to pass on to ocean model
-    if (present(mass_berg)) then ; if (associated(mass_berg)) then
-      if (bergs%add_weight_to_ocean) &
-        mass_berg(:,:)=grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)
-    endif ; endif
-    if (present(ustar_berg)) then ; if (associated(ustar_berg)) then
-      ustar_berg(:,:)=grd%ustar_iceberg(grd%isc:grd%iec,grd%jsc:grd%jec)
-    endif ; endif
-    if (present(area_berg)) then ; if (associated(area_berg)) then
-      area_berg(:,:)=grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec)
-    endif ; endif
+    if (present(mass_berg)) then 
+      if (associated(mass_berg)) then
+        if (bergs%add_weight_to_ocean) &
+          mass_berg(:,:)=grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)
+      endif
+    endif
+    if (present(ustar_berg)) then 
+      if (associated(ustar_berg)) then
+        ustar_berg(:,:)=grd%ustar_iceberg(grd%isc:grd%iec,grd%jsc:grd%jec)
+      endif 
+    endif
+    if (present(area_berg)) then 
+      if (associated(area_berg)) then
+        area_berg(:,:)=grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec)
+      endif 
+    endif
   endif
+  
   call mpp_clock_end(bergs%clock_int)
 
   ! Diagnose budgets
@@ -3547,7 +3560,6 @@ end subroutine icebergs_run
 
 ! ##############################################################################
 
-
 subroutine icebergs_incr_mass(bergs, mass, Time)
 ! Arguments
 type(icebergs), pointer :: bergs
@@ -3609,6 +3621,7 @@ integer :: stderrunit
   if (field_name=='Uvel') var_on_ocean(:,:,:)=grd%Uvel_on_ocean(:,:,:)
   if (field_name=='Vvel') var_on_ocean(:,:,:)=grd%Vvel_on_ocean(:,:,:)
   
+  !This line has been removed, for that routine can be used for other fields
   !if (.not. bergs%add_weight_to_ocean) return
 
   !Update the halos of the var_on_ocean
