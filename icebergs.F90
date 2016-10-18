@@ -2696,7 +2696,7 @@ end subroutine calculate_mass_on_ocean
 ! ##############################################################################
 
 subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh, sst, calving_hflx, cn, hi, &
-                        stagger, stress_stagger,sss,mass_berg, ustar_berg, area_berg)
+                        stagger, stress_stagger, sss, mass_berg, ustar_berg, area_berg)
 ! Arguments
 type(icebergs), pointer :: bergs
 type(time_type), intent(in) :: time
@@ -2704,8 +2704,7 @@ real, dimension(:,:), intent(inout) :: calving, calving_hflx
 real, dimension(:,:), intent(in) :: uo, vo, ui, vi, tauxa, tauya, ssh, sst, cn, hi
 integer,    optional, intent(in) :: stagger, stress_stagger
 real, dimension(:,:), optional, intent(in) :: sss
-real, dimension(:,:), optional, intent(inout) ::  mass_berg, ustar_berg, area_berg
-
+real, dimension(:,:), optional, pointer ::  mass_berg, ustar_berg, area_berg
 ! Local variables
 integer :: iyr, imon, iday, ihr, imin, isec, k
 type(icebergs_gridded), pointer :: grd
@@ -3156,6 +3155,10 @@ integer :: stderrunit
 
   call mpp_clock_end(bergs%clock_dia)
 
+  !Making sure that spread_mass has the correct mass
+  grd%spread_mass(:,:)=0.0
+  call icebergs_incr_mass(bergs, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec), within_iceberg_model=.True.)
+
   ! Return what ever calving we did not use and additional icebergs melt
   call mpp_clock_begin(bergs%clock_int)
   if (.not. bergs%passive_mode) then
@@ -3170,16 +3173,23 @@ integer :: stderrunit
       !area_berg0(:,:)=0.
     end where
     calving_hflx(:,:)=grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)
-    if (present(mass_berg)) then !; if (allocated(mass_berg)) then
-      mass_berg(:,:)=grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)
-    endif !; endif
-    if (present(ustar_berg)) then !; if (allocated(ustar_berg)) then
+    if (present(mass_berg)) then
+      if (associated(mass_berg) .and. .not.bergs%passive_mode) then
+        mass_berg(:,:)=grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)
+      endif
+    endif
+    if (present(ustar_berg)) then
+      if (associated(ustar_berg) .and. .not.bergs%passive_mode) then
       ustar_berg(:,:)=grd%ustar_iceberg(grd%isc:grd%iec,grd%jsc:grd%jec)
-    endif !; endif
-    if (present(area_berg)) then !; if (allocated(area_berg)) then
-      area_berg(:,:)=grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec)
-    endif !; endif
+      endif
+    endif
+    if (present(area_berg)) then
+      if (associated(area_berg) .and. .not.bergs%passive_mode) then
+        area_berg(:,:)=grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec)
+      endif
+    endif
   endif
+  
   call mpp_clock_end(bergs%clock_int)
 
   ! Diagnose budgets
@@ -3482,12 +3492,12 @@ end subroutine icebergs_run
 
 ! ##############################################################################
 
-subroutine icebergs_incr_mass(bergs, mass, within_iceberg_model, Time,field_name_in)
+subroutine icebergs_incr_mass(bergs, mass, within_iceberg_model, Time, field_name_in)
 ! Arguments
 type(icebergs), pointer :: bergs
 real, dimension(bergs%grd%isc:bergs%grd%iec,bergs%grd%jsc:bergs%grd%jec), intent(inout) :: mass
-type(time_type), intent(in), optional :: Time
 logical, intent(in), optional :: within_iceberg_model
+type(time_type), intent(in), optional :: Time
 character(len=4), intent(in), optional :: field_name_in
 ! Local variables
 logical :: within_model
@@ -3514,8 +3524,6 @@ integer :: stderrunit
   if (field_name=='Uvel') var_on_ocean(:,:,:)=grd%Uvel_on_ocean(:,:,:)
   if (field_name=='Vvel') var_on_ocean(:,:,:)=grd%Vvel_on_ocean(:,:,:)
 
-
-  
   within_model=.False.
   if (present(within_iceberg_model)) then 
     within_model=within_iceberg_model
@@ -3571,6 +3579,7 @@ integer :: stderrunit
     endif
     if ((grd%id_area_on_ocn>0).and.(field_name=='area')) grd%tmp(i,j)=dmda
     if ((grd%id_mass_on_ocn>0).and.(field_name=='mass')) grd%tmp(i,j)=dmda
+
   enddo; enddo
   
   if (field_name=='mass') then
@@ -3596,6 +3605,7 @@ integer :: stderrunit
     call mpp_clock_end(bergs%clock_int)
     call mpp_clock_end(bergs%clock)
   endif
+
 end subroutine icebergs_incr_mass
 
 ! ##############################################################################

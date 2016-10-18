@@ -1842,6 +1842,7 @@ end subroutine send_bergs_to_other_pes
   quick=.false.
   max_bonds=0
   if (present(max_bonds_in)) max_bonds=max_bonds_in
+
   force_app = .false.
   if(present(force_append)) force_app = force_append
      
@@ -3619,7 +3620,7 @@ real :: Lx, dx,dy
   elseif ((max(y1,y2,y3,y4)<89.999) .or.(.not. grd%grid_is_latlon)) then
     call calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, x, y, xi, yj, Lx, explain=explain)
   else
-    if (debug) write(stderrunit,*) 'diamonds, pos_within_cell: working in tangential plane!'
+!   if (debug) write(stderrunit,*) 'diamonds, pos_within_cell: working in tangential plane!'
     xx=(90.-y)*cos(x*pi_180)
     yy=(90.-y)*sin(x*pi_180)
     x1=(90.-y1)*cos(grd%lon(i-1,j-1)*pi_180)
@@ -3639,7 +3640,8 @@ real :: Lx, dx,dy
       endif
     endif
     call calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, xx, yy, xi, yj, Lx,explain=explain)
-    if (is_point_in_cell(grd, x, y, i, j)) then
+    if (.not. is_point_in_cell(grd, x, y, i, j)) then
+!was if (is_point_in_cell(grd, x, y, i, j)) then
       if (abs(xi-0.5)>0.5.or.abs(yj-0.5)>0.5) then
         ! Scale internal coordinates to be consistent with is_point_in_cell()
         ! Note: this is intended to fix the inconsistency between the tangent plane
@@ -3647,11 +3649,11 @@ real :: Lx, dx,dy
         fac=2.*max( abs(xi-0.5), abs(yj-0.5) ); fac=max(1., fac)
         xi=0.5+(xi-0.5)/fac
         yj=0.5+(yj-0.5)/fac
-        if (debug) call error_mesg('diamonds, pos_within_cell', 'in cell so scaling internal coordinates!', WARNING)
+ !      if (debug) call error_mesg('diamonds, pos_within_cell', 'in cell so scaling internal coordinates!', WARNING)
       endif
     else
-      if (abs(xi-0.5)<=0.5.and.abs(yj-0.5)<=0.5) then
-        if (debug) call error_mesg('diamonds, pos_within_cell', 'out of cell but coordinates <=0.5!', WARNING)
+      if (abs(xi-0.5)>0.5.and.abs(yj-0.5)>0.5) then
+        if (debug) call error_mesg('diamonds, pos_within_cell', 'in cell but coordinates >0.5!', WARNING)
       endif
     endif
   endif
