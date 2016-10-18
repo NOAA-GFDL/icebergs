@@ -2618,7 +2618,7 @@ type(bond) , pointer :: current_bond
         !print *, 'Current:', berg%iceberg_num, berg%ine, berg%jne,berg%halo_berg, mpp_pe()
         if  (associated(current_bond%other_berg)) then
           if (current_bond%other_berg%iceberg_num .ne. current_bond%other_berg_num) then
-            print *, 'Bond matching', berg%iceberg_num,current_bond%other_berg%iceberg_num, current_bond%other_berg_num,\
+            print *, 'Bond matching', berg%iceberg_num,current_bond%other_berg%iceberg_num, current_bond%other_berg_num,&
             berg%halo_berg,current_bond%other_berg%halo_berg ,mpp_pe()
             call error_mesg('diamonds, show all bonds:', 'The bonds are not matching properly!', FATAL)
           endif
