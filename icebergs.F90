@@ -2816,8 +2816,7 @@ real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass,grdd_spread_mass
 real :: grdd_u_iceberg, grdd_v_iceberg, grdd_ustar_iceberg, grdd_spread_uvel, grdd_spread_vvel
 integer :: i, j, Iu, ju, iv, Jv, Iu_off, ju_off, iv_off, Jv_off
 real :: mask
-real :: ave_thickness
-real, dimension(:,:), allocatable :: uC_tmp, vC_tmp
+real, dimension(:,:), allocatable :: uC_tmp, vC_tmp, uA_tmp, vA_tmp
 integer :: vel_stagger, str_stagger
 real, dimension(:,:), allocatable :: iCount
 integer :: nbonds
@@ -2987,6 +2986,26 @@ integer :: stderrunit
        grd%va(I,J) = mask * 0.5*(vC_tmp(i,J)+vC_tmp(i+1,J))
     enddo ; enddo
     deallocate(uC_tmp, vC_tmp)
+  elseif (str_stagger == AGRID) then
+    ! Copy into arrays with local index conventions and halos.
+    allocate(uA_tmp(grd%isd:grd%ied,grd%jsd:grd%jed), &
+             vA_tmp(grd%isd:grd%ied,grd%jsd:grd%jed))
+    uA_tmp(:,:) = 0.0 ! This avoids uninitialized values that might remain in halo
+    vA_tmp(:,:) = 0.0 ! regions after the call to mpp_update_domains() below.
+    uA_tmp(grd%isc:grd%iec,grd%jsc:grd%jec) = tauxa(:,:)
+    vA_tmp(grd%isc:grd%iec,grd%jsc:grd%jec) = tauya(:,:)
+    call mpp_update_domains(uA_tmp, vA_tmp, grd%domain, gridtype=AGRID)
+    do I=grd%isc-1,grd%iec ; do J=grd%jsc-1,grd%jec
+      ! Interpolate wind stresses from A-grid tracer points to the corner B-grid points.
+      ! This masking is needed for now to prevent icebergs from running up on to land.
+      mask = min(grd%msk(i,j), grd%msk(i+1,j), grd%msk(i,j+1), grd%msk(i+1,j+1))
+      grd%ua(I,J) = mask * 0.25*((uA_tmp(i,j) + uA_tmp(i+1,j+1)) + &
+                                 (uA_tmp(i+1,j) + uA_tmp(i,j+1)))
+      grd%va(I,J) = mask * 0.25*((vA_tmp(i,j) + vA_tmp(i+1,j+1)) + &
+                                 (vA_tmp(i+1,j) + vA_tmp(i,j+1)))
+    enddo ; enddo
+    
+    deallocate(uA_tmp, vA_tmp)
   else
     call error_mesg('diamonds, iceberg_run', 'Unrecognized value of stress_stagger!', FATAL)
   endif
