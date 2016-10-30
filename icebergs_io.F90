@@ -22,13 +22,14 @@ use fms_mod,    only : clock_flag_default
 
 use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 
-use ice_bergs_framework, only: icebergs_gridded, xyt, iceberg, icebergs, buffer
+use ice_bergs_framework, only: icebergs_gridded, xyt, iceberg, icebergs, buffer, bond
 use ice_bergs_framework, only: pack_berg_into_buffer2,unpack_berg_from_buffer2
 use ice_bergs_framework, only: pack_traj_into_buffer2,unpack_traj_from_buffer2
 use ice_bergs_framework, only: find_cell,find_cell_by_search,count_bergs,is_point_in_cell,pos_within_cell,append_posn
+use ice_bergs_framework, only: count_bonds, form_a_bond, find_individual_iceberg
 use ice_bergs_framework, only: push_posn
 use ice_bergs_framework, only: add_new_berg_to_list,destroy_iceberg
-use ice_bergs_framework, only: increase_ibuffer,increase_ibuffer_traj,grd_chksum2,grd_chksum3
+use ice_bergs_framework, only: increase_ibuffer,grd_chksum2,grd_chksum3
 use ice_bergs_framework, only: sum_mass,sum_heat,bilin
 !params !Niki: write a subroutine to get these
 use ice_bergs_framework, only: nclasses, buffer_width, buffer_width_traj
@@ -42,7 +43,8 @@ include 'netcdf.inc'
 
 public ice_bergs_io_init
 public read_restart_bergs,read_restart_bergs_orig,write_restart,write_trajectory
-public read_restart_calving
+public read_restart_calving, read_restart_bonds
+public read_ocean_depth
 
 !Local Vars
 integer, parameter :: file_format_major_version=0
@@ -98,27 +100,26 @@ end subroutine ice_bergs_io_init
 subroutine write_restart(bergs)
 ! Arguments
 type(icebergs), pointer :: bergs
+type(bond), pointer :: current_bond
 ! Local variables
 integer :: i,j,id
 character(len=35) :: filename
+character(len=35) :: filename_bonds
 type(iceberg), pointer :: this=>NULL()
 integer :: stderrunit
 !I/O vars
 type(restart_file_type) :: bergs_restart
-type(iceberg), pointer :: bergs4io=>NULL()
-integer :: nbergs
+type(restart_file_type) :: bergs_bond_restart
+integer :: nbergs, nbonds
+logical :: check_bond_quality 
 type(icebergs_gridded), pointer :: grd
 real, allocatable, dimension(:) :: lon,          &
                                    lat,          &
-                                   lon_old,      &
-                                   lat_old,      &
                                    uvel,         &
                                    vvel,         &
                                    mass,         &
                                    axn,          &
                                    ayn,          &
-                                   uvel_old,     &
-                                   vvel_old,     &
                                    bxn,          &
                                    byn,          &
                                    thickness,    &
@@ -130,15 +131,23 @@ real, allocatable, dimension(:) :: lon,          &
                                    start_mass,   &
                                    mass_scaling, &
                                    mass_of_bits, &
+                                   halo_berg,    &
+                                   static_berg,  &
                                    heat_density
 
-integer, allocatable, dimension(:) :: ine,       &
-                                      jne,       &
-                                      iceberg_num,       &
-                                      start_year
+integer, allocatable, dimension(:) :: ine,              &
+                                      jne,              &
+                                      iceberg_num,      &
+                                      start_year,       &
+                                      first_berg_num,   &
+                                      other_berg_num,   &
+                                      first_berg_jne,         &
+                                      first_berg_ine,         &
+                                      other_berg_jne,         &
+                                      other_berg_ine
 
 
-!uvel_old, vvel_old, lon_old, lat_old, axn, ayn, bxn, byn added by Alon.
+integer :: grdi, grdj
   
 ! Get the stderr unit number
  stderrunit=stderr()
@@ -148,29 +157,22 @@ integer, allocatable, dimension(:) :: ine,       &
   grd=>bergs%grd
  
   !First add the bergs on the io_tile_root_pe (if any) to the I/O list
-   nbergs = 0
-   if(associated(bergs%first)) then
-        !bergs4io => bergs%first !This would modify the bergs and cause them to grow to include all bergs in the tile.
-        !Alternatively, create a new list, slow
-        this=>bergs%first
-        do while (associated(this))
-           nbergs = nbergs +1
-           call add_new_berg_to_list(bergs4io, this)
-           this=>this%next
-        enddo
-   endif
+  nbergs = 0
+  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+      nbergs = nbergs +1
+      this=>this%next
+    enddo
+  enddo ; enddo
 
    allocate(lon(nbergs))
    allocate(lat(nbergs))
-   allocate(lon_old(nbergs))  !Alon
-   allocate(lat_old(nbergs))  !Alon
    allocate(uvel(nbergs))
    allocate(vvel(nbergs))
    allocate(mass(nbergs))
    allocate(axn(nbergs))    !Alon
    allocate(ayn(nbergs))    !Alon
-   allocate(uvel_old(nbergs)) !Alon
-   allocate(vvel_old(nbergs)) !Alon
    allocate(bxn(nbergs)) !Alon
    allocate(byn(nbergs)) !Alon
    allocate(thickness(nbergs))
@@ -183,11 +185,14 @@ integer, allocatable, dimension(:) :: ine,       &
    allocate(mass_scaling(nbergs))
    allocate(mass_of_bits(nbergs))
    allocate(heat_density(nbergs))
+   allocate(halo_berg(nbergs))
+   allocate(static_berg(nbergs))
 
    allocate(ine(nbergs))
    allocate(jne(nbergs))
    allocate(start_year(nbergs))
    allocate(iceberg_num(nbergs))
+
 
   call get_instance_filename("icebergs.res.nc", filename)
   call set_domain(bergs%grd%domain)
@@ -201,15 +206,11 @@ integer, allocatable, dimension(:) :: ine,       &
   ! Define Variables
   id = register_restart_field(bergs_restart,filename,'lon',lon,longname='longitude',units='degrees_E')
   id = register_restart_field(bergs_restart,filename,'lat',lat,longname='latitude',units='degrees_N')
-  id = register_restart_field(bergs_restart,filename,'lon_old',lon_old,longname='longitude',units='degrees_E') !Alon
-  id = register_restart_field(bergs_restart,filename,'lat_old',lat_old,longname='latitude',units='degrees_N') !Alon
   id = register_restart_field(bergs_restart,filename,'uvel',uvel,longname='zonal velocity',units='m/s')
   id = register_restart_field(bergs_restart,filename,'vvel',vvel,longname='meridional velocity',units='m/s')
   id = register_restart_field(bergs_restart,filename,'mass',mass,longname='mass',units='kg')
   id = register_restart_field(bergs_restart,filename,'axn',axn,longname='explicit zonal acceleration',units='m/s^2') !Alon
   id = register_restart_field(bergs_restart,filename,'ayn',ayn,longname='explicit meridional acceleration',units='m/s^2') !Alon
-  id = register_restart_field(bergs_restart,filename,'uvel_old',uvel_old,longname='old explicit zonal acceleration',units='m/s^2') !Alon
-  id = register_restart_field(bergs_restart,filename,'vvel_old',vvel_old,longname='old explicit meridional acceleration',units='m/s^2') !Alon
   id = register_restart_field(bergs_restart,filename,'bxn',bxn,longname='inplicit zonal acceleration',units='m/s^2') !Alon
   id = register_restart_field(bergs_restart,filename,'byn',byn,longname='implicit meridional acceleration',units='m/s^2') !Alon
   id = register_restart_field(bergs_restart,filename,'ine',ine,longname='i index',units='none')
@@ -235,28 +236,37 @@ integer, allocatable, dimension(:) :: ine,       &
                                             longname='mass of bergy bits',units='kg')
   id = register_restart_field(bergs_restart,filename,'heat_density',heat_density, &
                                             longname='heat density',units='J/kg')
+  id = register_restart_field(bergs_restart,filename,'halo_berg',halo_berg, &
+                                            longname='halo_berg',units='dimensionless')
+  id = register_restart_field(bergs_restart,filename,'static_berg',static_berg, &
+                                            longname='static_berg',units='dimensionless')
+
 
   ! Write variables
-
-  if(associated(bergs%first)) this=>bergs%first
-  do i=1,nbergs
-    lon(i) = this%lon; lat(i) = this%lat
-    lon_old(i) = this%lon_old; lat_old(i) = this%lat_old  !Alon
-    uvel(i) = this%uvel; vvel(i) = this%vvel
-    ine(i) = this%ine; jne(i) = this%jne
-    mass(i) = this%mass; thickness(i) = this%thickness
-    axn(i) = this%axn; ayn(i) = this%ayn !Added by Alon
-    uvel_old(i) = this%uvel_old; vvel_old(i) = this%vvel_old !Added by Alon
-    bxn(i) = this%bxn; byn(i) = this%byn !Added by Alon
-    width(i) = this%width; length(i) = this%length
-    start_lon(i) = this%start_lon; start_lat(i) = this%start_lat
-    start_year(i) = this%start_year; start_day(i) = this%start_day
-    iceberg_num(i) = this%iceberg_num; 
-    start_mass(i) = this%start_mass; mass_scaling(i) = this%mass_scaling
-    mass_of_bits(i) = this%mass_of_bits; heat_density(i) = this%heat_density
-    this=>this%next
-  enddo
    
+  i = 0
+  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+    this=>bergs%list(grdi,grdj)%first
+    do while(associated(this))
+      i = i + 1
+      lon(i) = this%lon; lat(i) = this%lat
+      uvel(i) = this%uvel; vvel(i) = this%vvel
+      ine(i) = this%ine; jne(i) = this%jne
+      mass(i) = this%mass; thickness(i) = this%thickness
+      axn(i) = this%axn; ayn(i) = this%ayn !Added by Alon
+      bxn(i) = this%bxn; byn(i) = this%byn !Added by Alon
+      width(i) = this%width; length(i) = this%length
+      start_lon(i) = this%start_lon; start_lat(i) = this%start_lat
+      start_year(i) = this%start_year; start_day(i) = this%start_day
+      start_mass(i) = this%start_mass; mass_scaling(i) = this%mass_scaling
+      halo_berg(i) = this%halo_berg 
+      static_berg(i) = this%static_berg 
+      iceberg_num(i) = this%iceberg_num; 
+      mass_of_bits(i) = this%mass_of_bits; heat_density(i) = this%heat_density
+      this=>this%next
+    enddo
+  enddo ; enddo
+
 
   call save_restart(bergs_restart)
   call free_restart_type(bergs_restart)
@@ -264,15 +274,11 @@ integer, allocatable, dimension(:) :: ine,       &
   deallocate(              &
              lon,          &
              lat,          &
-             lon_old,      &
-             lat_old,      &
              uvel,         &
              vvel,         &
              mass,         &
              axn,          &
              ayn,          &
-             uvel_old,     &
-             vvel_old,     &
              bxn,          &
              byn,          &
              thickness,    &
@@ -284,8 +290,8 @@ integer, allocatable, dimension(:) :: ine,       &
              start_mass,   &
              mass_scaling, &
              mass_of_bits, &
+             static_berg,    &
              heat_density )
-!axn, ayn, uvel_old, vvel_old, lat_old, lon_old, bxn, byn above added by Alon
 
   deallocate(           &
              ine,       &
@@ -293,8 +299,78 @@ integer, allocatable, dimension(:) :: ine,       &
              iceberg_num,       &
              start_year )
 
+  call nullify_domain()
+
+!########## Creating bond restart file ######################
+
+   !Allocating restart memory for bond related variables.
+   nbonds=0
+   if (bergs%iceberg_bonds_on) then
+     check_bond_quality=.true.
+     call count_bonds(bergs, nbonds,check_bond_quality)
+
+   allocate(first_berg_num(nbonds))
+   allocate(other_berg_num(nbonds))
+   allocate(first_berg_ine(nbonds))
+   allocate(first_berg_jne(nbonds))
+   allocate(other_berg_ine(nbonds))
+   allocate(other_berg_jne(nbonds))
+
+  call get_instance_filename("bonds_iceberg.res.nc", filename_bonds)
+  call set_domain(bergs%grd%domain)
+  call register_restart_axis(bergs_bond_restart,filename,'i',nbonds)
+  call set_meta_global(bergs_bond_restart,'file_format_major_version',ival=(/file_format_major_version/))
+  call set_meta_global(bergs_bond_restart,'file_format_minor_version',ival=(/file_format_minor_version/))
+  call set_meta_global(bergs_bond_restart,'time_axis',ival=(/0/))
+
+  !Now start writing in the io_tile_root_pe if there are any bergs in the I/O list
+
+  id = register_restart_field(bergs_bond_restart,filename_bonds,'first_berg_ine',first_berg_ine,longname='iceberg ine of first berg in bond',units='dimensionless')
+  id = register_restart_field(bergs_bond_restart,filename_bonds,'first_berg_jne',first_berg_jne,longname='iceberg jne of first berg in bond',units='dimensionless')
+  id = register_restart_field(bergs_bond_restart,filename_bonds,'first_berg_num',first_berg_num,longname='iceberg id first berg in bond',units='dimensionless')
+  id = register_restart_field(bergs_bond_restart,filename_bonds,'other_berg_ine',other_berg_ine,longname='iceberg ine of second berg in bond',units='dimensionless')
+  id = register_restart_field(bergs_bond_restart,filename_bonds,'other_berg_jne',other_berg_jne,longname='iceberg jne of second berg in bond',units='dimensionless')
+  id = register_restart_field(bergs_bond_restart,filename_bonds,'other_berg_num',other_berg_num,longname='iceberg id second berg in bond',units='dimensionless')
+  
+  
+  ! Write variables
+   
+  i = 0
+  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+    this=>bergs%list(grdi,grdj)%first
+    do while(associated(this)) !Loops over all bergs
+      current_bond=>this%first_bond
+      do while (associated(current_bond)) ! loop over all bonds
+        i = i + 1
+        first_berg_ine(i)=this%ine
+        first_berg_jne(i)=this%jne
+        first_berg_num(i)= this%iceberg_num
+        other_berg_num(i)=current_bond%other_berg_num
+        other_berg_ine(i)=current_bond%other_berg%ine
+        other_berg_jne(i)=current_bond%other_berg%jne
+
+        current_bond=>current_bond%next_bond
+      enddo !End of loop over bonds
+      this=>this%next
+    enddo!End of loop over bergs
+  enddo; enddo !End of loop over grid
+
+  call save_restart(bergs_bond_restart)
+  call free_restart_type(bergs_bond_restart)
+
+
+  deallocate(                 &
+             first_berg_num,  &
+             other_berg_num, &
+             first_berg_ine,        &
+             first_berg_jne,        &
+             other_berg_ine,        &
+             other_berg_jne )
+
 
   call nullify_domain()
+   endif
+!#############################################################################################
 
   ! Write stored ice
   filename='RESTART/calving.res.nc'
@@ -338,10 +414,10 @@ type(time_type), intent(in) :: Time
 integer, dimension(:), allocatable :: found_restart_int
 integer :: k, ierr, ncid, dimid, nbergs_in_file
 integer :: lonid, latid,  uvelid, vvelid, ineid, jneid
-integer :: axnid, aynid, uvel_oldid, vvel_oldid, bxnid, bynid, lon_oldid, lat_oldid !Added by Alon
+integer :: axnid, aynid, uvel_oldid, vvel_oldid, bxnid, bynid
 integer :: massid, thicknessid, widthid, lengthid
 integer :: start_lonid, start_latid, start_yearid, iceberg_numid, start_dayid, start_massid
-integer :: scaling_id, mass_of_bits_id, heat_density_id
+integer :: scaling_id, mass_of_bits_id, heat_density_id, halo_bergid, static_bergid
 logical :: lres, found_restart, multiPErestart
 real :: lon0, lon1, lat0, lat1
 character(len=33) :: filename, filename_base
@@ -400,15 +476,11 @@ integer :: stderrunit, iNg, jNg, i, j
 
   lonid=inq_var(ncid, 'lon')
   latid=inq_var(ncid, 'lat')
-  lon_oldid=inq_var(ncid, 'lon_old') !Alon
-  lat_oldid=inq_var(ncid, 'lat_old') !Alon
   uvelid=inq_var(ncid, 'uvel')
   vvelid=inq_var(ncid, 'vvel')
   massid=inq_var(ncid, 'mass')
   axnid=inq_var(ncid, 'axn') !Alon
   aynid=inq_var(ncid, 'ayn') !Alon
-  uvel_oldid=inq_var(ncid, 'uvel_old') !Alon
-  vvel_oldid=inq_var(ncid, 'vvel_old') !Alon
   bxnid=inq_var(ncid, 'bxn') !Alon
   bynid=inq_var(ncid, 'byn') !Alon
   thicknessid=inq_var(ncid, 'thickness')
@@ -425,6 +497,8 @@ integer :: stderrunit, iNg, jNg, i, j
   start_dayid=inq_var(ncid, 'start_day')
   start_massid=inq_var(ncid, 'start_mass')
   scaling_id=inq_var(ncid, 'mass_scaling')
+  halo_bergid=inq_var(ncid, 'halo_berg')
+  static_bergid=inq_var(ncid, 'static_berg')
   mass_of_bits_id=inq_var(ncid, 'mass_of_bits',unsafe=.true.)
   heat_density_id=inq_var(ncid, 'heat_density',unsafe=.true.)
   ineid=inq_var(ncid, 'ine',unsafe=.true.)
@@ -467,10 +541,6 @@ integer :: stderrunit, iNg, jNg, i, j
       localberg%mass=get_double(ncid, massid, k)
       localberg%axn=get_double(ncid, axnid, k) !Alon
       localberg%ayn=get_double(ncid, aynid, k) !Alon
-      localberg%uvel_old=get_double(ncid, uvel_oldid, k) !Alon
-      localberg%vvel_old=get_double(ncid, vvel_oldid, k) !Alon
-      localberg%lon_old=get_double(ncid, lon_oldid, k) !Alon
-      localberg%lat_old=get_double(ncid, lat_oldid, k) !Alon
       localberg%bxn=get_double(ncid, bxnid, k) !Alon
       localberg%byn=get_double(ncid, bynid, k) !Alon
       localberg%thickness=get_double(ncid, thicknessid, k)
@@ -487,6 +557,8 @@ integer :: stderrunit, iNg, jNg, i, j
       localberg%start_day=get_double(ncid, start_dayid, k)
       localberg%start_mass=get_double(ncid, start_massid, k)
       localberg%mass_scaling=get_double(ncid, scaling_id, k)
+      localberg%halo_berg=get_double(ncid, halo_bergid, k)
+      localberg%static_berg=get_double(ncid, static_bergid, k)
       if (mass_of_bits_id>0) then ! Allow reading of older restart with no bergy bits
         localberg%mass_of_bits=get_double(ncid, mass_of_bits_id, k)
       else
@@ -500,8 +572,8 @@ integer :: stderrunit, iNg, jNg, i, j
       if (really_debug) lres=is_point_in_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, explain=.true.)
       lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
      !call add_new_berg_to_list(bergs%first, localberg, quick=.true.)
-      call add_new_berg_to_list(bergs%first, localberg)
-      if (really_debug) call print_berg(stderrunit, bergs%first, 'read_restart_bergs, add_new_berg_to_list')
+      call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg)
+      if (really_debug) call print_berg(stderrunit, bergs%list(localberg%ine,localberg%jne)%first, 'read_restart_bergs, add_new_berg_to_list')
     elseif (multiPErestart .and. io_tile_id(1) .lt. 0) then
       call error_mesg('diamonds, read_restart_bergs', 'berg in PE file was not on PE!', FATAL)
     endif
@@ -529,11 +601,11 @@ integer :: stderrunit, iNg, jNg, i, j
 
   if (.not. found_restart .and. bergs%nbergs_start==0 .and. generate_test_icebergs) call generate_bergs(bergs,Time)
 
-  bergs%floating_mass_start=sum_mass(bergs%first)
+  bergs%floating_mass_start=sum_mass(bergs)
   call mpp_sum( bergs%floating_mass_start )
-  bergs%icebergs_mass_start=sum_mass(bergs%first,justbergs=.true.)
+  bergs%icebergs_mass_start=sum_mass(bergs,justbergs=.true.)
   call mpp_sum( bergs%icebergs_mass_start )
-  bergs%bergy_mass_start=sum_mass(bergs%first,justbits=.true.)
+  bergs%bergy_mass_start=sum_mass(bergs,justbits=.true.)
   call mpp_sum( bergs%bergy_mass_start )
   if (mpp_pe().eq.mpp_root_pe().and.verbose) write(*,'(a)') 'diamonds, read_restart_bergs: completed'
 
@@ -577,6 +649,8 @@ contains
         localberg%start_mass=localberg%mass
         localberg%mass_scaling=bergs%mass_scaling(1)
         localberg%mass_of_bits=0.
+        localberg%halo_berg=0.
+        localberg%static_berg=0.
         localberg%heat_density=0.
         localberg%axn=0. !Alon
         localberg%ayn=0. !Alon
@@ -590,25 +664,25 @@ contains
         localberg%vvel=0.
         localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
         grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
-        call add_new_berg_to_list(bergs%first, localberg)
+        call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
         !Berg B
         localberg%uvel=-1.
         localberg%vvel=0.
         localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
         grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
-        call add_new_berg_to_list(bergs%first, localberg)
+        call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
         !Berg C
         localberg%uvel=0.
         localberg%vvel=1.
         localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
         grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
-        call add_new_berg_to_list(bergs%first, localberg)
+        call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
         !Berg D
         localberg%uvel=0.
         localberg%vvel=-1.
         localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
         grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
-        call add_new_berg_to_list(bergs%first, localberg)
+        call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
       endif
     enddo; enddo
 
@@ -628,10 +702,12 @@ subroutine read_restart_bergs(bergs,Time)
 type(icebergs), pointer :: bergs
 type(time_type), intent(in) :: Time
 ! Local variables
-integer :: k, siz(4), nbergs_in_file
+integer :: k, siz(4), nbergs_in_file, nbergs_read
 logical :: lres, found_restart, found
+logical :: explain
 logical :: multiPErestart  ! Not needed with new restart read; currently kept for compatibility
 real :: lon0, lon1, lat0, lat1
+real :: pos_is_good, pos_is_good_all_pe
 character(len=33) :: filename, filename_base
 type(icebergs_gridded), pointer :: grd
 type(iceberg) :: localberg ! NOT a pointer but an actual local variable
@@ -639,15 +715,11 @@ integer :: stderrunit, iNg, jNg, i, j
 
 real, allocatable, dimension(:) :: lon,          &
                                    lat,          &
-                                   lon_old,      &
-                                   lat_old,      &
                                    uvel,         &
                                    vvel,         &
                                    mass,         &
                                    axn,          &
                                    ayn,          &
-                                   uvel_old,     &
-                                   vvel_old,     &
                                    bxn,          &
                                    byn,          &
                                    thickness,    &
@@ -659,8 +731,9 @@ real, allocatable, dimension(:) :: lon,          &
                                    start_mass,   &
                                    mass_scaling, &
                                    mass_of_bits, &
+                                   halo_berg,    &
+                                   static_berg,    &
                                    heat_density
-!axn, ayn, uvel_old, vvel_old, lon_old, lat_old, bxn, byn added by Alon
 integer, allocatable, dimension(:) :: ine,       &
                                       jne,       &
                                       iceberg_num,       &
@@ -693,15 +766,11 @@ integer, allocatable, dimension(:) :: ine,       &
   if(nbergs_in_file > 0) then
      allocate(lon(nbergs_in_file))
      allocate(lat(nbergs_in_file))
-     allocate(lon_old(nbergs_in_file)) !Alon
-     allocate(lat_old(nbergs_in_file)) !Alon
      allocate(uvel(nbergs_in_file))
      allocate(vvel(nbergs_in_file))
      allocate(mass(nbergs_in_file))
      allocate(axn(nbergs_in_file)) !Alon
      allocate(ayn(nbergs_in_file)) !Alon
-     allocate(uvel_old(nbergs_in_file)) !Alon
-     allocate(vvel_old(nbergs_in_file)) !Alon
      allocate(bxn(nbergs_in_file)) !Alon
      allocate(byn(nbergs_in_file)) !Alon
      allocate(thickness(nbergs_in_file))
@@ -713,6 +782,8 @@ integer, allocatable, dimension(:) :: ine,       &
      allocate(start_mass(nbergs_in_file))
      allocate(mass_scaling(nbergs_in_file))
      allocate(mass_of_bits(nbergs_in_file))
+     allocate(halo_berg(nbergs_in_file))
+     allocate(static_berg(nbergs_in_file))
      allocate(heat_density(nbergs_in_file))
      allocate(ine(nbergs_in_file))
      allocate(jne(nbergs_in_file))
@@ -723,15 +794,11 @@ integer, allocatable, dimension(:) :: ine,       &
   if (found_restart) then
      call read_unlimited_axis(filename,'lon',lon,domain=grd%domain)
      call read_unlimited_axis(filename,'lat',lat,domain=grd%domain)
-     call read_unlimited_axis(filename,'lon_old',lon_old,domain=grd%domain) !Alon
-     call read_unlimited_axis(filename,'lat_old',lat_old,domain=grd%domain) !Alon
      call read_unlimited_axis(filename,'uvel',uvel,domain=grd%domain)
      call read_unlimited_axis(filename,'vvel',vvel,domain=grd%domain)
      call read_unlimited_axis(filename,'mass',mass,domain=grd%domain)
      call read_unlimited_axis(filename,'axn',axn,domain=grd%domain) !Alon
      call read_unlimited_axis(filename,'ayn',ayn,domain=grd%domain) !Alon
-     call read_unlimited_axis(filename,'uvel_old',uvel_old,domain=grd%domain) !Alon
-     call read_unlimited_axis(filename,'vvel_old',vvel_old,domain=grd%domain) !Alon
      call read_unlimited_axis(filename,'bxn',bxn,domain=grd%domain) !Alon
      call read_unlimited_axis(filename,'byn',byn,domain=grd%domain) !Alon
      call read_unlimited_axis(filename,'thickness',thickness,domain=grd%domain)
@@ -743,6 +810,8 @@ integer, allocatable, dimension(:) :: ine,       &
      call read_unlimited_axis(filename,'start_mass',start_mass,domain=grd%domain)
      call read_unlimited_axis(filename,'mass_scaling',mass_scaling,domain=grd%domain)
      call read_unlimited_axis(filename,'mass_of_bits',mass_of_bits,domain=grd%domain)
+     call read_unlimited_axis(filename,'halo_berg',halo_berg,domain=grd%domain)
+     call read_unlimited_axis(filename,'static_berg',static_berg,domain=grd%domain)
      call read_unlimited_axis(filename,'heat_density',heat_density,domain=grd%domain)
      call read_unlimited_axis(filename,'ine',ine,domain=grd%domain)
      call read_unlimited_axis(filename,'jne',jne,domain=grd%domain)
@@ -759,6 +828,7 @@ integer, allocatable, dimension(:) :: ine,       &
   lon1=maxval( grd%lon(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
   lat0=minval( grd%lat(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
   lat1=maxval( grd%lat(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
+     
   do k=1, nbergs_in_file
     localberg%lon=lon(k)
     localberg%lat=lat(k)
@@ -766,7 +836,7 @@ integer, allocatable, dimension(:) :: ine,       &
       localberg%ine=ine(k)
       localberg%jne=jne(k)
       if ( localberg%ine>=grd%isc .and. localberg%ine<=grd%iec .and. &
-           localberg%jne>=grd%jsc .and.localberg%jne<=grd%jec ) then
+         localberg%jne>=grd%jsc .and.localberg%jne<=grd%jec ) then
         lres=.true.
       else
         lres=.false.
@@ -774,10 +844,39 @@ integer, allocatable, dimension(:) :: ine,       &
     else ! i,j are not available from the file so we search the grid to find out if we reside on this PE
       if (use_slow_find) then
         lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
-      else
-        lres=find_cell_by_search(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
-      endif
-    endif
+       else
+         lres=find_cell_by_search(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+       endif
+     endif
+     ! The next few lines are a check to see whether the icebergs are all found.
+
+       ! The next few lines are a check to see whether the icebergs are all found.
+       pos_is_good=0.0
+       if (lres) then
+         pos_is_good=1.0
+       endif
+       pos_is_good_all_pe=pos_is_good
+       call mpp_sum(pos_is_good_all_pe)
+       !Check to see if any iceberg in the restart file was not found
+       if (pos_is_good_all_pe .lt. 0.5) then
+         if (bergs%ignore_missing_restart_bergs) then 
+           if (mpp_pe().eq.mpp_root_pe()) then
+                   print * , 'Iceberg not located: ', lon(k),lat(k), iceberg_num(k)
+                   call error_mesg('diamonds, read_restart_bergs', 'Iceberg positions was not found', WARNING)
+           endif
+         else
+           call error_mesg('diamonds, read_restart_bergs', 'Iceberg positions was not found', FATAL)
+         endif
+
+       endif
+       !Check to see if any iceberg was found more than once.
+       if (pos_is_good_all_pe .gt. 1.5) then
+         if (mpp_pe().eq.mpp_root_pe()) then
+           print * , 'Iceberg was found more than once: ', lon(k),lat(k), iceberg_num(k)
+           call error_mesg('diamonds, read_restart_bergs', 'Iceberg copied twice', FATAL)
+         endif
+       endif
+
     if (really_debug) then
       write(stderrunit,'(a,i8,a,2f9.4,a,i8)') 'diamonds, read_restart_bergs: berg ',k,' is at ',localberg%lon,localberg%lat,&
            & ' on PE ',mpp_pe()
@@ -789,10 +888,10 @@ integer, allocatable, dimension(:) :: ine,       &
       localberg%mass=mass(k)
       localberg%axn=axn(k) !Alon
       localberg%ayn=ayn(k) !Alon
-      localberg%uvel_old=uvel_old(k) !Alon
-      localberg%vvel_old=vvel_old(k) !Alon
-      localberg%lon_old=lon_old(k) !Alon
-      localberg%lat_old=lat_old(k) !Alon
+      localberg%uvel_old=uvel(k) !Alon
+      localberg%vvel_old=vvel(k) !Alon
+      localberg%lon_old=lon(k) !Alon
+      localberg%lat_old=lat(k) !Alon
       localberg%bxn=bxn(k) !Alon
       localberg%byn=byn(k) !Alon
       localberg%thickness=thickness(k)
@@ -806,30 +905,39 @@ integer, allocatable, dimension(:) :: ine,       &
       localberg%start_mass=start_mass(k)
       localberg%mass_scaling=mass_scaling(k)
       localberg%mass_of_bits=mass_of_bits(k)
+      localberg%halo_berg=halo_berg(k)
+      localberg%static_berg=static_berg(k)
       localberg%heat_density=heat_density(k)
+      localberg%first_bond=>null()
+
       if (really_debug) lres=is_point_in_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, explain=.true.)
       lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
       !call add_new_berg_to_list(bergs%first, localberg, quick=.true.)
-      call add_new_berg_to_list(bergs%first, localberg)
-      if (really_debug) call print_berg(stderrunit, bergs%first, 'read_restart_bergs, add_new_berg_to_list')
+
+      if (bergs%grd%area(localberg%ine,localberg%jne) .ne. 0)  then
+       call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg)
+      else
+        if (mpp_pe().eq.mpp_root_pe()) then
+          print * , 'Grounded iceberg: ', lat(k),lon(k), iceberg_num(k)
+          call error_mesg('diamonds, read_restart_bergs', 'Iceberg not added because it is grounded', WARNING)
+        endif
+       endif
+
+      if (really_debug) call print_berg(stderrunit, bergs%list(localberg%ine,localberg%jne)%first, 'read_restart_bergs, add_new_berg_to_list')
     elseif (multiPErestart .and. io_tile_id(1) .lt. 0) then
       call error_mesg('diamonds, read_restart_bergs', 'berg in PE file was not on PE!', FATAL)
     endif
   enddo
   
-  if(nbergs_in_file > 0) then  
+  if(nbergs_in_file > 0) then
      deallocate(              &
                 lon,          &
                 lat,          &
-                lon_old,      &
-                lat_old,      &
                 uvel,         &
                 vvel,         &
                 mass,         &
                 axn,          &
                 ayn,          &
-                uvel_old,     &
-                vvel_old,     &
                 bxn,          &
                 byn,          &
                 thickness,    &
@@ -841,24 +949,45 @@ integer, allocatable, dimension(:) :: ine,       &
                 start_mass,   &
                 mass_scaling, &
                 mass_of_bits, &
+                halo_berg,    &
+                static_berg,    &
                 heat_density )
-!axn, ayn, uvel_old, vvel_old, lat_old, lon_old, bxn, byn above added by Alon.
      deallocate(           &
                 ine,       &
                 jne,       &
                 iceberg_num,       &
                 start_year )
+
+     !Checking the total number of icebergs read from the restart file.
+     nbergs_read=count_bergs(bergs)
+     call mpp_sum(nbergs_read)
+     if (mpp_pe().eq.mpp_root_pe()) then
+       write(*,'(a,i8,a,i8,a)') 'diamonds, read_restart_bergs: Number of Icebergs in restart file=',nbergs_in_file,' Number of Icebergs read=', nbergs_read
+       if (nbergs_read .gt. nbergs_in_file) then
+         call error_mesg('diamonds, read_restart_bergs', 'More icebergs read than exist in restart file.', FATAL)
+       elseif (nbergs_read .lt. nbergs_in_file) then
+         if (bergs%ignore_missing_restart_bergs) then
+           call error_mesg('diamonds, read_restart_bergs', 'Some Icebergs from restart file were not found (ignore_missing flag is on)', WARNING)
+         else
+           call error_mesg('diamonds, read_restart_bergs', 'Some Icebergs from restart file were not found', FATAL)
+         endif
+       elseif (nbergs_read .eq. nbergs_in_file) then
+         write(*,'(a,i8,a,i8,a)') 'diamonds, read_restart_bergs: Number of icebergs read (#',nbergs_read,') matches the number of icebergs in the file'
+       endif
+     endif
+
   elseif(.not. found_restart .and. bergs%nbergs_start==0 .and. generate_test_icebergs) then
      call generate_bergs(bergs,Time)
   endif
 
-  bergs%floating_mass_start=sum_mass(bergs%first)
+  bergs%floating_mass_start=sum_mass(bergs)
   call mpp_sum( bergs%floating_mass_start )
-  bergs%icebergs_mass_start=sum_mass(bergs%first,justbergs=.true.)
+  bergs%icebergs_mass_start=sum_mass(bergs,justbergs=.true.)
   call mpp_sum( bergs%icebergs_mass_start )
-  bergs%bergy_mass_start=sum_mass(bergs%first,justbits=.true.)
+  bergs%bergy_mass_start=sum_mass(bergs,justbits=.true.)
   call mpp_sum( bergs%bergy_mass_start )
   if (mpp_pe().eq.mpp_root_pe().and.verbose) write(*,'(a)') 'diamonds, read_restart_bergs: completed'
+
 
 contains
   
@@ -902,6 +1031,8 @@ contains
         localberg%start_mass=localberg%mass
         localberg%mass_scaling=bergs%mass_scaling(1)
         localberg%mass_of_bits=0.
+        localberg%halo_berg=0.
+        localberg%static_berg=0.
         localberg%heat_density=0.
         localberg%axn=0. !Alon
         localberg%ayn=0. !Alon
@@ -914,22 +1045,22 @@ contains
         call loc_set_berg_pos(grd, 0.9, 0.5, 1., 0., localberg)
         localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
         grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
-        call add_new_berg_to_list(bergs%first, localberg)
+        call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
         !Berg B
         call loc_set_berg_pos(grd, 0.1, 0.5, -1., 0., localberg)
         localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
         grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
-        call add_new_berg_to_list(bergs%first, localberg)
+        call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
         !Berg C
         call loc_set_berg_pos(grd, 0.5, 0.9, 0., 1., localberg)
         localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
         grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
-        call add_new_berg_to_list(bergs%first, localberg)
+        call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
         !Berg D
         call loc_set_berg_pos(grd, 0.5, 0.1, 0., -1., localberg)
         localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
         grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
-        call add_new_berg_to_list(bergs%first, localberg)
+        call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
       endif
     enddo; enddo
 
@@ -971,6 +1102,243 @@ contains
   end subroutine loc_set_berg_pos
   
 end subroutine read_restart_bergs
+
+
+! ##############################################################################
+subroutine read_restart_bonds(bergs,Time)
+! Arguments
+type(icebergs), pointer :: bergs
+type(time_type), intent(in) :: Time
+! Local variables
+integer :: k, siz(4), nbonds_in_file
+logical :: lres, found_restart, found
+logical :: first_berg_found, second_berg_found
+logical :: multiPErestart  ! Not needed with new restart read; currently kept for compatibility
+real :: lon0, lon1, lat0, lat1
+character(len=33) :: filename, filename_base
+type(icebergs_gridded), pointer :: grd
+type(iceberg) :: localberg ! NOT a pointer but an actual local variable
+type(iceberg) , pointer :: this, first_berg, second_berg
+type(bond) , pointer :: current_bond
+integer :: stderrunit
+integer :: number_first_bonds_matched !How many first bond bergs found on pe
+integer :: number_second_bonds_matched !How many second bond bergs found on pe
+integer :: number_perfect_bonds ! How many complete bonds formed
+integer :: number_partial_bonds ! How many either complete/partial bonds formed.
+integer :: number_perfect_bonds_with_first_on_pe ! How many bonds with first bond on the compuational domain
+integer :: all_pe_number_perfect_bonds, all_pe_number_partial_bonds
+integer :: all_pe_number_first_bonds_matched, all_pe_number_second_bonds_matched
+integer :: all_pe_number_perfect_bonds_with_first_on_pe
+integer :: ine, jne
+logical :: search_data_domain
+real :: berg_found, berg_found_all_pe
+integer, allocatable, dimension(:) :: first_berg_num,   &
+                                      other_berg_num,   &
+                                      first_berg_jne,   &
+                                      first_berg_ine,   &
+                                      other_berg_jne,   &
+                                      other_berg_ine
+!integer, allocatable, dimension(:,:) :: iceberg_counter_grd
+
+  ! Get the stderr unit number
+  stderrunit=stderr()
+
+  ! For convenience
+  grd=>bergs%grd
+
+  ! Zero out nbergs_in_file
+  nbonds_in_file = 0
+  all_pe_number_perfect_bonds=0
+
+  filename_base=trim(restart_input_dir)//'bonds_iceberg.res.nc'
+
+  found_restart = find_restart_file(filename_base, filename, multiPErestart, io_tile_id(1))
+  call error_mesg('read_restart_bonds_bergs_new', 'Using icebergs bond restart read', NOTE)
+
+  filename = filename_base
+  call get_field_size(filename,'i',siz, field_found=found, domain=bergs%grd%domain)
+  nbonds_in_file = siz(1)
+  
+    if (mpp_pe() .eq. mpp_root_pe()) then
+      write(stderrunit,*)  'diamonds, bond read restart : ','Number of bonds in file',  nbonds_in_file
+    endif
+
+  if (nbonds_in_file .gt. 0) then
+
+    allocate(first_berg_num(nbonds_in_file))
+    allocate(other_berg_num(nbonds_in_file))
+    allocate(first_berg_jne(nbonds_in_file))
+    allocate(first_berg_ine(nbonds_in_file))
+    allocate(other_berg_ine(nbonds_in_file))
+    allocate(other_berg_jne(nbonds_in_file))
+
+
+    call read_unlimited_axis(filename,'first_berg_num',first_berg_num,domain=grd%domain)
+    call read_unlimited_axis(filename,'other_berg_num',other_berg_num,domain=grd%domain)
+    call read_unlimited_axis(filename,'first_berg_jne',first_berg_jne,domain=grd%domain)
+    call read_unlimited_axis(filename,'first_berg_ine',first_berg_ine,domain=grd%domain)
+    call read_unlimited_axis(filename,'other_berg_jne',other_berg_jne,domain=grd%domain)
+    call read_unlimited_axis(filename,'other_berg_ine',other_berg_ine,domain=grd%domain)
+
+    number_first_bonds_matched=0
+    number_second_bonds_matched=0
+    number_perfect_bonds=0
+    number_partial_bonds=0
+    number_perfect_bonds_with_first_on_pe=0
+
+    do k=1, nbonds_in_file
+      
+
+       ! If i,j in restart files are not good, then we find the berg position of the bond addresses manually:
+       if (ignore_ij_restart) then 
+         !Finding first iceberg in bond
+         ine=999 ; jne=999 ; berg_found=0.0 ; search_data_domain=.true.
+         call find_individual_iceberg(bergs,first_berg_num(k), ine, jne,berg_found,search_data_domain)
+         berg_found_all_pe=berg_found
+         call mpp_sum(berg_found_all_pe)
+         if (berg_found_all_pe .gt. 0.5) then
+             first_berg_ine(k)=ine
+             first_berg_jne(k)=jne
+         else
+           print * , 'First bond berg not located: ', first_berg_num(k),berg_found, mpp_pe(),ine, jne
+           call error_mesg('read_restart_bonds_bergs_new', 'First iceberg in bond not found on any pe', FATAL)
+         endif
+         !else
+
+         !Finding other iceberg other iceberg
+         ine=999 ; jne=999 ; berg_found=0.0 ; search_data_domain =.true.
+         call find_individual_iceberg(bergs,other_berg_num(k), ine, jne, berg_found,search_data_domain)
+         berg_found_all_pe=berg_found
+         call mpp_sum(berg_found_all_pe)
+         if (berg_found_all_pe .gt. 0.5) then
+           !if (berg_found_all_pe .gt. 1.5) then
+           !  call error_mesg('read_restart_bonds_bergs_new', 'Other iceberg bond found on more than one pe', FATAL)
+           !else
+             other_berg_ine(k)=ine
+             other_berg_jne(k)=jne
+           !endif
+         else
+          call error_mesg('read_restart_bonds_bergs_new', 'Other iceberg in bond not found on any pe', FATAL)
+         endif
+         if (berg_found_all_pe .lt. 0.5) then
+                 print * , 'First bond berg not located: ', other_berg_num(k),berg_found, mpp_pe(),ine, jne
+             call error_mesg('read_restart_bonds_bergs_new', 'First bond iceberg not located', FATAL)
+         endif
+       endif
+
+      ! Decide whether the first iceberg is on the processeor
+      if ( (first_berg_ine(k)>=grd%isd) .and. (first_berg_ine(k)<=grd%ied) .and. &
+        (first_berg_jne(k)>=grd%jsd) .and. (first_berg_jne(k)<=grd%jed) ) then
+        number_first_bonds_matched=number_first_bonds_matched+1
+        
+        ! Search for the first berg, which the bond belongs to
+        first_berg_found=.false.
+        first_berg=>null()
+        this=>bergs%list(first_berg_ine(k),first_berg_jne(k))%first
+        do while(associated(this))
+          if (this%iceberg_num == first_berg_num(k)) then
+            first_berg_found=.true.
+            first_berg=>this
+            !if (first_berg%halo_berg.gt.0.5) print *, 'bonding halo berg:', first_berg_num(k),  first_berg_ine(k),first_berg_jne(k) ,grd%isc, grd%iec, mpp_pe()
+            this=>null()
+          else  
+            this=>this%next
+          endif
+        enddo
+     
+
+        ! Decide whether the second iceberg is on the processeor (data domain)
+        second_berg_found=.false.
+        !if ( other_berg_ine(k)>=grd%isc-1 .and. other_berg_ine(k)<=grd%iec+1 .and. &
+        !  other_berg_jne(k)>=grd%jsc-1 .and.other_berg_jne(k)<=grd%jec+1 ) then
+        if ( (other_berg_ine(k)>=grd%isd) .and. (other_berg_ine(k)<=grd%ied) .and. &
+          (other_berg_jne(k)>=grd%jsd) .and.(other_berg_jne(k)<=grd%jed) ) then
+          number_second_bonds_matched=number_second_bonds_matched+1
+
+          ! Search for the second berg, which the bond belongs to
+          second_berg=>null()
+          this=>bergs%list(other_berg_ine(k),other_berg_jne(k))%first
+          do while(associated(this))
+            if (this%iceberg_num == other_berg_num(k)) then
+              second_berg_found=.true.
+              second_berg=>this
+              this=>null()
+            else  
+              this=>this%next
+            endif
+          enddo
+        endif
+         
+        if (first_berg_found) then
+          number_partial_bonds=number_partial_bonds+1
+          if (second_berg_found) then
+            call form_a_bond(first_berg, other_berg_num(k), other_berg_ine(k), other_berg_jne(k),  second_berg)
+            number_perfect_bonds=number_perfect_bonds+1
+    
+            !Counting number of bonds where the first bond is in the computational domain
+            if ( (first_berg_ine(k)>=grd%isc) .and. (first_berg_ine(k)<=grd%iec) .and. &
+              (first_berg_jne(k)>=grd%jsc) .and. (first_berg_jne(k)<=grd%jec) ) then
+               number_perfect_bonds_with_first_on_pe=number_perfect_bonds_with_first_on_pe+1
+        endif
+     
+          else
+            !print *, 'Forming a bond of the second type', mpp_pe(), first_berg_num(k),  other_berg_num(k)
+            !call form_a_bond(first_berg, other_berg_num(k),other_berg_ine(k),other_berg_jne(k))
+          endif
+        else
+          write(stderrunit,*) 'diamonds, bond read restart : ','Not enough partial bonds formed', k, mpp_pe(), nbonds_in_file
+          call error_mesg('read_restart_bonds_bergs_new', 'Failure with reading bonds: First bond not found on pe', FATAL)
+        endif
+      endif
+    enddo
+
+    !Analyse how many bonds were created and take appropriate action
+    all_pe_number_perfect_bonds=number_perfect_bonds
+    all_pe_number_perfect_bonds_with_first_on_pe=number_perfect_bonds_with_first_on_pe
+    all_pe_number_partial_bonds=number_partial_bonds
+    all_pe_number_first_bonds_matched=number_first_bonds_matched
+    all_pe_number_second_bonds_matched=number_second_bonds_matched
+    call mpp_sum(all_pe_number_perfect_bonds)
+    call mpp_sum(all_pe_number_partial_bonds)
+    call mpp_sum(all_pe_number_perfect_bonds_with_first_on_pe)
+
+    if (all_pe_number_partial_bonds .lt. nbonds_in_file) then
+      write(stderrunit,*) 'diamonds, bond read restart : ','Not enough partial bonds formed', all_pe_number_partial_bonds , nbonds_in_file
+      call error_mesg('read_restart_bonds_bergs_new', 'Not enough partial bonds formed', FATAL)
+    endif
+    
+    if (all_pe_number_perfect_bonds .lt. nbonds_in_file) then
+      call mpp_sum(all_pe_number_first_bonds_matched)
+      call mpp_sum(all_pe_number_second_bonds_matched)
+      write(stderrunit,*)  'diamonds, bond read restart : ','Warning, some bonds are not fully formed',  all_pe_number_first_bonds_matched , nbonds_in_file
+      write(stderrunit,*)  'diamonds, bond read restart : ','Number of first and second bonds matched:', all_pe_number_second_bonds_matched , nbonds_in_file
+      call error_mesg('read_restart_bonds_bergs_new', 'Not enough perfect bonds formed', NOTE)
+    endif
+
+    if (all_pe_number_perfect_bonds_with_first_on_pe .ne. nbonds_in_file) then
+      call mpp_sum(all_pe_number_first_bonds_matched)
+      call mpp_sum(all_pe_number_second_bonds_matched)
+      write(stderrunit,*)  'diamonds, bond read restart : ','Warning, # bonds with first bond on computational domain, does not match file',  all_pe_number_first_bonds_matched , nbonds_in_file
+      write(stderrunit,*)  'diamonds, bond read restart : ','Computational bond, first second:', all_pe_number_second_bonds_matched , nbonds_in_file
+      call error_mesg('read_restart_bonds_bergs_new', 'Computational perfect bonds do not match those in file', NOTE)
+    endif
+
+    deallocate(               &
+            first_berg_num,   &
+            other_berg_num,  &
+            first_berg_ine,   &
+            first_berg_jne,   &
+            other_berg_ine,  &
+            other_berg_jne )
+  endif
+    
+  if (mpp_pe() .eq. mpp_root_pe()) then
+    write(stderrunit,*)  'diamonds, bond read restart : ','Number of bonds (including halos)',  all_pe_number_perfect_bonds
+    write(stderrunit,*)  'diamonds, bond read restart : ','Number of true bonds created',  all_pe_number_perfect_bonds_with_first_on_pe
+  endif
+
+end subroutine read_restart_bonds
+
 ! ##############################################################################
 
 subroutine read_restart_calving(bergs)
@@ -1069,28 +1437,57 @@ type(randomNumberStream) :: rns
   call mpp_sum( bergs%stored_start )
   bergs%stored_heat_start=sum( grd%stored_heat(grd%isc:grd%iec,grd%jsc:grd%jec) )
   call mpp_sum( bergs%stored_heat_start )
-  bergs%floating_heat_start=sum_heat(bergs%first)
+  bergs%floating_heat_start=sum_heat(bergs)
   call mpp_sum( bergs%floating_heat_start )
 
 end subroutine read_restart_calving
 
 ! ##############################################################################
 
-subroutine write_trajectory(trajectory)
+subroutine read_ocean_depth(grd)
+! Arguments
+! Local variables
+character(len=37) :: filename 
+type(icebergs_gridded), pointer :: grd
+
+  ! Read stored ice
+  filename=trim(restart_input_dir)//'topog.nc'
+  if (file_exist(filename)) then
+    if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') &
+     'diamonds, read_ocean_depth: reading ',filename
+    if (field_exist(filename, 'depth')) then
+      if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
+       'diamonds, read_restart_calving: reading stored_heat from restart file.'
+      call read_data(filename, 'depth', grd%ocean_depth, grd%domain)
+    else
+      if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
+     'diamonds, read_restart_calving: stored_heat WAS NOT FOUND in the file. Setting to 0.'
+      !grd%ocean_depth(:,:)=0.
+    endif
+  else
+    if (mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
+     'diamonds, read_ocean_depth: Ocean depth file (topog.nc) not present)'
+  endif
+
+  !call grd_chksum2(bergs%grd, bergs%grd%ocean_depth, 'read_ocean_depth, ocean_depth')
+end subroutine read_ocean_depth
+
+! ##############################################################################
+
+subroutine write_trajectory(trajectory, save_short_traj)
 ! Arguments
 type(xyt), pointer :: trajectory
 ! Local variables
 integer :: iret, ncid, i_dim, i
 integer :: lonid, latid, yearid, dayid, uvelid, vvelid, iceberg_numid
-!integer :: axnid, aynid, uvel_oldid, vvel_oldid, lat_oldid, lon_oldid, bxnid, bynid !Added by Alon 
-integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid
+integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid, sssid
 integer :: cnid, hiid
 integer :: mid, did, wid, lid, mbid, hdid
 character(len=37) :: filename
 character(len=7) :: pe_name
 type(xyt), pointer :: this, next
 integer :: stderrunit
-
+logical, intent(in) :: save_short_traj
 !I/O vars
 type(xyt), pointer :: traj4io=>null()
 integer :: ntrajs_sent_io,ntrajs_rcvd_io
@@ -1131,10 +1528,10 @@ logical :: io_is_in_append_mode
         from_pe=io_tile_pelist(np)
         call mpp_recv(ntrajs_rcvd_io, glen=1, from_pe=from_pe, tag=COMM_TAG_11)
         if (ntrajs_rcvd_io .gt. 0) then
-           call increase_ibuffer_traj(ibuffer_io, ntrajs_rcvd_io)
+           call increase_ibuffer(ibuffer_io, ntrajs_rcvd_io,buffer_width_traj)
            call mpp_recv(ibuffer_io%data, ntrajs_rcvd_io*buffer_width_traj,from_pe=from_pe, tag=COMM_TAG_12)
            do i=1, ntrajs_rcvd_io
-              call unpack_traj_from_buffer2(traj4io, ibuffer_io, i)
+              call unpack_traj_from_buffer2(traj4io, ibuffer_io, i, save_short_traj)
            enddo
        endif
      enddo
@@ -1142,7 +1539,7 @@ logical :: io_is_in_append_mode
      ! Pack and send trajectories to the root PE for this I/O tile
      do while (associated(trajectory))
        ntrajs_sent_io = ntrajs_sent_io +1
-       call pack_traj_into_buffer2(trajectory, obuffer_io, ntrajs_sent_io)
+       call pack_traj_into_buffer2(trajectory, obuffer_io, ntrajs_sent_io, save_short_traj)
        this => trajectory ! Need to keep pointer in order to free up the links memory
        trajectory => trajectory%next ! This will eventually result in trajectory => null()
        deallocate(this) ! Delete the link from memory
@@ -1202,26 +1599,29 @@ logical :: io_is_in_append_mode
       latid = inq_varid(ncid, 'lat')
       yearid = inq_varid(ncid, 'year')
       dayid = inq_varid(ncid, 'day')
-      uvelid = inq_varid(ncid, 'uvel')
-      vvelid = inq_varid(ncid, 'vvel')
-      uoid = inq_varid(ncid, 'uo')
-      void = inq_varid(ncid, 'vo')
-      uiid = inq_varid(ncid, 'ui')
-      viid = inq_varid(ncid, 'vi')
-      uaid = inq_varid(ncid, 'ua')
-      vaid = inq_varid(ncid, 'va')
-      mid = inq_varid(ncid, 'mass')
-      mbid = inq_varid(ncid, 'mass_of_bits')
-      hdid = inq_varid(ncid, 'heat_density')
-      did = inq_varid(ncid, 'thickness')
-      wid = inq_varid(ncid, 'width')
-      lid = inq_varid(ncid, 'length')
-      sshxid = inq_varid(ncid, 'ssh_x')
-      sshyid = inq_varid(ncid, 'ssh_y')
-      sstid = inq_varid(ncid, 'sst')
-      cnid = inq_varid(ncid, 'cn')
-      hiid = inq_varid(ncid, 'hi')
       iceberg_numid = inq_varid(ncid, 'iceberg_num')
+      if (.not.save_short_traj) then
+        uvelid = inq_varid(ncid, 'uvel')
+        vvelid = inq_varid(ncid, 'vvel')
+        uoid = inq_varid(ncid, 'uo')
+        void = inq_varid(ncid, 'vo')
+        uiid = inq_varid(ncid, 'ui')
+        viid = inq_varid(ncid, 'vi')
+        uaid = inq_varid(ncid, 'ua')
+        vaid = inq_varid(ncid, 'va')
+        mid = inq_varid(ncid, 'mass')
+        mbid = inq_varid(ncid, 'mass_of_bits')
+        hdid = inq_varid(ncid, 'heat_density')
+        did = inq_varid(ncid, 'thickness')
+        wid = inq_varid(ncid, 'width')
+        lid = inq_varid(ncid, 'length')
+        sshxid = inq_varid(ncid, 'ssh_x')
+        sshyid = inq_varid(ncid, 'ssh_y')
+        sstid = inq_varid(ncid, 'sst')
+        sssid = inq_varid(ncid, 'sss')
+        cnid = inq_varid(ncid, 'cn')
+        hiid = inq_varid(ncid, 'hi')
+      endif
     else
       ! Dimensions
       iret = nf_def_dim(ncid, 'i', NF_UNLIMITED, i_dim)
@@ -1232,26 +1632,29 @@ logical :: io_is_in_append_mode
       latid = def_var(ncid, 'lat', NF_DOUBLE, i_dim)
       yearid = def_var(ncid, 'year', NF_INT, i_dim)
       dayid = def_var(ncid, 'day', NF_DOUBLE, i_dim)
-      uvelid = def_var(ncid, 'uvel', NF_DOUBLE, i_dim)
-      vvelid = def_var(ncid, 'vvel', NF_DOUBLE, i_dim)
-      uoid = def_var(ncid, 'uo', NF_DOUBLE, i_dim)
-      void = def_var(ncid, 'vo', NF_DOUBLE, i_dim)
-      uiid = def_var(ncid, 'ui', NF_DOUBLE, i_dim)
-      viid = def_var(ncid, 'vi', NF_DOUBLE, i_dim)
-      uaid = def_var(ncid, 'ua', NF_DOUBLE, i_dim)
-      vaid = def_var(ncid, 'va', NF_DOUBLE, i_dim)
-      mid = def_var(ncid, 'mass', NF_DOUBLE, i_dim)
-      mbid = def_var(ncid, 'mass_of_bits', NF_DOUBLE, i_dim)
-      hdid = def_var(ncid, 'heat_density', NF_DOUBLE, i_dim)
-      did = def_var(ncid, 'thickness', NF_DOUBLE, i_dim)
-      wid = def_var(ncid, 'width', NF_DOUBLE, i_dim)
-      lid = def_var(ncid, 'length', NF_DOUBLE, i_dim)
-      sshxid = def_var(ncid, 'ssh_x', NF_DOUBLE, i_dim)
-      sshyid = def_var(ncid, 'ssh_y', NF_DOUBLE, i_dim)
-      sstid = def_var(ncid, 'sst', NF_DOUBLE, i_dim)
-      cnid = def_var(ncid, 'cn', NF_DOUBLE, i_dim)
-      hiid = def_var(ncid, 'hi', NF_DOUBLE, i_dim)
       iceberg_numid = def_var(ncid, 'iceberg_num', NF_INT, i_dim)
+      if (.not. save_short_traj) then
+        uvelid = def_var(ncid, 'uvel', NF_DOUBLE, i_dim)
+        vvelid = def_var(ncid, 'vvel', NF_DOUBLE, i_dim)
+        uoid = def_var(ncid, 'uo', NF_DOUBLE, i_dim)
+        void = def_var(ncid, 'vo', NF_DOUBLE, i_dim)
+        uiid = def_var(ncid, 'ui', NF_DOUBLE, i_dim)
+        viid = def_var(ncid, 'vi', NF_DOUBLE, i_dim)
+        uaid = def_var(ncid, 'ua', NF_DOUBLE, i_dim)
+        vaid = def_var(ncid, 'va', NF_DOUBLE, i_dim)
+        mid = def_var(ncid, 'mass', NF_DOUBLE, i_dim)
+        mbid = def_var(ncid, 'mass_of_bits', NF_DOUBLE, i_dim)
+        hdid = def_var(ncid, 'heat_density', NF_DOUBLE, i_dim)
+        did = def_var(ncid, 'thickness', NF_DOUBLE, i_dim)
+        wid = def_var(ncid, 'width', NF_DOUBLE, i_dim)
+        lid = def_var(ncid, 'length', NF_DOUBLE, i_dim)
+        sshxid = def_var(ncid, 'ssh_x', NF_DOUBLE, i_dim)
+        sshyid = def_var(ncid, 'ssh_y', NF_DOUBLE, i_dim)
+        sstid = def_var(ncid, 'sst', NF_DOUBLE, i_dim)
+        sssid = def_var(ncid, 'sss', NF_DOUBLE, i_dim)
+        cnid = def_var(ncid, 'cn', NF_DOUBLE, i_dim)
+        hiid = def_var(ncid, 'hi', NF_DOUBLE, i_dim)
+      endif
 
       ! Attributes
       iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_major_version', NF_INT, 1, 0)
@@ -1264,46 +1667,51 @@ logical :: io_is_in_append_mode
       call put_att(ncid, yearid, 'units', 'years')
       call put_att(ncid, dayid, 'long_name', 'year day')
       call put_att(ncid, dayid, 'units', 'days')
-      call put_att(ncid, uvelid, 'long_name', 'zonal spped')
-      call put_att(ncid, uvelid, 'units', 'm/s')
-      call put_att(ncid, vvelid, 'long_name', 'meridional spped')
-      call put_att(ncid, vvelid, 'units', 'm/s')
-      call put_att(ncid, uoid, 'long_name', 'ocean zonal spped')
-      call put_att(ncid, uoid, 'units', 'm/s')
-      call put_att(ncid, void, 'long_name', 'ocean meridional spped')
-      call put_att(ncid, void, 'units', 'm/s')
-      call put_att(ncid, uiid, 'long_name', 'ice zonal spped')
-      call put_att(ncid, uiid, 'units', 'm/s')
-      call put_att(ncid, viid, 'long_name', 'ice meridional spped')
-      call put_att(ncid, viid, 'units', 'm/s')
-      call put_att(ncid, uaid, 'long_name', 'atmos zonal spped')
-      call put_att(ncid, uaid, 'units', 'm/s')
-      call put_att(ncid, vaid, 'long_name', 'atmos meridional spped')
-      call put_att(ncid, vaid, 'units', 'm/s')
-      call put_att(ncid, mid, 'long_name', 'mass')
-      call put_att(ncid, mid, 'units', 'kg')
-      call put_att(ncid, mbid, 'long_name', 'mass_of_bits')
-      call put_att(ncid, mbid, 'units', 'kg')
-      call put_att(ncid, hdid, 'long_name', 'heat_density')
-      call put_att(ncid, hdid, 'units', 'J/kg')
-      call put_att(ncid, did, 'long_name', 'thickness')
-      call put_att(ncid, did, 'units', 'm')
-      call put_att(ncid, wid, 'long_name', 'width')
-      call put_att(ncid, wid, 'units', 'm')
-      call put_att(ncid, lid, 'long_name', 'length')
-      call put_att(ncid, lid, 'units', 'm')
-      call put_att(ncid, sshxid, 'long_name', 'sea surface height gradient_x')
-      call put_att(ncid, sshxid, 'units', 'non-dim')
-      call put_att(ncid, sshyid, 'long_name', 'sea surface height gradient_y')
-      call put_att(ncid, sshyid, 'units', 'non-dim')
-      call put_att(ncid, sstid, 'long_name', 'sea surface temperature')
-      call put_att(ncid, sstid, 'units', 'degrees_C')
-      call put_att(ncid, cnid, 'long_name', 'sea ice concentration')
-      call put_att(ncid, cnid, 'units', 'none')
-      call put_att(ncid, hiid, 'long_name', 'sea ice thickness')
-      call put_att(ncid, hiid, 'units', 'm')
       call put_att(ncid, iceberg_numid, 'long_name', 'iceberg id number')
       call put_att(ncid, iceberg_numid, 'units', 'dimensionless')
+      
+      if (.not. save_short_traj) then
+        call put_att(ncid, uvelid, 'long_name', 'zonal spped')
+        call put_att(ncid, uvelid, 'units', 'm/s')
+        call put_att(ncid, vvelid, 'long_name', 'meridional spped')
+        call put_att(ncid, vvelid, 'units', 'm/s')
+        call put_att(ncid, uoid, 'long_name', 'ocean zonal spped')
+        call put_att(ncid, uoid, 'units', 'm/s')
+        call put_att(ncid, void, 'long_name', 'ocean meridional spped')
+        call put_att(ncid, void, 'units', 'm/s')
+        call put_att(ncid, uiid, 'long_name', 'ice zonal spped')
+        call put_att(ncid, uiid, 'units', 'm/s')
+        call put_att(ncid, viid, 'long_name', 'ice meridional spped')
+        call put_att(ncid, viid, 'units', 'm/s')
+        call put_att(ncid, uaid, 'long_name', 'atmos zonal spped')
+        call put_att(ncid, uaid, 'units', 'm/s')
+        call put_att(ncid, vaid, 'long_name', 'atmos meridional spped')
+        call put_att(ncid, vaid, 'units', 'm/s')
+        call put_att(ncid, mid, 'long_name', 'mass')
+        call put_att(ncid, mid, 'units', 'kg')
+        call put_att(ncid, mbid, 'long_name', 'mass_of_bits')
+        call put_att(ncid, mbid, 'units', 'kg')
+        call put_att(ncid, hdid, 'long_name', 'heat_density')
+        call put_att(ncid, hdid, 'units', 'J/kg')
+        call put_att(ncid, did, 'long_name', 'thickness')
+        call put_att(ncid, did, 'units', 'm')
+        call put_att(ncid, wid, 'long_name', 'width')
+        call put_att(ncid, wid, 'units', 'm')
+        call put_att(ncid, lid, 'long_name', 'length')
+        call put_att(ncid, lid, 'units', 'm')
+        call put_att(ncid, sshxid, 'long_name', 'sea surface height gradient_x')
+        call put_att(ncid, sshxid, 'units', 'non-dim')
+        call put_att(ncid, sshyid, 'long_name', 'sea surface height gradient_y')
+        call put_att(ncid, sshyid, 'units', 'non-dim')
+        call put_att(ncid, sstid, 'long_name', 'sea surface temperature')
+        call put_att(ncid, sstid, 'units', 'degrees_C')
+        call put_att(ncid, sssid, 'long_name', 'sea surface salinity')
+        call put_att(ncid, sssid, 'units', 'psu')
+        call put_att(ncid, cnid, 'long_name', 'sea ice concentration')
+        call put_att(ncid, cnid, 'units', 'none')
+        call put_att(ncid, hiid, 'long_name', 'sea ice thickness')
+        call put_att(ncid, hiid, 'units', 'm')
+      endif
     endif
 
     ! End define mode
@@ -1323,25 +1731,28 @@ logical :: io_is_in_append_mode
       call put_double(ncid, latid, i, this%lat)
       call put_int(ncid, yearid, i, this%year)
       call put_double(ncid, dayid, i, this%day)
-      call put_double(ncid, uvelid, i, this%uvel)
-      call put_double(ncid, vvelid, i, this%vvel)
-      call put_double(ncid, uoid, i, this%uo)
-      call put_double(ncid, void, i, this%vo)
-      call put_double(ncid, uiid, i, this%ui)
-      call put_double(ncid, viid, i, this%vi)
-      call put_double(ncid, uaid, i, this%ua)
-      call put_double(ncid, vaid, i, this%va)
-      call put_double(ncid, mid, i, this%mass)
-      call put_double(ncid, hdid, i, this%heat_density)
-      call put_double(ncid, did, i, this%thickness)
-      call put_double(ncid, wid, i, this%width)
-      call put_double(ncid, lid, i, this%length)
-      call put_double(ncid, sshxid, i, this%ssh_x)
-      call put_double(ncid, sshyid, i, this%ssh_y)
-      call put_double(ncid, sstid, i, this%sst)
-      call put_double(ncid, cnid, i, this%cn)
-      call put_double(ncid, hiid, i, this%hi)
       call put_int(ncid, iceberg_numid, i, this%iceberg_num)
+      if (.not. save_short_traj) then
+        call put_double(ncid, uvelid, i, this%uvel)
+        call put_double(ncid, vvelid, i, this%vvel)
+        call put_double(ncid, uoid, i, this%uo)
+        call put_double(ncid, void, i, this%vo)
+        call put_double(ncid, uiid, i, this%ui)
+        call put_double(ncid, viid, i, this%vi)
+        call put_double(ncid, uaid, i, this%ua)
+        call put_double(ncid, vaid, i, this%va)
+        call put_double(ncid, mid, i, this%mass)
+        call put_double(ncid, hdid, i, this%heat_density)
+        call put_double(ncid, did, i, this%thickness)
+        call put_double(ncid, wid, i, this%width)
+        call put_double(ncid, lid, i, this%length)
+        call put_double(ncid, sshxid, i, this%ssh_x)
+        call put_double(ncid, sshyid, i, this%ssh_y)
+        call put_double(ncid, sstid, i, this%sst)
+        call put_double(ncid, sssid, i, this%sss)
+        call put_double(ncid, cnid, i, this%cn)
+        call put_double(ncid, hiid, i, this%hi)
+      endif
       next=>this%next
       deallocate(this)
       this=>next
