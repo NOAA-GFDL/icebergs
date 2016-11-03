@@ -2455,26 +2455,35 @@ character(len=*) :: label
 integer, optional, intent(in) :: il, jl !< Indices of cell berg should be in
 ! Local variables
 
-  write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,") start lon,lat,yr,#,day,mass,hb=",2f10.4,i5,i12,f7.2,es12.4,f5.1)') &
-    label, mpp_pe(), berg%start_lon, berg%start_lat, &
-    berg%start_year, berg%iceberg_num, berg%start_day, berg%start_mass, berg%halo_berg
+  write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,a,2f10.4,i5,f7.2,es12.4,f5.1)') &
+    label, 'pe=(', mpp_pe(), ') #=', berg%iceberg_num, ' start lon,lat,yr,day,mass,hb=', &
+    berg%start_lon, berg%start_lat, berg%start_year, berg%start_day, berg%start_mass, berg%halo_berg
   if (present(il).and.present(jl)) then
-    write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,a,2i5,3(a,2f14.8),a,2l2)') &
-      label, mpp_pe(), ') List i,j=',il,jl
+    write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,a,2i5)') &
+      label, 'pe=(', mpp_pe(), ') #=', berg%iceberg_num, ' List i,j=',il,jl
   endif
-  write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,a,2i5,3(a,2f14.8),a,2l2)') &
-    label, mpp_pe(), ') i,j=',berg%ine, berg%jne, &
+  write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,a,2i5,a,2l2)') &
+    label, 'pe=(', mpp_pe(), ') #=', berg%iceberg_num, &
+    ' i,j=', berg%ine, berg%jne, &
+    ' p,n=', associated(berg%prev), associated(berg%next)
+  write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,3(a,2f14.8))') &
+    label, 'pe=(', mpp_pe(), ') #=', berg%iceberg_num, &
     ' xi,yj=', berg%xi, berg%yj, &
     ' lon,lat=', berg%lon, berg%lat, &
+    ' lon_old,lat_old=', berg%lon_old, berg%lat_old
+  write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,2(a,2f14.8))') &
+    label, 'pe=(', mpp_pe(), ') #=', berg%iceberg_num, &
     ' u,v=', berg%uvel, berg%vvel, &
+    ' uvel_old,vvel_old=', berg%uvel_old, berg%vvel_old
+  write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,2(a,2f14.8))') &
+    label, 'pe=(', mpp_pe(), ') #=', berg%iceberg_num, &
     ' axn,ayn=', berg%axn, berg%ayn, &
-    ' bxn,byn=', berg%bxn, berg%byn, &
-    ' uvel_old,vvel_old=', berg%uvel_old, berg%vvel_old, &
-    ' lon_old,lat_old=', berg%lon_old, berg%lat_old, &
-    ' p,n=', associated(berg%prev), associated(berg%next)
-  write(iochan,'("diamonds, print_berg: ",a," pe=(",i3,") ",6(a,2f14.8))') &
-    label, mpp_pe(), 'uo,vo=', berg%uo, berg%vo, 'ua,va=', berg%ua, berg%va, 'ui,vi=', berg%ui, berg%vi
-!Two lines above added by Alon
+    ' bxn,byn=', berg%bxn, berg%byn
+  write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,3(a,2f14.8))') &
+    label, 'pe=(', mpp_pe(), ') #=', berg%iceberg_num, &
+    ' uo,vo=', berg%uo, berg%vo, &
+    ' ua,va=', berg%ua, berg%va, &
+    ' ui,vi=', berg%ui, berg%vi
 end subroutine print_berg
 
 ! ##############################################################################
@@ -3594,10 +3603,9 @@ real :: Lx, dx,dy
 
   if (present(explain)) then
     if(explain) then
-    write(stderrunit,'(a,4f12.6)') 'pos_within_cell: x1..x4 ',x1, x2, x3, x4
-    write(stderrunit,'(a,2f12.6)') 'pos_within_cell: x ',x
-    write(stderrunit,'(a,4f12.6)') 'pos_within_cell: y1..y4 ',y1, y2, y3, y4
-    write(stderrunit,'(a,2f12.6)') 'pos_within_cell: y ',y
+    write(stderrunit,'(a,4(f12.6,a))') 'pos_within_cell: lon=[',x1,',',x2,',',x3,',',x4,']'
+    write(stderrunit,'(a,4(f12.6,a))') 'pos_within_cell: lat=[',y1,',',y2,',',y3,',',y4,']'
+    write(stderrunit,'(2(a,f12.6))') 'pos_within_cell: x,y=',x,',',y
     endif
   endif
 
@@ -3627,10 +3635,9 @@ real :: Lx, dx,dy
     y4=(90.-y4)*sin(grd%lon(i-1,j  )*pi_180)
     if (present(explain)) then
       if(explain) then
-      write(stderrunit,'(a,4f12.6)') 'pos_within_cell: x1..x4 ',x1,x2,x3,x4
-      write(stderrunit,'(a,2f12.6)') 'pos_within_cell: x',xx
-      write(stderrunit,'(a,4f12.6)') 'pos_within_cell: y1..y4 ',y1,y2,y3,y4
-      write(stderrunit,'(a,2f12.6)') 'pos_within_cell: y',yy
+      write(stderrunit,'(a,4(f12.6,a))') 'pos_within_cell: lon=[',x1,',',x2,',',x3,',',x4,']'
+      write(stderrunit,'(a,4(f12.6,a))') 'pos_within_cell: lat=[',y1,',',y2,',',y3,',',y4,']'
+      write(stderrunit,'(2(a,f12.6))') 'pos_within_cell: x,y=',xx,',',yy
       endif
     endif
     call calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, xx, yy, xi, yj, Lx,explain=explain)
@@ -3717,9 +3724,9 @@ real :: Lx, dx,dy
       if (abs(yy1-0.5).lt.abs(yy2-0.5)) then; yj=yy1; else; yj=yy2; endif
       if (expl) write(stderrunit,'(a,1p3e12.4)') 'Roots for y = ',yy1,yy2,yj
     else
-      write(stderrunit,'(a,i3,4f8.2)') 'calc_xiyj: x1..x4 ',mpp_pe(),x1,x2,x3,x4
+      write(stderrunit,'(a,i3,a,4(f8.2,a))') 'calc_xiyj: ',mpp_pe(),'lon=[',x1,',',x2,',',x3,',',x4,']'
       write(stderrunit,'(a,i3,3f8.2)') 'calc_xiyj: x2..x4 - x1',mpp_pe(),x2-x1,x3-x1,x4-x1
-      write(stderrunit,'(a,i3,4f8.2)') 'calc_xiyj: y1..y4 ',mpp_pe(),y1,y2,y3,y4
+      write(stderrunit,'(a,i3,a,4(f8.2,a))') 'calc_xiyj: ',mpp_pe(),'lat=[',y1,',',y2,',',y3,',',y4,']'
       write(stderrunit,'(a,i3,3f8.2)') 'calc_xiyj: y2..y4 - x1',mpp_pe(),y2-y1,y3-y1,y4-y1
       write(stderrunit,'(a,i3,1p6e12.4)') 'calc_xiyj: coeffs alpha..kappa',mpp_pe(),alpha,beta,gamma,delta,epsilon,kappa
       write(stderrunit,'(a,i3)') 'calc_xiyj: b<0 in quadratic root solver!!!!',mpp_pe()
