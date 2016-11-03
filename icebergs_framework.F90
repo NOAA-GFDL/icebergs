@@ -72,7 +72,7 @@ public grd_chksum2,grd_chksum3
 public fix_restart_dates, offset_berg_dates
 public move_berg_between_cells
 public find_individual_iceberg
-
+public monitor_a_berg
 
 type :: icebergs_gridded
   type(domain2D), pointer :: domain ! MPP domain
@@ -1473,8 +1473,6 @@ integer :: grdi, grdj
     nbergs_start=count_bergs(bergs, with_halos=.true.)
   endif
 
-  if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'send_bergs_to_other_pes (top)')
-
   ! Find number of bergs that headed east/west
   nbergs_to_send_e=0
   nbergs_to_send_w=0
@@ -1657,8 +1655,6 @@ integer :: grdi, grdj
   else
     nbergs_rcvd_from_n=0
   endif
-
-  if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'send_bergs_to_other_pes (end)')
 
   if (debug) then
     nbergs_end=count_bergs(bergs, with_halos=.true.)

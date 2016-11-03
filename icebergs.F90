@@ -37,6 +37,7 @@ use ice_bergs_framework, only: add_new_berg_to_list,delete_iceberg_from_list,des
 use ice_bergs_framework, only: grd_chksum2,grd_chksum3
 use ice_bergs_framework, only: fix_restart_dates, offset_berg_dates
 use ice_bergs_framework, only: orig_read  ! Remove when backward compatibility no longer needed
+use ice_bergs_framework, only: monitor_a_berg
 
 use ice_bergs_io,        only: ice_bergs_io_init,write_restart,write_trajectory
 use ice_bergs_io,        only: read_restart_bergs,read_restart_bergs_orig,read_restart_calving
@@ -3088,18 +3089,22 @@ integer :: stderrunit
 
   call mpp_clock_begin(bergs%clock_cal)
   ! Calve excess stored ice into icebergs
+  if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'icebergs_run, before calving()   ')
   call calve_icebergs(bergs)
   if (debug) call bergs_chksum(bergs, 'run bergs (calved)')
   if (debug) call checksum_gridded(bergs%grd, 's/r run after calving')
+  if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'icebergs_run, after calving()    ')
   call mpp_clock_end(bergs%clock_cal)
 
   ! For each berg, evolve
   call mpp_clock_begin(bergs%clock_mom)
 
   if (.not.bergs%Static_icebergs) then
-        call evolve_icebergs(bergs)
+    call evolve_icebergs(bergs)
+    if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'icebergs_run, after evolve()     ')
   endif
   call move_berg_between_cells(bergs)  !Markpoint6
+  if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'icebergs_run, after move_lists() ')
   if (debug) call bergs_chksum(bergs, 'run bergs (evolved)',ignore_halo_violation=.true.)
   if (debug) call checksum_gridded(bergs%grd, 's/r run after evolve')
   call mpp_clock_end(bergs%clock_mom)
@@ -3109,9 +3114,12 @@ integer :: stderrunit
   if (bergs%iceberg_bonds_on)  call  bond_address_update(bergs)
 
   call send_bergs_to_other_pes(bergs)
-  if ((bergs%interactive_icebergs_on) .or. (bergs%iceberg_bonds_on)) &
-  call update_halo_icebergs(bergs)
-  if (bergs%iceberg_bonds_on)  call connect_all_bonds(bergs)
+  if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'icebergs_run, after send_bergs() ')
+  if ((bergs%interactive_icebergs_on) .or. (bergs%iceberg_bonds_on)) then
+    call update_halo_icebergs(bergs)
+    if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'icebergs_run, after update_halo()')
+    if (bergs%iceberg_bonds_on)  call connect_all_bonds(bergs)
+  endif
   if (debug) call bergs_chksum(bergs, 'run bergs (exchanged)')
   if (debug) call checksum_gridded(bergs%grd, 's/r run after exchange')
   call mpp_clock_end(bergs%clock_com)
@@ -3129,6 +3137,7 @@ integer :: stderrunit
   ! Iceberg thermodynamics (melting) + rolling
   call mpp_clock_begin(bergs%clock_the)
   call thermodynamics(bergs)
+  if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'icebergs_run, after thermodyn()  ')
   if (debug) call bergs_chksum(bergs, 'run bergs (thermo)')
   if (debug) call checksum_gridded(bergs%grd, 's/r run after thermodynamics')
   call mpp_clock_end(bergs%clock_the)
