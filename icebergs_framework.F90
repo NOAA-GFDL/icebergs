@@ -3599,7 +3599,6 @@ real :: Lx, dx,dy
   y3=grd%lat(i  ,j  )
   x4=grd%lon(i-1,j  )
   y4=grd%lat(i-1,j  )
-  
 
   if (present(explain)) then
     if(explain) then
@@ -3620,9 +3619,11 @@ real :: Lx, dx,dy
     yj=((y-y1)/dy)+0.5
 
   elseif ((max(y1,y2,y3,y4)<89.999) .or.(.not. grd%grid_is_latlon)) then
+    ! This returns non-dimensional position xi,yj for quad cells (not at a pole)
     call calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, x, y, xi, yj, Lx, explain=explain)
   else
-!   if (debug) write(stderrunit,*) 'diamonds, pos_within_cell: working in tangential plane!'
+    ! One of the cell corners is at the north pole so we switch to a tangent plane with
+    ! co-latitude as a radial coordinate.
     xx=(90.-y)*cos(x*pi_180)
     yy=(90.-y)*sin(x*pi_180)
     x1=(90.-y1)*cos(grd%lon(i-1,j-1)*pi_180)
@@ -3640,21 +3641,29 @@ real :: Lx, dx,dy
       write(stderrunit,'(2(a,f12.6))') 'pos_within_cell: x,y=',xx,',',yy
       endif
     endif
+    ! Calculate non-dimensional position xi,yj within a quad in the tangent plane.
+    ! This quad has straight sides in the plane and so is not the same on the
+    ! projection of the spherical quad.
     call calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, xx, yy, xi, yj, Lx,explain=explain)
-    if (.not. is_point_in_cell(grd, x, y, i, j)) then
-!was if (is_point_in_cell(grd, x, y, i, j)) then
+    if (is_point_in_cell(grd, x, y, i, j)) then
+      ! The point is within the spherical quad
       if (abs(xi-0.5)>0.5.or.abs(yj-0.5)>0.5) then
-        ! Scale internal coordinates to be consistent with is_point_in_cell()
+        ! If the non-dimensional position is found to be outside (possible because the
+        ! projection of the spherical quad and the quad in the tangent plane are different)
+        ! then scale non-dimensional coordinates to be consistent with is_point_in_cell()
         ! Note: this is intended to fix the inconsistency between the tangent plane
-        ! and lat-lon calculations
-        fac=2.*max( abs(xi-0.5), abs(yj-0.5) ); fac=max(1., fac)
+        ! and lat-lon calculations and is a work around only for the four polar cells.
+        fac=2.1*max( abs(xi-0.5), abs(yj-0.5) ); fac=max(1., fac)
         xi=0.5+(xi-0.5)/fac
         yj=0.5+(yj-0.5)/fac
- !      if (debug) call error_mesg('diamonds, pos_within_cell', 'in cell so scaling internal coordinates!', WARNING)
+        if (debug) call error_mesg('diamonds, pos_within_cell', 'in cell but scaling internal coordinates!', WARNING)
       endif
     else
-      if (abs(xi-0.5)>0.5.and.abs(yj-0.5)>0.5) then
-        if (debug) call error_mesg('diamonds, pos_within_cell', 'in cell but coordinates >0.5!', WARNING)
+      ! The point is not inside the spherical quad
+      if (abs(xi-0.5)<0.5.and.abs(yj-0.5)<0.5) then
+        ! The projection of the spherical quad onto the tangent plane should be larger than
+        ! quad in the tangent plane so we should never be able to get here.
+        call error_mesg('diamonds, pos_within_cell', 'not in cell but coordinates <0.5!', FATAL)
       endif
     endif
   endif
@@ -3663,17 +3672,20 @@ real :: Lx, dx,dy
     if(explain) write(stderrunit,'(a,2f12.6)') 'pos_within_cell: xi,yj=',xi,yj
   endif
 
- !if (.not. is_point_in_cell(grd, x, y, i, j) ) then
- !   write(stderrunit,'(a,i3,a,8f8.2,a)') 'diamonds, pos_within_cell: (',mpp_pe(),') ', &
- !                   x1, y1, x2, y2, x3, y3, x4, y4, ' NOT IN CELL!'
- !endif
-
+  ! Check for consistency with test for whether point is inside a polygon
+  pos_within_cell=is_point_in_cell(grd, x, y, i, j,explain=explain)
   if (xi.ge.0. .and. xi.le.1. .and. yj.ge.0. .and. yj.le.1.) then
-    pos_within_cell=is_point_in_cell(grd, x, y, i, j,explain=explain)
-    if (.not. pos_within_cell .and. verbose) then
+    ! Based on coordinate, the point is out of cell
+    if (pos_within_cell .and. verbose) then
+      ! Based on is_point_in_cell() the point is within cell so we have an inconsistency
       if (debug) call error_mesg('diamonds, pos_within_cell', 'pos_within_cell is in cell BUT is_point_in_cell disagrees!', WARNING)
     endif
-   !pos_within_cell=.true. ! commenting this out makes pos_within_cell agree with is_point_in_cell
+  else
+    ! Based on coordinate, the point is within cell
+    if (.not. pos_within_cell .and. verbose) then
+      ! Based on is_point_in_cell() the point is out of cell so we have an inconsistency
+      if (debug) call error_mesg('diamonds, pos_within_cell', 'pos_within_cell is in cell BUT is_point_in_cell disagrees!', WARNING)
+    endif
   endif
 
   contains
