@@ -246,7 +246,6 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   logical :: apply_thickness_cutoff_to_gridded_melt=.False.  !Prevents melt for ocean thickness below melt_cuttoff (applied to gridded melt fields)
   logical :: apply_thickness_cutoff_to_bergs_melt=.False.  !Prevents melt for ocean thickness below melt_cuttoff (applied to bergs)
   logical :: use_updated_rolling_scheme=.false. ! True to use the aspect ratio based rolling scheme rather than incorrect version of WM scheme   (set tip_parameter=1000. for correct WM scheme)
-  logical :: read_old_restarts=.true. ! If true, read restarts prior to grid_of_lists and iceberg_num innovation
   logical :: pass_fields_to_ocean_model=.False. !Iceberg area, mass and ustar fields are prepared to pass to ocean model
   logical :: use_mixed_layer_salinity_for_thermo=.False.  !If true, then model uses ocean salinity for 3 and 2 equation melt model.
   logical :: find_melt_using_spread_mass=.False.  !If true, then the model calculates ice loss by looping at the spread_mass before and after.
@@ -428,7 +427,7 @@ logical :: interactive_icebergs_on=.false.  !Turn on/off interactions between ic
 logical :: critical_interaction_damping_on=.true.  !Sets the damping on relative iceberg velocity to critical value - Added by Alon 
 logical :: do_unit_tests=.false. ! Conduct some unit tests
 logical :: input_freq_distribution=.false. ! Flag to show if input distribution is freq or mass dist (=1 if input is a freq dist, =0 to use an input mass dist)
-logical :: read_old_restarts=.true. ! If true, read restarts prior to grid_of_lists and iceberg_num innovations
+logical :: read_old_restarts=.false. ! Legacy option that does nothing
 logical :: use_old_spreading=.true. ! If true, spreads iceberg mass as if the berg is one grid cell wide
 logical :: read_ocean_depth_from_file=.false. ! If true, ocean depth is read from a file.
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
@@ -864,7 +863,6 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
   bergs%use_new_predictive_corrective=use_new_predictive_corrective  !Alon
   bergs%grounding_fraction=grounding_fraction
   bergs%add_weight_to_ocean=add_weight_to_ocean
-  bergs%read_old_restarts=read_old_restarts
   bergs%use_old_spreading=use_old_spreading
   bergs%debug_iceberg_with_id=debug_iceberg_with_id
   allocate( bergs%initial_mass(nclasses) ); bergs%initial_mass(:)=initial_mass(:)
@@ -876,7 +874,7 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
   bergs%initial_width(:)=sqrt(initial_mass(:)/(LoW_ratio*rho_bergs*initial_thickness(:)))
   bergs%initial_length(:)=LoW_ratio*bergs%initial_width(:)
 
-  if (bergs%read_old_restarts) call error_mesg('diamonds, ice_bergs_framework_init', 'Setting "read_old_restarts=.true." can lead to non-reproducing checksums in restarts!', WARNING)
+  if (read_old_restarts) call error_mesg('diamonds, ice_bergs_framework_init', 'Setting "read_old_restarts=.true." is obsolete and does nothing!', WARNING)
 
   ! Diagnostics
   id_class = diag_axis_init('mass_class', initial_mass, 'kg','Z', 'iceberg mass')

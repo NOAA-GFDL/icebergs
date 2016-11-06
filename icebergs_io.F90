@@ -433,8 +433,8 @@ integer :: stderrunit, iNg, jNg, i, j
 
   ! For convenience
   grd=>bergs%grd
-  iNg=(grd%ieg-grd%isg+1) ! Total number of points globally in i direction, used with read_old_restarts=.true.
-  jNg=(grd%jeg-grd%jsg+1) ! Total number of points globally in j direction, used with read_old_restarts=.true.
+  iNg=(grd%ieg-grd%isg+1) ! Total number of points globally in i direction
+  jNg=(grd%jeg-grd%jsg+1) ! Total number of points globally in j direction
 
   ! Find a restart file
   multiPErestart=.false.
@@ -749,8 +749,8 @@ integer, allocatable, dimension(:) :: ine,       &
 
   ! For convenience
   grd=>bergs%grd
-  iNg=(grd%ieg-grd%isg+1) ! Total number of points globally in i direction, used with read_old_restarts=.true.
-  jNg=(grd%jeg-grd%jsg+1) ! Total number of points globally in j direction, used with read_old_restarts=.true.
+  iNg=(grd%ieg-grd%isg+1) ! Total number of points globally in i direction
+  jNg=(grd%jeg-grd%jsg+1) ! Total number of points globally in j direction
 
   ! Zero out nbergs_in_file
   nbergs_in_file = 0
