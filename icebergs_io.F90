@@ -209,10 +209,12 @@ integer :: grdi, grdj
   id = register_restart_field(bergs_restart,filename,'uvel',uvel,longname='zonal velocity',units='m/s')
   id = register_restart_field(bergs_restart,filename,'vvel',vvel,longname='meridional velocity',units='m/s')
   id = register_restart_field(bergs_restart,filename,'mass',mass,longname='mass',units='kg')
-  id = register_restart_field(bergs_restart,filename,'axn',axn,longname='explicit zonal acceleration',units='m/s^2') !Alon
-  id = register_restart_field(bergs_restart,filename,'ayn',ayn,longname='explicit meridional acceleration',units='m/s^2') !Alon
-  id = register_restart_field(bergs_restart,filename,'bxn',bxn,longname='inplicit zonal acceleration',units='m/s^2') !Alon
-  id = register_restart_field(bergs_restart,filename,'byn',byn,longname='implicit meridional acceleration',units='m/s^2') !Alon
+  if (.not. bergs%Runge_not_Verlet) then
+    id = register_restart_field(bergs_restart,filename,'axn',axn,longname='explicit zonal acceleration',units='m/s^2')
+    id = register_restart_field(bergs_restart,filename,'ayn',ayn,longname='explicit meridional acceleration',units='m/s^2')
+    id = register_restart_field(bergs_restart,filename,'bxn',bxn,longname='inplicit zonal acceleration',units='m/s^2')
+    id = register_restart_field(bergs_restart,filename,'byn',byn,longname='implicit meridional acceleration',units='m/s^2')
+  endif
   id = register_restart_field(bergs_restart,filename,'ine',ine,longname='i index',units='none')
   id = register_restart_field(bergs_restart,filename,'jne',jne,longname='j index',units='none')
   id = register_restart_field(bergs_restart,filename,'thickness',thickness,longname='thickness',units='m')
@@ -236,11 +238,12 @@ integer :: grdi, grdj
                                             longname='mass of bergy bits',units='kg')
   id = register_restart_field(bergs_restart,filename,'heat_density',heat_density, &
                                             longname='heat density',units='J/kg')
-  id = register_restart_field(bergs_restart,filename,'halo_berg',halo_berg, &
-                                            longname='halo_berg',units='dimensionless')
-  id = register_restart_field(bergs_restart,filename,'static_berg',static_berg, &
-                                            longname='static_berg',units='dimensionless')
-
+  if (bergs%interactive_icebergs_on .or. bergs%iceberg_bonds_on) &
+    id = register_restart_field(bergs_restart,filename,'halo_berg',halo_berg, &
+                                              longname='halo_berg',units='dimensionless')
+  if (bergs%static_icebergs) &
+    id = register_restart_field(bergs_restart,filename,'static_berg',static_berg, &
+                                              longname='static_berg',units='dimensionless')
 
   ! Write variables
    
@@ -479,28 +482,24 @@ integer :: stderrunit, iNg, jNg, i, j
   uvelid=inq_var(ncid, 'uvel')
   vvelid=inq_var(ncid, 'vvel')
   massid=inq_var(ncid, 'mass')
-  axnid=inq_var(ncid, 'axn') !Alon
-  aynid=inq_var(ncid, 'ayn') !Alon
-  bxnid=inq_var(ncid, 'bxn') !Alon
-  bynid=inq_var(ncid, 'byn') !Alon
+  axnid=inq_var(ncid, 'axn', unsafe=.true.)
+  aynid=inq_var(ncid, 'ayn', unsafe=.true.)
+  bxnid=inq_var(ncid, 'bxn', unsafe=.true.)
+  bynid=inq_var(ncid, 'byn', unsafe=.true.)
   thicknessid=inq_var(ncid, 'thickness')
   widthid=inq_var(ncid, 'width')
   lengthid=inq_var(ncid, 'length')
   start_lonid=inq_var(ncid, 'start_lon')
   start_latid=inq_var(ncid, 'start_lat')
   start_yearid=inq_var(ncid, 'start_year')
-  if (bergs%read_old_restarts) then
-    iceberg_numid=-1
-  else
-    iceberg_numid=inq_var(ncid, 'icberg_num')
-  endif
+  iceberg_numid=inq_var(ncid, 'icberg_num', unsafe=.true.)
   start_dayid=inq_var(ncid, 'start_day')
   start_massid=inq_var(ncid, 'start_mass')
   scaling_id=inq_var(ncid, 'mass_scaling')
-  halo_bergid=inq_var(ncid, 'halo_berg')
-  static_bergid=inq_var(ncid, 'static_berg')
-  mass_of_bits_id=inq_var(ncid, 'mass_of_bits',unsafe=.true.)
-  heat_density_id=inq_var(ncid, 'heat_density',unsafe=.true.)
+  halo_bergid=inq_var(ncid, 'halo_berg', unsafe=.true.)
+  static_bergid=inq_var(ncid, 'static_berg', unsafe=.true.)
+  mass_of_bits_id=inq_var(ncid, 'mass_of_bits', unsafe=.true.)
+  heat_density_id=inq_var(ncid, 'heat_density', unsafe=.true.)
   ineid=inq_var(ncid, 'ine',unsafe=.true.)
   jneid=inq_var(ncid, 'jne',unsafe=.true.)
 
@@ -539,36 +538,29 @@ integer :: stderrunit, iNg, jNg, i, j
       localberg%uvel=get_double(ncid, uvelid, k)
       localberg%vvel=get_double(ncid, vvelid, k)
       localberg%mass=get_double(ncid, massid, k)
-      localberg%axn=get_double(ncid, axnid, k) !Alon
-      localberg%ayn=get_double(ncid, aynid, k) !Alon
-      localberg%bxn=get_double(ncid, bxnid, k) !Alon
-      localberg%byn=get_double(ncid, bynid, k) !Alon
+      localberg%axn=get_real_from_file(ncid, axnid, k, value_if_not_in_file=0.)
+      localberg%ayn=get_real_from_file(ncid, aynid, k, value_if_not_in_file=0.)
+      localberg%bxn=get_real_from_file(ncid, bxnid, k, value_if_not_in_file=0.)
+      localberg%byn=get_real_from_file(ncid, bynid, k, value_if_not_in_file=0.)
       localberg%thickness=get_double(ncid, thicknessid, k)
       localberg%width=get_double(ncid, widthid, k)
       localberg%length=get_double(ncid, lengthid, k)
       localberg%start_lon=get_double(ncid, start_lonid, k)
       localberg%start_lat=get_double(ncid, start_latid, k)
       localberg%start_year=get_int(ncid, start_yearid, k)
-      if (bergs%read_old_restarts) then
-        localberg%iceberg_num=-1
-      else
+      if (iceberg_numid>0) then
         localberg%iceberg_num=get_int(ncid, iceberg_numid, k)
+      else
+        localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
+        grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
       endif
       localberg%start_day=get_double(ncid, start_dayid, k)
       localberg%start_mass=get_double(ncid, start_massid, k)
       localberg%mass_scaling=get_double(ncid, scaling_id, k)
-      localberg%halo_berg=get_double(ncid, halo_bergid, k)
-      localberg%static_berg=get_double(ncid, static_bergid, k)
-      if (mass_of_bits_id>0) then ! Allow reading of older restart with no bergy bits
-        localberg%mass_of_bits=get_double(ncid, mass_of_bits_id, k)
-      else
-        localberg%mass_of_bits=0.
-      endif
-      if (heat_density_id>0) then ! Allow reading of older restart with no heat content
-        localberg%heat_density=get_double(ncid, heat_density_id, k)
-      else
-        localberg%heat_density=0.
-      endif
+      localberg%halo_berg=get_real_from_file(ncid, halo_bergid, k, value_if_not_in_file=0.)
+      localberg%static_berg=get_real_from_file(ncid, static_bergid, k, value_if_not_in_file=0.)
+      localberg%mass_of_bits=get_real_from_file(ncid, mass_of_bits_id, k, value_if_not_in_file=0.)
+      localberg%heat_density=get_real_from_file(ncid, heat_density_id, k, value_if_not_in_file=0.)
       if (really_debug) lres=is_point_in_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, explain=.true.)
       lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
      !call add_new_berg_to_list(bergs%first, localberg, quick=.true.)
@@ -610,6 +602,17 @@ integer :: stderrunit, iNg, jNg, i, j
   if (mpp_pe().eq.mpp_root_pe().and.verbose) write(*,'(a)') 'diamonds, read_restart_bergs: completed'
 
 contains
+
+  real function get_real_from_file(ncid, varid, k, value_if_not_in_file)
+  integer, intent(in) :: ncid, varid, k
+  real, optional :: value_if_not_in_file
+
+  if (varid<1.and.present(value_if_not_in_file)) then
+    get_real_from_file=value_if_not_in_file
+  else
+    get_real_from_file=get_double(ncid, ncid, k)
+  endif
+  end function get_real_from_file
   
   subroutine generate_bergs(bergs,Time)
   ! Arguments
@@ -797,10 +800,10 @@ integer, allocatable, dimension(:) :: ine,       &
      call read_unlimited_axis(filename,'uvel',uvel,domain=grd%domain)
      call read_unlimited_axis(filename,'vvel',vvel,domain=grd%domain)
      call read_unlimited_axis(filename,'mass',mass,domain=grd%domain)
-     call read_unlimited_axis(filename,'axn',axn,domain=grd%domain) !Alon
-     call read_unlimited_axis(filename,'ayn',ayn,domain=grd%domain) !Alon
-     call read_unlimited_axis(filename,'bxn',bxn,domain=grd%domain) !Alon
-     call read_unlimited_axis(filename,'byn',byn,domain=grd%domain) !Alon
+     call read_real_vector(filename,'axn',axn,grd%domain,value_if_not_in_file=0.)
+     call read_real_vector(filename,'ayn',ayn,grd%domain,value_if_not_in_file=0.)
+     call read_real_vector(filename,'bxn',bxn,grd%domain,value_if_not_in_file=0.)
+     call read_real_vector(filename,'byn',byn,grd%domain,value_if_not_in_file=0.)
      call read_unlimited_axis(filename,'thickness',thickness,domain=grd%domain)
      call read_unlimited_axis(filename,'width',width,domain=grd%domain)
      call read_unlimited_axis(filename,'length',length,domain=grd%domain)
@@ -809,18 +812,14 @@ integer, allocatable, dimension(:) :: ine,       &
      call read_unlimited_axis(filename,'start_day',start_day,domain=grd%domain)
      call read_unlimited_axis(filename,'start_mass',start_mass,domain=grd%domain)
      call read_unlimited_axis(filename,'mass_scaling',mass_scaling,domain=grd%domain)
-     call read_unlimited_axis(filename,'mass_of_bits',mass_of_bits,domain=grd%domain)
-     call read_unlimited_axis(filename,'halo_berg',halo_berg,domain=grd%domain)
-     call read_unlimited_axis(filename,'static_berg',static_berg,domain=grd%domain)
-     call read_unlimited_axis(filename,'heat_density',heat_density,domain=grd%domain)
+     call read_real_vector(filename,'mass_of_bits',mass_of_bits,domain=grd%domain,value_if_not_in_file=0.)
+     call read_real_vector(filename,'heat_density',heat_density,domain=grd%domain,value_if_not_in_file=0.)
      call read_unlimited_axis(filename,'ine',ine,domain=grd%domain)
      call read_unlimited_axis(filename,'jne',jne,domain=grd%domain)
      call read_unlimited_axis(filename,'start_year',start_year,domain=grd%domain)
-     if (bergs%read_old_restarts) then
-       iceberg_num(:)=-1
-     else
-       call read_unlimited_axis(filename,'iceberg_num',iceberg_num,domain=grd%domain)
-     endif
+     call read_real_vector(filename,'halo_berg',halo_berg,grd%domain,value_if_not_in_file=0.)
+     call read_int_vector(filename,'iceberg_num',iceberg_num,grd%domain,value_if_not_in_file=-1)
+     call read_real_vector(filename,'static_berg',static_berg,grd%domain,value_if_not_in_file=0.)
   endif
 
   ! Find approx outer bounds for tile
@@ -915,7 +914,11 @@ integer, allocatable, dimension(:) :: ine,       &
       !call add_new_berg_to_list(bergs%first, localberg, quick=.true.)
 
       if (bergs%grd%area(localberg%ine,localberg%jne) .ne. 0)  then
-       call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg)
+        if (iceberg_num(k)==-1) then ! If using an old_restart then iceberg_num needs to be generated
+          localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(localberg%ine,localberg%jne))+(localberg%ine+(iNg*(localberg%jne-1)))
+          grd%iceberg_counter_grd(localberg%ine,localberg%jne)=grd%iceberg_counter_grd(localberg%ine,localberg%jne)+1
+        endif
+        call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg)
       else
         if (mpp_pe().eq.mpp_root_pe()) then
           print * , 'Grounded iceberg: ', lat(k),lon(k), iceberg_num(k)
@@ -988,8 +991,35 @@ integer, allocatable, dimension(:) :: ine,       &
   call mpp_sum( bergs%bergy_mass_start )
   if (mpp_pe().eq.mpp_root_pe().and.verbose) write(*,'(a)') 'diamonds, read_restart_bergs: completed'
 
-
 contains
+
+  subroutine read_real_vector(filename, varname, values, domain, value_if_not_in_file)
+    character(len=*), intent(in)  :: filename
+    character(len=*), intent(in)  :: varname
+    real,             intent(out) :: values(:)
+    type(domain2D),   intent(in)  :: domain
+    real, optional,   intent(in)  :: value_if_not_in_file
+
+    if (present(value_if_not_in_file).and..not.field_exist(filename, varname)) then
+      values(:)=value_if_not_in_file
+    else
+      call read_unlimited_axis(filename,varname,values,domain=domain)
+    endif
+  end subroutine read_real_vector
+
+  subroutine read_int_vector(filename, varname, values, domain, value_if_not_in_file)
+    character(len=*),  intent(in)  :: filename
+    character(len=*),  intent(in)  :: varname
+    integer,           intent(out) :: values(:)
+    type(domain2D),    intent(in)  :: domain
+    integer, optional, intent(in)  :: value_if_not_in_file
+
+    if (present(value_if_not_in_file).and..not.field_exist(filename, varname)) then
+      values(:)=value_if_not_in_file
+    else
+      call read_unlimited_axis(filename,varname,values,domain=domain)
+    endif
+  end subroutine read_int_vector
   
   subroutine generate_bergs(bergs,Time)
   ! Arguments
