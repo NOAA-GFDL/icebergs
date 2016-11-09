@@ -189,7 +189,9 @@ integer, allocatable, dimension(:) :: ine,       &
    allocate(start_year(nbergs))
    allocate(iceberg_num(nbergs))
 
-  call get_instance_filename("icebergs.res.nc", filename)
+!  call get_instance_filename("icebergs.res.nc", filename)!This will be done in fms_io
+!                                                          Having it here causes double append of ensemble id to filename.
+  filename = trim("icebergs.res.nc")
   call set_domain(bergs%grd%domain)
   call register_restart_axis(bergs_restart,filename,'i',nbergs)
   call set_meta_global(bergs_restart,'file_format_major_version',ival=(/file_format_major_version/))
