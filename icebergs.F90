@@ -1120,6 +1120,7 @@ real :: Mv, Me, Mb, melt, dvo, dva, dM, Ss, dMe, dMb, dMv
 real :: Mnew, Mnew1, Mnew2, Hocean
 real :: Mbits, nMbits, dMbitsE, dMbitsM, Lbits, Abits, Mbb
 real :: tip_parameter
+real :: Delta, q
 integer :: i,j, stderrunit
 type(iceberg), pointer :: this, next
 real, parameter :: perday=1./86400.
@@ -1298,7 +1299,9 @@ real :: SSS !Temporarily here
           if (Wn>Ln) call swap_variables(Ln,Wn)  !Make sure that Wn is the smaller dimension
         
           if ( (.not.bergs%use_updated_rolling_scheme) .and. (bergs%tip_parameter>=999.) ) then    !Use Rolling Scheme 2
-            if ( Wn<sqrt(0.92*(Tn**2)-58.32*Tn) ) then
+            q=bergs%rho_bergs/rho_seawater
+            Delta=6.0
+            if (Wn<sqrt((6.0*q*(1-q)*(Tn**2))-(12*Delta*q*Tn))) then
                 call swap_variables(Tn,Wn)
             endif
           endif
