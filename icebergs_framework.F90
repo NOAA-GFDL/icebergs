@@ -3360,6 +3360,7 @@ real :: xlo, xhi, ylo, yhi
 real :: Lx_2
 integer :: stderrunit
 real :: Lx
+real :: tol
 
   ! Get the stderr unit number
   stderrunit=stderr()
@@ -3386,11 +3387,14 @@ real :: Lx
            modulo(grd%lon(i-1,j  )-(x-Lx_2),Lx)+(x-Lx_2), &
            modulo(grd%lon(i  ,j  )-(x-Lx_2),Lx)+(x-Lx_2) )
 
-  if (x.lt.xlo .or. x.gt.xhi) return
+  ! The modolo function inside sum_sign_dot_prod leads to a roundoff.
+  !Adding adding a tolorance to the crude bounds avoids excluding the cell which
+  !would be correct after roundoff. This is a bit of a hack.
+  tol=0.1 
+  if (x.lt.(xlo-tol) .or. x.gt.(xhi+tol)) return
+
   ylo=min( grd%lat(i-1,j-1), grd%lat(i,j-1), grd%lat(i-1,j), grd%lat(i,j) )
   yhi=max( grd%lat(i-1,j-1), grd%lat(i,j-1), grd%lat(i-1,j), grd%lat(i,j) )
-
-
   if (y.lt.ylo .or. y.gt.yhi) return
   
   if ((grd%lat(i,j).gt.89.999).and. (grd%grid_is_latlon))   then
