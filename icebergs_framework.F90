@@ -3583,10 +3583,12 @@ logical, intent(in), optional :: explain
 real :: x1,y1,x2,y2,x3,y3,x4,y4,xx,yy,fac
 integer :: stderrunit
 real :: Lx, dx,dy
+real :: Delta_x, Lx_2
 
   ! Get the stderr unit number
   stderrunit=stderr()
   Lx=grd%Lx
+  Lx_2=Lx/2
   pos_within_cell=.false.; xi=-999.; yj=-999.
   if (i-1<grd%isd) return
   if (j-1<grd%jsd) return
@@ -3617,7 +3619,9 @@ real :: Lx, dx,dy
     dy=abs((grd%lat(i  ,j  )-grd%lat(i  ,j-1  )))
     x1=grd%lon(i  ,j  )-(dx/2)
     y1=grd%lat(i  ,j  )-(dy/2)
-    xi=((x-x1)/dx)+0.5
+    Delta_x=modulo(x-(x1-Lx_2),Lx)+(x1-Lx_2)-x1
+    xi=((Delta_x)/dx)+0.5
+    !xi=((x-x1)/dx)+0.5
     yj=((y-y1)/dy)+0.5
 
   elseif ((max(y1,y2,y3,y4)<89.999) .or.(.not. grd%grid_is_latlon)) then
