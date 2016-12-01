@@ -2878,11 +2878,13 @@ integer :: stderrunit
   ! Turn on sampling of trajectories, verbosity, budgets
   sample_traj=.false.
   if ( (bergs%traj_sample_hrs>0)  .and. (.not. bergs%ignore_traj) ) then
-    if (mod(60*60*24*iday+ 60*60*ihr + 60*imin + isec ,60*60*bergs%traj_sample_hrs).eq.0) &  sample_traj=.true.
+    if (mod(60*60*24*iday+ 60*60*ihr + 60*imin + isec ,60*60*bergs%traj_sample_hrs).eq.0) &
+        sample_traj=.true.
   endif
   write_traj=.false.
   if ((bergs%traj_write_hrs>0) .and. (.not. bergs%ignore_traj))  then
-     if (mod(60*60*24*iday+ 60*60*ihr + 60*imin + isec ,60*60*bergs%traj_write_hrs).eq.0) &  write_traj=.true.
+     if (mod(60*60*24*iday+ 60*60*ihr + 60*imin + isec ,60*60*bergs%traj_write_hrs).eq.0) &
+         write_traj=.true.
   endif
   lverbose=.false.
   if (bergs%verbose_hrs>0) then
@@ -2890,7 +2892,7 @@ integer :: stderrunit
   endif
   lbudget=.false.
   if (bergs%verbose_hrs>0) then
-     if (mod(24*iday+ihr+(imin/60.),float(bergs%verbose_hrs)).eq.0) lbudget=budget  !Added minutes, so that it does not repeat when smaller time steps are used.:q
+     if (mod(24*iday+ihr+(imin/60.),float(bergs%verbose_hrs)).eq.0) lbudget=budget  !Added minutes, so that it does not repeat when smaller time steps are used.
   endif
   if (mpp_pe()==mpp_root_pe().and.lverbose) write(*,'(a,3i5,a,3i5,a,i5,f8.3)') &
        'diamonds: y,m,d=',iyr, imon, iday,' h,m,s=', ihr, imin, isec, &
