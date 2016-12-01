@@ -1120,6 +1120,7 @@ real :: Mv, Me, Mb, melt, dvo, dva, dM, Ss, dMe, dMb, dMv
 real :: Mnew, Mnew1, Mnew2, Hocean
 real :: Mbits, nMbits, dMbitsE, dMbitsM, Lbits, Abits, Mbb
 real :: tip_parameter
+real :: Delta, q
 integer :: i,j, stderrunit
 type(iceberg), pointer :: this, next
 real, parameter :: perday=1./86400.
@@ -1298,7 +1299,9 @@ real :: SSS !Temporarily here
           if (Wn>Ln) call swap_variables(Ln,Wn)  !Make sure that Wn is the smaller dimension
         
           if ( (.not.bergs%use_updated_rolling_scheme) .and. (bergs%tip_parameter>=999.) ) then    !Use Rolling Scheme 2
-            if ( Wn<sqrt(0.92*(Tn**2)-58.32*Tn) ) then
+            q=bergs%rho_bergs/rho_seawater
+            Delta=6.0
+            if (Wn<sqrt((6.0*q*(1-q)*(Tn**2))-(12*Delta*q*Tn))) then
                 call swap_variables(Tn,Wn)
             endif
           endif
@@ -2875,21 +2878,22 @@ integer :: stderrunit
   ! Turn on sampling of trajectories, verbosity, budgets
   sample_traj=.false.
   if ( (bergs%traj_sample_hrs>0)  .and. (.not. bergs%ignore_traj) ) then
-     if (mod(24*iday+ihr,bergs%traj_sample_hrs).eq.0) sample_traj=.true.
-  end if
+    if (mod(60*60*24*iday+ 60*60*ihr + 60*imin + isec ,60*60*bergs%traj_sample_hrs).eq.0) &
+        sample_traj=.true.
+  endif
   write_traj=.false.
   if ((bergs%traj_write_hrs>0) .and. (.not. bergs%ignore_traj))  then
-     if (mod(24*iday+ihr,bergs%traj_write_hrs).eq.0) write_traj=.true.
-  end if
+     if (mod(60*60*24*iday+ 60*60*ihr + 60*imin + isec ,60*60*bergs%traj_write_hrs).eq.0) &
+         write_traj=.true.
+  endif
   lverbose=.false.
   if (bergs%verbose_hrs>0) then
-     if (mod(24*iday+ihr,bergs%verbose_hrs).eq.0) lverbose=verbose
-  end if
+     if (mod(24*iday+ihr+(imin/60.),float(bergs%verbose_hrs)).eq.0) lverbose=verbose
+  endif
   lbudget=.false.
   if (bergs%verbose_hrs>0) then
-     !if (mod(24*iday+ihr,bergs%verbose_hrs).eq.0) lbudget=budget
-     if (mod(24*iday+ihr+(imin/60.),float(bergs%verbose_hrs)).eq.0) lbudget=budget  !Added minutes, so that it does not repeat when smaller time steps are used.:q
-  end if
+     if (mod(24*iday+ihr+(imin/60.),float(bergs%verbose_hrs)).eq.0) lbudget=budget  !Added minutes, so that it does not repeat when smaller time steps are used.
+  endif
   if (mpp_pe()==mpp_root_pe().and.lverbose) write(*,'(a,3i5,a,3i5,a,i5,f8.3)') &
        'diamonds: y,m,d=',iyr, imon, iday,' h,m,s=', ihr, imin, isec, &
        ' yr,yrdy=', bergs%current_year, bergs%current_yearday
