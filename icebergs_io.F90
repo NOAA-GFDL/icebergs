@@ -241,7 +241,7 @@ integer :: grdi, grdj
   if (bergs%interactive_icebergs_on .or. bergs%iceberg_bonds_on) &
     id = register_restart_field(bergs_restart,filename,'halo_berg',halo_berg, &
                                               longname='halo_berg',units='dimensionless')
-  if (bergs%static_icebergs) &
+  if (bergs%save_static_berg_field_in_restart) &
     id = register_restart_field(bergs_restart,filename,'static_berg',static_berg, &
                                               longname='static_berg',units='dimensionless')
 
