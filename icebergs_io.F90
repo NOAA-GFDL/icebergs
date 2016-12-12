@@ -131,7 +131,6 @@ real, allocatable, dimension(:) :: lon,          &
                                    start_mass,   &
                                    mass_scaling, &
                                    mass_of_bits, &
-                                   halo_berg,    &
                                    static_berg,  &
                                    heat_density
 
@@ -185,7 +184,6 @@ integer :: grdi, grdj
    allocate(mass_scaling(nbergs))
    allocate(mass_of_bits(nbergs))
    allocate(heat_density(nbergs))
-   allocate(halo_berg(nbergs))
    allocate(static_berg(nbergs))
 
    allocate(ine(nbergs))
@@ -238,9 +236,6 @@ integer :: grdi, grdj
                                             longname='mass of bergy bits',units='kg')
   id = register_restart_field(bergs_restart,filename,'heat_density',heat_density, &
                                             longname='heat density',units='J/kg')
-  if (bergs%interactive_icebergs_on .or. bergs%iceberg_bonds_on) &
-    id = register_restart_field(bergs_restart,filename,'halo_berg',halo_berg, &
-                                              longname='halo_berg',units='dimensionless')
   if (bergs%save_static_berg_field_in_restart) &
     id = register_restart_field(bergs_restart,filename,'static_berg',static_berg, &
                                               longname='static_berg',units='dimensionless')
@@ -262,7 +257,6 @@ integer :: grdi, grdj
       start_lon(i) = this%start_lon; start_lat(i) = this%start_lat
       start_year(i) = this%start_year; start_day(i) = this%start_day
       start_mass(i) = this%start_mass; mass_scaling(i) = this%mass_scaling
-      halo_berg(i) = this%halo_berg 
       static_berg(i) = this%static_berg 
       iceberg_num(i) = this%iceberg_num; 
       mass_of_bits(i) = this%mass_of_bits; heat_density(i) = this%heat_density
@@ -420,7 +414,7 @@ integer :: lonid, latid,  uvelid, vvelid, ineid, jneid
 integer :: axnid, aynid, uvel_oldid, vvel_oldid, bxnid, bynid
 integer :: massid, thicknessid, widthid, lengthid
 integer :: start_lonid, start_latid, start_yearid, iceberg_numid, start_dayid, start_massid
-integer :: scaling_id, mass_of_bits_id, heat_density_id, halo_bergid, static_bergid
+integer :: scaling_id, mass_of_bits_id, heat_density_id, static_bergid
 logical :: lres, found_restart, multiPErestart
 real :: lon0, lon1, lat0, lat1
 character(len=33) :: filename, filename_base
@@ -496,7 +490,6 @@ integer :: stderrunit, iNg, jNg, i, j
   start_dayid=inq_var(ncid, 'start_day')
   start_massid=inq_var(ncid, 'start_mass')
   scaling_id=inq_var(ncid, 'mass_scaling')
-  halo_bergid=inq_var(ncid, 'halo_berg', unsafe=.true.)
   static_bergid=inq_var(ncid, 'static_berg', unsafe=.true.)
   mass_of_bits_id=inq_var(ncid, 'mass_of_bits', unsafe=.true.)
   heat_density_id=inq_var(ncid, 'heat_density', unsafe=.true.)
@@ -557,7 +550,7 @@ integer :: stderrunit, iNg, jNg, i, j
       localberg%start_day=get_double(ncid, start_dayid, k)
       localberg%start_mass=get_double(ncid, start_massid, k)
       localberg%mass_scaling=get_double(ncid, scaling_id, k)
-      localberg%halo_berg=get_real_from_file(ncid, halo_bergid, k, value_if_not_in_file=0.)
+      localberg%halo_berg=0.
       localberg%static_berg=get_real_from_file(ncid, static_bergid, k, value_if_not_in_file=0.)
       localberg%mass_of_bits=get_real_from_file(ncid, mass_of_bits_id, k, value_if_not_in_file=0.)
       localberg%heat_density=get_real_from_file(ncid, heat_density_id, k, value_if_not_in_file=0.)
@@ -734,7 +727,6 @@ real, allocatable, dimension(:) :: lon,          &
                                    start_mass,   &
                                    mass_scaling, &
                                    mass_of_bits, &
-                                   halo_berg,    &
                                    static_berg,    &
                                    heat_density
 integer, allocatable, dimension(:) :: ine,       &
@@ -785,7 +777,6 @@ integer, allocatable, dimension(:) :: ine,       &
      allocate(start_mass(nbergs_in_file))
      allocate(mass_scaling(nbergs_in_file))
      allocate(mass_of_bits(nbergs_in_file))
-     allocate(halo_berg(nbergs_in_file))
      allocate(static_berg(nbergs_in_file))
      allocate(heat_density(nbergs_in_file))
      allocate(ine(nbergs_in_file))
@@ -817,7 +808,6 @@ integer, allocatable, dimension(:) :: ine,       &
      call read_unlimited_axis(filename,'ine',ine,domain=grd%domain)
      call read_unlimited_axis(filename,'jne',jne,domain=grd%domain)
      call read_unlimited_axis(filename,'start_year',start_year,domain=grd%domain)
-     call read_real_vector(filename,'halo_berg',halo_berg,grd%domain,value_if_not_in_file=0.)
      call read_int_vector(filename,'iceberg_num',iceberg_num,grd%domain,value_if_not_in_file=-1)
      call read_real_vector(filename,'static_berg',static_berg,grd%domain,value_if_not_in_file=0.)
   endif
@@ -904,7 +894,7 @@ integer, allocatable, dimension(:) :: ine,       &
       localberg%start_mass=start_mass(k)
       localberg%mass_scaling=mass_scaling(k)
       localberg%mass_of_bits=mass_of_bits(k)
-      localberg%halo_berg=halo_berg(k)
+      localberg%halo_berg=0.
       localberg%static_berg=static_berg(k)
       localberg%heat_density=heat_density(k)
       localberg%first_bond=>null()
@@ -952,7 +942,6 @@ integer, allocatable, dimension(:) :: ine,       &
                 start_mass,   &
                 mass_scaling, &
                 mass_of_bits, &
-                halo_berg,    &
                 static_berg,    &
                 heat_density )
      deallocate(           &
