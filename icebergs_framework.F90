@@ -455,7 +455,7 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
 type(icebergs_gridded), pointer :: grd
-real :: minl, big_number
+real :: lon_mod, big_number
 logical :: lerr
 integer :: stdlogunit, stderrunit
 real :: Total_mass  !Added by Alon 
@@ -696,24 +696,24 @@ real :: Total_mass  !Added by Alon
  !The fix to reproduce across PE layout change, from AJA
   if (Lx>0.) then
     j=grd%jsc; do i=grd%isc+1,grd%ied
-      minl=grd%lon(i-1,j)-(Lx/2.)
-      if (abs(grd%lon(i,j)-(modulo(grd%lon(i,j)-minl,Lx)+minl))>(Lx/2.)) &
-      grd%lon(i,j)=modulo(grd%lon(i,j)-minl,Lx)+minl
+      lon_mod = apply_modulo_around_point(grd%lon(i,j),grd%lon(i-1,j),Lx)
+      if (abs(grd%lon(i,j)-lon_mod)>(Lx/2.)) &
+        grd%lon(i,j)= lon_mod
     enddo
     j=grd%jsc; do i=grd%isc-1,grd%isd,-1
-      minl=grd%lon(i+1,j)-(Lx/2.)
-      if (abs(grd%lon(i,j)-(modulo(grd%lon(i,j)-minl,Lx)+minl))>(Lx/2.)) &
-      grd%lon(i,j)=modulo(grd%lon(i,j)-minl,Lx)+minl
+      lon_mod = apply_modulo_around_point(grd%lon(i,j),grd%lon(i+1,j) ,Lx)
+      if (abs(grd%lon(i,j)-  lon_mod )>(Lx/2.)) &
+        grd%lon(i,j)= lon_mod
     enddo
     do j=grd%jsc+1,grd%jed; do i=grd%isd,grd%ied
-      minl=grd%lon(i,j-1)-(Lx/2.)
-      if (abs(grd%lon(i,j)-(modulo(grd%lon(i,j)-minl,Lx)+minl))>(Lx/2.)) &
-      grd%lon(i,j)=modulo(grd%lon(i,j)-minl,Lx)+minl
+      lon_mod = apply_modulo_around_point(grd%lon(i,j),grd%lon(i,j-1) ,Lx)
+      if (abs(grd%lon(i,j)-(lon_mod ))>(Lx/2.)) &
+        grd%lon(i,j)= lon_mod
     enddo; enddo
     do j=grd%jsc-1,grd%jsd,-1; do i=grd%isd,grd%ied
-      minl=grd%lon(i,j+1)-(Lx/2.)
-      if (abs(grd%lon(i,j)-(modulo(grd%lon(i,j)-minl,Lx)+minl))>(Lx/2.)) &
-      grd%lon(i,j)=modulo(grd%lon(i,j)-minl,Lx)+minl
+      lon_mod = apply_modulo_around_point(grd%lon(i,j),grd%lon(i,j+1) ,Lx)
+      if (abs(grd%lon(i,j)- lon_mod )>(Lx/2.)) &
+        grd%lon(i,j)=  lon_mod
     enddo; enddo
   endif
 
