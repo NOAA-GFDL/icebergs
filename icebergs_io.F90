@@ -111,6 +111,7 @@ integer :: stderrunit
 type(restart_file_type) :: bergs_restart
 type(restart_file_type) :: bergs_bond_restart
 integer :: nbergs, nbonds
+integer :: n_static_bergs
 logical :: check_bond_quality 
 type(icebergs_gridded), pointer :: grd
 real, allocatable, dimension(:) :: lon,          &
@@ -236,7 +237,18 @@ integer :: grdi, grdj
                                             longname='mass of bergy bits',units='kg')
   id = register_restart_field(bergs_restart,filename,'heat_density',heat_density, &
                                             longname='heat density',units='J/kg')
-  if (bergs%save_static_berg_field_in_restart) &
+
+  !Checking if any icebergs are static in order to decide whether to save static_berg
+  n_static_bergs = 0
+  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+      n_static_bergs=n_static_bergs+this%static_berg
+      this=>this%next
+    enddo
+  enddo ; enddo
+  call mpp_sum(n_static_bergs) 
+  if (n_static_bergs .gt. 0) &
     id = register_restart_field(bergs_restart,filename,'static_berg',static_berg, &
                                               longname='static_berg',units='dimensionless')
 
