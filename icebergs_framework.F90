@@ -261,7 +261,6 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   logical :: allow_bergs_to_roll=.True. !Allows icebergs to roll over when rolling conditions are met
   logical :: ignore_missing_restart_bergs=.False.  !True Allows the model to ignorm icebergs missing in the restart. 
   logical :: Static_icebergs=.False.  !True= icebergs do no move
-  logical :: save_static_berg_field_in_restart=.False.  !If true, then static_berg is saved in restarts
   logical :: only_interactive_forces=.False.  !Icebergs only feel interactive forces, and not ocean, wind... 
   logical :: halo_debugging=.False.  !Use for debugging halos (remove when its working) 
   logical :: save_short_traj=.True.  !True saves only lon,lat,time,iceberg_num in iceberg_trajectory.nc 
@@ -417,7 +416,6 @@ logical :: allow_bergs_to_roll=.True. !Allows icebergs to roll over when rolling
 logical :: hexagonal_icebergs=.False. !True treats icebergs as rectangles, False as hexagonal elements (for the purpose of mass spreading)
 logical :: ignore_missing_restart_bergs=.False.  !True Allows the model to ignorm icebergs missing in the restart. 
 logical :: Static_icebergs=.False.  !True= icebergs do no move
-logical :: save_static_berg_field_in_restart=.False.  !If true, then static_berg is saved in restarts
 logical :: only_interactive_forces=.False.  !Icebergs only feel interactive forces, and not ocean, wind... 
 logical :: halo_debugging=.False.  !Use for debugging halos (remove when its working) 
 logical :: save_short_traj=.True.  !True saves only lon,lat,time,iceberg_num in iceberg_trajectory.nc 
@@ -449,7 +447,7 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          grid_is_regular,override_iceberg_velocities,u_override,v_override,add_iceberg_thickness_to_SSH,Iceberg_melt_without_decay,melt_icebergs_as_ice_shelf, &
          Use_three_equation_model,find_melt_using_spread_mass,use_mixed_layer_salinity_for_thermo,utide_icebergs,ustar_icebergs_bg,cdrag_icebergs, pass_fields_to_ocean_model, &
          const_gamma, Gamma_T_3EQ, ignore_traj, debug_iceberg_with_id,use_updated_rolling_scheme, tip_parameter, read_old_restarts, tau_calving, read_ocean_depth_from_file, melt_cutoff,&
-         apply_thickness_cutoff_to_gridded_melt, apply_thickness_cutoff_to_bergs_melt, save_static_berg_field_in_restart 
+         apply_thickness_cutoff_to_gridded_melt, apply_thickness_cutoff_to_bergs_melt 
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -856,7 +854,6 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
   bergs%hexagonal_icebergs=hexagonal_icebergs 
   bergs%ignore_missing_restart_bergs=ignore_missing_restart_bergs
   bergs%Static_icebergs=Static_icebergs 
-  bergs%save_static_berg_field_in_restart=save_static_berg_field_in_restart 
   bergs%only_interactive_forces=only_interactive_forces
   bergs%halo_debugging=halo_debugging
   bergs%iceberg_bonds_on=iceberg_bonds_on   !Alon
