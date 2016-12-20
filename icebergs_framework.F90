@@ -3778,7 +3778,7 @@ end function pos_within_cell
 
 ! ##############################################################################
 
-real function is_point_within_xi_yj_bounds(xi,yj)
+logical function is_point_within_xi_yj_bounds(xi,yj)
 ! Arguments
 real, intent(in) :: xi, yj
 ! Local variables
