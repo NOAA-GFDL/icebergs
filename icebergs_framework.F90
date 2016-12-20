@@ -73,6 +73,7 @@ public fix_restart_dates, offset_berg_dates
 public move_berg_between_cells
 public find_individual_iceberg
 public monitor_a_berg
+public is_point_within_xi_yj_bounds
 
 type :: icebergs_gridded
   type(domain2D), pointer :: domain ! MPP domain
@@ -452,7 +453,7 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
 type(icebergs_gridded), pointer :: grd
-real :: minl, big_number
+real :: lon_mod, big_number
 logical :: lerr
 integer :: stdlogunit, stderrunit
 real :: Total_mass  !Added by Alon 
@@ -686,33 +687,33 @@ real :: Total_mass  !Added by Alon
     if (mpp_pe().eq.mpp_root_pe())  then
             call error_mesg('diamonds, framework', 'Since the lat/lon grid is off, the x-direction is being set as non-periodic. Set Lx not equal to 360 override.', WARNING) 
     endif
-    Lx=1E14
+    Lx=-1.
   endif
 
+
  !The fix to reproduce across PE layout change, from AJA
-  j=grd%jsc; do i=grd%isc+1,grd%ied
-  minl=grd%lon(i-1,j)-(Lx/2.)
-    if (abs(grd%lon(i,j)-(modulo(grd%lon(i,j)-minl,Lx)+minl))>(Lx/2.)) &
-    grd%lon(i,j)=modulo(grd%lon(i,j)-minl,Lx)+minl
-  enddo
-  j=grd%jsc; do i=grd%isc-1,grd%isd,-1
-    minl=grd%lon(i+1,j)-(Lx/2.)
-    if (abs(grd%lon(i,j)-(modulo(grd%lon(i,j)-minl,Lx)+minl))>(Lx/2.)) &
-    grd%lon(i,j)=modulo(grd%lon(i,j)-minl,Lx)+minl
-  enddo
-  do j=grd%jsc+1,grd%jed; do i=grd%isd,grd%ied
-      minl=grd%lon(i,j-1)-(Lx/2.)
-      if (abs(grd%lon(i,j)-(modulo(grd%lon(i,j)-minl,Lx)+minl))>(Lx/2.)) &
-      grd%lon(i,j)=modulo(grd%lon(i,j)-minl,Lx)+minl
-  enddo; enddo
-  do j=grd%jsc-1,grd%jsd,-1; do i=grd%isd,grd%ied
-      minl=grd%lon(i,j+1)-(Lx/2.)
-      if (abs(grd%lon(i,j)-(modulo(grd%lon(i,j)-minl,Lx)+minl))>(Lx/2.)) &
-      grd%lon(i,j)=modulo(grd%lon(i,j)-minl,Lx)+minl
-  enddo; enddo
-
-
-
+  if (Lx>0.) then
+    j=grd%jsc; do i=grd%isc+1,grd%ied
+      lon_mod = apply_modulo_around_point(grd%lon(i,j),grd%lon(i-1,j),Lx)
+      if (abs(grd%lon(i,j)-lon_mod)>(Lx/2.)) &
+        grd%lon(i,j)= lon_mod
+    enddo
+    j=grd%jsc; do i=grd%isc-1,grd%isd,-1
+      lon_mod = apply_modulo_around_point(grd%lon(i,j),grd%lon(i+1,j) ,Lx)
+      if (abs(grd%lon(i,j)-  lon_mod )>(Lx/2.)) &
+        grd%lon(i,j)= lon_mod
+    enddo
+    do j=grd%jsc+1,grd%jed; do i=grd%isd,grd%ied
+      lon_mod = apply_modulo_around_point(grd%lon(i,j),grd%lon(i,j-1) ,Lx)
+      if (abs(grd%lon(i,j)-(lon_mod ))>(Lx/2.)) &
+        grd%lon(i,j)= lon_mod
+    enddo; enddo
+    do j=grd%jsc-1,grd%jsd,-1; do i=grd%isd,grd%ied
+      lon_mod = apply_modulo_around_point(grd%lon(i,j),grd%lon(i,j+1) ,Lx)
+      if (abs(grd%lon(i,j)- lon_mod )>(Lx/2.)) &
+        grd%lon(i,j)=  lon_mod
+    enddo; enddo
+  endif
 
 
 
@@ -3194,7 +3195,7 @@ real :: Lx
   ! Local variables
   real :: x1m
 
-    x1m=modulo(x1-(x2-(Lx/2.)),Lx)+(x2-(Lx/2.))
+    x1m=apply_modulo_around_point(x1,x2,Lx)
   ! dcost=(x2-x1)**2+(y2-y1)**2
     dcost=(x2-x1m)**2+(y2-y1)**2
   end function dcost
@@ -3357,7 +3358,6 @@ integer, intent(in) :: i, j
 logical, intent(in), optional :: explain
 ! Local variables
 real :: xlo, xhi, ylo, yhi
-real :: Lx_2
 integer :: stderrunit
 real :: Lx
 real :: tol
@@ -3365,7 +3365,6 @@ real :: tol
   ! Get the stderr unit number
   stderrunit=stderr()
   Lx=grd%Lx
-  Lx_2=Lx/2.
 
   ! Safety check index bounds
   if (i-1.lt.grd%isd.or.i.gt.grd%ied.or.j-1.lt.grd%jsd.or.j.gt.grd%jed) then
@@ -3378,14 +3377,14 @@ real :: tol
   is_point_in_cell=.false.
 
   ! Test crude bounds
-  xlo=min( modulo(grd%lon(i-1,j-1)-(x-Lx_2),Lx)+(x-Lx_2), &
-           modulo(grd%lon(i  ,j-1)-(x-Lx_2),Lx)+(x-Lx_2), &
-           modulo(grd%lon(i-1,j  )-(x-Lx_2),Lx)+(x-Lx_2), &
-           modulo(grd%lon(i  ,j  )-(x-Lx_2),Lx)+(x-Lx_2) )
-  xhi=max( modulo(grd%lon(i-1,j-1)-(x-Lx_2),Lx)+(x-Lx_2), &
-           modulo(grd%lon(i  ,j-1)-(x-Lx_2),Lx)+(x-Lx_2), &
-           modulo(grd%lon(i-1,j  )-(x-Lx_2),Lx)+(x-Lx_2), &
-           modulo(grd%lon(i  ,j  )-(x-Lx_2),Lx)+(x-Lx_2) )
+  xlo=min( apply_modulo_around_point(grd%lon(i-1,j-1)   ,x,  Lx), & 
+           apply_modulo_around_point(grd%lon(i  ,j-1)   ,x,  Lx), &
+           apply_modulo_around_point(grd%lon(i-1,j  )   ,x,  Lx), &
+           apply_modulo_around_point(grd%lon(i  ,j  )   ,x,  Lx) )
+  xhi=max( apply_modulo_around_point(grd%lon(i-1,j-1)   ,x,  Lx), & 
+           apply_modulo_around_point(grd%lon(i  ,j-1)   ,x,  Lx), &
+           apply_modulo_around_point(grd%lon(i-1,j  )   ,x,  Lx), &
+           apply_modulo_around_point(grd%lon(i  ,j  )   ,x,  Lx) )
 
   ! The modolo function inside sum_sign_dot_prod leads to a roundoff.
   !Adding adding a tolorance to the crude bounds avoids excluding the cell which
@@ -3446,26 +3445,17 @@ real :: p0,p1,p2,p3,xx
 real :: l0,l1,l2,l3
 real :: xx0,xx1,xx2,xx3
 integer :: stderrunit
-real :: Lx_2
 
   ! Get the stderr unit number
   stderrunit=stderr()
-  Lx_2=Lx/2.
 
   sum_sign_dot_prod4=.false.
-  if (Lx .ge. 1E14 ) then
-    xx=x
-    xx0=x0
-    xx1=x1
-    xx2=x2
-    xx3=x3
-  else
-    xx=modulo(x-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x to within Lx_2 of x0
-    xx0=modulo(x0-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x0 to within Lx_2of xx
-    xx1=modulo(x1-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x1 to within Lx_2of xx
-    xx2=modulo(x2-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x2 to within Lx_2of xx
-    xx3=modulo(x3-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x3 to within Lx_2of xx
-  endif
+  xx= apply_modulo_around_point(x,x0,Lx)
+  xx0= apply_modulo_around_point(x0,x0,Lx)
+  xx1= apply_modulo_around_point(x1,x0,Lx)
+  xx2= apply_modulo_around_point(x2,x0,Lx)
+  xx3= apply_modulo_around_point(x3,x0,Lx)
+
 
   l0=(xx-xx0)*(y1-y0)-(y-y0)*(xx1-xx0)
   l1=(xx-xx1)*(y2-y1)-(y-y1)*(xx2-xx1)
@@ -3514,28 +3504,18 @@ real :: p0,p1,p2,p3,p4,xx
 real :: l0,l1,l2,l3,l4
 real :: xx0,xx1,xx2,xx3,xx4
 integer :: stderrunit
-real :: Lx_2
 
   ! Get the stderr unit number
   stderrunit=stderr()
-  Lx_2=Lx/2.
 
   sum_sign_dot_prod5=.false.
-  if (Lx .ge. 1E14 ) then
-    xx=x
-    xx0=x0
-    xx1=x1
-    xx2=x2
-    xx3=x3
-    xx4=x4
-  else
-    xx=modulo(x-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x to within Lx_2of x0
-    xx0=modulo(x0-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x0 to within Lx_2 of xx
-    xx1=modulo(x1-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x1 to within Lx_2 of xx
-    xx2=modulo(x2-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x2 to within Lx_2 of xx
-    xx3=modulo(x3-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x3 to within Lx_2 of xx
-    xx4=modulo(x4-(x0-Lx_2),Lx)+(x0-Lx_2) ! Reference x4 to within Lx_2 of xx
-  endif
+  xx= apply_modulo_around_point(x,x0,Lx)
+  xx0= apply_modulo_around_point(x0,x0,Lx)
+  xx1= apply_modulo_around_point(x1,x0,Lx)
+  xx2= apply_modulo_around_point(x2,x0,Lx)
+  xx3= apply_modulo_around_point(x3,x0,Lx)
+  xx4= apply_modulo_around_point(x4,x0,Lx)
+
 
   l0=(xx-xx0)*(y1-y0)-(y-y0)*(xx1-xx0)
   l1=(xx-xx1)*(y2-y1)-(y-y1)*(xx2-xx1)
@@ -3583,12 +3563,12 @@ logical, intent(in), optional :: explain
 real :: x1,y1,x2,y2,x3,y3,x4,y4,xx,yy,fac
 integer :: stderrunit
 real :: Lx, dx,dy
-real :: Delta_x, Lx_2
+real :: Delta_x
+logical :: is_point_in_cell_using_xi_yj
 
   ! Get the stderr unit number
   stderrunit=stderr()
   Lx=grd%Lx
-  Lx_2=Lx/2
   pos_within_cell=.false.; xi=-999.; yj=-999.
   if (i-1<grd%isd) return
   if (j-1<grd%jsd) return
@@ -3619,7 +3599,9 @@ real :: Delta_x, Lx_2
     dy=abs((grd%lat(i  ,j  )-grd%lat(i  ,j-1  )))
     x1=grd%lon(i  ,j  )-(dx/2)
     y1=grd%lat(i  ,j  )-(dy/2)
-    Delta_x=modulo(x-(x1-Lx_2),Lx)+(x1-Lx_2)-x1
+
+    Delta_x= apply_modulo_around_point(x,x1,Lx)-x1
+
     xi=((Delta_x)/dx)+0.5
     !xi=((x-x1)/dx)+0.5
     yj=((y-y1)/dy)+0.5
@@ -3653,7 +3635,8 @@ real :: Delta_x, Lx_2
     call calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, xx, yy, xi, yj, Lx,explain=explain)
     if (is_point_in_cell(grd, x, y, i, j)) then
       ! The point is within the spherical quad
-      if (abs(xi-0.5)>0.5.or.abs(yj-0.5)>0.5) then
+      is_point_in_cell_using_xi_yj=is_point_within_xi_yj_bounds(xi,yj)
+      if (.not. is_point_in_cell_using_xi_yj) then
         ! If the non-dimensional position is found to be outside (possible because the
         ! projection of the spherical quad and the quad in the tangent plane are different)
         ! then scale non-dimensional coordinates to be consistent with is_point_in_cell()
@@ -3680,17 +3663,26 @@ real :: Delta_x, Lx_2
 
   ! Check for consistency with test for whether point is inside a polygon
   pos_within_cell=is_point_in_cell(grd, x, y, i, j,explain=explain)
-  if (xi.ge.0. .and. xi.le.1. .and. yj.ge.0. .and. yj.le.1.) then
+  is_point_in_cell_using_xi_yj=is_point_within_xi_yj_bounds(xi,yj)
+  if (is_point_in_cell_using_xi_yj) then
     ! Based on coordinate, the point is out of cell
-    if (pos_within_cell .and. verbose) then
+    if (.not. pos_within_cell) then
       ! Based on is_point_in_cell() the point is within cell so we have an inconsistency
-      if (debug) call error_mesg('diamonds, pos_within_cell', 'pos_within_cell is in cell BUT is_point_in_cell disagrees!', WARNING)
+      if (debug) then
+        write(stderrunit,'(a,1p6e12.4)') 'values of xi, yj ',xi, yj
+        pos_within_cell=is_point_in_cell(grd, x, y, i, j,explain=.True.)
+        call error_mesg('diamonds, pos_within_cell', 'pos_within_cell is False BUT is_point_in_cell disagrees!', FATAL)
+      endif
     endif
   else
     ! Based on coordinate, the point is within cell
-    if (.not. pos_within_cell .and. verbose) then
+    if (pos_within_cell) then
       ! Based on is_point_in_cell() the point is out of cell so we have an inconsistency
-      if (debug) call error_mesg('diamonds, pos_within_cell', 'pos_within_cell is in cell BUT is_point_in_cell disagrees!', WARNING)
+      if (debug) then
+        write(stderrunit,'(a,1p6e12.4)') 'values of xi, yj ',xi, yj
+        pos_within_cell=is_point_in_cell(grd, x, y, i, j,explain=.True.)
+        call error_mesg('diamonds, pos_within_cell', 'pos_within_cell is True BUT is_point_in_cell disagrees!', FATAL)
+      endif
     endif
   endif
 
@@ -3705,11 +3697,9 @@ real :: Delta_x, Lx_2
   real :: alpha, beta, gamma, delta, epsilon, kappa, a, b, c, d, dx, dy, yy1, yy2
   logical :: expl=.false.
   integer :: stderrunit
-  real :: Lx_2
 
   ! Get the stderr unit number
   stderrunit=stderr()
-  Lx_2=Lx/2.
 
   expl=.false.
   if (present(explain)) then
@@ -3726,7 +3716,8 @@ real :: Delta_x, Lx_2
   if (expl) write(stderrunit,'(a,1p6e12.4)') 'calc_xiyj: coeffs delta,epsilon,kappa',alpha,beta,gamma,delta,epsilon,kappa
 
   a=(kappa*beta-gamma*epsilon)
-  dx=modulo(x-(x1-Lx_2),Lx)+(x1-Lx_2)-x1
+  dx= apply_modulo_around_point(x,x1,Lx)-x1
+
   dy=y-y1
   b=(delta*beta-alpha*epsilon)-(kappa*dx-gamma*dy)
   c=(alpha*dy-delta*dx)
@@ -3786,6 +3777,36 @@ real :: Delta_x, Lx_2
 end function pos_within_cell
 
 ! ##############################################################################
+
+logical function is_point_within_xi_yj_bounds(xi,yj)
+! Arguments
+real, intent(in) :: xi, yj
+! Local variables
+!Includes South and East boundaries, and excludes North and West  (double check this is the way that is needed)
+  is_point_within_xi_yj_bounds=.False.
+  if ((xi .ge. 0 )  .and.  (xi .lt. 1)) then
+    if ((yj .ge. 0 )  .and.  (yj .lt. 1)) then
+      is_point_within_xi_yj_bounds=.True.
+    endif
+  endif
+end function is_point_within_xi_yj_bounds
+
+real function apply_modulo_around_point(x,y,Lx)
+! Arguments
+real, intent(in) :: x ,y ,Lx
+!Local_variables
+real ::Lx_2
+!Gives the modula value of x in an interval [y-(Lx/2)  y+(Lx/2)]  , modulo Lx
+!If Lx<=0, then it returns x without applying modulo arithmetic.
+
+  if (Lx>0.) then
+    Lx_2=Lx/2.
+    apply_modulo_around_point=modulo(x-(y-Lx_2),Lx)+(y-Lx_2)
+  else
+    apply_modulo_around_point=x
+  endif
+
+end function apply_modulo_around_point
 
 subroutine check_position(grd, berg, label, il, jl)
 ! Arguments

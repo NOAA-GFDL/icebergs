@@ -38,6 +38,7 @@ use ice_bergs_framework, only: grd_chksum2,grd_chksum3
 use ice_bergs_framework, only: fix_restart_dates, offset_berg_dates
 use ice_bergs_framework, only: orig_read  ! Remove when backward compatibility no longer needed
 use ice_bergs_framework, only: monitor_a_berg
+use ice_bergs_framework, only: is_point_within_xi_yj_bounds
 
 use ice_bergs_io,        only: ice_bergs_io_init,write_restart,write_trajectory
 use ice_bergs_io,        only: read_restart_bergs,read_restart_bergs_orig,read_restart_calving
@@ -4579,6 +4580,7 @@ real, parameter :: posn_eps=0.05
 integer :: icount, i0, j0, inm, jnm
 real :: xi0, yj0, lon0, lat0
 integer :: stderrunit
+logical :: point_in_cell_using_xi_yj
 
   ! Get the stderr unit number
     stderrunit = stderr()
@@ -4596,7 +4598,9 @@ integer :: stderrunit
   if (debug) then
     !Sanity check lret, xi and yj
     lret=is_point_in_cell(grd, lon, lat, i, j)
-    if (xi<0. .or. xi>1. .or. yj<0. .or. yj>1.) then
+    point_in_cell_using_xi_yj=is_point_within_xi_yj_bounds(xi,yj)
+    if (.not. point_in_cell_using_xi_yj) then
+
       if (lret) then
         write(stderrunit,*) 'diamonds, adjust: WARNING!!! lret=T but |xi,yj|>1',mpp_pe()
         write(stderrunit,*) 'diamonds, adjust: xi=',xi,' lon=',lon
@@ -4610,6 +4614,7 @@ integer :: stderrunit
         lret=pos_within_cell(grd, lon, lat, i, j, xi, yj,explain=.true.)
         write(stderrunit,*) 'diamonds, adjust: fn pos_within_cell=',lret
         write(0,*) 'This should never happen!'
+        call error_mesg('adjust index, ','Iceberg is_point_in_cell=True but xi, yi are out of cell',FATAL)
         error=.true.; return
      endif
     else
@@ -4626,6 +4631,7 @@ integer :: stderrunit
         lret=pos_within_cell(grd, lon, lat, i, j, xi, yj, explain=.true.)
         write(stderrunit,*) 'diamonds, adjust: fn pos_within_cell=',lret
         write(0,*) 'This should never happen!'
+        call error_mesg('adjust index, ','Iceberg is_point_in_cell=False but xi, yi are out of cell',FATAL)
         error=.true.; return
       endif
     endif
