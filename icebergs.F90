@@ -39,6 +39,7 @@ use ice_bergs_framework, only: fix_restart_dates, offset_berg_dates
 use ice_bergs_framework, only: orig_read  ! Remove when backward compatibility no longer needed
 use ice_bergs_framework, only: monitor_a_berg
 use ice_bergs_framework, only: is_point_within_xi_yj_bounds
+use ice_bergs_framework, only: test_check_for_duplicate_ids_in_list
 
 use ice_bergs_io,        only: ice_bergs_io_init,write_restart,write_trajectory
 use ice_bergs_io,        only: read_restart_bergs,read_restart_bergs_orig,read_restart_calving
@@ -151,6 +152,7 @@ type(icebergs), pointer :: bergs
 call hexagon_test()
 call point_in_triangle_test()
 call basal_melt_test(bergs)
+call test_check_for_duplicate_ids_in_list()
 
 end subroutine unit_testing
 

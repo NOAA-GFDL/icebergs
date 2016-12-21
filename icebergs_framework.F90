@@ -49,7 +49,6 @@ public verbose, really_debug, debug, restart_input_dir,make_calving_reproduce,ol
 public ignore_ij_restart, use_slow_find,generate_test_icebergs,old_bug_rotated_weights,budget
 public orig_read, force_all_pes_traj
 
-
 !Public types
 public icebergs_gridded, xyt, iceberg, icebergs, buffer, bond 
 
@@ -74,6 +73,8 @@ public move_berg_between_cells
 public find_individual_iceberg
 public monitor_a_berg
 public is_point_within_xi_yj_bounds
+public test_check_for_duplicate_ids_in_list
+public check_for_duplicates_in_parallel
 
 type :: icebergs_gridded
   type(domain2D), pointer :: domain ! MPP domain
@@ -4365,5 +4366,130 @@ logical function unitTests(bergs)
 end function unitTests
 
 ! ##############################################################################
+
+!> Check for duplicates of icebergs on and across processors and issue an error
+!! if any are detected
+subroutine check_for_duplicates_in_parallel(bergs)
+  type(icebergs), pointer :: bergs !< Icebergs
+  ! Local variables
+  type(icebergs_gridded), pointer :: grd
+  type(iceberg), pointer :: this
+  integer :: stderrunit, i, j, k, nbergs, nbergs_total
+  integer, dimension(:), allocatable :: ids ! List of ids of all bergs on this processor
+
+  stderrunit=stderr()
+  grd=>bergs%grd
+  nbergs = count_bergs(bergs)
+  nbergs_total = nbergs
+  call mpp_sum(nbergs_total) ! Total number of bergs
+  if (nbergs_total==0) return ! Skip the rest of the test
+
+  k = 0
+  if (nbergs>0) then
+    allocate(ids(nbergs))
+    do j = grd%jsc,grd%jec ; do i = grd%isc,grd%iec
+      this=>bergs%list(i,j)%first
+      do while (associated(this))
+        k = k + 1
+        ids(k) = this%iceberg_num
+        this=>this%next
+      enddo
+    enddo ; enddo
+  endif
+  if (k /= nbergs) then
+    write(stderrunit,*) 'counted bergs=',k,'count_bergs()=',nbergs
+    call error_mesg('diamonds, check_for_duplicates:', 'Mismatch between concatenation of lists and count_bergs()!', FATAL)
+  endif
+  k = check_for_duplicate_ids_in_list(nbergs, ids, verbose=.true.)
+  if (k /= 0) call error_mesg('diamonds, check_for_duplicates:', 'Duplicate berg detected across PEs!', FATAL)
+  if (nbergs>0) deallocate(ids)
+end subroutine check_for_duplicates_in_parallel
+
+!> Returns error count of duplicates of integer values in a distributed list
+integer function check_for_duplicate_ids_in_list(nbergs, ids, verbose)
+  integer,               intent(in)    :: nbergs !< Length of ids
+  integer, dimension(:), intent(inout) :: ids !< List of ids
+  logical,               intent(in)    :: verbose !< True if messages should be written
+  integer :: stderrunit, i, j, k, l, nbergs_total, ii
+
+  stderrunit=stderr()
+  nbergs_total = nbergs
+  call mpp_sum(nbergs_total) ! Total number of bergs
+  ! Sort the list "ids" (largest first)
+  do j = 1, nbergs-1
+    do i = j+1, nbergs
+      if (ids(j) < ids(i)) then
+        ! Swap
+        k = ids(i)
+        ids(i) = ids(j)
+        ids(j) = k
+      endif
+    enddo
+  enddo
+  ! Check for duplicates on processor
+  check_for_duplicate_ids_in_list = 0
+  do k = 1, nbergs-1
+    if (ids(k) == ids(k+1)) then
+      if (verbose) write(stderrunit,*) 'Duplicated berg on PE with id=',ids(k),'pe=',mpp_pe()
+      check_for_duplicate_ids_in_list = check_for_duplicate_ids_in_list + 1
+    endif
+  enddo
+  ! Check for duplicates across processor
+  j = 1 ! Pointer to first berg in my list
+  do k = 1, nbergs_total
+    ! Set i to first id in my list
+    if (j <= nbergs) then
+      i = ids(j)
+    else
+      i = 0
+    endif
+    l = i
+    call mpp_max(l)
+    if (i == l) then
+      ii = 1 ! This berg is mine
+      j = j + 1
+    else
+      ii = 0 ! This berg is not mine
+    endif
+    call mpp_sum(ii)
+    if (ii > 1) then
+      if (verbose) write(stderrunit,*) 'Duplicated berg across PEs with id=',i,l,' seen',ii,' times pe=',mpp_pe(),k
+      check_for_duplicate_ids_in_list = check_for_duplicate_ids_in_list + 1
+    endif
+  enddo
+
+end function check_for_duplicate_ids_in_list
+
+subroutine test_check_for_duplicate_ids_in_list()
+  integer :: k
+  integer, dimension(:), allocatable :: ids
+  integer :: error_count
+
+  allocate(ids(5))
+  do k = 1,5
+    ids(k) = k + 5*mpp_pe()
+  enddo
+  error_count = check_for_duplicate_ids_in_list(5, ids, verbose=.false.)
+  call mpp_sum(error_count)
+  if (error_count /= 0) then
+    error_count = check_for_duplicate_ids_in_list(5, ids, verbose=.true.)
+    call error_mesg('diamonds, test_check_for_duplicate_ids_in_list:', 'Unit test for clean list failed!', FATAL)
+  endif
+  if (mpp_pe() == mpp_root_pe()) ids(5) = ids(4)
+  error_count = check_for_duplicate_ids_in_list(5, ids, verbose=.false.)
+  call mpp_sum(error_count)
+  if (error_count == 0) then
+    error_count = check_for_duplicate_ids_in_list(5, ids, verbose=.true.)
+    call error_mesg('diamonds, test_check_for_duplicate_ids_in_list:', 'Unit test for dirty list failed!', FATAL)
+  endif
+  if (mpp_pe() == mpp_root_pe()) ids(5) = 7 + 5*mpp_pe()
+  error_count = check_for_duplicate_ids_in_list(5, ids, verbose=.false.)
+  call mpp_sum(error_count)
+  if (error_count == 0) then
+    error_count = check_for_duplicate_ids_in_list(5, ids, verbose=.true.)
+    call error_mesg('diamonds, test_check_for_duplicate_ids_in_list:', 'Unit test for a really dirty list failed!', FATAL)
+  endif
+  deallocate(ids)
+end subroutine test_check_for_duplicate_ids_in_list
 
 end module
