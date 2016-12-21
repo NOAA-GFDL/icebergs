@@ -36,6 +36,7 @@ use ice_bergs_framework, only: nclasses, buffer_width, buffer_width_traj
 use ice_bergs_framework, only: verbose, really_debug, debug, restart_input_dir,make_calving_reproduce
 use ice_bergs_framework, only: ignore_ij_restart, use_slow_find,generate_test_icebergs,print_berg
 use ice_bergs_framework, only: force_all_pes_traj
+use ice_bergs_framework, only: check_for_duplicates_in_parallel
 
 implicit none ; private
 
@@ -845,39 +846,10 @@ integer, allocatable, dimension(:) :: ine,       &
     else ! i,j are not available from the file so we search the grid to find out if we reside on this PE
       if (use_slow_find) then
         lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
-       else
-         lres=find_cell_by_search(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
-       endif
-     endif
-     ! The next few lines are a check to see whether the icebergs are all found.
-
-       ! The next few lines are a check to see whether the icebergs are all found.
-       pos_is_good=0.0
-       if (lres) then
-         pos_is_good=1.0
-       endif
-       pos_is_good_all_pe=pos_is_good
-       call mpp_sum(pos_is_good_all_pe)
-       !Check to see if any iceberg in the restart file was not found
-       if (pos_is_good_all_pe .lt. 0.5) then
-         if (bergs%ignore_missing_restart_bergs) then 
-           if (mpp_pe().eq.mpp_root_pe()) then
-                   print * , 'Iceberg not located: ', lon(k),lat(k), iceberg_num(k)
-                   call error_mesg('diamonds, read_restart_bergs', 'Iceberg positions was not found', WARNING)
-           endif
-         else
-           call error_mesg('diamonds, read_restart_bergs', 'Iceberg positions was not found', FATAL)
-         endif
-
-       endif
-       !Check to see if any iceberg was found more than once.
-       if (pos_is_good_all_pe .gt. 1.5) then
-         if (mpp_pe().eq.mpp_root_pe()) then
-           print * , 'Iceberg was found more than once: ', lon(k),lat(k), iceberg_num(k)
-           call error_mesg('diamonds, read_restart_bergs', 'Iceberg copied twice', FATAL)
-         endif
-       endif
-
+      else
+        lres=find_cell_by_search(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+      endif
+    endif
     if (really_debug) then
       write(stderrunit,'(a,i8,a,2f9.4,a,i8)') 'diamonds, read_restart_bergs: berg ',k,' is at ',localberg%lon,localberg%lat,&
            & ' on PE ',mpp_pe()
@@ -935,54 +907,59 @@ integer, allocatable, dimension(:) :: ine,       &
   enddo
   
   if(nbergs_in_file > 0) then
-     deallocate(              &
-                lon,          &
-                lat,          &
-                uvel,         &
-                vvel,         &
-                mass,         &
-                axn,          &
-                ayn,          &
-                bxn,          &
-                byn,          &
-                thickness,    &
-                width,        &
-                length,       &
-                start_lon,    &
-                start_lat,    &
-                start_day,    &
-                start_mass,   &
-                mass_scaling, &
-                mass_of_bits, &
-                static_berg,    &
-                heat_density )
-     deallocate(           &
-                ine,       &
-                jne,       &
-                iceberg_num,       &
-                start_year )
+    deallocate(              &
+               lon,          &
+               lat,          &
+               uvel,         &
+               vvel,         &
+               mass,         &
+               axn,          &
+               ayn,          &
+               bxn,          &
+               byn,          &
+               thickness,    &
+               width,        &
+               length,       &
+               start_lon,    &
+               start_lat,    &
+               start_day,    &
+               start_mass,   &
+               mass_scaling, &
+               mass_of_bits, &
+               static_berg,  &
+               heat_density )
+    deallocate(              &
+               ine,          &
+               jne,          &
+               iceberg_num,  &
+               start_year )
 
-     !Checking the total number of icebergs read from the restart file.
-     nbergs_read=count_bergs(bergs)
-     call mpp_sum(nbergs_read)
-     if (mpp_pe().eq.mpp_root_pe()) then
-       write(*,'(a,i8,a,i8,a)') 'diamonds, read_restart_bergs: Number of Icebergs in restart file=',nbergs_in_file,' Number of Icebergs read=', nbergs_read
-       if (nbergs_read .gt. nbergs_in_file) then
-         call error_mesg('diamonds, read_restart_bergs', 'More icebergs read than exist in restart file.', FATAL)
-       elseif (nbergs_read .lt. nbergs_in_file) then
-         if (bergs%ignore_missing_restart_bergs) then
-           call error_mesg('diamonds, read_restart_bergs', 'Some Icebergs from restart file were not found (ignore_missing flag is on)', WARNING)
-         else
-           call error_mesg('diamonds, read_restart_bergs', 'Some Icebergs from restart file were not found', FATAL)
-         endif
-       elseif (nbergs_read .eq. nbergs_in_file) then
-         write(*,'(a,i8,a,i8,a)') 'diamonds, read_restart_bergs: Number of icebergs read (#',nbergs_read,') matches the number of icebergs in the file'
-       endif
-     endif
+    ! This block only works for IO_LAYOUT=1,1 or 0,0 but not for arbitrary layouts.
+    ! I'm commenting this out until we find a way to implement the same sorts of checks
+    ! that work for all i/o layouts. -AJA
+    !Checking the total number of icebergs read from the restart file.
+    !nbergs_read=count_bergs(bergs)
+    !call mpp_sum(nbergs_read)
+    !if (mpp_pe().eq.mpp_root_pe()) then
+    !  write(*,'(a,i8,a,i8,a)') 'diamonds, read_restart_bergs: Number of Icebergs in restart file=',nbergs_in_file,' Number of Icebergs read=', nbergs_read
+    !  if (nbergs_read .gt. nbergs_in_file) then
+    !    call error_mesg('diamonds, read_restart_bergs', 'More icebergs read than exist in restart file.', FATAL)
+    !  elseif (nbergs_read .lt. nbergs_in_file) then
+    !    if (bergs%ignore_missing_restart_bergs) then
+    !      call error_mesg('diamonds, read_restart_bergs', 'Some Icebergs from restart file were not found (ignore_missing flag is on)', WARNING)
+    !    else
+    !      call error_mesg('diamonds, read_restart_bergs', 'Some Icebergs from restart file were not found', FATAL)
+    !    endif
+    !  elseif (nbergs_read .eq. nbergs_in_file) then
+    !    write(*,'(a,i8,a,i8,a)') 'diamonds, read_restart_bergs: Number of icebergs read (#',nbergs_read,') matches the number of icebergs in the file'
+    !  endif
+    !endif
 
   elseif(.not. found_restart .and. bergs%nbergs_start==0 .and. generate_test_icebergs) then
-     call generate_bergs(bergs,Time)
+    call generate_bergs(bergs,Time)
   endif
+
+  call check_for_duplicates_in_parallel(bergs)
 
   bergs%floating_mass_start=sum_mass(bergs)
   call mpp_sum( bergs%floating_mass_start )
