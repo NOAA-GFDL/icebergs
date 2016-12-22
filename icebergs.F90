@@ -2822,7 +2822,7 @@ logical :: lerr, sample_traj, write_traj, lbudget, lverbose, check_bond_quality
 real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass,grdd_spread_mass, grdd_spread_area
 real :: grdd_u_iceberg, grdd_v_iceberg, grdd_ustar_iceberg, grdd_spread_uvel, grdd_spread_vvel
 integer :: i, j, Iu, ju, iv, Jv, Iu_off, ju_off, iv_off, Jv_off
-real :: mask
+real :: mask, max_SST
 real, dimension(:,:), allocatable :: uC_tmp, vC_tmp, uA_tmp, vA_tmp
 integer :: vel_stagger, str_stagger
 real, dimension(:,:), allocatable :: iCount
@@ -3038,7 +3038,12 @@ integer :: stderrunit
   endif
 
   call mpp_update_domains(grd%ssh, grd%domain)
-  grd%sst(grd%isc:grd%iec,grd%jsc:grd%jec)=sst(:,:)-273.15 ! Note convert from Kelvin to Celsius
+  max_SST = maxval(sst(:,:))
+  if (max_SST > 120.0) then ! The input sst is in degrees Kelvin, otherwise the water would be boiling.
+    grd%sst(grd%isc:grd%iec,grd%jsc:grd%jec) = sst(:,:)-273.15 ! Note convert from Kelvin to Celsius
+  else  ! The input sst is already in degrees Celsius.
+    grd%sst(grd%isc:grd%iec,grd%jsc:grd%jec) = sst(:,:) ! Note no conversion necessary.
+  endif
   call mpp_update_domains(grd%sst, grd%domain)
   ! Copy sea-ice concentration and thickness (resides on A grid)
   grd%cn(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=cn(:,:)
