@@ -100,7 +100,7 @@ subroutine write_restart(bergs)
 type(icebergs), pointer :: bergs
 ! Local variables
 integer :: i,j,id
-character(len=35) :: filename
+character(len=35) :: filename, filename_base
 type(iceberg), pointer :: this=>NULL()
 integer :: stderrunit
 !I/O vars
@@ -189,6 +189,7 @@ integer, allocatable, dimension(:) :: ine,       &
    allocate(start_year(nbergs))
    allocate(iceberg_num(nbergs))
 
+  filename_base = "icebergs.res.nc"
   call get_instance_filename("icebergs.res.nc", filename)
   call set_domain(bergs%grd%domain)
   call register_restart_axis(bergs_restart,filename,'i',nbergs)
@@ -199,41 +200,41 @@ integer, allocatable, dimension(:) :: ine,       &
   !Now start writing in the io_tile_root_pe if there are any bergs in the I/O list
 
   ! Define Variables
-  id = register_restart_field(bergs_restart,filename,'lon',lon,longname='longitude',units='degrees_E')
-  id = register_restart_field(bergs_restart,filename,'lat',lat,longname='latitude',units='degrees_N')
-  id = register_restart_field(bergs_restart,filename,'lon_old',lon_old,longname='longitude',units='degrees_E') !Alon
-  id = register_restart_field(bergs_restart,filename,'lat_old',lat_old,longname='latitude',units='degrees_N') !Alon
-  id = register_restart_field(bergs_restart,filename,'uvel',uvel,longname='zonal velocity',units='m/s')
-  id = register_restart_field(bergs_restart,filename,'vvel',vvel,longname='meridional velocity',units='m/s')
-  id = register_restart_field(bergs_restart,filename,'mass',mass,longname='mass',units='kg')
-  id = register_restart_field(bergs_restart,filename,'axn',axn,longname='explicit zonal acceleration',units='m/s^2') !Alon
-  id = register_restart_field(bergs_restart,filename,'ayn',ayn,longname='explicit meridional acceleration',units='m/s^2') !Alon
-  id = register_restart_field(bergs_restart,filename,'uvel_old',uvel_old,longname='old explicit zonal acceleration',units='m/s^2') !Alon
-  id = register_restart_field(bergs_restart,filename,'vvel_old',vvel_old,longname='old explicit meridional acceleration',units='m/s^2') !Alon
-  id = register_restart_field(bergs_restart,filename,'bxn',bxn,longname='inplicit zonal acceleration',units='m/s^2') !Alon
-  id = register_restart_field(bergs_restart,filename,'byn',byn,longname='implicit meridional acceleration',units='m/s^2') !Alon
-  id = register_restart_field(bergs_restart,filename,'ine',ine,longname='i index',units='none')
-  id = register_restart_field(bergs_restart,filename,'jne',jne,longname='j index',units='none')
-  id = register_restart_field(bergs_restart,filename,'thickness',thickness,longname='thickness',units='m')
-  id = register_restart_field(bergs_restart,filename,'width',width,longname='width',units='m')
-  id = register_restart_field(bergs_restart,filename,'length',length,longname='length',units='m')
-  id = register_restart_field(bergs_restart,filename,'start_lon',start_lon, &
+  id = register_restart_field(bergs_restart,filename_base,'lon',lon,longname='longitude',units='degrees_E')
+  id = register_restart_field(bergs_restart,filename_base,'lat',lat,longname='latitude',units='degrees_N')
+  id = register_restart_field(bergs_restart,filename_base,'lon_old',lon_old,longname='longitude',units='degrees_E') !Alon
+  id = register_restart_field(bergs_restart,filename_base,'lat_old',lat_old,longname='latitude',units='degrees_N') !Alon
+  id = register_restart_field(bergs_restart,filename_base,'uvel',uvel,longname='zonal velocity',units='m/s')
+  id = register_restart_field(bergs_restart,filename_base,'vvel',vvel,longname='meridional velocity',units='m/s')
+  id = register_restart_field(bergs_restart,filename_base,'mass',mass,longname='mass',units='kg')
+  id = register_restart_field(bergs_restart,filename_base,'axn',axn,longname='explicit zonal acceleration',units='m/s^2') !Alon
+  id = register_restart_field(bergs_restart,filename_base,'ayn',ayn,longname='explicit meridional acceleration',units='m/s^2') !Alon
+  id = register_restart_field(bergs_restart,filename_base,'uvel_old',uvel_old,longname='old explicit zonal acceleration',units='m/s^2') !Alon
+  id = register_restart_field(bergs_restart,filename_base,'vvel_old',vvel_old,longname='old explicit meridional acceleration',units='m/s^2') !Alon
+  id = register_restart_field(bergs_restart,filename_base,'bxn',bxn,longname='inplicit zonal acceleration',units='m/s^2') !Alon
+  id = register_restart_field(bergs_restart,filename_base,'byn',byn,longname='implicit meridional acceleration',units='m/s^2') !Alon
+  id = register_restart_field(bergs_restart,filename_base,'ine',ine,longname='i index',units='none')
+  id = register_restart_field(bergs_restart,filename_base,'jne',jne,longname='j index',units='none')
+  id = register_restart_field(bergs_restart,filename_base,'thickness',thickness,longname='thickness',units='m')
+  id = register_restart_field(bergs_restart,filename_base,'width',width,longname='width',units='m')
+  id = register_restart_field(bergs_restart,filename_base,'length',length,longname='length',units='m')
+  id = register_restart_field(bergs_restart,filename_base,'start_lon',start_lon, &
                                             longname='longitude of calving location',units='degrees_E')
-  id = register_restart_field(bergs_restart,filename,'start_lat',start_lat, &
+  id = register_restart_field(bergs_restart,filename_base,'start_lat',start_lat, &
                                             longname='latitude of calving location',units='degrees_N')
-  id = register_restart_field(bergs_restart,filename,'start_year',start_year, &
+  id = register_restart_field(bergs_restart,filename_base,'start_year',start_year, &
                                             longname='calendar year of calving event', units='years')
-  id = register_restart_field(bergs_restart,filename,'iceberg_num',iceberg_num, &
+  id = register_restart_field(bergs_restart,filename_base,'iceberg_num',iceberg_num, &
                                             longname='identification of the iceberg', units='dimensionless')
-  id = register_restart_field(bergs_restart,filename,'start_day',start_day, &
+  id = register_restart_field(bergs_restart,filename_base,'start_day',start_day, &
                                             longname='year day of calving event',units='days')
-  id = register_restart_field(bergs_restart,filename,'start_mass',start_mass, &
+  id = register_restart_field(bergs_restart,filename_base,'start_mass',start_mass, &
                                             longname='initial mass of calving berg',units='kg')
-  id = register_restart_field(bergs_restart,filename,'mass_scaling',mass_scaling, &
+  id = register_restart_field(bergs_restart,filename_base,'mass_scaling',mass_scaling, &
                                             longname='scaling factor for mass of calving berg',units='none')
-  id = register_restart_field(bergs_restart,filename,'mass_of_bits',mass_of_bits, &
+  id = register_restart_field(bergs_restart,filename_base,'mass_of_bits',mass_of_bits, &
                                             longname='mass of bergy bits',units='kg')
-  id = register_restart_field(bergs_restart,filename,'heat_density',heat_density, &
+  id = register_restart_field(bergs_restart,filename_base,'heat_density',heat_density, &
                                             longname='heat density',units='J/kg')
 
   ! Write variables
