@@ -4410,11 +4410,22 @@ integer function check_for_duplicate_ids_in_list(nbergs, ids, verbose)
   integer,               intent(in)    :: nbergs !< Length of ids
   integer, dimension(:), intent(inout) :: ids !< List of ids
   logical,               intent(in)    :: verbose !< True if messages should be written
-  integer :: stderrunit, i, j, k, l, nbergs_total, ii
+  integer :: stderrunit, i, j, k, l, nbergs_total, ii, lowest_id, nonexistent_id
+  logical :: have_berg
 
   stderrunit=stderr()
   nbergs_total = nbergs
   call mpp_sum(nbergs_total) ! Total number of bergs
+
+  ! Establish lowest id or 0 across all PEs
+  lowest_id = 0
+  if (nbergs>0) lowest_id = minval(ids)
+  call mpp_min(lowest_id)
+  i = lowest_id
+  nonexistent_id = lowest_id - 1
+  if (nonexistent_id >= lowest_id) then
+    write(stderrunit,*) 'Underflow in iceberg ids!',nonexistent_id,lowest_id,mpp_pe()
+  endif
   ! Sort the list "ids" (largest first)
   do j = 1, nbergs-1
     do i = j+1, nbergs
@@ -4440,12 +4451,14 @@ integer function check_for_duplicate_ids_in_list(nbergs, ids, verbose)
     ! Set i to first id in my list
     if (j <= nbergs) then
       i = ids(j)
+      have_berg = .true.
     else
-      i = 0
+      i = nonexistent_id
+      have_berg = .false.
     endif
     l = i
     call mpp_max(l)
-    if (i == l) then
+    if (have_berg .and. i == l) then
       ii = 1 ! This berg is mine
       j = j + 1
     else
@@ -4453,8 +4466,10 @@ integer function check_for_duplicate_ids_in_list(nbergs, ids, verbose)
     endif
     call mpp_sum(ii)
     if (ii > 1) then
-      if (verbose) write(stderrunit,*) 'Duplicated berg across PEs with id=',i,l,' seen',ii,' times pe=',mpp_pe(),k
+      if (verbose) write(stderrunit,*) 'Duplicated berg across PEs with id=',i,l,' seen',ii,' times pe=',mpp_pe(),k,j,nbergs
       check_for_duplicate_ids_in_list = check_for_duplicate_ids_in_list + 1
+    elseif (ii == 0) then
+      if (verbose) write(stderrunit,*) 'Berg not accounted for on all PEs with id=',i,l,' seen',ii,' times pe=',mpp_pe(),k,j,nbergs
     endif
   enddo
 
