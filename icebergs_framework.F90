@@ -245,6 +245,7 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
   logical :: time_average_weight=.false. ! Time average the weight on the ocean
   logical :: Runge_not_Verlet=.True.  !True=Runge Kuttai, False=Verlet.  - Added by Alon 
+  logical :: use_mixed_melting=.False.  !If true, then the melt is determined partly using 3 eq model partly using iceberg parametrizations (according to iceberg bond number)
   logical :: apply_thickness_cutoff_to_gridded_melt=.False.  !Prevents melt for ocean thickness below melt_cuttoff (applied to gridded melt fields)
   logical :: apply_thickness_cutoff_to_bergs_melt=.False.  !Prevents melt for ocean thickness below melt_cuttoff (applied to bergs)
   logical :: use_updated_rolling_scheme=.false. ! True to use the aspect ratio based rolling scheme rather than incorrect version of WM scheme   (set tip_parameter=1000. for correct WM scheme)
@@ -398,6 +399,7 @@ real :: tau_calving=0. ! Time scale for smoothing out calving field (years)
 real :: tip_parameter=0. ! parameter to override iceberg rollilng critica ratio (use zero to get parameter directly from ice and seawater densities
 real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
 logical :: Runge_not_Verlet=.True.  !True=Runge Kutta, False=Verlet.  - Added by Alon 
+logical :: use_mixed_melting=.False.  !If true, then the melt is determined partly using 3 eq model partly using iceberg parametrizations (according to iceberg bond number)
 logical :: apply_thickness_cutoff_to_gridded_melt=.False.  !Prevents melt for ocean thickness below melt_cuttoff (applied to gridded melt fields)
 logical :: apply_thickness_cutoff_to_bergs_melt=.False.  !Prevents melt for ocean thickness below melt_cuttoff (applied to bergs)
 logical :: use_updated_rolling_scheme=.false. ! Use the corrected Rolling Scheme rather than the erronios one
@@ -449,7 +451,7 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          grid_is_regular,override_iceberg_velocities,u_override,v_override,add_iceberg_thickness_to_SSH,Iceberg_melt_without_decay,melt_icebergs_as_ice_shelf, &
          Use_three_equation_model,find_melt_using_spread_mass,use_mixed_layer_salinity_for_thermo,utide_icebergs,ustar_icebergs_bg,cdrag_icebergs, pass_fields_to_ocean_model, &
          const_gamma, Gamma_T_3EQ, ignore_traj, debug_iceberg_with_id,use_updated_rolling_scheme, tip_parameter, read_old_restarts, tau_calving, read_ocean_depth_from_file, melt_cutoff,&
-         apply_thickness_cutoff_to_gridded_melt, apply_thickness_cutoff_to_bergs_melt 
+         apply_thickness_cutoff_to_gridded_melt, apply_thickness_cutoff_to_bergs_melt,use_mixed_melting 
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -828,6 +830,7 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
   bergs%tip_parameter=tip_parameter
   bergs%use_updated_rolling_scheme=use_updated_rolling_scheme  !Alon
   bergs%Runge_not_Verlet=Runge_not_Verlet   
+  bergs%use_mixed_melting=use_mixed_melting   
   bergs%apply_thickness_cutoff_to_bergs_melt=apply_thickness_cutoff_to_bergs_melt
   bergs%apply_thickness_cutoff_to_gridded_melt=apply_thickness_cutoff_to_gridded_melt
   bergs%melt_cutoff=melt_cutoff 
