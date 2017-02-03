@@ -1118,11 +1118,13 @@ subroutine thermodynamics(bergs)
 type(icebergs), pointer :: bergs
 ! Local variables
 type(icebergs_gridded), pointer :: grd
+type(bond), pointer :: current_bond
 real :: M, T, W, L, SST, Vol, Ln, Wn, Tn, nVol, IC, Dn
 real :: Mv, Me, Mb, melt, dvo, dva, dM, Ss, dMe, dMb, dMv
 real :: Mnew, Mnew1, Mnew2, Hocean
 real :: Mbits, nMbits, dMbitsE, dMbitsM, Lbits, Abits, Mbb
 real :: tip_parameter
+real :: Ms, N_bonds, N_max !Ice shelf melt, Number of bonds, Max_number of bonds
 real :: Delta, q
 integer :: i,j, stderrunit
 type(iceberg), pointer :: this, next
@@ -1170,21 +1172,40 @@ real :: SSS !Temporarily here
           *perday ! convert to m/s
       Me=max( 1./12.*(SST+2.)*Ss*(1+cos(pi*(IC**3))) ,0.) &! Wave erosion
           *perday ! convert to m/s
-
+       
       !For icebergs acting as ice shelves 
-      if (bergs%melt_icebergs_as_ice_shelf) then
-        Mv=0.0
-        Mb=0.0
-        Me=0.0
+      if ((bergs%melt_icebergs_as_ice_shelf) .or.(bergs%use_mixed_melting))  then
         if (.not. bergs%use_mixed_layer_salinity_for_thermo)  SSS=35.0  
-        call find_basal_melt(bergs,dvo,this%lat,SSS,SST,bergs%Use_three_equation_model,T,Mb,this%iceberg_num)
-        Mb=max(Mb,0.) !No refreezing allowed for now
+        call find_basal_melt(bergs,dvo,this%lat,SSS,SST,bergs%Use_three_equation_model,T,Ms,this%iceberg_num)
+        Ms=max(Ms,0.) !No refreezing allowed for now
         !Set melt to zero if ocean is too thin.
         if ((bergs%melt_cutoff >=0.) .and. (bergs%apply_thickness_cutoff_to_bergs_melt)) then
           Dn=(bergs%rho_bergs/rho_seawater)*this%thickness ! draught (keel depth)
           if ((grd%ocean_depth(i,j)-Dn) < bergs%melt_cutoff) then
-            Mb=0.
+            Ms=0.
           endif
+        endif
+
+        if (bergs%use_mixed_melting) then
+          N_bonds=0.
+          N_max=4.0  !Maximum number of bonds that element can form based on shape      
+          if (bergs%hexagonal_icebergs) N_max=6.0
+          if (bergs%iceberg_bonds_on) then
+            ! Determining number of bonds
+            current_bond=>this%first_bond
+            do while (associated(current_bond)) ! loop over all bonds
+              N_bonds=N_bonds+1.0
+              current_bond=>current_bond%next_bond
+            enddo
+          endif
+          if  (this%static_berg .eq. 1)  N_bonds=N_max  !Static icebergs melt  like ice shelves 
+          Me=((N_max-N_bonds)/N_max)*(Mv+Me)
+          Mv=0.0
+          Mb=(((N_max-N_bonds)/N_max)*(Mb)) + (N_bonds/N_max)*Ms
+        else  !Using Three equation model only.
+          Mv=0.0
+          Me=0.0
+          Mb=Ms
         endif
       endif
             
