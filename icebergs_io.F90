@@ -1,4 +1,7 @@
+!> Handles reading/writing of restart files and trajectory-based diagnostic files
 module ice_bergs_io
+
+! This file is part of NOAA-GFDL/icebergs. See LICENSE.md for the license.
 
 use mpp_domains_mod, only: domain2D
 use mpp_domains_mod, only: mpp_domain_is_tile_root_pe,mpp_get_domain_tile_root_pe
@@ -66,9 +69,10 @@ integer :: clock_trw,clock_trp
 
 contains
 
+!> Initialize parallel i/o
 subroutine ice_bergs_io_init(bergs, io_layout)
-type(icebergs), pointer :: bergs
-integer, intent(in) :: io_layout(2)
+type(icebergs), pointer :: bergs !< Icebergs container
+integer, intent(in) :: io_layout(2) !< Decomposition of i/o processors
 
 integer :: np
 integer :: stdlogunit, stderrunit
@@ -78,7 +82,7 @@ integer :: stdlogunit, stderrunit
   stdlogunit=stdlog()
   write(stdlogunit,*) "ice_bergs_framework: "//trim(version)
 
-  !I/O layout init 
+  !I/O layout init
   io_tile_id=-1
   io_domain => mpp_get_io_domain(bergs%grd%domain)
   if(associated(io_domain)) then
@@ -96,13 +100,12 @@ integer :: stdlogunit, stderrunit
 
 end subroutine ice_bergs_io_init
 
-! ##############################################################################
-
+!> Write an iceberg restart file
 subroutine write_restart(bergs)
 ! Arguments
-type(icebergs), pointer :: bergs
-type(bond), pointer :: current_bond
+type(icebergs), pointer :: bergs !< Icebergs container
 ! Local variables
+type(bond), pointer :: current_bond
 integer :: i,j,id
 character(len=35) :: filename
 character(len=35) :: filename_bonds
@@ -113,7 +116,7 @@ type(restart_file_type) :: bergs_restart
 type(restart_file_type) :: bergs_bond_restart
 integer :: nbergs, nbonds
 integer :: n_static_bergs
-logical :: check_bond_quality 
+logical :: check_bond_quality
 type(icebergs_gridded), pointer :: grd
 real, allocatable, dimension(:) :: lon,          &
                                    lat,          &
@@ -149,14 +152,14 @@ integer, allocatable, dimension(:) :: ine,              &
 
 
 integer :: grdi, grdj
-  
+
 ! Get the stderr unit number
  stderrunit=stderr()
 
 
   ! For convenience
   grd=>bergs%grd
- 
+
   !First add the bergs on the io_tile_root_pe (if any) to the I/O list
   nbergs = 0
   do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
@@ -248,13 +251,13 @@ integer :: grdi, grdj
       this=>this%next
     enddo
   enddo ; enddo
-  call mpp_sum(n_static_bergs) 
+  call mpp_sum(n_static_bergs)
   if (n_static_bergs .gt. 0) &
     id = register_restart_field(bergs_restart,filename,'static_berg',static_berg, &
                                               longname='static_berg',units='dimensionless')
 
   ! Write variables
-   
+
   i = 0
   do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
     this=>bergs%list(grdi,grdj)%first
@@ -270,8 +273,8 @@ integer :: grdi, grdj
       start_lon(i) = this%start_lon; start_lat(i) = this%start_lat
       start_year(i) = this%start_year; start_day(i) = this%start_day
       start_mass(i) = this%start_mass; mass_scaling(i) = this%mass_scaling
-      static_berg(i) = this%static_berg 
-      iceberg_num(i) = this%iceberg_num; 
+      static_berg(i) = this%static_berg
+      iceberg_num(i) = this%iceberg_num
       mass_of_bits(i) = this%mass_of_bits; heat_density(i) = this%heat_density
       this=>this%next
     enddo
@@ -313,18 +316,18 @@ integer :: grdi, grdj
 
 !########## Creating bond restart file ######################
 
-   !Allocating restart memory for bond related variables.
-   nbonds=0
-   if (bergs%iceberg_bonds_on) then
-     check_bond_quality=.true.
-     call count_bonds(bergs, nbonds,check_bond_quality)
+  !Allocating restart memory for bond related variables.
+  nbonds=0
+  if (bergs%iceberg_bonds_on) then
+    check_bond_quality=.true.
+    call count_bonds(bergs, nbonds,check_bond_quality)
 
-   allocate(first_berg_num(nbonds))
-   allocate(other_berg_num(nbonds))
-   allocate(first_berg_ine(nbonds))
-   allocate(first_berg_jne(nbonds))
-   allocate(other_berg_ine(nbonds))
-   allocate(other_berg_jne(nbonds))
+  allocate(first_berg_num(nbonds))
+  allocate(other_berg_num(nbonds))
+  allocate(first_berg_ine(nbonds))
+  allocate(first_berg_jne(nbonds))
+  allocate(other_berg_ine(nbonds))
+  allocate(other_berg_jne(nbonds))
 
   call get_instance_filename("bonds_iceberg.res.nc", filename_bonds)
   call set_domain(bergs%grd%domain)
@@ -341,10 +344,10 @@ integer :: grdi, grdj
   id = register_restart_field(bergs_bond_restart,filename_bonds,'other_berg_ine',other_berg_ine,longname='iceberg ine of second berg in bond',units='dimensionless')
   id = register_restart_field(bergs_bond_restart,filename_bonds,'other_berg_jne',other_berg_jne,longname='iceberg jne of second berg in bond',units='dimensionless')
   id = register_restart_field(bergs_bond_restart,filename_bonds,'other_berg_num',other_berg_num,longname='iceberg id second berg in bond',units='dimensionless')
-  
-  
+
+
   ! Write variables
-   
+
   i = 0
   do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
     this=>bergs%list(grdi,grdj)%first
@@ -379,8 +382,7 @@ integer :: grdi, grdj
 
 
   call nullify_domain()
-   endif
-!#############################################################################################
+  endif
 
   ! Write stored ice
   filename='RESTART/calving.res.nc'
@@ -400,9 +402,11 @@ integer :: grdi, grdj
   endif
   contains
 
+  !> Find the last berg in a linked list.
   function last_berg(berg)
   ! Arguments
-  type(iceberg), pointer :: last_berg, berg
+  type(iceberg), pointer :: berg !< Pointer to an iceberg
+  type(iceberg), pointer :: last_berg
   ! Local variables
 
     last_berg=>berg
@@ -414,12 +418,11 @@ integer :: grdi, grdj
 
 end subroutine write_restart
 
-! ##############################################################################
-
+!> Read an iceberg restart file (original implementation)
 subroutine read_restart_bergs_orig(bergs,Time)
 ! Arguments
-type(icebergs), pointer :: bergs
-type(time_type), intent(in) :: Time
+type(icebergs), pointer :: bergs !< Icebergs container
+type(time_type), intent(in) :: Time !< Model time
 ! Local variables
 integer, dimension(:), allocatable :: found_restart_int
 integer :: k, ierr, ncid, dimid, nbergs_in_file
@@ -471,7 +474,7 @@ integer :: stderrunit, iNg, jNg, i, j
 
   elseif (found_restart) then ! if (.not.found_restart)
   ! only do the following if a file was found
-  
+
   if (verbose.and.mpp_pe()==mpp_root_pe()) write(*,'(2a)') 'diamonds, read_restart_bergs: found restart file = ',filename
 
   ierr=nf_open(filename, NF_NOWRITE, ncid)
@@ -580,7 +583,7 @@ integer :: stderrunit, iNg, jNg, i, j
   else ! if no restart file was read on this PE
     nbergs_in_file=0
   endif ! if (.not.found_restart)
-  
+
   ! Sanity check
   k=count_bergs(bergs)
   if (verbose) write(*,'(2(a,i8))') 'diamonds, read_restart_bergs: # bergs =',k,' on PE',mpp_pe()
@@ -595,7 +598,7 @@ integer :: stderrunit, iNg, jNg, i, j
      k,' bergs have been read'
   endif
 
-  if (k.ne.nbergs_in_file) call error_mesg('diamonds, read_restart_bergs', 'wrong number of bergs read!', FATAL) 
+  if (k.ne.nbergs_in_file) call error_mesg('diamonds, read_restart_bergs', 'wrong number of bergs read!', FATAL)
 
   if (.not. found_restart .and. bergs%nbergs_start==0 .and. generate_test_icebergs) call generate_bergs(bergs,Time)
 
@@ -609,6 +612,7 @@ integer :: stderrunit, iNg, jNg, i, j
 
 contains
 
+  !> Read a real value from a file and optionally return a default value if variable is missing
   real function get_real_from_file(ncid, varid, k, value_if_not_in_file)
   integer, intent(in) :: ncid, varid, k
   real, optional :: value_if_not_in_file
@@ -619,11 +623,12 @@ contains
     get_real_from_file=get_double(ncid, ncid, k)
   endif
   end function get_real_from_file
-  
+
+  !> Generate bergs for the purpose of debugging
   subroutine generate_bergs(bergs,Time)
   ! Arguments
-  type(icebergs), pointer :: bergs
-  type(time_type), intent(in) :: Time
+  type(icebergs), pointer :: bergs !< Icebergs container
+  type(time_type), intent(in) :: Time !< Model time
   ! Local variables
   integer :: i,j
   integer :: iNg, jNg  !Total number of points gloablly in i and j direction
@@ -667,7 +672,7 @@ contains
         localberg%vvel_old=0. !Alon
         localberg%bxn=0. !Alon
         localberg%byn=0. !Alon
-        
+
         !Berg A
         localberg%uvel=1.
         localberg%vvel=0.
@@ -701,15 +706,14 @@ contains
       write(*,'(a,i8,a)') 'diamonds, generate_bergs: ',bergs%nbergs_start,' were generated'
 
   end subroutine generate_bergs
-  
+
 end subroutine read_restart_bergs_orig
 
-! ##############################################################################
-
+!> Read an iceberg restart file
 subroutine read_restart_bergs(bergs,Time)
 ! Arguments
-type(icebergs), pointer :: bergs
-type(time_type), intent(in) :: Time
+type(icebergs), pointer :: bergs !< Icebergs container
+type(time_type), intent(in) :: Time !< Model time
 ! Local variables
 integer :: k, siz(4), nbergs_in_file, nbergs_read
 logical :: lres, found_restart, found
@@ -830,7 +834,7 @@ integer, allocatable, dimension(:) :: ine,       &
   lon1=maxval( grd%lon(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
   lat0=minval( grd%lat(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
   lat1=maxval( grd%lat(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
-     
+
   do k=1, nbergs_in_file
     localberg%lon=lon(k)
     localberg%lat=lat(k)
@@ -905,7 +909,7 @@ integer, allocatable, dimension(:) :: ine,       &
       call error_mesg('diamonds, read_restart_bergs', 'berg in PE file was not on PE!', FATAL)
     endif
   enddo
-  
+
   if(nbergs_in_file > 0) then
     deallocate(              &
                lon,          &
@@ -971,12 +975,13 @@ integer, allocatable, dimension(:) :: ine,       &
 
 contains
 
+  !> Read a vector of reals from file and use a default value if variable is missing
   subroutine read_real_vector(filename, varname, values, domain, value_if_not_in_file)
-    character(len=*), intent(in)  :: filename
-    character(len=*), intent(in)  :: varname
-    real,             intent(out) :: values(:)
-    type(domain2D),   intent(in)  :: domain
-    real, optional,   intent(in)  :: value_if_not_in_file
+    character(len=*), intent(in)  :: filename !< Name of file to read from
+    character(len=*), intent(in)  :: varname !< Name of variable to read
+    real,             intent(out) :: values(:) !< Returned vector of reals
+    type(domain2D),   intent(in)  :: domain !< Parallel decomposition
+    real, optional,   intent(in)  :: value_if_not_in_file !< Value to use if variable is not in file
 
     if (present(value_if_not_in_file).and..not.field_exist(filename, varname)) then
       values(:)=value_if_not_in_file
@@ -985,12 +990,13 @@ contains
     endif
   end subroutine read_real_vector
 
+  !> Read a vector of integers from file and use a default value if variable is missing
   subroutine read_int_vector(filename, varname, values, domain, value_if_not_in_file)
-    character(len=*),  intent(in)  :: filename
-    character(len=*),  intent(in)  :: varname
-    integer,           intent(out) :: values(:)
-    type(domain2D),    intent(in)  :: domain
-    integer, optional, intent(in)  :: value_if_not_in_file
+    character(len=*),  intent(in)  :: filename !< Name of file to read from
+    character(len=*),  intent(in)  :: varname !< Name of variable to read
+    integer,           intent(out) :: values(:) !< Returned vector of integers
+    type(domain2D),    intent(in)  :: domain !< Parallel decomposition
+    integer, optional, intent(in)  :: value_if_not_in_file !< Value to use if variable is not in file
 
     if (present(value_if_not_in_file).and..not.field_exist(filename, varname)) then
       values(:)=value_if_not_in_file
@@ -998,11 +1004,12 @@ contains
       call read_unlimited_axis(filename,varname,values,domain=domain)
     endif
   end subroutine read_int_vector
-  
+
+  !> Generate bergs for the purpose of debugging
   subroutine generate_bergs(bergs,Time)
   ! Arguments
-  type(icebergs), pointer :: bergs
-  type(time_type), intent(in) :: Time
+  type(icebergs), pointer :: bergs !< Icebergs container
+  type(time_type), intent(in) :: Time !< Model time
   ! Local variables
   integer :: i,j
   integer :: iNg, jNg  !Total number of points gloablly in i and j direction
@@ -1080,9 +1087,12 @@ contains
   end subroutine generate_bergs
 
   subroutine loc_set_berg_pos(grd, xi, yj, uvel, vvel, berg)
-    type(icebergs_gridded), pointer :: grd
-    real, intent(in) :: xi, yj, uvel, vvel
-    type(iceberg), intent(inout) :: berg
+    type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+    real, intent(in) :: xi !< Non-dimensional x-position within cell to give berg
+    real, intent(in) :: yj !< Non-dimensional y-position within cell to give berg
+    real, intent(in) :: uvel !< Zonal velocity to give berg
+    real, intent(in) :: vvel !< Meridional velocity to give berg
+    type(iceberg), intent(inout) :: berg !< An iceberg
     integer :: i, j
     logical :: lres
     i = berg%ine ; j = berg%jne
@@ -1108,15 +1118,15 @@ contains
       stop 'generate_bergs, loc_set_berg_pos(): VERY FATAL!'
     endif
   end subroutine loc_set_berg_pos
-  
+
 end subroutine read_restart_bergs
 
 
-! ##############################################################################
+!> Read bond restart file
 subroutine read_restart_bonds(bergs,Time)
 ! Arguments
-type(icebergs), pointer :: bergs
-type(time_type), intent(in) :: Time
+type(icebergs), pointer :: bergs !< Icebergs container
+type(time_type), intent(in) :: Time !< Model time
 ! Local variables
 integer :: k, siz(4), nbonds_in_file
 logical :: lres, found_restart, found
@@ -1166,7 +1176,7 @@ integer, allocatable, dimension(:) :: first_berg_num,   &
   filename = filename_base
   call get_field_size(filename,'i',siz, field_found=found, domain=bergs%grd%domain)
   nbonds_in_file = siz(1)
-  
+
     if (mpp_pe() .eq. mpp_root_pe()) then
       write(stderrunit,*)  'diamonds, bond read restart : ','Number of bonds in file',  nbonds_in_file
     endif
@@ -1195,10 +1205,9 @@ integer, allocatable, dimension(:) :: first_berg_num,   &
     number_perfect_bonds_with_first_on_pe=0
 
     do k=1, nbonds_in_file
-      
 
        ! If i,j in restart files are not good, then we find the berg position of the bond addresses manually:
-       if (ignore_ij_restart) then 
+       if (ignore_ij_restart) then
          !Finding first iceberg in bond
          ine=999 ; jne=999 ; berg_found=0.0 ; search_data_domain=.true.
          call find_individual_iceberg(bergs,first_berg_num(k), ine, jne,berg_found,search_data_domain)
@@ -1238,7 +1247,7 @@ integer, allocatable, dimension(:) :: first_berg_num,   &
       if ( (first_berg_ine(k)>=grd%isd) .and. (first_berg_ine(k)<=grd%ied) .and. &
         (first_berg_jne(k)>=grd%jsd) .and. (first_berg_jne(k)<=grd%jed) ) then
         number_first_bonds_matched=number_first_bonds_matched+1
-        
+
         ! Search for the first berg, which the bond belongs to
         first_berg_found=.false.
         first_berg=>null()
@@ -1249,11 +1258,10 @@ integer, allocatable, dimension(:) :: first_berg_num,   &
             first_berg=>this
             !if (first_berg%halo_berg.gt.0.5) print *, 'bonding halo berg:', first_berg_num(k),  first_berg_ine(k),first_berg_jne(k) ,grd%isc, grd%iec, mpp_pe()
             this=>null()
-          else  
+          else
             this=>this%next
           endif
         enddo
-     
 
         ! Decide whether the second iceberg is on the processeor (data domain)
         second_berg_found=.false.
@@ -1271,24 +1279,24 @@ integer, allocatable, dimension(:) :: first_berg_num,   &
               second_berg_found=.true.
               second_berg=>this
               this=>null()
-            else  
+            else
               this=>this%next
             endif
           enddo
         endif
-         
+
         if (first_berg_found) then
           number_partial_bonds=number_partial_bonds+1
           if (second_berg_found) then
             call form_a_bond(first_berg, other_berg_num(k), other_berg_ine(k), other_berg_jne(k),  second_berg)
             number_perfect_bonds=number_perfect_bonds+1
-    
+
             !Counting number of bonds where the first bond is in the computational domain
             if ( (first_berg_ine(k)>=grd%isc) .and. (first_berg_ine(k)<=grd%iec) .and. &
               (first_berg_jne(k)>=grd%jsc) .and. (first_berg_jne(k)<=grd%jec) ) then
                number_perfect_bonds_with_first_on_pe=number_perfect_bonds_with_first_on_pe+1
-        endif
-     
+            endif
+
           else
             !print *, 'Forming a bond of the second type', mpp_pe(), first_berg_num(k),  other_berg_num(k)
             !call form_a_bond(first_berg, other_berg_num(k),other_berg_ine(k),other_berg_jne(k))
@@ -1314,7 +1322,7 @@ integer, allocatable, dimension(:) :: first_berg_num,   &
       write(stderrunit,*) 'diamonds, bond read restart : ','Not enough partial bonds formed', all_pe_number_partial_bonds , nbonds_in_file
       call error_mesg('read_restart_bonds_bergs_new', 'Not enough partial bonds formed', FATAL)
     endif
-    
+
     if (all_pe_number_perfect_bonds .lt. nbonds_in_file) then
       call mpp_sum(all_pe_number_first_bonds_matched)
       call mpp_sum(all_pe_number_second_bonds_matched)
@@ -1339,7 +1347,7 @@ integer, allocatable, dimension(:) :: first_berg_num,   &
             other_berg_ine,  &
             other_berg_jne )
   endif
-    
+
   if (mpp_pe() .eq. mpp_root_pe()) then
     write(stderrunit,*)  'diamonds, bond read restart : ','Number of bonds (including halos)',  all_pe_number_perfect_bonds
     write(stderrunit,*)  'diamonds, bond read restart : ','Number of true bonds created',  all_pe_number_perfect_bonds_with_first_on_pe
@@ -1347,12 +1355,11 @@ integer, allocatable, dimension(:) :: first_berg_num,   &
 
 end subroutine read_restart_bonds
 
-! ##############################################################################
-
+!> Reading calving and gridded restart data
 subroutine read_restart_calving(bergs)
 use random_numbers_mod, only: initializeRandomNumberStream, getRandomNumbers, randomNumberStream
 ! Arguments
-type(icebergs), pointer :: bergs
+type(icebergs), pointer :: bergs !< Icebergs container
 ! Local variables
 integer :: k,i,j
 character(len=37) :: filename, actual_filename
@@ -1399,7 +1406,7 @@ type(randomNumberStream) :: rns
     if (field_exist(filename, 'iceberg_counter_grd')) then
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
        'diamonds, read_restart_calving: reading iceberg_counter_grd from restart file.'
-      call read_data(filename, 'iceberg_counter_grd', grd%iceberg_counter_grd, grd%domain) 
+      call read_data(filename, 'iceberg_counter_grd', grd%iceberg_counter_grd, grd%domain)
     else
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
      'diamonds, read_restart_calving: iceberg_counter_grd WAS NOT FOUND in the file. Setting to 0.'
@@ -1450,13 +1457,12 @@ type(randomNumberStream) :: rns
 
 end subroutine read_restart_calving
 
-! ##############################################################################
-
+!> Read ocean depth from file
 subroutine read_ocean_depth(grd)
 ! Arguments
+type(icebergs_gridded), pointer :: grd !< Container for gridded fields
 ! Local variables
-character(len=37) :: filename 
-type(icebergs_gridded), pointer :: grd
+character(len=37) :: filename
 
   ! Read stored ice
   filename=trim(restart_input_dir)//'topog.nc'
@@ -1480,11 +1486,11 @@ type(icebergs_gridded), pointer :: grd
   !call grd_chksum2(bergs%grd, bergs%grd%ocean_depth, 'read_ocean_depth, ocean_depth')
 end subroutine read_ocean_depth
 
-! ##############################################################################
-
+!> Write a trajectory-based diagnostics file
 subroutine write_trajectory(trajectory, save_short_traj)
 ! Arguments
-type(xyt), pointer :: trajectory
+type(xyt), pointer :: trajectory !< An iceberg trajectory
+logical, intent(in) :: save_short_traj !< If true, record less data
 ! Local variables
 integer :: iret, ncid, i_dim, i
 integer :: lonid, latid, yearid, dayid, uvelid, vvelid, iceberg_numid
@@ -1495,7 +1501,6 @@ character(len=37) :: filename
 character(len=7) :: pe_name
 type(xyt), pointer :: this, next
 integer :: stderrunit
-logical, intent(in) :: save_short_traj
 !I/O vars
 type(xyt), pointer :: traj4io=>null()
 integer :: ntrajs_sent_io,ntrajs_rcvd_io
@@ -1528,7 +1533,7 @@ logical :: io_is_in_append_mode
 
   !Now gather and append the bergs from all pes in the io_tile to the list on corresponding io_tile_root_pe
   ntrajs_sent_io =0
-  ntrajs_rcvd_io =0 
+  ntrajs_rcvd_io =0
 
   if(is_io_tile_root_pe) then
      !Receive trajs from all pes in this I/O tile !FRAGILE!SCARY!
@@ -1552,7 +1557,7 @@ logical :: io_is_in_append_mode
        trajectory => trajectory%next ! This will eventually result in trajectory => null()
        deallocate(this) ! Delete the link from memory
      enddo
-        
+
      call mpp_send(ntrajs_sent_io, plen=1, to_pe=io_tile_root_pe, tag=COMM_TAG_11)
      if (ntrajs_sent_io .gt. 0) then
         call mpp_send(obuffer_io%data, ntrajs_sent_io*buffer_width_traj, to_pe=io_tile_root_pe, tag=COMM_TAG_12)
@@ -1567,21 +1572,21 @@ logical :: io_is_in_append_mode
   call mpp_clock_begin(clock_trw)
 
   if((force_all_pes_traj .OR. is_io_tile_root_pe) .AND. associated(traj4io)) then
- 
+
     call get_instance_filename("iceberg_trajectories.nc", filename)
     if(io_tile_id(1) .ge. 0 .AND. .NOT. force_all_pes_traj) then !io_tile_root_pes write
        if(io_npes .gt. 1) then !attach tile_id  to filename only if there is more than one I/O pe
           if (io_tile_id(1)<10000) then
-             write(filename,'(A,".",I4.4)') trim(filename), io_tile_id(1) 
+             write(filename,'(A,".",I4.4)') trim(filename), io_tile_id(1)
           else
-             write(filename,'(A,".",I6.6)') trim(filename), io_tile_id(1) 
+             write(filename,'(A,".",I6.6)') trim(filename), io_tile_id(1)
           endif
        endif
     else !All pes write, attach pe# to filename
        if (mpp_npes()<10000) then
-          write(filename,'(A,".",I4.4)') trim(filename), mpp_pe() 
+          write(filename,'(A,".",I4.4)') trim(filename), mpp_pe()
        else
-          write(filename,'(A,".",I6.6)') trim(filename), mpp_pe() 
+          write(filename,'(A,".",I6.6)') trim(filename), mpp_pe()
        endif
     endif
 
@@ -1677,7 +1682,7 @@ logical :: io_is_in_append_mode
       call put_att(ncid, dayid, 'units', 'days')
       call put_att(ncid, iceberg_numid, 'long_name', 'iceberg id number')
       call put_att(ncid, iceberg_numid, 'units', 'dimensionless')
-      
+
       if (.not. save_short_traj) then
         call put_att(ncid, uvelid, 'long_name', 'zonal spped')
         call put_att(ncid, uvelid, 'units', 'm/s')
@@ -1724,7 +1729,7 @@ logical :: io_is_in_append_mode
 
     ! End define mode
     iret = nf_enddef(ncid)
-         
+
     ! Write variables
     this=>traj4io
     if (io_is_in_append_mode) then
@@ -1775,20 +1780,18 @@ logical :: io_is_in_append_mode
 
 end subroutine write_trajectory
 
-
-! ##############################################################################
-
+!> Returns netcdf id of variable
 integer function inq_var(ncid, var, unsafe)
 ! Arguments
-integer, intent(in) :: ncid
-character(len=*), intent(in) :: var
-logical, optional, intent(in) :: unsafe
+integer, intent(in) :: ncid !< Handle to netcdf file
+character(len=*), intent(in) :: var !< Name of variable
+logical, optional, intent(in) :: unsafe !< If present and true, do not fail if variable is not in file
 ! Local variables
 integer :: iret
 integer :: stderrunit
 logical :: unsafely=.false.
 
-if(present(unsafe)) unsafely=unsafe
+  if(present(unsafe)) unsafely=unsafe
   ! Get the stderr unit number
   stderrunit=stderr()
 
@@ -1804,12 +1807,13 @@ if(present(unsafe)) unsafely=unsafe
 
 end function inq_var
 
-! ##############################################################################
-
+!> Define a netcdf variable
 integer function def_var(ncid, var, ntype, idim)
 ! Arguments
-integer, intent(in) :: ncid, ntype, idim
-character(len=*), intent(in) :: var
+integer, intent(in) :: ncid !< Handle to netcdf file
+character(len=*), intent(in) :: var !< Name of variable
+integer, intent(in) :: ntype !< Netcdf type of variable
+integer, intent(in) :: idim !< Length of vector
 ! Local variables
 integer :: iret
 integer :: stderrunit
@@ -1825,12 +1829,11 @@ integer :: stderrunit
 
 end function def_var
 
-! ##############################################################################
-
+!> Returns id of variable
 integer function inq_varid(ncid, var)
 ! Arguments
-integer, intent(in) :: ncid
-character(len=*), intent(in) :: var
+integer, intent(in) :: ncid !< Handle to netcdf file
+character(len=*), intent(in) :: var !< Name of variable
 ! Local variables
 integer :: iret
 integer :: stderrunit
@@ -1846,12 +1849,13 @@ integer :: stderrunit
 
 end function inq_varid
 
-! ##############################################################################
-
+!> Add a string attribute to a netcdf variable
 subroutine put_att(ncid, id, att, attval)
 ! Arguments
-integer, intent(in) :: ncid, id
-character(len=*), intent(in) :: att, attval
+integer, intent(in) :: ncid !< Handle to netcdf file
+integer, intent(in) :: id !< Netcdf id of variable
+character(len=*), intent(in) :: att !< Name of attribute
+character(len=*), intent(in) :: attval !< Value of attribute
 ! Local variables
 integer :: vallen, iret
 integer :: stderrunit
@@ -1869,11 +1873,12 @@ integer :: stderrunit
 
 end subroutine put_att
 
-! ##############################################################################
-
+!> Read a real from a netcdf file
 real function get_double(ncid, id, i)
 ! Arguments
-integer, intent(in) :: ncid, id, i
+integer, intent(in) :: ncid !< Handle to netcdf file
+integer, intent(in) :: id !< Netcdf id of variable
+integer, intent(in) :: i !< Index to read
 ! Local variables
 integer :: iret
 integer :: stderrunit
@@ -1889,11 +1894,12 @@ integer :: stderrunit
 
 end function get_double
 
-! ##############################################################################
-
+!> Read an integer from a netcdf file
 integer function get_int(ncid, id, i)
 ! Arguments
-integer, intent(in) :: ncid, id, i
+integer, intent(in) :: ncid !< Handle to netcdf file
+integer, intent(in) :: id !< Netcdf id of variable
+integer, intent(in) :: i !< Index to read
 ! Local variables
 integer :: iret
 integer :: stderrunit
@@ -1909,12 +1915,13 @@ integer :: stderrunit
 
 end function get_int
 
-! ##############################################################################
-
+!> Write a real to a netcdf file
 subroutine put_double(ncid, id, i, val)
 ! Arguments
-integer, intent(in) :: ncid, id, i
-real, intent(in) :: val
+integer, intent(in) :: ncid !< Handle to netcdf file
+integer, intent(in) :: id !< Netcdf id of variable
+integer, intent(in) :: i !< Index of position to write
+real, intent(in) :: val !< Value to write
 ! Local variables
 integer :: iret
 integer :: stderrunit
@@ -1930,11 +1937,13 @@ integer :: stderrunit
 
 end subroutine put_double
 
-! ##############################################################################
-
+!> Write an integer to a netcdf file
 subroutine put_int(ncid, id, i, val)
 ! Arguments
-integer, intent(in) :: ncid, id, i, val
+integer, intent(in) :: ncid !< Handle to netcdf file
+integer, intent(in) :: id !< Netcdf id of variable
+integer, intent(in) :: i !< Index of position to write
+integer, intent(in) :: val !< Value to write
 ! Local variables
 integer :: iret
 integer :: stderrunit
@@ -1950,14 +1959,12 @@ integer :: stderrunit
 
 end subroutine put_int
 
-
-! ##############################################################################
-
+!> True is a restart file can be found
 logical function find_restart_file(filename, actual_file, multiPErestart, tile_id)
-  character(len=*), intent(in) :: filename
-  character(len=*), intent(out) :: actual_file
-  logical, intent(out) :: multiPErestart
-  integer, intent(in) :: tile_id
+  character(len=*), intent(in) :: filename !< Base-name of restart file
+  character(len=*), intent(out) :: actual_file !< Actual name of file, if found
+  logical, intent(out) :: multiPErestart !< True if found, false otherwise
+  integer, intent(in) :: tile_id !< Parallel tile number of file
 
   character(len=6) :: pe_name
 
@@ -1965,19 +1972,19 @@ logical function find_restart_file(filename, actual_file, multiPErestart, tile_i
 
   ! If running as ensemble, add the ensemble id string to the filename
   call get_instance_filename(filename, actual_file)
-    
+
   ! Prefer combined restart files.
   inquire(file=actual_file,exist=find_restart_file)
   if (find_restart_file) return
-    
+
   ! Uncombined restart
   if(tile_id .ge. 0) then
     write(actual_file,'(A,".",I4.4)') trim(actual_file), tile_id
   else
   if (mpp_npes()>10000) then
-     write(pe_name,'(a,i6.6)' )'.', mpp_pe()    
+     write(pe_name,'(a,i6.6)' )'.', mpp_pe()
   else
-     write(pe_name,'(a,i4.4)' )'.', mpp_pe()    
+     write(pe_name,'(a,i4.4)' )'.', mpp_pe()
   endif
   actual_file=trim(actual_file)//trim(pe_name)
   endif
@@ -1993,6 +2000,5 @@ logical function find_restart_file(filename, actual_file, multiPErestart, tile_i
   multiPErestart=.false.
 
 end function find_restart_file
-
 
 end module

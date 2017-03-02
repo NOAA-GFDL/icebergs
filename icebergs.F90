@@ -1,4 +1,7 @@
+!> Top-level/entry functions that step forward the governing equations
 module ice_bergs
+
+! This file is part of NOAA-GFDL/icebergs. See LICENSE.md for the license.
 
 use constants_mod, only: pi, omega, HLF
 use fms_mod, only: open_namelist_file, check_nml_error, close_file
@@ -51,20 +54,20 @@ implicit none ; private
 public icebergs_init, icebergs_end, icebergs_run, icebergs_stock_pe, icebergs
 public icebergs_incr_mass, icebergs_save_restart
 
-real, parameter :: pi_180=pi/180.  ! Converts degrees to radians
-real, parameter :: r180_pi=180./pi ! Converts radians to degrees
-real, parameter :: Rearth=6360000. ! Radius of earth (m)
-real, parameter :: rho_ice=916.7 ! Density of fresh ice @ 0oC (kg/m^3)
-real, parameter :: rho_water=999.8 ! Density of fresh water @ 0oC (kg/m^3)
-real, parameter :: rho_air=1.1 ! Density of air @ 0oC (kg/m^3) ???
-real, parameter :: rho_seawater=1025. ! Approx. density of surface sea water @ 0oC (kg/m^3)
-real, parameter :: gravity=9.8 ! Gravitational acceleratio (m/s^2)
-real, parameter :: Cd_av=1.3 ! (Vertical) Drag coefficient between bergs and atmos (?)
-real, parameter :: Cd_ah=0.0055 ! (Horizontal) Drag coefficient between bergs and atmos (?)
-real, parameter :: Cd_wv=0.9 ! (Vertical) Drag coefficient between bergs and ocean (?)
-real, parameter :: Cd_wh=0.0012 ! (Horizontal) Drag coefficient between bergs and ocean (?)
-real, parameter :: Cd_iv=0.9 ! (Vertical) Drag coefficient between bergs and sea-ice (?)
-!TOM> no horizontal drag for sea ice! real, parameter :: Cd_ih=0.0012 ! (Horizontal) Drag coefficient between bergs and sea-ice (?)
+real, parameter :: pi_180=pi/180.  !< Converts degrees to radians
+real, parameter :: r180_pi=180./pi !< Converts radians to degrees
+real, parameter :: Rearth=6360000. !< Radius of earth (m)
+real, parameter :: rho_ice=916.7 !< Density of fresh ice @ 0oC (kg/m^3)
+real, parameter :: rho_water=999.8 !< Density of fresh water @ 0oC (kg/m^3)
+real, parameter :: rho_air=1.1 !< Density of air @ 0oC (kg/m^3) ???
+real, parameter :: rho_seawater=1025. !< Approx. density of surface sea water @ 0oC (kg/m^3)
+real, parameter :: gravity=9.8 !< Gravitational acceleratio (m/s^2)
+real, parameter :: Cd_av=1.3 !< (Vertical) Drag coefficient between bergs and atmos (?)
+real, parameter :: Cd_ah=0.0055 !< (Horizontal) Drag coefficient between bergs and atmos (?)
+real, parameter :: Cd_wv=0.9 !< (Vertical) Drag coefficient between bergs and ocean (?)
+real, parameter :: Cd_wh=0.0012 !< (Horizontal) Drag coefficient between bergs and ocean (?)
+real, parameter :: Cd_iv=0.9 !< (Vertical) Drag coefficient between bergs and sea-ice (?)
+!TOM> no horizontal drag for sea ice! real, parameter :: Cd_ih=0.0012 !< (Horizontal) Drag coefficient between bergs and sea-ice (?)
 
 #ifdef _FILE_VERSION
   character(len=128) :: version = _FILE_VERSION
@@ -74,27 +77,37 @@ real, parameter :: Cd_iv=0.9 ! (Vertical) Drag coefficient between bergs and sea
 
 contains
 
-! ##############################################################################
+!> Initializes icebergs container "bergs"
 subroutine icebergs_init(bergs, &
              gni, gnj, layout, io_layout, axes, dom_x_flags, dom_y_flags, &
              dt, Time, ice_lon, ice_lat, ice_wet, ice_dx, ice_dy, ice_area, &
              cos_rot, sin_rot, ocean_depth, maskmap, fractional_area)
 ! Arguments
-type(icebergs), pointer :: bergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
+integer, intent(in) :: gni !< Number of global points in i-direction
+integer, intent(in) :: gnj !< Number of global points in j-direction
+integer, intent(in) :: layout(2) !< Parallel decomposition of computational processors in i/j direction
+integer, intent(in) :: io_layout(2) !< Parallel decomposition of i/o processors in i/j direction
+integer, intent(in) :: axes(2) !< Diagnostic axes
+integer, intent(in) :: dom_x_flags !< Decomposition flags for i-direction
+integer, intent(in) :: dom_y_flags !< Decomposition flags for j-direction
+real, intent(in) :: dt !< Time step (s)
+type (time_type), intent(in) :: Time !< Model time
+real, dimension(:,:), intent(in) :: ice_lon !< Longitude of cell corners using NE convention (degree E)
+real, dimension(:,:), intent(in) :: ice_lat !< Latitude of cell corners using NE conventino (degree N)
+real, dimension(:,:), intent(in) :: ice_wet !< Wet/dry mask (1 is wet, 0 is dry) of cell centers
+real, dimension(:,:), intent(in) :: ice_dx !< Zonal length of cell on northern side (m)
+real, dimension(:,:), intent(in) :: ice_dy !< Meridional length of cell on eastern side (m)
+real, dimension(:,:), intent(in) :: ice_area !< Area of cells (m^2, or non-dim is fractional_area=True)
+real, dimension(:,:), intent(in) :: cos_rot !< Cosine from rotation matrix to lat-lon coords
+real, dimension(:,:), intent(in) :: sin_rot !< Sine from rotation matrix to lat-lon coords
+real, dimension(:,:), intent(in),optional :: ocean_depth !< Depth of ocean bottom (m)
+logical, intent(in), optional :: maskmap(:,:) !< Masks out parallel cores
+logical, intent(in), optional :: fractional_area !< If true, ice_area contains cell area as fraction of entire spherical surface
+! Local variables
 type(icebergs_gridded), pointer :: grd => null()
-integer, intent(in) :: gni, gnj, layout(2), io_layout(2), axes(2)
-integer, intent(in) :: dom_x_flags, dom_y_flags
-real, intent(in) :: dt
-type (time_type), intent(in) :: Time ! current time
-real, dimension(:,:), intent(in) :: ice_lon, ice_lat, ice_wet
-real, dimension(:,:), intent(in) :: ice_dx, ice_dy, ice_area
-real, dimension(:,:), intent(in) :: cos_rot, sin_rot
-real, dimension(:,:), intent(in), optional :: ocean_depth
-logical, intent(in), optional :: maskmap(:,:)
-logical, intent(in), optional :: fractional_area
 integer :: nbonds
 logical :: check_bond_quality
-
 integer :: stdlogunit, stderrunit
 
   ! Get the stderr and stdlog unit numbers
@@ -123,7 +136,7 @@ integer :: stdlogunit, stderrunit
   call mpp_clock_end(bergs%clock_ior)
 
   if (really_debug) call print_bergs(stderrunit,bergs,'icebergs_init, initial status')
-  
+
   !Reading ocean depth from a file
   if (bergs%read_ocean_depth_from_file) call read_ocean_depth(bergs%grd)
 
@@ -143,11 +156,10 @@ integer :: stdlogunit, stderrunit
 
 end subroutine icebergs_init
 
-
-! ##############################################################################
+!> Invoke some unit testing
 subroutine unit_testing(bergs)
 ! Arguments
-type(icebergs), pointer :: bergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
 
 call hexagon_test()
 call point_in_triangle_test()
@@ -156,12 +168,14 @@ call test_check_for_duplicate_ids_in_list()
 
 end subroutine unit_testing
 
+!> Test find_basal_melt()
 subroutine basal_melt_test(bergs)
-  ! Arguments
-  type(icebergs), pointer :: bergs
-  real :: dvo,lat,salt,temp, basal_melt, thickness
-  integer :: iceberg_num
-  logical :: Use_three_equation_model
+! Arguments
+type(icebergs), pointer :: bergs !< Container for all types and memory
+! Local variables
+real :: dvo,lat,salt,temp, basal_melt, thickness
+integer :: iceberg_num
+logical :: Use_three_equation_model
 
   if (mpp_pe() .eq. mpp_root_pe() ) print *, 'Begining Basal Melting Unit Test'
   dvo=0.2 ;lat=0.0 ; salt=35.0 ; temp=2.0 ;thickness=100.; iceberg_num=0
@@ -175,12 +189,13 @@ subroutine basal_melt_test(bergs)
 
 end subroutine basal_melt_test
 
+!> Test point_in_triangle()
 subroutine point_in_triangle_test()
 ! Arguments
 real :: Ax,Ay,Bx,By,Cx,Cy  !Position of icebergs
 logical :: fail_unit_test
 integer :: stderrunit
-  
+
   ! Get the stderr unit number.
   stderrunit = stderr()
   Ax= -2.695732526092343E-012
@@ -195,6 +210,7 @@ integer :: stderrunit
 
 end subroutine point_in_triangle_test
 
+!> Test Hexagon_into_quadrants_using_triangles()
 subroutine hexagon_test()
 ! Arguments
 real :: x0,y0  !Position of icebergs
@@ -203,7 +219,7 @@ real :: Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4 ! Areas of icebergs
 real :: tol
 logical :: fail_unit_test
 integer :: stderrunit
-  
+
   ! Get the stderr unit number.
   stderrunit = stderr()
 
@@ -261,7 +277,7 @@ integer :: stderrunit
     call error_mesg('diamonds, hexagon unit testing:', 'Hexagon split btw 3 and 4!', WARNING)
     fail_unit_test=.True.
   endif
-  
+
   ! Test 3:  Two corners of hex on the axis
   !Test 3a: center on x>0 axis
   x0=S/2.  ;  y0=0.
@@ -304,11 +320,11 @@ integer :: stderrunit
 
 end subroutine hexagon_test
 
-! ##############################################################################
-
+!> Initializes bonds
 subroutine initialize_iceberg_bonds(bergs)
-
-type(icebergs), pointer :: bergs
+! Arguments
+type(icebergs), pointer :: bergs !< Container for all types and memory
+! Local variables
 type(iceberg), pointer :: berg
 type(iceberg), pointer :: other_berg
 type(icebergs_gridded), pointer :: grd
@@ -320,22 +336,21 @@ real :: r_dist_x, r_dist_y, r_dist
 integer :: grdi_outer, grdj_outer
 integer :: grdi_inner, grdj_inner
 
-
   ! For convenience
-    grd=>bergs%grd
-    !Should update halos before doing this 
+  grd=>bergs%grd
+  !Should update halos before doing this
   do grdj_outer = grd%jsc,grd%jec ; do grdi_outer = grd%isc,grd%iec  !Should you be on the data domain??
     berg=>bergs%list(grdi_outer,grdj_outer)%first
     do while (associated(berg)) ! loop over all bergs
-    
+
       lon1=berg%lon; lat1=berg%lat
       !call rotpos_to_tang(lon1,lat1,x1,y1)  !Is this correct? Shouldn't it only be on tangent plane?
 
       do grdj_inner = grd%jsc,grd%jec ; do grdi_inner = grd%isc,grd%iec  !This line uses n^2 steps
 !     do grdj_inner = berg%jne-1,berg%jne+1 ; do grdi_inner = berg%ine-1,berg%ine+1   !Only looping through adjacent cells.
         other_berg=>bergs%list(grdi_inner,grdj_inner)%first
-        do while (associated(other_berg)) ! loop over all other bergs  
-          
+        do while (associated(other_berg)) ! loop over all other bergs
+
           if (berg%iceberg_num .ne. other_berg%iceberg_num) then
             lon2=other_berg%lon; lat2=other_berg%lat
             !call rotpos_to_tang(lon2,lat2,x2,y2) !Is this correct? Shouldn't it only be on tangent plane?
@@ -349,10 +364,10 @@ integer :: grdi_inner, grdj_inner
             r_dist_x=dlon*dx_dlon
             r_dist_y=dlat*dy_dlat
             r_dist=sqrt( (r_dist_x**2) + (r_dist_y**2) )
-        
+
             !if (r_dist.gt.1000.) then  ! If the bergs are close together, then form a bond
               call form_a_bond(berg, other_berg%iceberg_num, other_berg%ine, other_berg%jne, other_berg)
-            !endif       
+            !endif
           endif
           other_berg=>other_berg%next
         enddo  ! End of looping through all other bergs in the inner list
@@ -361,82 +376,98 @@ integer :: grdi_inner, grdj_inner
     enddo ! End of looping through all bergs in the outer list
   enddo ; enddo; !End of outer loop.
 
-
 end subroutine initialize_iceberg_bonds
 
-subroutine  convert_from_grid_to_meters(lat_ref,grid_is_latlon ,dx_dlon,dy_dlat)
-  ! Arguments
-  real, intent(in) :: lat_ref
-  logical, intent(in) :: grid_is_latlon
-  real, intent(out) :: dx_dlon,dy_dlat
+! Returns metric converting grid distances to meters
+subroutine convert_from_grid_to_meters(lat_ref, grid_is_latlon, dx_dlon, dy_dlat)
+! Arguments
+real, intent(in) :: lat_ref
+logical, intent(in) :: grid_is_latlon
+real, intent(out) :: dx_dlon
+real, intent(out) :: dy_dlat
 
   if (grid_is_latlon) then
     dx_dlon=(pi/180.)*Rearth*cos((lat_ref)*(pi/180.))
     dy_dlat=(pi/180.)*Rearth
-
   else
     dx_dlon=1.
     dy_dlat=1.
-
   endif
+
 end subroutine  convert_from_grid_to_meters
 
+! Returns metric converting distance in meters to grid distance
 subroutine  convert_from_meters_to_grid(lat_ref,grid_is_latlon ,dlon_dx,dlat_dy)
-  ! Arguments
-  real, intent(in) :: lat_ref
-  logical, intent(in) :: grid_is_latlon
-  real, intent(out) :: dlon_dx,dlat_dy
+! Arguments
+real, intent(in) :: lat_ref
+logical, intent(in) :: grid_is_latlon
+real, intent(out) :: dlon_dx
+real, intent(out) :: dlat_dy
 
   if (grid_is_latlon) then
     dlon_dx=(180./pi)/(Rearth*cos((lat_ref)*(pi/180.)))
     dlat_dy=(180./pi)/Rearth
-
   else
     dlon_dx=1.
     dlat_dy=1.
-
   endif
-end subroutine  convert_from_meters_to_grid
-! ##############################################################################
 
-subroutine interactive_force(bergs,berg,IA_x, IA_y, u0, v0, u1, v1, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y) !Calculating interactive force between icebergs. Alon,  Markpoint_4
-type(icebergs), pointer :: bergs
+end subroutine  convert_from_meters_to_grid
+
+subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
+                             P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y)
+!Calculating interactive force between icebergs. Alon,  Markpoint_4
+! Arguments
+type(icebergs), pointer :: bergs !< Container for all types and memory
 type(iceberg), pointer :: berg
 type(iceberg), pointer :: other_berg
 type(bond), pointer :: current_bond
-real, intent(in) :: u0,v0, u1, v1
+real, intent(in) :: u0
+real, intent(in) :: v0
+real, intent(in) :: u1
+real, intent(in) :: v1
+real, intent(out) :: IA_x
+real, intent(out) :: IA_y
+real, intent(out) :: P_ia_11
+real, intent(out) :: P_ia_12
+real, intent(out) :: P_ia_22
+real, intent(out) :: P_ia_21
+real, intent(out) :: P_ia_times_u_x
+real, intent(out) :: P_ia_times_u_y
+! Local variables
 real :: u2, v2
 logical :: critical_interaction_damping_on
-real, intent(out) :: IA_x, IA_y 
-real, intent(out) :: P_ia_11, P_ia_12, P_ia_22, P_ia_21, P_ia_times_u_x, P_ia_times_u_y
 integer :: grdi, grdj
 logical :: iceberg_bonds_on
 logical :: bonded
-iceberg_bonds_on=bergs%iceberg_bonds_on
+
+  iceberg_bonds_on=bergs%iceberg_bonds_on
 
   IA_x=0.
   IA_y=0.
-  P_ia_11=0. ; P_ia_12=0. ;  P_ia_21=0.;  P_ia_22=0. 
+  P_ia_11=0. ; P_ia_12=0. ;  P_ia_21=0.;  P_ia_22=0.
   P_ia_times_u_x=0. ; P_ia_times_u_y=0.
 
   bonded=.false. !Unbonded iceberg interactions
   do grdj = berg%jne-1,berg%jne+1 ; do grdi = berg%ine-1,berg%ine+1  !Note: need  to make sure this is wide enough, but less than the halo width
     other_berg=>bergs%list(grdi,grdj)%first
-    do while (associated(other_berg)) ! loop over all other bergs  
-      call calculate_force(bergs,berg,other_berg,IA_x, IA_y, u0, v0, u1, v1, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y, bonded) 
+    do while (associated(other_berg)) ! loop over all other bergs
+      call calculate_force(bergs,berg,other_berg, IA_x, IA_y, u0, v0, u1, v1, &
+                           P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y, bonded)
       other_berg=>other_berg%next
     enddo ! loop over all bergs
   enddo ; enddo
 
   bonded=.true.  !Interactions due to iceberg bonds
-  if (iceberg_bonds_on) then ! MP1  
+  if (iceberg_bonds_on) then ! MP1
     current_bond=>berg%first_bond
     do while (associated(current_bond)) ! loop over all bonds
       other_berg=>current_bond%other_berg
       if (.not. associated(other_berg)) then
         call error_mesg('diamonds,bond interactions', 'Trying to do Bond interactions with unassosiated berg!' ,FATAL)
       else
-        call calculate_force(bergs,berg,other_berg,IA_x, IA_y, u0, v0, u1, v1, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y,bonded) 
+        call calculate_force(bergs,berg,other_berg, IA_x, IA_y, u0, v0, u1, v1,  &
+                             P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y,bonded)
       endif
       current_bond=>current_bond%next_bond
     enddo
@@ -445,165 +476,170 @@ iceberg_bonds_on=bergs%iceberg_bonds_on
   !print *,'IA_x=',IA_x,'IA_y',IA_y, berg%iceberg_num
   !print *,'P_ia_11',P_ia_11,'P_ia_12',P_ia_12, 'P_ia_21',P_ia_21,'P_ia_22', P_ia_22
   !print *, 'P_ia_times_u_x', P_ia_times_u_x, 'P_ia_times_u_y', P_ia_times_u_y
+
   contains
 
+  subroutine calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, &
+                             P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y,bonded)
+  !Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  type(iceberg), pointer :: berg
+  type(iceberg), pointer :: other_berg
+  real :: T1, L1, W1, lon1, lat1, x1, y1, R1, A1   !Current iceberg
+  real :: T2, L2, W2, lon2, lat2, x2, y2, R2, A2   !Other iceberg
+  real :: dlon, dlat
+  real :: r_dist_x, r_dist_y, r_dist, A_o, A_min, trapped, T_min
+  real, intent(in) :: u0,v0, u1, v1
+  real :: P_11, P_12, P_21, P_22
+  real :: M1, M2, M_min
+  real :: u2, v2
+  real :: lat_ref, dx_dlon, dy_dlat
+  logical :: critical_interaction_damping_on
+  real :: spring_coef, accel_spring, radial_damping_coef, p_ia_coef, tangental_damping_coef, bond_coef
+  real, intent(inout) :: IA_x, IA_y
+  real, intent(inout) :: P_ia_11, P_ia_12, P_ia_22, P_ia_21, P_ia_times_u_x, P_ia_times_u_y
+  logical ,intent(in) :: bonded
 
-   subroutine calculate_force(bergs,berg,other_berg,IA_x, IA_y, u0, v0, u1, v1, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y,bonded) 
-   !Arguments
-     type(icebergs), pointer :: bergs
-     type(iceberg), pointer :: berg
-     type(iceberg), pointer :: other_berg
-     real :: T1, L1, W1, lon1, lat1, x1, y1, R1, A1   !Current iceberg
-     real :: T2, L2, W2, lon2, lat2, x2, y2, R2, A2   !Other iceberg
-     real :: dlon, dlat
-     real :: r_dist_x, r_dist_y, r_dist, A_o, A_min, trapped, T_min
-     real, intent(in) :: u0,v0, u1, v1
-     real :: P_11, P_12, P_21, P_22
-     real :: M1, M2, M_min
-     real :: u2, v2
-     real :: lat_ref, dx_dlon, dy_dlat
-     logical :: critical_interaction_damping_on
-     real :: spring_coef, accel_spring, radial_damping_coef, p_ia_coef, tangental_damping_coef, bond_coef
-     real, intent(inout) :: IA_x, IA_y 
-     real, intent(inout) :: P_ia_11, P_ia_12, P_ia_22, P_ia_21, P_ia_times_u_x, P_ia_times_u_y
-     logical ,intent(in) :: bonded
+    spring_coef=bergs%spring_coef
+    !bond_coef=bergs%bond_coef
+    radial_damping_coef=bergs%radial_damping_coef
+    tangental_damping_coef=bergs%tangental_damping_coef
+    critical_interaction_damping_on=bergs%critical_interaction_damping_on
 
-      spring_coef=bergs%spring_coef
-      !bond_coef=bergs%bond_coef 
-      radial_damping_coef=bergs%radial_damping_coef
-      tangental_damping_coef=bergs%tangental_damping_coef
-      critical_interaction_damping_on=bergs%critical_interaction_damping_on
+    !Using critical values for damping rather than manually setting the damping.
+    if (critical_interaction_damping_on) then
+      radial_damping_coef=2.*sqrt(spring_coef)  ! Critical damping
+      tangental_damping_coef=(2.*sqrt(spring_coef))/4  ! Critical damping   (just a guess)
+    endif
 
-      !Using critical values for damping rather than manually setting the damping.
-      if (critical_interaction_damping_on) then
-        radial_damping_coef=2.*sqrt(spring_coef)  ! Critical damping  
-        tangental_damping_coef=(2.*sqrt(spring_coef))/4  ! Critical damping   (just a guess)
+    if (berg%iceberg_num .ne. other_berg%iceberg_num) then
+      !From Berg 1
+      L1=berg%length
+      W1=berg%width
+      T1=berg%thickness
+      M1=berg%mass
+      A1=L1*W1
+      lon1=berg%lon_old; lat1=berg%lat_old
+      !call rotpos_to_tang(lon1,lat1,x1,y1)
+
+      !From Berg 1
+      L2=other_berg%length
+      W2=other_berg%width
+      T2=other_berg%thickness
+      M2=other_berg%mass
+      u2=other_berg%uvel_old !Old values are used to make it order invariant
+      v2=other_berg%vvel_old !Old values are used to make it order invariant
+      A2=L2*W2
+      lon2=other_berg%lon_old; lat2=other_berg%lat_old !Old values are used to make it order invariant
+
+      !call rotpos_to_tang(lon2,lat2,x2,y2)
+
+      dlon=lon1-lon2
+      dlat=lat1-lat2
+
+      !Note that this is not the exact distance along a great circle.
+      !Approximation for small distances. Should be fine.
+      !r_dist_x=x1-x2 ; r_dist_y=y1-y2
+      !r_dist=sqrt( ((x1-x2)**2) + ((y1-y2)**2) )
+      lat_ref=0.5*(lat1+lat2)
+      call convert_from_grid_to_meters(lat_ref,bergs%grd%grid_is_latlon,dx_dlon,dy_dlat)
+
+      r_dist_x=dlon*dx_dlon
+      r_dist_y=dlat*dy_dlat
+      r_dist=sqrt( (r_dist_x**2) + (r_dist_y**2) )
+
+      if (bergs%hexagonal_icebergs) then
+        R1=sqrt(A1/(2.*sqrt(3.)))
+        R2=sqrt(A2/(2.*sqrt(3.)))
+      else !square packing
+        R1=sqrt(A1/pi) ! Interaction radius of the iceberg (assuming circular icebergs)
+        R2=sqrt(A2/pi) ! Interaction radius of the other iceberg
       endif
-
-      if (berg%iceberg_num .ne. other_berg%iceberg_num) then
-        !From Berg 1
-        L1=berg%length
-        W1=berg%width
-        T1=berg%thickness 
-        M1=berg%mass 
-        A1=L1*W1 
-        lon1=berg%lon_old; lat1=berg%lat_old
-        !call rotpos_to_tang(lon1,lat1,x1,y1)
-
-        !From Berg 1
-        L2=other_berg%length
-        W2=other_berg%width
-        T2=other_berg%thickness 
-        M2=other_berg%mass 
-        u2=other_berg%uvel_old !Old values are used to make it order invariant 
-        v2=other_berg%vvel_old !Old values are used to make it order invariant 
-        A2=L2*W2
-        lon2=other_berg%lon_old; lat2=other_berg%lat_old !Old values are used to make it order invariant
-
-        !call rotpos_to_tang(lon2,lat2,x2,y2)
-
-        dlon=lon1-lon2
-        dlat=lat1-lat2
-        
-        !Note that this is not the exact distance along a great circle.
-        !Approximation for small distances. Should be fine.
-        !r_dist_x=x1-x2 ; r_dist_y=y1-y2
-        !r_dist=sqrt( ((x1-x2)**2) + ((y1-y2)**2) )
-        lat_ref=0.5*(lat1+lat2)
-        call convert_from_grid_to_meters(lat_ref,bergs%grd%grid_is_latlon,dx_dlon,dy_dlat)
-
-        r_dist_x=dlon*dx_dlon
-        r_dist_y=dlat*dy_dlat
-        r_dist=sqrt( (r_dist_x**2) + (r_dist_y**2) )
-       
-        if (bergs%hexagonal_icebergs) then 
-          R1=sqrt(A1/(2.*sqrt(3.)))
-          R2=sqrt(A2/(2.*sqrt(3.)))
-        else !square packing
-          R1=sqrt(A1/pi) ! Interaction radius of the iceberg (assuming circular icebergs)
-          R2=sqrt(A2/pi) ! Interaction radius of the other iceberg
-        endif
-       !!!!!!!!!!!!!!!!!!!!!!!!!!!debugging!!!!!!!!!!!!!!!!!!!!!!!!!!MP1 
-       ! if (berg%iceberg_num .eq. 1) then
-       !   print *, 'Comparing longitudes: ', lon1, lon2, r_dist_x, dlon
-       !   print *, 'Comparing latitudes: ', lat1, lat2, r_dist_y, dlat
-       !   print *, 'Outside, iceberg_num, r_dist', berg%iceberg_num, r_dist,bonded
-       !   print *, 'Halo_status', berg%halo_berg,other_berg%halo_berg 
-       ! endif
-       ! print *, 'outside the loop',R1, R2,r_dist, bonded
-       !!!!!!!!!!!!!!!!!!!!!!!!!!!debugging!!!!!!!!!!!!!!!!!!!!!!!!!! 
+      !!!!!!!!!!!!!!!!!!!!!!!!!!!debugging!!!!!!!!!!!!!!!!!!!!!!!!!!MP1
+      ! if (berg%iceberg_num .eq. 1) then
+      !   print *, 'Comparing longitudes: ', lon1, lon2, r_dist_x, dlon
+      !   print *, 'Comparing latitudes: ', lat1, lat2, r_dist_y, dlat
+      !   print *, 'Outside, iceberg_num, r_dist', berg%iceberg_num, r_dist,bonded
+      !   print *, 'Halo_status', berg%halo_berg,other_berg%halo_berg
+      ! endif
+      ! print *, 'outside the loop',R1, R2,r_dist, bonded
+      !!!!!!!!!!!!!!!!!!!!!!!!!!!debugging!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 
-       !call overlap_area(R1,R2,r_dist,A_o,trapped)
-       !T_min=min(T1,T2)
-       !A_min = min((pi*R1**R1),(pi*R2*R2)) 
-       M_min=min(M1,M2)
-       !Calculating spring force  (later this should only be done on the first time around)
-       if ((r_dist>0.) .AND. ((r_dist< (R1+R2).AND. (.not. bonded)) .OR. ( (r_dist> (R1+R2)) .AND. (bonded) ) )) then
-         !Spring force
-         !accel_spring=spring_coef*(T_min/T1)*(A_o/A1) ! Old version dependent on area
-         accel_spring=spring_coef*(M_min/M1)*(R1+R2-r_dist)
-         IA_x=IA_x+(accel_spring*(r_dist_x/r_dist))
-         IA_y=IA_y+(accel_spring*(r_dist_y/r_dist))
-         
+      !call overlap_area(R1,R2,r_dist,A_o,trapped)
+      !T_min=min(T1,T2)
+      !A_min = min((pi*R1**R1),(pi*R2*R2))
+      M_min=min(M1,M2)
+      !Calculating spring force  (later this should only be done on the first time around)
+      if ((r_dist>0.) .AND. ((r_dist< (R1+R2).AND. (.not. bonded)) .OR. ( (r_dist> (R1+R2)) .AND. (bonded) ) )) then
+        !Spring force
+        !accel_spring=spring_coef*(T_min/T1)*(A_o/A1) ! Old version dependent on area
+        accel_spring=spring_coef*(M_min/M1)*(R1+R2-r_dist)
+        IA_x=IA_x+(accel_spring*(r_dist_x/r_dist))
+        IA_y=IA_y+(accel_spring*(r_dist_y/r_dist))
+
 
         if (r_dist < 5*(R1+R2)) then
-          
+
           !MP1
           !if (berg%iceberg_num .eq. 1) then
           !  !print *,  '************************************************************'
           !  print *, 'INSIDE, r_dist', berg%iceberg_num, other_berg%iceberg_num, r_dist, bonded
           !endif
-          !print *, 'in the loop1', spring_coef, (M_min/M1), accel_spring,(R1+R2-r_dist) 
+          !print *, 'in the loop1', spring_coef, (M_min/M1), accel_spring,(R1+R2-r_dist)
           !print *, 'in the loop2', IA_x, IA_y, R1, R2,r_dist, berg%iceberg_num,other_berg%iceberg_num
           !Damping force:
           !Paralel velocity
-           P_11=(r_dist_x*r_dist_x)/(r_dist**2)
-           P_12=(r_dist_x*r_dist_y)/(r_dist**2)
-           P_21=(r_dist_x*r_dist_y)/(r_dist**2)
-           P_22=(r_dist_y*r_dist_y)/(r_dist**2)
-           !p_ia_coef=radial_damping_coef*(T_min/T1)*(A_min/A1)
-           p_ia_coef=radial_damping_coef*(M_min/M1)
-           p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2)) &
-           + sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
-          
-           P_ia_11=P_ia_11+p_ia_coef*P_11
-           P_ia_12=P_ia_12+p_ia_coef*P_12
-           P_ia_21=P_ia_21+p_ia_coef*P_21
-           P_ia_22=P_ia_22+p_ia_coef*P_22
-           P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
-           P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
-           !print *, 'Paralel: ',berg%iceberg_num,  p_ia_coef, IA_x, P_ia_11, P_ia_21,P_ia_12, P_ia_22
+          P_11=(r_dist_x*r_dist_x)/(r_dist**2)
+          P_12=(r_dist_x*r_dist_y)/(r_dist**2)
+          P_21=(r_dist_x*r_dist_y)/(r_dist**2)
+          P_22=(r_dist_y*r_dist_y)/(r_dist**2)
+          !p_ia_coef=radial_damping_coef*(T_min/T1)*(A_min/A1)
+          p_ia_coef=radial_damping_coef*(M_min/M1)
+          p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2)) &
+          + sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
 
-           !Normal velocities
-           P_11=1-P_11  ;  P_12=-P_12 ; P_21= -P_21 ;    P_22=1-P_22
-           !p_ia_coef=tangental_damping_coef*(T_min/T1)*(A_min/A1)
-           p_ia_coef=tangental_damping_coef*(M_min/M1)
-           p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2))  &
-           + sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
-           P_ia_11=P_ia_11+p_ia_coef*P_11
-           P_ia_12=P_ia_12+p_ia_coef*P_12
-           P_ia_21=P_ia_21+p_ia_coef*P_21
-           P_ia_22=P_ia_22+p_ia_coef*P_22
-           P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
-           P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
-           !print *, 'Perp: ',berg%iceberg_num,  p_ia_coef, IA_x, P_ia_11, P_ia_21,P_ia_12, P_ia_22
-           !print *, 'P_11',P_11
-           !print *, 'P_21',P_21
-           !print *, 'P_12',P_12
-           !print *, 'P_22',P_22
-          endif
+          P_ia_11=P_ia_11+p_ia_coef*P_11
+          P_ia_12=P_ia_12+p_ia_coef*P_12
+          P_ia_21=P_ia_21+p_ia_coef*P_21
+          P_ia_22=P_ia_22+p_ia_coef*P_22
+          P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
+          P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
+          !print *, 'Paralel: ',berg%iceberg_num,  p_ia_coef, IA_x, P_ia_11, P_ia_21,P_ia_12, P_ia_22
+
+          !Normal velocities
+          P_11=1-P_11  ;  P_12=-P_12 ; P_21= -P_21 ;    P_22=1-P_22
+          !p_ia_coef=tangental_damping_coef*(T_min/T1)*(A_min/A1)
+          p_ia_coef=tangental_damping_coef*(M_min/M1)
+          p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2))  &
+          + sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
+          P_ia_11=P_ia_11+p_ia_coef*P_11
+          P_ia_12=P_ia_12+p_ia_coef*P_12
+          P_ia_21=P_ia_21+p_ia_coef*P_21
+          P_ia_22=P_ia_22+p_ia_coef*P_22
+          P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
+          P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
+          !print *, 'Perp: ',berg%iceberg_num,  p_ia_coef, IA_x, P_ia_11, P_ia_21,P_ia_12, P_ia_22
+          !print *, 'P_11',P_11
+          !print *, 'P_21',P_21
+          !print *, 'P_12',P_12
+          !print *, 'P_22',P_22
         endif
       endif
+    endif
 
+  end subroutine calculate_force
 
-      end subroutine calculate_force
+  subroutine overlap_area(R1, R2, d, A, trapped)
+  ! Arguments
+  real, intent(in) :: R1
+  real, intent(in) :: R2
+  real, intent(in) :: d
+  real, intent(out) :: A
+  real, intent(out) :: Trapped
+  ! Local variables
+  real :: R1_sq, R2_sq, d_sq
 
-
-  subroutine overlap_area(R1,R2,d,A,trapped)
-    real, intent(in) :: R1, R2, d
-    real, intent(out) :: A, Trapped
-    real :: R1_sq, R2_sq, d_sq  
     R1_sq=R1**2
     R2_sq=R2**2
     d_sq=d**2
@@ -614,7 +650,7 @@ iceberg_bonds_on=bergs%iceberg_bonds_on
         if (d>abs(R1-R2)) then
           A= (R1_sq*acos((d_sq+R1_sq-R2_sq)/(2.*d*R1)))  +  (R2_sq*acos((d_sq+R2_sq-R1_sq)/(2.*d*R2)))  - (0.5*sqrt((-d+R1+R2)*(d+R1-R2)*(d-R1+R2)*(d+R1+R2)))
         else
-          A=min(pi*R1_sq,pi*R2_sq) 
+          A=min(pi*R1_sq,pi*R2_sq)
           Trapped=1.
         endif
       else
@@ -626,25 +662,31 @@ iceberg_bonds_on=bergs%iceberg_bonds_on
 
    end subroutine overlap_area
 
-
-
-
 end subroutine interactive_force
 
-
-! ##############################################################################
-
-
+!> Calculates the instantaneous acceleration of an iceberg
 subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, axn, ayn, bxn, byn, debug_flag) !Saving  acceleration for Verlet, Adding Verlet flag - Alon  MP1
 !subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, debug_flag) !old version commmented out by Alon
 ! Arguments
-type(icebergs), pointer :: bergs
-type(iceberg), pointer :: berg
-integer, intent(in) :: i, j
-real, intent(in) :: xi, yj, lat, uvel, vvel, uvel0, vvel0, dt
-real, intent(out) :: ax, ay
-real, intent(inout) :: axn, ayn, bxn, byn ! Added implicit and explicit accelerations to output -Alon
-logical, optional :: debug_flag
+type(icebergs), pointer :: bergs !< Container for all types and memory
+type(iceberg), pointer :: berg !< An iceberg
+integer, intent(in) :: i !< i-index of cell berg is in
+integer, intent(in) :: j !< j-index of cell berg is in
+real, intent(in) :: xi !< Non-dimensional x-position within cell of berg
+real, intent(in) :: yj !< Non-dimensional y-position within cell of berg
+real, intent(in) :: lat !< Latitude of berg (degree N)
+real, intent(in) :: uvel !< Zonal velocity of berg (m/s)
+real, intent(in) :: vvel !< Meridional velocity of berg (m/s)
+real, intent(in) :: uvel0
+real, intent(in) :: vvel0
+real, intent(in) :: dt !< Time step (s)
+real, intent(out) :: ax !< Zonal acceleration (m/s2)
+real, intent(out) :: ay !< Meridional acceleration (m/s2)
+real, intent(inout) :: axn
+real, intent(inout) :: ayn
+real, intent(inout) :: bxn
+real, intent(inout) :: byn ! Added implicit and explicit accelerations to output -Alon
+logical, optional :: debug_flag !< If true, print debugging
 ! Local variables
 type(icebergs_gridded), pointer :: grd
 real :: uo, vo, ui, vi, ua, va, uwave, vwave, ssh_x, ssh_y, sst, sss, cn, hi
@@ -654,7 +696,7 @@ real :: c_ocn, c_atm, c_ice
 real :: ampl, wmod, Cr, Lwavelength, Lcutoff, Ltop
 real, parameter :: accel_lim=1.e-2, Cr0=0.06, vel_lim=15.
 real :: alpha, beta, C_N
-real :: lambda, detA, A11, A12, A21, A22, RHS_x, RHS_y, D_hi 
+real :: lambda, detA, A11, A12, A21, A22, RHS_x, RHS_y, D_hi
 real :: uveln, vveln, us, vs, speed, loc_dx, new_speed
 real :: u_star, v_star    !Added by Alon
 real :: IA_x, IA_y    !Added by Alon
@@ -666,27 +708,25 @@ logical :: use_new_predictive_corrective !Flad to use Bob's predictive correctiv
 integer :: itloop
 integer :: stderrunit
 
-Runge_not_Verlet=bergs%Runge_not_Verlet  ! Loading directly from namelist/default , Alon
-interactive_icebergs_on=bergs%interactive_icebergs_on  ! Loading directly from namelist/default , Alon
-use_new_predictive_corrective=bergs%use_new_predictive_corrective  ! Loading directly from namelist/default , Alon
+  Runge_not_Verlet=bergs%Runge_not_Verlet  ! Loading directly from namelist/default , Alon
+  interactive_icebergs_on=bergs%interactive_icebergs_on  ! Loading directly from namelist/default , Alon
+  use_new_predictive_corrective=bergs%use_new_predictive_corrective  ! Loading directly from namelist/default , Alon
 
-!These values are no longer set as parameters, but rather can be changed as variables.
-alpha=0.0
-beta=1.0
-C_N=0.0
+  !These values are no longer set as parameters, but rather can be changed as variables.
+  alpha=0.0
+  beta=1.0
+  C_N=0.0
 
+  !Alon: Verlet requires implicit Coriolis and implicit drag.
+  !Alon: Also, I think that the implicit Coriolis with RK gives icebergs which do not complete inertial circles.
+  if (.not.Runge_not_Verlet) then
+    alpha=1.0
+    C_N=1.0
+    beta=1.0
+    use_new_predictive_corrective=.True.
+  endif
 
-!Alon: Verlet requires implicit Coriolis and implicit drag. 
-!Alon: Also, I think that the implicit Coriolis with RK gives icebergs which do not complete inertial circles.
-if (.not.Runge_not_Verlet) then
-alpha=1.0 
-C_N=1.0
-beta=1.0
-use_new_predictive_corrective=.True.
-endif
-
-
-!print *, 'axn=',axn,'ayn=',ayn
+  !print *, 'axn=',axn,'ayn=',ayn
   u_star=uvel0+(axn*(dt/2.))  !Alon
   v_star=vvel0+(ayn*(dt/2.))  !Alon
 
@@ -704,7 +744,7 @@ endif
   else
      f_cori=(2.*omega)*sin(pi_180*bergs%lat_ref)
   endif
-!  f_cori=0.
+  !f_cori=0.
 
   M=berg%mass
   T=berg%thickness ! total thickness
@@ -713,7 +753,7 @@ endif
   W=berg%width
   L=berg%length
 
-!Initializing accelerations - Alon. (I am not 100% sure this is needed). I'm not sure what is output if variable is not defined in the subroutine.
+  ! Initializing accelerations - Alon. (I am not 100% sure this is needed). I'm not sure what is output if variable is not defined in the subroutine.
   axn=0.
   ayn=0.
   bxn=0.
@@ -725,14 +765,14 @@ endif
   ! Wave radiation
   uwave=ua-uo; vwave=va-vo  ! Use wind speed rel. to ocean for wave model (aja)?
   wmod=uwave*uwave+vwave*vwave ! The wave amplitude and length depend on the wind speed relative to the ocean current;
-                               !  actually wmod is wmod**2 here.
+                               ! actually wmod is wmod**2 here.
   ampl=0.5*0.02025*wmod ! This is "a", the wave amplitude
   Lwavelength=0.32*wmod ! Surface wave length fitted to data in table at
-  !      http://www4.ncsu.edu/eos/users/c/ceknowle/public/chapter10/part2.html
+                        ! http://www4.ncsu.edu/eos/users/c/ceknowle/public/chapter10/part2.html
   Lcutoff=0.125*Lwavelength
   Ltop=0.25*Lwavelength
-  Cr=Cr0*min(max(0.,(L-Lcutoff)/((Ltop-Lcutoff)+1.e-30)),1.) ! Wave radiation coefficient
-  !     fitted to graph from Carrieres et al.,  POAC Drift Model.
+  Cr=Cr0*min(max(0.,(L-Lcutoff)/((Ltop-Lcutoff)+1.e-30)),1.) ! Wave radiation coefficient fitted to
+                                                             ! graph from Carrieres et al.,  POAC Drift Model.
   wave_rad=0.5*rho_seawater/M*Cr*gravity*ampl*min(ampl,F)*(2.*W*L)/(W+L)
   wmod = sqrt(ua*ua+va*va) ! Wind speed
   if (wmod.ne.0.) then
@@ -758,53 +798,50 @@ endif
 !c_ice=0.
 
     ! Half half accelerations  - axn, ayn
-    if (.not.Runge_not_Verlet) then  
-        axn=-gravity*ssh_x +wave_rad*uwave 
-        ayn=-gravity*ssh_y +wave_rad*vwave 
+    if (.not.Runge_not_Verlet) then
+      axn=-gravity*ssh_x +wave_rad*uwave
+      ayn=-gravity*ssh_y +wave_rad*vwave
     else
-    ! Not half half accelerations  - for RK
-        bxn=-gravity*ssh_x +wave_rad*uwave 
-        byn=-gravity*ssh_y +wave_rad*vwave 
-     endif
+      ! Not half half accelerations  - for RK
+      bxn=-gravity*ssh_x +wave_rad*uwave
+      byn=-gravity*ssh_y +wave_rad*vwave
+    endif
 
-
-! Interactive spring acceleration - (Does the spring part need to be called twice?)
-if (interactive_icebergs_on) then
-           call interactive_force(bergs, berg, IA_x, IA_y, uvel0, vvel0, uvel0, vvel0, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y) ! Spring forces, Made by Alon.
-           if (.not.Runge_not_Verlet) then
-               axn=axn + IA_x
-               ayn=ayn + IA_y
-           else
-               bxn=bxn + IA_x
-               byn=byn + IA_y
-           endif
-
-endif
-
+  ! Interactive spring acceleration - (Does the spring part need to be called twice?)
+  if (interactive_icebergs_on) then
+    call interactive_force(bergs, berg, IA_x, IA_y, uvel0, vvel0, uvel0, vvel0, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y) ! Spring forces, Made by Alon.
+    if (.not.Runge_not_Verlet) then
+      axn=axn + IA_x
+      ayn=ayn + IA_y
+    else
+      bxn=bxn + IA_x
+      byn=byn + IA_y
+    endif
+  endif
 
   if (alpha>0.) then ! If implicit Coriolis, use u_star rather than RK4 latest  !Alon
-        if (C_N>0.) then !  C_N=1 for Crank Nicolson Coriolis, C_N=0 for full implicit Coriolis !Alon  
-           axn=axn+f_cori*v_star
-           ayn=ayn-f_cori*u_star
-        else
-           bxn=bxn+f_cori*v_star
-           byn=byn-f_cori*u_star
-        endif
+    if (C_N>0.) then !  C_N=1 for Crank Nicolson Coriolis, C_N=0 for full implicit Coriolis !Alon
+      axn=axn+f_cori*v_star
+      ayn=ayn-f_cori*u_star
+    else
+      bxn=bxn+f_cori*v_star
+      byn=byn-f_cori*u_star
+    endif
   else
-           bxn=bxn+f_cori*vvel
-           byn=byn-f_cori*uvel
+    bxn=bxn+f_cori*vvel
+    byn=byn-f_cori*uvel
   endif
-  
+
   if (use_new_predictive_corrective) then
-     uveln=uvel0; vveln=vvel0 ! Discuss this change with Alistair. Alon thinks that it is needed. 
+    uveln=uvel0; vveln=vvel0 ! Discuss this change with Alistair. Alon thinks that it is needed.
   else
-     uveln=uvel; vveln=vvel
+    uveln=uvel; vveln=vvel
   endif
- 
+
   us=uvel0   ; vs=vvel0
   do itloop=1,2 ! Iterate on drag coefficients
     if (itloop .eq. 2) then
-      us=uveln   ; vs=vveln
+      us=uveln ; vs=vveln
     endif
   if (use_new_predictive_corrective) then
     !Alon's proposed change - using Bob's improved scheme.
@@ -819,68 +856,66 @@ endif
     drag_ice=c_ice*sqrt( (us-ui)**2+(vs-vi)**2 )
   endif
 
-     RHS_x=(axn/2) + bxn
-     RHS_y=(ayn/2) + byn
+  RHS_x=(axn/2) + bxn
+  RHS_y=(ayn/2) + byn
 
-     if (beta>0.) then ! If implicit, use u_star, v_star rather than RK4 latest
-         RHS_x=RHS_x - drag_ocn*(u_star-uo) -drag_atm*(u_star-ua) -drag_ice*(u_star-ui) 
-         RHS_y=RHS_y - drag_ocn*(v_star-vo) -drag_atm*(v_star-va) -drag_ice*(v_star-vi)  
-    else
-         RHS_x=RHS_x - drag_ocn*(uvel-uo) -drag_atm*(uvel-ua) -drag_ice*(uvel-ui)  
-         RHS_y=RHS_y - drag_ocn*(vvel-vo) -drag_atm*(vvel-va) -drag_ice*(vvel-vi)  
-    endif
+  if (beta>0.) then ! If implicit, use u_star, v_star rather than RK4 latest
+    RHS_x=RHS_x - drag_ocn*(u_star-uo) -drag_atm*(u_star-ua) -drag_ice*(u_star-ui)
+    RHS_y=RHS_y - drag_ocn*(v_star-vo) -drag_atm*(v_star-va) -drag_ice*(v_star-vi)
+  else
+    RHS_x=RHS_x - drag_ocn*(uvel-uo) -drag_atm*(uvel-ua) -drag_ice*(uvel-ui)
+    RHS_y=RHS_y - drag_ocn*(vvel-vo) -drag_atm*(vvel-va) -drag_ice*(vvel-vi)
+  endif
 
-if (interactive_icebergs_on) then
-   if (itloop>1) then
-        call interactive_force(bergs, berg, IA_x, IA_y, uvel0, vvel0, us,vs, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y) ! Spring forces, Made by Alon.
+  if (interactive_icebergs_on) then
+    if (itloop>1) then
+      call interactive_force(bergs, berg, IA_x, IA_y, uvel0, vvel0, us,vs, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y) ! Spring forces, Made by Alon.
     endif
-     if (beta>0.) then ! If implicit, use u_star, v_star rather than RK4 latest
-         RHS_x=RHS_x -(((P_ia_11*u_star)+(P_ia_12*v_star))-P_ia_times_u_x) 
-         RHS_y=RHS_y -(((P_ia_21*u_star)+(P_ia_22*v_star))-P_ia_times_u_y) 
+    if (beta>0.) then ! If implicit, use u_star, v_star rather than RK4 latest
+      RHS_x=RHS_x -(((P_ia_11*u_star)+(P_ia_12*v_star))-P_ia_times_u_x)
+      RHS_y=RHS_y -(((P_ia_21*u_star)+(P_ia_22*v_star))-P_ia_times_u_y)
     else
-         RHS_x=RHS_x - (((P_ia_11*uvel)+(P_ia_12*vvel))-P_ia_times_u_x)
-         RHS_y=RHS_y - (((P_ia_21*uvel)+(P_ia_22*vvel))-P_ia_times_u_y)       
+      RHS_x=RHS_x - (((P_ia_11*uvel)+(P_ia_12*vvel))-P_ia_times_u_x)
+      RHS_y=RHS_y - (((P_ia_21*uvel)+(P_ia_22*vvel))-P_ia_times_u_y)
     endif
     !print *,'Before calculation:', berg%iceberg_num, IA_x, IA_y, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y
-endif
+  endif
 
 
   ! Solve for implicit accelerations
-    if (alpha+beta.gt.0.) then
-      lambda=drag_ocn+drag_atm+drag_ice
-      A11=1.+beta*dt*lambda
-      A22=1.+beta*dt*lambda
-      A12=-alpha*dt*f_cori  
-      A21=alpha*dt*f_cori  
-      !A12=dt*f_cori  !Removed by ALon (in order to have the entire matrix. I hope the sign is correct)
+  if (alpha+beta.gt.0.) then
+    lambda=drag_ocn+drag_atm+drag_ice
+    A11=1.+beta*dt*lambda
+    A22=1.+beta*dt*lambda
+    A12=-alpha*dt*f_cori
+    A21=alpha*dt*f_cori
+    !A12=dt*f_cori  !Removed by ALon (in order to have the entire matrix. I hope the sign is correct)
 
-      if (C_N>0.) then   !For Crank-Nicolson Coriolis term.   
-          A12=A12/2.
-          A21=A21/2.
-      endif
+    if (C_N>0.) then ! For Crank-Nicolson Coriolis term.
+        A12=A12/2.
+        A21=A21/2.
+    endif
 
-      if (interactive_icebergs_on) then
-            A11=A11+(dt*P_ia_11)
-            A12=A12+(dt*P_ia_12)
-            A21=A21+(dt*P_ia_21)
-            A22=A22+(dt*P_ia_22)
-     endif
+    if (interactive_icebergs_on) then
+          A11=A11+(dt*P_ia_11)
+          A12=A12+(dt*P_ia_12)
+          A21=A21+(dt*P_ia_21)
+          A22=A22+(dt*P_ia_22)
+    endif
 
-     !This is for testing the code using only interactive forces
-     if (bergs%only_interactive_forces) then
-       RHS_x=(IA_x/2) -(((P_ia_11*u_star)+(P_ia_12*v_star))-P_ia_times_u_x) 
-       RHS_y=(IA_y/2) -(((P_ia_21*u_star)+(P_ia_22*v_star))-P_ia_times_u_y) 
+    ! This is for testing the code using only interactive forces
+    if (bergs%only_interactive_forces) then
+       RHS_x=(IA_x/2) -(((P_ia_11*u_star)+(P_ia_12*v_star))-P_ia_times_u_x)
+       RHS_y=(IA_y/2) -(((P_ia_21*u_star)+(P_ia_22*v_star))-P_ia_times_u_y)
        A11=1+(dt*P_ia_11)
        A12=(dt*P_ia_12)
        A21=(dt*P_ia_21)
        A22=1+(dt*P_ia_22)
-     endif
+    endif
 
-
-
-      detA=1./((A11*A22)-(A12*A21))
-      ax=detA*(A22*RHS_x-A12*RHS_y)
-      ay=detA*(A11*RHS_y-A21*RHS_x)
+    detA=1./((A11*A22)-(A12*A21))
+    ax=detA*(A22*RHS_x-A12*RHS_y)
+    ay=detA*(A11*RHS_y-A21*RHS_x)
 
 !Alistair's version removed by Alon
 !      detA=1./(A11**2+A12**2)
@@ -890,43 +925,43 @@ endif
       ax=RHS_x; ay=RHS_y
     endif
 
-      uveln=u_star+dt*ax        ! Alon
-      vveln=v_star+dt*ay        ! Alon
+    uveln=u_star+dt*ax        ! Alon
+    vveln=v_star+dt*ay        ! Alon
 !MP4
   !    if (berg%iceberg_num .eq. 1) then
   !      print *, '***************************************************'
   !      print *,'Iceberg_num, itloop', berg%iceberg_num, itloop
-  !      print *, 'P matrix:', P_ia_11, P_ia_12,P_ia_21,P_ia_22,P_ia_times_u_x, P_ia_times_u_x 
-  !      print *,'A_matrix', A11, A12, A21, A22 
-  !      print *,'IA_x IA_y', IA_x, IA_y 
+  !      print *, 'P matrix:', P_ia_11, P_ia_12,P_ia_21,P_ia_22,P_ia_times_u_x, P_ia_times_u_x
+  !      print *,'A_matrix', A11, A12, A21, A22
+  !      print *,'IA_x IA_y', IA_x, IA_y
   !      print *, 'RHS, ustar, uvel,ax: ', RHS_x, u_star,uveln, ax
   !    endif
   enddo ! itloop
 
-!Saving the totally explicit part of the acceleration to use in finding the next position and u_star -Alon
-    axn=0.
-    ayn=0.
-    if (.not.Runge_not_Verlet) then
-        axn=-gravity*ssh_x +wave_rad*uwave
-        ayn=-gravity*ssh_y +wave_rad*vwave
-        if (interactive_icebergs_on) then
-          axn=axn + IA_x
-          ayn=ayn + IA_y
-        endif
+  !Saving the totally explicit part of the acceleration to use in finding the next position and u_star -Alon
+  axn=0.
+  ayn=0.
+  if (.not.Runge_not_Verlet) then
+    axn=-gravity*ssh_x +wave_rad*uwave
+    ayn=-gravity*ssh_y +wave_rad*vwave
+    if (interactive_icebergs_on) then
+      axn=axn + IA_x
+      ayn=ayn + IA_y
     endif
-    if (C_N>0.) then !  C_N=1 for Crank Nicolson Coriolis, C_N=0 for full implicit Coriolis !Alon 
-      axn=axn+f_cori*vveln
-      ayn=ayn-f_cori*uveln
-    endif
+  endif
+  if (C_N>0.) then !  C_N=1 for Crank Nicolson Coriolis, C_N=0 for full implicit Coriolis !Alon
+    axn=axn+f_cori*vveln
+    ayn=ayn-f_cori*uveln
+  endif
 
-     !This is for testing the code using only interactive forces
-     if (bergs%only_interactive_forces) then
-       axn=IA_x
-       ayn=IA_y
-     endif
+  !This is for testing the code using only interactive forces
+  if (bergs%only_interactive_forces) then
+    axn=IA_x
+    ayn=IA_y
+  endif
 
-    bxn= ax-(axn/2) !Alon
-    byn= ay-(ayn/2) !Alon
+  bxn= ax-(axn/2) !Alon
+  byn= ay-(ayn/2) !Alon
 
   ! Limit speed of bergs based on a CFL criteria
   if ((bergs%speed_limit>0.) .or. (bergs%speed_limit .eq.-1.)) then
@@ -934,13 +969,13 @@ endif
     if (speed>0.) then
       loc_dx=min(0.5*(grd%dx(i,j)+grd%dx(i,j-1)),0.5*(grd%dy(i,j)+grd%dy(i-1,j))) ! min(dx,dy)
       !new_speed=min(loc_dx/dt*bergs%speed_limit,speed) ! Restrict speed to dx/dt x factor
-      new_speed=loc_dx/dt*bergs%speed_limit ! Speed limit as a factor of dx / dt 
+      new_speed=loc_dx/dt*bergs%speed_limit ! Speed limit as a factor of dx / dt
       if (new_speed<speed) then
         if (bergs%speed_limit>0.) then
           uveln=uveln*(new_speed/speed) ! Scale velocity to reduce speed
           vveln=vveln*(new_speed/speed) ! without changing the direction
           bergs%nspeeding_tickets=bergs%nspeeding_tickets+1
-        else 
+        else
           call error_mesg('diamonds, Speeding icebergs', 'Faster than the CFL!', WARNING)
           write(stderrunit,*) 'diamonds, Speeding berg1! =',mpp_pe(), berg%iceberg_num
           write(stderrunit,*) 'diamonds, Speeding berg2, speed =',speed, loc_dx/dt
@@ -1084,7 +1119,7 @@ endif
     write(stderrunit,'("pe=",i3,x,i8,3es12.4)') mpp_pe(),j0+jj,(B(ii,jj),ii=-1,1)
   enddo
   end subroutine dump_locfld
-  
+
   subroutine dump_locvel(grd,i0,j0,A,lbl)
   ! Arguments
   type(icebergs_gridded), pointer :: grd
@@ -1108,14 +1143,14 @@ endif
     write(stderrunit,'("pe=",i3,x,i8,3es12.4)') mpp_pe(),j0+jj,(B(ii,jj),ii=-1,0)
   enddo
   end subroutine dump_locvel
-  
+
 end subroutine accel
 
 ! ##############################################################################
 
 subroutine thermodynamics(bergs)
 ! Arguments
-type(icebergs), pointer :: bergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
 ! Local variables
 type(icebergs_gridded), pointer :: grd
 type(bond), pointer :: current_bond
@@ -1134,13 +1169,13 @@ real :: SSS !Temporarily here
 
   ! For convenience
   grd=>bergs%grd
-  
-  !Initializing 
+
+  !Initializing
   grd%Uvel_on_ocean(:,:,:)=0.
   grd%Vvel_on_ocean(:,:,:)=0.
 
   ! Thermodynamics of first halo row is calculated, so that spread mass to ocean works correctly
-  do grdj = grd%jsc-1,grd%jec+1 ; do grdi = grd%isc-1,grd%iec+1  
+  do grdj = grd%jsc-1,grd%jec+1 ; do grdi = grd%isc-1,grd%iec+1
     this=>bergs%list(grdi,grdj)%first
     do while(associated(this))
       if (debug) call check_position(grd, this, 'thermodynamics (top)')
@@ -1149,7 +1184,7 @@ real :: SSS !Temporarily here
               this%sss,this%cn, this%hi)
       SST=this%sst
       SSS=this%sss
-      IC=min(1.,this%cn+bergs%sicn_shift) ! Shift sea-ice concentration 
+      IC=min(1.,this%cn+bergs%sicn_shift) ! Shift sea-ice concentration
       M=this%mass
       T=this%thickness ! total thickness
       !D=(bergs%rho_bergs/rho_seawater)*T ! draught (keel depth)
@@ -1159,12 +1194,12 @@ real :: SSS !Temporarily here
       i=this%ine
       j=this%jne
       Vol=T*W*L
-  
+
       ! Environment
       dvo=sqrt((this%uvel-this%uo)**2+(this%vvel-this%vo)**2)
       dva=sqrt((this%ua-this%uo)**2+(this%va-this%vo)**2)
       Ss=1.5*(dva**0.5)+0.1*dva ! Sea state
-  
+
       ! Melt rates in m/s
       Mv=max( 7.62e-3*SST+1.29e-3*(SST**2), 0.) &! Buoyant convection at sides
           *perday ! convert to m/s
@@ -1172,10 +1207,10 @@ real :: SSS !Temporarily here
           *perday ! convert to m/s
       Me=max( 1./12.*(SST+2.)*Ss*(1+cos(pi*(IC**3))) ,0.) &! Wave erosion
           *perday ! convert to m/s
-       
-      !For icebergs acting as ice shelves 
+
+      !For icebergs acting as ice shelves
       if ((bergs%melt_icebergs_as_ice_shelf) .or.(bergs%use_mixed_melting))  then
-        if (.not. bergs%use_mixed_layer_salinity_for_thermo)  SSS=35.0  
+        if (.not. bergs%use_mixed_layer_salinity_for_thermo)  SSS=35.0
         call find_basal_melt(bergs,dvo,this%lat,SSS,SST,bergs%Use_three_equation_model,T,Ms,this%iceberg_num)
         Ms=max(Ms,0.) !No refreezing allowed for now
         !Set melt to zero if ocean is too thin.
@@ -1188,7 +1223,7 @@ real :: SSS !Temporarily here
 
         if (bergs%use_mixed_melting) then
           N_bonds=0.
-          N_max=4.0  !Maximum number of bonds that element can form based on shape      
+          N_max=4.0  !Maximum number of bonds that element can form based on shape
           if (bergs%hexagonal_icebergs) N_max=6.0
           if (bergs%iceberg_bonds_on) then
             ! Determining number of bonds
@@ -1198,7 +1233,7 @@ real :: SSS !Temporarily here
               current_bond=>current_bond%next_bond
             enddo
           endif
-          if  (this%static_berg .eq. 1)  N_bonds=N_max  !Static icebergs melt  like ice shelves 
+          if  (this%static_berg .eq. 1)  N_bonds=N_max  !Static icebergs melt  like ice shelves
           Me=((N_max-N_bonds)/N_max)*(Mv+Me)
           Mv=0.0
           Mb=(((N_max-N_bonds)/N_max)*(Mb)) + (N_bonds/N_max)*Ms
@@ -1208,26 +1243,26 @@ real :: SSS !Temporarily here
           Mb=Ms
         endif
       endif
-            
+
       if (bergs%set_melt_rates_to_zero) then
         Mv=0.0
         Mb=0.0
         Me=0.0
       endif
-  
+
       if (bergs%use_operator_splitting) then
         ! Operator split update of volume/mass
         Tn=max(T-Mb*bergs%dt,0.) ! new total thickness (m)
         nVol=Tn*W*L ! new volume (m^3)
         Mnew1=(nVol/Vol)*M ! new mass (kg)
         dMb=M-Mnew1 ! mass lost to basal melting (>0) (kg)
-  
+
         Ln=max(L-Mv*bergs%dt,0.) ! new length (m)
         Wn=max(W-Mv*bergs%dt,0.) ! new width (m)
         nVol=Tn*Wn*Ln ! new volume (m^3)
         Mnew2=(nVol/Vol)*M ! new mass (kg)
         dMv=Mnew1-Mnew2 ! mass lost to buoyant convection (>0) (kg)
-  
+
         Ln=max(Ln-Me*bergs%dt,0.) ! new length (m)
         Wn=max(Wn-Me*bergs%dt,0.) ! new width (m)
         nVol=Tn*Wn*Ln ! new volume (m^3)
@@ -1247,7 +1282,7 @@ real :: SSS !Temporarily here
         dMe=(M/Vol)*(T*(W+L))*Me*bergs%dt ! approx. mass lost to erosion (kg)
         dMv=(M/Vol)*(T*(W+L))*Mv*bergs%dt ! approx. mass loss to buoyant convection (kg)
       endif
-  
+
       ! Bergy bits
       if (bergs%bergy_bit_erosion_fraction>0.) then
         Mbits=this%mass_of_bits ! mass of bergy bits (kg)
@@ -1260,7 +1295,7 @@ real :: SSS !Temporarily here
         Mbb=bergs%rho_bergs*Abits*Mbb ! in kg/s
         dMbitsM=min(Mbb*bergs%dt,nMbits) ! bergy bits mass lost to melting (kg)
         nMbits=nMbits-dMbitsM ! remove mass lost to bergy bits melt
-        if (Mnew==0.) then ! if parent berg has completely melted then 
+        if (Mnew==0.) then ! if parent berg has completely melted then
           dMbitsM=dMbitsM+nMbits ! instantly melt all the bergy bits
           nMbits=0.
         endif
@@ -1270,7 +1305,7 @@ real :: SSS !Temporarily here
         dMbitsM=0.
         nMbits=this%mass_of_bits ! retain previous value incase non-zero
       endif
-  
+
       ! Add melting to the grid and field diagnostics
       if (grd%area(i,j).ne.0.) then
         melt=(dM-(dMbitsE-dMbitsM))/bergs%dt ! kg/s
@@ -1305,69 +1340,68 @@ real :: SSS !Temporarily here
         write(stderrunit,*) 'msk=',grd%msk(i,j),grd%area(i,j)
         call error_mesg('diamonds, thermodynamics', 'berg appears to have grounded!', FATAL)
       endif
-  
- 
-   ! Rolling 
-   !There are now 3 iceberg rolling schemes:
-   !1) Rolling based on aspect ratio threshold (iceberg of constant density)
-   !2) Rolling based on corrected Weeks and Mellor scheme
-   !3) Rolling based on incorrect Weeks and Mellor scheme - kept for legacy reasons
-    if (bergs%allow_bergs_to_roll) then
-      Dn=(bergs%rho_bergs/rho_seawater)*Tn ! draught (keel depth)
-      if ( Dn>0. ) then
-        if ( (.not.bergs%use_updated_rolling_scheme) .and. (bergs%tip_parameter<999.) ) then    !Use Rolling Scheme 3
-            if ( max(Wn,Ln)<sqrt(0.92*(Dn**2)+58.32*Dn) ) then
-              call swap_variables(Tn,Wn)
-            endif
-        else
-          if (Wn>Ln) call swap_variables(Ln,Wn)  !Make sure that Wn is the smaller dimension
-        
-          if ( (.not.bergs%use_updated_rolling_scheme) .and. (bergs%tip_parameter>=999.) ) then    !Use Rolling Scheme 2
-            q=bergs%rho_bergs/rho_seawater
-            Delta=6.0
-            if (Wn<sqrt((6.0*q*(1-q)*(Tn**2))-(12*Delta*q*Tn))) then
+
+      ! Rolling
+      !There are now 3 iceberg rolling schemes:
+      !1) Rolling based on aspect ratio threshold (iceberg of constant density)
+      !2) Rolling based on corrected Weeks and Mellor scheme
+      !3) Rolling based on incorrect Weeks and Mellor scheme - kept for legacy reasons
+      if (bergs%allow_bergs_to_roll) then
+        Dn=(bergs%rho_bergs/rho_seawater)*Tn ! draught (keel depth)
+        if ( Dn>0. ) then
+          if ( (.not.bergs%use_updated_rolling_scheme) .and. (bergs%tip_parameter<999.) ) then    !Use Rolling Scheme 3
+              if ( max(Wn,Ln)<sqrt(0.92*(Dn**2)+58.32*Dn) ) then
                 call swap_variables(Tn,Wn)
+              endif
+          else
+            if (Wn>Ln) call swap_variables(Ln,Wn)  !Make sure that Wn is the smaller dimension
+
+            if ( (.not.bergs%use_updated_rolling_scheme) .and. (bergs%tip_parameter>=999.) ) then    !Use Rolling Scheme 2
+              q=bergs%rho_bergs/rho_seawater
+              Delta=6.0
+              if (Wn<sqrt((6.0*q*(1-q)*(Tn**2))-(12*Delta*q*Tn))) then
+                  call swap_variables(Tn,Wn)
+              endif
+            endif
+
+            if (bergs%use_updated_rolling_scheme) then    !Use Rolling Scheme 1
+              if (bergs%tip_parameter>0.) then
+                tip_parameter=bergs%tip_parameter
+              else
+                ! Equation 27 from Burton et al 2012, or equivolently, Weeks and Mellor 1979 with constant density
+                tip_parameter=sqrt(6*(bergs%rho_bergs/rho_seawater)*(1-(bergs%rho_bergs/rho_seawater)))   !using default values gives 0.92
+              endif
+              if ((tip_parameter*Tn)>Wn)  then     !note that we use the Thickness instead of the Draft
+                  call swap_variables(Tn,Wn)
+              endif
             endif
           endif
+          Dn=(bergs%rho_bergs/rho_seawater)*Tn ! re-calculate draught (keel depth) for grounding
+        endif
+      endif
 
-          if (bergs%use_updated_rolling_scheme) then    !Use Rolling Scheme 1
-            if (bergs%tip_parameter>0.) then
-              tip_parameter=bergs%tip_parameter
-            else
-              ! Equation 27 from Burton et al 2012, or equivolently, Weeks and Mellor 1979 with constant density
-              tip_parameter=sqrt(6*(bergs%rho_bergs/rho_seawater)*(1-(bergs%rho_bergs/rho_seawater)))   !using default values gives 0.92
-            endif
-            if ((tip_parameter*Tn)>Wn)  then     !note that we use the Thickness instead of the Draft
-                call swap_variables(Tn,Wn)
-            endif
+      !This option allows iceberg melt fluxes to enter the ocean without the icebergs changing shape
+      if (bergs%Iceberg_melt_without_decay) then
+        !In this case, the iceberg dimension are reset to their values before
+        !the thermodynamics are applied.
+        !If the spread_mass is being used to calculate melt, we calculate this
+        !before reseting
+        if (bergs%find_melt_using_spread_mass) then
+          if (Mnew>0.) then !If the berg still exists
+            call spread_mass_across_ocean_cells(bergs,this, i, j, this%xi, this%yj,Mnew , nMbits, this%mass_scaling, Ln*Wn,  Tn)
           endif
         endif
-        Dn=(bergs%rho_bergs/rho_seawater)*Tn ! re-calculate draught (keel depth) for grounding
-      endif
-    endif
-
-       !This option allows iceberg melt fluxes to enter the ocean without the icebergs changing shape
-       if (bergs%Iceberg_melt_without_decay) then
-         !In this case, the iceberg dimension are reset to their values before
-         !the thermodynamics are applied. 
-         !If the spread_mass is being used to calculate melt, we calculate this
-         !before reseting 
-         if (bergs%find_melt_using_spread_mass) then
-           if (Mnew>0.) then !If the berg still exists
-             call spread_mass_across_ocean_cells(bergs,this, i, j, this%xi, this%yj,Mnew , nMbits, this%mass_scaling, Ln*Wn,  Tn)
-           endif
-         endif
-         !Reset all the values
-         Mnew=this%mass
-         nMbits=this%mass_of_bits
-         Tn=this%thickness
-         Wn=this%width
-         Ln=this%length
-         if (bergs%bergy_bit_erosion_fraction>0.) then
-           Mbits=this%mass_of_bits ! mass of bergy bits (kg)
-           Lbits=min(L,W,T,40.) ! assume bergy bits are smallest dimension or 40 meters
-           Abits=(Mbits/bergs%rho_bergs)/Lbits ! Effective bottom area (assuming T=Lbits)
-         endif
+        !Reset all the values
+        Mnew=this%mass
+        nMbits=this%mass_of_bits
+        Tn=this%thickness
+        Wn=this%width
+        Ln=this%length
+        if (bergs%bergy_bit_erosion_fraction>0.) then
+          Mbits=this%mass_of_bits ! mass of bergy bits (kg)
+          Lbits=min(L,W,T,40.) ! assume bergy bits are smallest dimension or 40 meters
+          Abits=(Mbits/bergs%rho_bergs)/Lbits ! Effective bottom area (assuming T=Lbits)
+        endif
       else
         ! Store the new state of iceberg (with L>W)
         this%mass=Mnew
@@ -1377,7 +1411,7 @@ real :: SSS !Temporarily here
         this%length=max(Wn,Ln)
       endif
       next=>this%next
-  
+
       ! Did berg completely melt?
       if (Mnew<=0.) then ! Delete the berg
         call move_trajectory(bergs, this)
@@ -1388,31 +1422,28 @@ real :: SSS !Temporarily here
     enddo
   enddo ; enddo
 
-
   contains
 
   subroutine swap_variables(x,y)
   ! Arguments
   real, intent(inout) :: x, y
   real :: temp
-  temp=x
-  x=y
-  y=temp
+    temp=x
+    x=y
+    y=temp
   end subroutine swap_variables
 
 end subroutine thermodynamics
 
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 subroutine create_gridded_icebergs_fields(bergs)
 ! Arguments
-type(icebergs), pointer :: bergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
 ! Local variables
 type(icebergs_gridded), pointer :: grd
 type(iceberg), pointer :: this
 integer i,j
 integer :: grdi, grdj
-real :: Hocean, Dn,Tn,dvo, mass_tmp 
+real :: Hocean, Dn,Tn,dvo, mass_tmp
 real :: ustar_h, ustar
 real :: orientation
 real :: ave_thickness, ave_draft
@@ -1422,33 +1453,33 @@ real :: tmp
   ! For convenience
   grd=>bergs%grd
 
-  spread_mass_tmp(:,:)=0. !Initializing temporary variable to use in iceberg melt calculation 
+  spread_mass_tmp(:,:)=0. !Initializing temporary variable to use in iceberg melt calculation
 
   !Special case for icebergs not decaying, but mass diffence being used for melt rates
   if ((bergs%find_melt_using_spread_mass) .and.  (bergs%Iceberg_melt_without_decay)) then
-    call sum_up_spread_fields(bergs, spread_mass_tmp(grd%isc:grd%iec,grd%jsc:grd%jec),'mass') 
+    call sum_up_spread_fields(bergs, spread_mass_tmp(grd%isc:grd%iec,grd%jsc:grd%jec),'mass')
   endif
- 
-  !Loop through icebergs and spread mass on ocean 
+
+  !Loop through icebergs and spread mass on ocean
   call calculate_mass_on_ocean(bergs, with_diagnostics=.true.)
-  
-  !Finding the spread fields 
-  if ((grd%id_spread_uvel>0)  .or. (bergs%pass_fields_to_ocean_model)) then 
+
+  !Finding the spread fields
+  if ((grd%id_spread_uvel>0)  .or. (bergs%pass_fields_to_ocean_model)) then
     grd%spread_uvel(:,:)=0.
-    call sum_up_spread_fields(bergs, grd%spread_uvel(grd%isc:grd%iec,grd%jsc:grd%jec), 'Uvel') 
+    call sum_up_spread_fields(bergs, grd%spread_uvel(grd%isc:grd%iec,grd%jsc:grd%jec), 'Uvel')
   endif
-  if ( (grd%id_spread_vvel>0)  .or. (bergs%pass_fields_to_ocean_model)) then 
+  if ( (grd%id_spread_vvel>0)  .or. (bergs%pass_fields_to_ocean_model)) then
     grd%spread_vvel(:,:)=0.
-    call sum_up_spread_fields(bergs, grd%spread_vvel(grd%isc:grd%iec,grd%jsc:grd%jec), 'Vvel') 
+    call sum_up_spread_fields(bergs, grd%spread_vvel(grd%isc:grd%iec,grd%jsc:grd%jec), 'Vvel')
   endif
-  if ( (grd%id_spread_area>0)  .or. (bergs%pass_fields_to_ocean_model)) then 
+  if ( (grd%id_spread_area>0)  .or. (bergs%pass_fields_to_ocean_model)) then
     grd%spread_area(:,:)=0.
-    call sum_up_spread_fields(bergs, grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec), 'area') 
+    call sum_up_spread_fields(bergs, grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec), 'area')
   endif
-  !Always find spread_mass since it is used for so many things.  
+  !Always find spread_mass since it is used for so many things.
   grd%spread_mass(:,:)=0.
-    call sum_up_spread_fields(bergs, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec),'mass') 
-  
+    call sum_up_spread_fields(bergs, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec),'mass')
+
   !Using spread_mass_to_ocean to calculate melt rates (if this option is chosen)
   if (bergs%find_melt_using_spread_mass) then
     if (.not. bergs%Iceberg_melt_without_decay) &
@@ -1463,25 +1494,25 @@ real :: tmp
     grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)=grd%floating_melt(grd%isc:grd%iec,grd%jsc:grd%jec)*HLF !Not 100% sure this is correct.
   endif
 
-  !Dividng the gridded iceberg momentum diagnostic by the iceberg mass to get velocities
+  ! Dividing the gridded iceberg momentum diagnostic by the iceberg mass to get velocities
   if ((grd%id_u_iceberg>0) .or. (grd%id_v_iceberg>0)) then
-    do j = grd%jsc,grd%jec ; do i = grd%isc,grd%iec  
+    do j = grd%jsc,grd%jec ; do i = grd%isc,grd%iec
       if (grd%mass(i,j)>0.) then
         if (grd%id_u_iceberg>0) &
           grd%u_iceberg(i,j)=grd%u_iceberg(i,j)/grd%mass(i,j)
         if (grd%id_v_iceberg>0) &
           grd%v_iceberg(i,j)=grd%v_iceberg(i,j)/grd%mass(i,j)
       else
-        if (grd%id_u_iceberg>0)  grd%u_iceberg(i,j)=0. 
-        if (grd%id_v_iceberg>0)  grd%v_iceberg(i,j)=0. 
+        if (grd%id_u_iceberg>0)  grd%u_iceberg(i,j)=0.
+        if (grd%id_v_iceberg>0)  grd%v_iceberg(i,j)=0.
       endif
     enddo; enddo
   endif
-  
+
   !Calculating ustar_iceberg (gridded)
   grd%ustar_iceberg(:,:)=0.
   if  ((grd%id_ustar_iceberg>0) .or. (bergs%pass_fields_to_ocean_model)) then   !Update diagnostic of iceberg mass spread on ocean
-    do j = grd%jsc,grd%jec ; do i = grd%isc,grd%iec  
+    do j = grd%jsc,grd%jec ; do i = grd%isc,grd%iec
       dvo=sqrt((grd%spread_uvel(i,j)-grd%uo(i,j))**2+(grd%spread_vvel(i,j)-grd%vo(i,j))**2)
       ustar = sqrt(bergs%cdrag_icebergs*(dvo**2  + bergs%utide_icebergs**2))
       ustar_h = max(bergs%ustar_icebergs_bg, ustar)
@@ -1494,7 +1525,7 @@ real :: tmp
   if (bergs%apply_thickness_cutoff_to_gridded_melt) then
     do i=grd%isd,grd%ied ; do j=grd%jsd,grd%jed
       if ((bergs%melt_cutoff >=0.) .and. (grd%spread_area(i,j)>0.)) then
-        ave_thickness=grd%spread_mass(i,j)/(grd%spread_area(i,j)*bergs%rho_bergs) 
+        ave_thickness=grd%spread_mass(i,j)/(grd%spread_area(i,j)*bergs%rho_bergs)
         ave_draft=ave_thickness*(bergs%rho_bergs/rho_seawater)
         if ((grd%ocean_depth(i,j)-ave_draft) < bergs%melt_cutoff) then
           grd%floating_melt(i,j)=0.0
@@ -1505,103 +1536,100 @@ real :: tmp
   endif
 end subroutine create_gridded_icebergs_fields
 
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-subroutine find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thickness,basal_melt,iceberg_num)
-  ! Arguments
-  type(icebergs), pointer :: bergs
-  ! Local variables
-  real , intent(out) :: basal_melt !Melt rate underneath the icebergs
-  real , intent(in) :: dvo !Speed of iceberg relative to ocean mixed layer
-  real , intent(in) :: salt !Salinity of mixed layer
-  real , intent(in) :: temp !Temperature of mixed layer
-  real , intent(in) :: lat !Latitude (for boundary layer calculation)
-  integer , intent(in) :: iceberg_num !Iceberg number, used for debugging (error messages)
-  real , intent(in) :: thickness !Ice thickness - needed to work out the pressure below the ice
-  logical , intent(in) :: Use_three_equation_model !True uses the 3 equation model, False uses the 2 equation model.
-  
-  ! Local variables
-  real :: ustar, f_cori, absf,tfreeze
-  real :: Hml !Mixed layer depth
+subroutine find_basal_melt(bergs, dvo, lat, salt, temp, Use_three_equation_model, thickness, basal_melt, iceberg_num)
+! Arguments
+type(icebergs), pointer :: bergs !< Container for all types and memory
+real, intent(in) :: dvo !< Speed of iceberg relative to ocean mixed layer
+real, intent(in) :: lat !< Latitude (for boundary layer calculation)
+real, intent(in) :: salt !< Salinity of mixed layer
+real, intent(in) :: temp !< Temperature of mixed layer
+logical, intent(in) :: Use_three_equation_model !< True uses the 3 equation model, False uses the 2 equation model.
+real, intent(in) :: thickness !< Ice thickness - needed to work out the pressure below the ice
+real, intent(out) :: basal_melt !< Melt rate underneath the icebergs
+integer, intent(in) :: iceberg_num !< Iceberg number, used for debugging (error messages)
+! Local variables
+real :: ustar, f_cori, absf,tfreeze
+real :: Hml !Mixed layer depth
 
-  !These could also be useful output variables if needed.
-  real :: t_flux, exch_vel_t, exch_vel_s,tflux_shelf,lprec 
- 
-  real ::  Rhoml   ! Ocean mixed layer density in kg m-3.
-  real ::  p_int   ! The pressure at the ice-ocean interface, in Pa.
+!These could also be useful output variables if needed.
+real :: t_flux, exch_vel_t, exch_vel_s,tflux_shelf,lprec
 
-  real, parameter :: VK    = 0.40     ! Von Karman's constant - dimensionless
-  real :: ZETA_N = 0.052   ! The fraction of the boundary layer over which the
-                           ! viscosity is linearly increasing. (Was 1/8. Why?)
-  real, parameter :: RC    = 0.20     ! critical flux Richardson number.
-  real :: I_ZETA_N  ! The inverse of ZETA_N.
-  real :: I_LF  ! Inverse of Latent Heat of fusion (J kg-1)
-  real :: I_VK      ! The inverse of VK.
-  real :: PR, SC    ! The Prandtl number and Schmidt number, nondim.
-!
-  ! 3 equation formulation variables
-  real :: Sbdry     !   Salinities in the ocean at the interface with the
-  real :: Sbdry_it  ! the ice shelf, in PSU.
-  real :: dS_it     ! The interface salinity change during an iteration, in PSU.
-  real :: hBL_neut  ! The neutral boundary layer thickness, in m.
-  real :: hBL_neut_h_molec ! The ratio of the neutral boundary layer thickness
-                           ! to the molecular boundary layer thickness, ND.
-  real :: wT_flux ! The vertical fluxes of heat and buoyancy just inside the
-  real :: wB_flux ! ocean, in C m s-1 and m2 s-3, ###CURRENTLY POSITIVE UPWARD.
-  real :: dB_dS  ! The derivative of buoyancy with salinity, in m s-2 PSU-1.
-  real :: dB_dT  ! The derivative of buoyancy with temperature, in m s-2 C-1.
-  real :: I_n_star, n_star_term
-  real :: dIns_dwB  ! The partial derivative of I_n_star with wB_flux, in ???.
-  real :: dT_ustar, dS_ustar
-  real :: ustar_h
-  real :: Gam_turb
-  real :: Gam_mol_t, Gam_mol_s
-  real :: RhoCp
-  real :: I_RhoLF
-  real :: Rho0
-  real :: ln_neut
-  real :: mass_exch
-  real :: Sb_min, Sb_max
-  real :: dS_min, dS_max
-  real :: density_ice
-!
-  ! Variables used in iterating for wB_flux.
-  real :: wB_flux_new, DwB, dDwB_dwB_in
-  real :: I_Gam_T, I_Gam_S
-  real :: dG_dwB, iDens
-  logical :: Sb_min_set, Sb_max_set
-  logical :: out_of_bounds
+real ::  Rhoml   ! Ocean mixed layer density in kg m-3.
+real ::  p_int   ! The pressure at the ice-ocean interface, in Pa.
 
-  real, parameter :: c2_3 = 2.0/3.0
-  integer ::  it1, it3
- 
-  !Parameters copied ice shelf module defaults (could be entered in the namelist later)
-  real, parameter ::  dR0_dT = -0.038357 ! Partial derivative of the mixed layer density with temperature, in units of kg m-3 K-1. 
-  real, parameter ::  dR0_dS = 0.805876 ! Partial derivative of the mixed layer density with salinity, in units of kg m-3 psu-1.
-  real, parameter ::  RHO_T0_S0 = 999.910681 ! Density of water with T=0, S=0 for linear EOS
-  real, parameter :: Salin_Ice =0.0 !Salinity of ice
-  real, parameter :: Temp_Ice = -15.0 !Salinity of ice
-  real, parameter :: kd_molec_salt=  8.02e-10 !The molecular diffusivity of salt in sea water at the freezing point
-  real, parameter :: kd_molec_temp=  1.41e-7 !The molecular diffusivity of heat in sea water at the freezing point
-  real, parameter :: kv_molec=  1.95e-6 !The molecular molecular kinimatic viscosity of sea water at the freezing point
-  real, parameter :: Cp_Ice =  2009.0 !Specific heat capacity of ice, taking from HJ99 (Holland and Jenkins 1999)
-  real, parameter :: Cp_ml =  3974.0 !Specific heat capacity of mixed layer, taking from HJ99 (Holland and Jenkins 1999)
-  real, parameter :: LF =  3.335e5 !Latent heat of fusion, taken from HJ99 (Holland and Jenkins 1999)
-  real, parameter :: gamma_t =  0.0 ! Exchange velcoity used in 2 equation model. Whn gamma_t is >0, the exchange velocity is independ of u_star. 
-                                  ! When gamma_t=0.0, then gamma_t is not used, and the exchange velocity is found using u_star.
-  real, parameter :: p_atm =  101325 ! Average atmospheric pressure (Pa) - from Google. 
-  
+real, parameter :: VK    = 0.40     ! Von Karman's constant - dimensionless
+real :: ZETA_N = 0.052   ! The fraction of the boundary layer over which the
+                         ! viscosity is linearly increasing. (Was 1/8. Why?)
+real, parameter :: RC    = 0.20     ! critical flux Richardson number.
+real :: I_ZETA_N  ! The inverse of ZETA_N.
+real :: I_LF  ! Inverse of Latent Heat of fusion (J kg-1)
+real :: I_VK      ! The inverse of VK.
+real :: PR, SC    ! The Prandtl number and Schmidt number, nondim.
+
+! 3 equation formulation variables
+real :: Sbdry     !   Salinities in the ocean at the interface with the
+real :: Sbdry_it  ! the ice shelf, in PSU.
+real :: dS_it     ! The interface salinity change during an iteration, in PSU.
+real :: hBL_neut  ! The neutral boundary layer thickness, in m.
+real :: hBL_neut_h_molec ! The ratio of the neutral boundary layer thickness
+                         ! to the molecular boundary layer thickness, ND.
+real :: wT_flux ! The vertical fluxes of heat and buoyancy just inside the
+real :: wB_flux ! ocean, in C m s-1 and m2 s-3, ###CURRENTLY POSITIVE UPWARD.
+real :: dB_dS  ! The derivative of buoyancy with salinity, in m s-2 PSU-1.
+real :: dB_dT  ! The derivative of buoyancy with temperature, in m s-2 C-1.
+real :: I_n_star, n_star_term
+real :: dIns_dwB  ! The partial derivative of I_n_star with wB_flux, in ???.
+real :: dT_ustar, dS_ustar
+real :: ustar_h
+real :: Gam_turb
+real :: Gam_mol_t, Gam_mol_s
+real :: RhoCp
+real :: I_RhoLF
+real :: Rho0
+real :: ln_neut
+real :: mass_exch
+real :: Sb_min, Sb_max
+real :: dS_min, dS_max
+real :: density_ice
+
+! Variables used in iterating for wB_flux.
+real :: wB_flux_new, DwB, dDwB_dwB_in
+real :: I_Gam_T, I_Gam_S
+real :: dG_dwB, iDens
+logical :: Sb_min_set, Sb_max_set
+logical :: out_of_bounds
+
+real, parameter :: c2_3 = 2.0/3.0
+integer ::  it1, it3
+
+!Parameters copied ice shelf module defaults (could be entered in the namelist later)
+real, parameter :: dR0_dT = -0.038357 ! Partial derivative of the mixed layer density with temperature, in units of kg m-3 K-1.
+real, parameter :: dR0_dS = 0.805876 ! Partial derivative of the mixed layer density with salinity, in units of kg m-3 psu-1.
+real, parameter :: RHO_T0_S0 = 999.910681 ! Density of water with T=0, S=0 for linear EOS
+real, parameter :: Salin_Ice =0.0 !Salinity of ice
+real, parameter :: Temp_Ice = -15.0 !Salinity of ice
+real, parameter :: kd_molec_salt=  8.02e-10 !The molecular diffusivity of salt in sea water at the freezing point
+real, parameter :: kd_molec_temp=  1.41e-7 !The molecular diffusivity of heat in sea water at the freezing point
+real, parameter :: kv_molec=  1.95e-6 !The molecular molecular kinematic viscosity of sea water at the freezing point
+real, parameter :: Cp_Ice =  2009.0 !Specific heat capacity of ice, taking from HJ99 (Holland and Jenkins 1999)
+real, parameter :: Cp_ml =  3974.0 !Specific heat capacity of mixed layer, taking from HJ99 (Holland and Jenkins 1999)
+real, parameter :: LF =  3.335e5 !Latent heat of fusion, taken from HJ99 (Holland and Jenkins 1999)
+real, parameter :: gamma_t =  0.0 ! Exchange velocity used in 2 equation model. Whn gamma_t is >0, the exchange velocity is independent of u_star.
+                                ! When gamma_t=0.0, then gamma_t is not used, and the exchange velocity is found using u_star.
+real, parameter :: p_atm =  101325 ! Average atmospheric pressure (Pa) - from Google.
+
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   density_ice = bergs%rho_bergs
   Rho0=rho_seawater  !Note that the ice shelf code has a default of Rho0=1035
   Hml =10.      !Mixed layer depth. This is an approximate value. It looks like the code is not sensitive to it (since it enters in log(Hml)
   p_int= p_atm+(gravity*thickness*density_ice)    ! The pressure at the ice-ocean interface, in Pa.
-  
+
   ! Find the ocean mixed layer density in kg m-3.
   call calculate_density(temp, salt, p_int, Rhoml, Rho_T0_S0, dR0_dT, dR0_dS)
 
   ! This routine finds the melt at the base of the icebergs using the 2 equation
   ! model or 3 equation model. This code is adapted from the ice shelf code. Once
-  ! the iceberg model is inside the ocean model, we should use the same code. 
+  ! the iceberg model is inside the ocean model, we should use the same code.
 
   I_ZETA_N = 1.0 / ZETA_N
   I_RhoLF = 1.0/(Rho0*LF)
@@ -1611,7 +1639,7 @@ subroutine find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thic
   I_VK = 1.0/VK
   RhoCp = Rho0 * Cp_ml
 
-  !first calculate molecular component  
+  !first calculate molecular component
   Gam_mol_t = 12.5 * (PR**c2_3) - 6
   Gam_mol_s = 12.5 * (SC**c2_3) - 6
 
@@ -1630,25 +1658,24 @@ subroutine find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thic
      f_cori=(2.*omega)*sin(pi_180*bergs%lat_ref)
   endif
   absf = abs(f_cori)  !Absolute value of the Coriolis parameter
-  if ((absf*Hml <= VK*ustar_h) .or. (absf.eq.0.))  then 
+  if ((absf*Hml <= VK*ustar_h) .or. (absf.eq.0.))  then
     hBL_neut = Hml
-  else 
-    hBL_neut = (VK*ustar_h) / absf 
+  else
+    hBL_neut = (VK*ustar_h) / absf
   endif
   hBL_neut_h_molec = ZETA_N * ((hBL_neut * ustar_h) / (5.0 * Kv_molec))
   ln_neut = 0.0 ; if (hBL_neut_h_molec > 1.0) ln_neut = log(hBL_neut_h_molec)
 
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   if (Use_three_equation_model) then   ! Use 3 equation model
-    ! 3 equation model solves for the melt rates iteratively. This is not working right now, because we don't have access to the mixed layer 
-    ! temperature and salinty gradients
-
+    ! 3 equation model solves for the melt rates iteratively. This is not working right now, because we don't have access to the mixed layer
+    ! temperature and salinity gradients
 
     ! Guess sss as the iteration starting point for the boundary salinity.
     Sbdry = salt ; Sb_max_set = .false. ; Sb_min_set = .false.
     out_of_bounds=.false.
 
-    ! Determine the mixed layer buoyancy flux, wB_flux.      
+    ! Determine the mixed layer buoyancy flux, wB_flux.
     dB_dS = (gravity / Rhoml) * dR0_dS
     dB_dT = (gravity / Rhoml) * dR0_dT
 
@@ -1781,7 +1808,7 @@ subroutine find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thic
     ! In the 2-equation form, the mixed layer turbulent exchange velocity
     ! is specified and large enough that the ocean salinity at the interface
     ! is about the same as the boundary layer salinity.
-    ! Alon: I have adapted the code so that the turbulent exchange velocoty is not constant, but rather proportional to the frictional velocity. 
+    ! Alon: I have adapted the code so that the turbulent exchange velocoty is not constant, but rather proportional to the frictional velocity.
     ! This should give you the same answers as the 3 equation model when salinity gradients in the mixed layer are zero (I think/hope)
     ! Use 2-equation model when 3 equation version fails.
 
@@ -1850,37 +1877,36 @@ contains
   end subroutine calculate_density
 
 end subroutine find_basal_melt
-!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
-subroutine find_orientation_using_iceberg_bonds(grd,berg,orientation)
-  ! Arguments
-  type(iceberg), pointer :: berg
-  real, intent(inout) :: orientation 
-  type(icebergs_gridded), pointer :: grd
-  type(iceberg), pointer :: other_berg
-  type(bond), pointer :: current_bond
-  real :: angle, lat1,lat2,lon1,lon2,dlat,dlon
-  real :: r_dist_x, r_dist_y 
-  real :: lat_ref, dx_dlon, dy_dlat
-  real :: theta, bond_count, Average_angle
-    
+subroutine find_orientation_using_iceberg_bonds(grd, berg, orientation)
+! Arguments
+type(icebergs_gridded), pointer :: grd
+type(iceberg), pointer :: berg
+real, intent(inout) :: orientation
+! Local variables
+type(iceberg), pointer :: other_berg
+type(bond), pointer :: current_bond
+real :: angle, lat1,lat2,lon1,lon2,dlat,dlon
+real :: r_dist_x, r_dist_y
+real :: lat_ref, dx_dlon, dy_dlat
+real :: theta, bond_count, Average_angle
+
   bond_count=0.
   Average_angle=0.
-  !Don't check orientation of the edges of halo,  since they can contain unassosiated bonds  (this is why halo width must be larger >= 2 to use bonds)    
-  if  (  ((berg%ine .gt.  grd%isd) .and. (berg%ine .lt. grd%ied)) .and. ((berg%jne .ge.  grd%jsd) .and. (berg%jne .le. grd%jed) ) ) then  
+  !Don't check orientation of the edges of halo,  since they can contain unassosiated bonds  (this is why halo width must be larger >= 2 to use bonds)
+  if  (  ((berg%ine .gt.  grd%isd) .and. (berg%ine .lt. grd%ied)) .and. ((berg%jne .ge.  grd%jsd) .and. (berg%jne .le. grd%jed) ) ) then
     current_bond=>berg%first_bond
     lat1=berg%lat
     lon1=berg%lon
     do while (associated(current_bond)) ! loop over all bonds
       other_berg=>current_bond%other_berg
-      if (.not. associated(other_berg)) then !good place for debugging 
+      if (.not. associated(other_berg)) then !good place for debugging
         !One valid option: current iceberg is on the edge of halo, with other berg on the next pe (not influencing mass spreading)
-          !print *, 'Iceberg bond details:',berg%iceberg_num, current_bond%other_berg_num,berg%halo_berg, mpp_pe()
-          !print *, 'Iceberg bond details2:',berg%ine, berg%jne, current_bond%other_berg_ine, current_bond%other_berg_jne
-          !print *, 'Iceberg isd,ied,jsd,jed:',grd%isd, grd%ied, grd%jsd, grd%jed
-          !print *, 'Iceberg isc,iec,jsc,jec:',grd%isc, grd%iec, grd%jsc, grd%jec
-          !call error_mesg('diamonds,calculating orientation', 'Looking at bond interactions of unassosiated berg!' ,FATAL)
+        !print *, 'Iceberg bond details:',berg%iceberg_num, current_bond%other_berg_num,berg%halo_berg, mpp_pe()
+        !print *, 'Iceberg bond details2:',berg%ine, berg%jne, current_bond%other_berg_ine, current_bond%other_berg_jne
+        !print *, 'Iceberg isd,ied,jsd,jed:',grd%isd, grd%ied, grd%jsd, grd%jed
+        !print *, 'Iceberg isc,iec,jsc,jec:',grd%isc, grd%iec, grd%jsc, grd%jec
+        !call error_mesg('diamonds,calculating orientation', 'Looking at bond interactions of unassosiated berg!' ,FATAL)
         !endif
       else
         lat2=other_berg%lat
@@ -1888,7 +1914,7 @@ subroutine find_orientation_using_iceberg_bonds(grd,berg,orientation)
 
         dlat=lat2-lat1
         dlon=lon2-lon1
-        
+
         lat_ref=0.5*(lat1+lat2)
         call convert_from_grid_to_meters(lat_ref,grd%grid_is_latlon,dx_dlon,dy_dlat)
         r_dist_x=dlon*dx_dlon
@@ -1918,26 +1944,26 @@ subroutine find_orientation_using_iceberg_bonds(grd,berg,orientation)
 end subroutine find_orientation_using_iceberg_bonds
 
 subroutine spread_mass_across_ocean_cells(bergs, berg, i, j, x, y, Mberg, Mbits, scaling, Area, Tn)
-  ! Arguments
-  type(icebergs), pointer :: bergs
-  type(icebergs_gridded), pointer :: grd
-  type(iceberg), pointer :: berg
-  integer, intent(in) :: i, j
-  real, intent(in) :: x, y, Mberg, Mbits, scaling, Area
-  real, intent(in) :: Tn
-  ! Local variables
-  real :: xL, xC, xR, yD, yC, yU, Mass, L
-  real :: yDxL, yDxC, yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR
-  real :: S, H, origin_x, origin_y, x0, y0
-  real :: Area_Q1,Area_Q2 , Area_Q3,Area_Q4, Area_hex
-  real :: fraction_used !fraction of iceberg mass included (part of the mass near the boundary is discarded sometimes)
-  real :: I_fraction_used !Inverse of fraction used
-  real :: tol
-  real :: Dn, Hocean
-  real, parameter :: rho_seawater=1035.
-  integer :: stderrunit
-  logical :: debug
-  real :: orientation, Mass_berg
+! Arguments
+type(icebergs), pointer :: bergs !< Container for all types and memory
+type(icebergs_gridded), pointer :: grd
+type(iceberg), pointer :: berg
+integer, intent(in) :: i, j
+real, intent(in) :: x, y, Mberg, Mbits, scaling, Area
+real, intent(in) :: Tn
+! Local variables
+real :: xL, xC, xR, yD, yC, yU, Mass, L
+real :: yDxL, yDxC, yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR
+real :: S, H, origin_x, origin_y, x0, y0
+real :: Area_Q1,Area_Q2 , Area_Q3,Area_Q4, Area_hex
+real :: fraction_used !fraction of iceberg mass included (part of the mass near the boundary is discarded sometimes)
+real :: I_fraction_used !Inverse of fraction used
+real :: tol
+real :: Dn, Hocean
+real, parameter :: rho_seawater=1035.
+integer :: stderrunit
+logical :: debug
+real :: orientation, Mass_berg
 
   ! Get the stderr unit number
   stderrunit = stderr()
@@ -1957,20 +1983,20 @@ subroutine spread_mass_across_ocean_cells(bergs, berg, i, j, x, y, Mberg, Mbits,
   ! This line attempts to "clip" the weight felt by the ocean. The concept of
   ! clipping is non-physical and this step should be replaced by grounding.
   if (grd%clipping_depth>0.) Mass=min(Mass,grd%clipping_depth*grd%area(i,j)*rho_seawater)
- 
-  !Initialize weights for each cell       
+
+  !Initialize weights for each cell
   yDxL=0.  ; yDxC=0. ; yDxR=0. ; yCxL=0. ; yCxR=0.
   yUxL=0.  ; yUxC=0. ; yUxR=0. ; yCxC=1.
 
   if (.not. bergs%hexagonal_icebergs) then  !Treat icebergs as rectangles of size L:  (this is the default)
-    
+
     !L is the non dimensional length of the iceberg [  L=(Area of berg/ Area of grid cell)^0.5  ] or something like that.
     if (grd%area(i,j)>0) then
       L=min( sqrt(Area / grd%area(i,j)),1.0)
-    else 
+    else
       L=1.
     endif
-  
+
     if (bergs%use_old_spreading) then
       !Old version before icebergs were given size L
       xL=min(0.5, max(0., 0.5-x))
@@ -1997,17 +2023,17 @@ subroutine spread_mass_across_ocean_cells(bergs, berg, i, j, x, y, Mberg, Mbits,
     yUxC=yU*xC*grd%msk(i  ,j+1)
     yUxR=yU*xR*grd%msk(i+1,j+1)
     yCxC=1.-( ((yDxL+yUxR)+(yDxR+yUxL)) + ((yCxL+yCxR)+(yDxC+yUxC)) )
-    
+
     fraction_used=1.  !rectangular bergs do share mass with boundaries (all mass is included in cells)
 
   else !Spread mass as if elements area hexagonal
-    
+
     orientation=bergs%initial_orientation
     if ((bergs%iceberg_bonds_on) .and. (bergs%rotate_icebergs_for_mass_spreading)) call find_orientation_using_iceberg_bonds(grd,berg,orientation)
 
     if (grd%area(i,j)>0) then
       H = min(( (sqrt(Area/(2.*sqrt(3.)))  / sqrt(grd%area(i,j)))),1.) ;  !Non dimensionalize element length by grid area. (This gives the non-dim Apothen of the hexagon)
-    else 
+    else
       H= (sqrt(3.)/2)*(0.49)  !Largest allowable H, since this makes S=0.49, and S has to be less than 0.5  (Not sure what the implications of this are)
     endif
     S=(2/sqrt(3.))*H !Side of the hexagon
@@ -2022,13 +2048,13 @@ subroutine spread_mass_across_ocean_cells(bergs, berg, i, j, x, y, Mberg, Mbits,
     origin_x=1. ; origin_y=1.
     if (x<0.5) origin_x=0.
     if (y<0.5) origin_y=0.
-    
+
     !Position of the hexagon center, relative to origin at the nearest vertex
     x0=(x-origin_x)
     y0=(y-origin_y)
 
     call Hexagon_into_quadrants_using_triangles(x0,y0,H,orientation,Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4)
-    
+
     if (min(min(Area_Q1,Area_Q2),min(Area_Q3, Area_Q4)) <-tol) then
       call error_mesg('diamonds, hexagonal spreading', 'Intersection with hexagons should not be negative!!!', WARNING)
       write(stderrunit,*) 'diamonds, yU,yC,yD', Area_Q1, Area_Q2, Area_Q3, Area_Q4
@@ -2061,23 +2087,22 @@ subroutine spread_mass_across_ocean_cells(bergs, berg, i, j, x, y, Mberg, Mbits,
       yDxC=Area_Q3
       yDxR=Area_Q4
     endif
-                        
+
     !Temporary for debugging reasons.
-    if (mpp_pe()==mpp_root_pe()) then 
-            !write(stderrunit,*) 'diamonds, You are in the hexagonal domain now!!!'
+    if (mpp_pe()==mpp_root_pe()) then
+      !write(stderrunit,*) 'diamonds, You are in the hexagonal domain now!!!'
     endif
 
-      !Double check that all the mass is being used.
-      if ((abs(yCxC-(1.-( ((yDxL+yUxR)+(yDxR+yUxL)) + ((yCxL+yCxR)+(yDxC+yUxC)) )))>tol) .and. (mpp_pe().eq. mpp_root_pe())) then
-        !call error_mesg('diamonds, hexagonal spreading', 'All the mass is not being used!!!', WARNING)
-        write(stderrunit,*) 'diamonds, hexagonal, H,x0,y0', H, x0 , y0
-        write(stderrunit,*) 'diamonds, hexagonal, Areas',(Area_Q1+Area_Q2 + Area_Q3+Area_Q4), Area_Q1,  Area_Q2 , Area_Q3,  Area_Q4
-        debug=.True.
-        !call Hexagon_into_quadrants_using_triangles(x0,y0,H,orientation,Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4, debug)
-        call error_mesg('diamonds, hexagonal spreading', 'All the mass is not being used!!!', FATAL)
-      endif
+    !Double check that all the mass is being used.
+    if ((abs(yCxC-(1.-( ((yDxL+yUxR)+(yDxR+yUxL)) + ((yCxL+yCxR)+(yDxC+yUxC)) )))>tol) .and. (mpp_pe().eq. mpp_root_pe())) then
+      !call error_mesg('diamonds, hexagonal spreading', 'All the mass is not being used!!!', WARNING)
+      write(stderrunit,*) 'diamonds, hexagonal, H,x0,y0', H, x0 , y0
+      write(stderrunit,*) 'diamonds, hexagonal, Areas',(Area_Q1+Area_Q2 + Area_Q3+Area_Q4), Area_Q1,  Area_Q2 , Area_Q3,  Area_Q4
+      debug=.True.
+      !call Hexagon_into_quadrants_using_triangles(x0,y0,H,orientation,Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4, debug)
+      call error_mesg('diamonds, hexagonal spreading', 'All the mass is not being used!!!', FATAL)
+    endif
 
-        
     !Scale each cell by (1/fraction_used) in order to redisribute ice mass which landed up on the land, back into the ocean
     !Note that for the square elements, the mass has already been reassigned, so fraction_used shoule be equal to 1 aready
     fraction_used= ((yDxL*grd%msk(i-1,j-1)) + (yDxC*grd%msk(i  ,j-1))  +(yDxR*grd%msk(i+1,j-1)) +(yCxL*grd%msk(i-1,j  )) +  (yCxR*grd%msk(i+1,j  ))&
@@ -2099,14 +2124,14 @@ subroutine spread_mass_across_ocean_cells(bergs, berg, i, j, x, y, Mberg, Mbits,
   !Spreading the iceberg y momentum onto the ocean
   call spread_variable_across_cells(grd,grd%Vvel_on_ocean, berg%vvel*Area*scaling , i ,j, &
              yDxL, yDxC,yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR, I_fraction_used)
-  
+
 end subroutine spread_mass_across_ocean_cells
 
 subroutine spread_variable_across_cells(grd, variable_on_ocean, Var,i,j, &
            yDxL, yDxC,yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR,I_fraction_used)
   ! Arguments
   type(icebergs_gridded), pointer, intent(in) :: grd
-  real, dimension(grd%isd:grd%ied, grd%jsd:grd%jed, 9), intent(inout) :: variable_on_ocean 
+  real, dimension(grd%isd:grd%ied, grd%jsd:grd%jed, 9), intent(inout) :: variable_on_ocean
   real, intent(in) :: Var !Variable to be spread accross cell
   real, intent(in) :: yDxL, yDxC, yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR !Weights
   real, intent(in) :: I_fraction_used !Amount of iceberg used (inverse)
@@ -2125,26 +2150,23 @@ subroutine spread_variable_across_cells(grd, variable_on_ocean, Var,i,j, &
 
 end subroutine spread_variable_across_cells
 
-
-! ##############################################################################
-
-real function Area_of_triangle(Ax,Ay,Bx,By,Cx,Cy)
-  ! Arguments
-  real, intent(in) :: Ax,Ay,Bx,By,Cx,Cy
+real function Area_of_triangle(Ax, Ay, Bx, By, Cx, Cy)
+! Arguments
+real, intent(in) :: Ax,Ay,Bx,By,Cx,Cy
   Area_of_triangle    =   abs(    0.5*((Ax*(By-Cy))+(Bx*(Cy-Ay))+(Cx*(Ay-By))) );
 end function Area_of_triangle
 
 real function roundoff(x,sig_fig)
-  ! Arguments
-  real, intent(in) :: x
-  integer, intent(in) :: sig_fig
-    !roundoff=round(x*(10**(sig_fig))
-    roundoff=(FLOAT (INT(x * (10.**sig_fig) + 0.5)) / (10.**sig_fig))
+! Arguments
+real, intent(in) :: x
+integer, intent(in) :: sig_fig
+  !roundoff=round(x*(10**(sig_fig))
+  roundoff=(FLOAT (INT(x * (10.**sig_fig) + 0.5)) / (10.**sig_fig))
 end function roundoff
 
-logical function point_in_interval(Ax,Ay,Bx,By,px,py)
-  ! Arguments
-  real, intent(in) :: Ax,Ay,Bx,By,px,py
+logical function point_in_interval(Ax, Ay, Bx, By, px, py)
+! Arguments
+real, intent(in) :: Ax,Ay,Bx,By,px,py
   point_in_interval=.False.
   if ((px <= max(Ax,Bx)) .and. (px >= min(Ax,Bx))) then
     if ((py <= max(Ay,By)) .and. (py >= min(Ay,By))) then
@@ -2153,33 +2175,33 @@ logical function point_in_interval(Ax,Ay,Bx,By,px,py)
   endif
 end function point_in_interval
 
-
 logical function point_is_on_the_line(Ax,Ay,Bx,By,qx,qy)
-  ! Arguments
-  real, intent(in) :: Ax,Ay,Bx,By,qx,qy
-  real :: tol, dxc,dyc,dxl,dyl,cross
-    !tol=1.e-12;
-    tol=0.0;
-    dxc = qx - Ax;
-    dyc = qy - Ay;
-    dxl = Bx - Ax;
-    dyl = By - Ay;
-    cross = dxc * dyl - dyc * dxl;
-    if (abs(cross)<=tol) then
-      point_is_on_the_line=.True.
-    else
-     point_is_on_the_line=.False.
-    endif
+! Arguments
+real, intent(in) :: Ax,Ay,Bx,By,qx,qy
+real :: tol, dxc,dyc,dxl,dyl,cross
+  !tol=1.e-12;
+  tol=0.0;
+  dxc = qx - Ax;
+  dyc = qy - Ay;
+  dxl = Bx - Ax;
+  dyl = By - Ay;
+  cross = dxc * dyl - dyc * dxl;
+  if (abs(cross)<=tol) then
+    point_is_on_the_line=.True.
+  else
+   point_is_on_the_line=.False.
+  endif
 end function point_is_on_the_line
 
 logical function point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,qx,qy)
-  !This function decides whether a point (qx,qy) is inside the triangle ABC.
-  !There is also the option to include the boundary of the triangle.
-  ! Arguments
-  real, intent(in) :: Ax,Ay,Bx,By,Cx,Cy,qx,qy
-  real :: l0,l1,l2,p0,p1,p2
-  real :: v0x,v1x,v2x,v0y,v1y,v2y,dot00,dot01,dot02,dot11,dot12
-  
+!This function decides whether a point (qx,qy) is inside the triangle ABC.
+!There is also the option to include the boundary of the triangle.
+! Arguments
+real, intent(in) :: Ax,Ay,Bx,By,Cx,Cy,qx,qy
+! Local variables
+real :: l0,l1,l2,p0,p1,p2
+real :: v0x,v1x,v2x,v0y,v1y,v2y,dot00,dot01,dot02,dot11,dot12
+
   point_in_triangle = .False.
   if ((Ax==qx .and. Ay==qy) .or. (Bx==qx .and. By==qy) .or. (Cx==qx .and. Cy==qy)) then  !Exclude the pathelogical case
       point_in_triangle = .False.
@@ -2201,16 +2223,15 @@ logical function point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,qx,qy)
   endif
 end function point_in_triangle
 
-
 subroutine Area_of_triangle_across_axes(Ax,Ay,Bx,By,Cx,Cy,axis1,Area_positive, Area_negative)  !You should change this name a little, so that it not similar the other routine.
 !This function calculates the area of a triangle on opposited sides of an axis when the triangle is split with two points on one side, and one point on the other.
 !In this fuction, A is the point on one side of the axis, and B,C are on the opposite sides
-  ! Arguments
-  real , intent(in) :: Ax,Ay,Bx,By,Cx,Cy
-  character , intent(in) :: axis1
-  real, intent(out) :: Area_positive, Area_negative
-  real :: pABx, pABy, pACx, pACy, A0
-  real :: A_half_triangle, A_triangle
+! Arguments
+real , intent(in) :: Ax,Ay,Bx,By,Cx,Cy
+character , intent(in) :: axis1
+real, intent(out) :: Area_positive, Area_negative
+real :: pABx, pABy, pACx, pACy, A0
+real :: A_half_triangle, A_triangle
 
   A_triangle=Area_of_triangle(Ax,Ay,Bx,By,Cx,Cy);
 
@@ -2234,17 +2255,16 @@ end subroutine Area_of_triangle_across_axes
 subroutine intercept_of_a_line(Ax,Ay,Bx,By,axes1,x0,y0)
 !This routine returns the position (x0,y0) at which a line AB intercepts the x or y axis
 !The value No_intercept_val is returned when the line does not intercept the axis
-  !Arguments
-  real, intent(in) :: Ax,Ay,Bx,By
-  character, intent(in) ::axes1
-  real, intent(out) :: x0,y0
-  real :: No_intercept_val !Huge value used to make sure that the intercept is outside the triange in the parralel case.
-  
+!Arguments
+real, intent(in) :: Ax,Ay,Bx,By
+character, intent(in) ::axes1
+real, intent(out) :: x0,y0
+real :: No_intercept_val !Huge value used to make sure that the intercept is outside the triange in the parralel case.
 
-  No_intercept_val=100000000000.; !Huge value used to make sure that the intercept is outside the triange in the parralel case. 
+  No_intercept_val=100000000000.; !Huge value used to make sure that the intercept is outside the triange in the parralel case.
   x0=No_intercept_val
   y0=No_intercept_val
-  
+
   if (axes1=='x') then  !x intercept
     if (Ay.ne.By) then
       x0=Ax -(((Ax-Bx)/(Ay-By))*Ay)
@@ -2260,18 +2280,16 @@ subroutine intercept_of_a_line(Ax,Ay,Bx,By,axes1,x0,y0)
   endif
 end subroutine intercept_of_a_line
 
-
 subroutine divding_triangle_across_axes(Ax,Ay,Bx,By,Cx,Cy,axes1,Area_positive, Area_negative)
-!This routine gives you the area of a triangle on opposite sides of the axis specified. 
+!This routine gives you the area of a triangle on opposite sides of the axis specified.
 !It also takes care of the special case where the triangle is totally on one side
 !This routine calls Area_of_triangle_across_axes to calculate the areas when the triangles are split.
-
-  !Arguments
-  real, intent(in) :: Ax,Ay,Bx,By,Cx,Cy
-  character, intent(in) ::axes1
-  real, intent(out) :: Area_positive, Area_negative
-  real :: A0,B0,C0
-  real A_triangle 
+!Arguments
+real, intent(in) :: Ax,Ay,Bx,By,Cx,Cy
+character, intent(in) ::axes1
+real, intent(out) :: Area_positive, Area_negative
+real :: A0,B0,C0
+real A_triangle
 
   if (axes1=='x') then  !Use the y-coordinates for if statements to see which side of the line you are on
     A0=Ay
@@ -2283,7 +2301,7 @@ subroutine divding_triangle_across_axes(Ax,Ay,Bx,By,Cx,Cy,axes1,Area_positive, A
     B0=Bx
     C0=Cx
   endif
-  
+
   A_triangle=Area_of_triangle(Ax,Ay,Bx,By,Cx,Cy);
   if ((B0*C0)>0.) then !B and C are on the same side  (and non-zero)
     if ((A0*B0).ge.0.) then !all three on the the same side (if it equals zero, then A0=0 and the otehrs are not)
@@ -2339,23 +2357,23 @@ end subroutine divding_triangle_across_axes
 
 subroutine Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy,Area_triangle, Area_Q1, Area_Q2 ,Area_Q3 ,Area_Q4)
 !This routine takes a triangle, and finds the intersection with the four quadrants
-  !Arguments
-  real, intent(in) :: Ax,Ay,Bx,By,Cx,Cy
-  real, intent(out) :: Area_triangle, Area_Q1, Area_Q2 ,Area_Q3 ,Area_Q4
-  real :: Area_Upper, Area_Lower, Area_Right, Area_Left
-  real :: px, py , qx , qy 
-  real :: Area_key_quadrant,Error
-  real :: tol
-  integer :: Key_quadrant
-  integer ::sig_fig
-  integer :: stderrunit
+!Arguments
+real, intent(in) :: Ax,Ay,Bx,By,Cx,Cy
+real, intent(out) :: Area_triangle, Area_Q1, Area_Q2 ,Area_Q3 ,Area_Q4
+real :: Area_Upper, Area_Lower, Area_Right, Area_Left
+real :: px, py , qx , qy
+real :: Area_key_quadrant,Error
+real :: tol
+integer :: Key_quadrant
+integer ::sig_fig
+integer :: stderrunit
 
   ! Get the stderr unit number
   stderrunit = stderr()
   tol=1.e-10
 
   Area_triangle=Area_of_triangle(Ax,Ay,Bx,By,Cx,Cy);
-  
+
   !Calculating area across axes
   call divding_triangle_across_axes(Ax,Ay,Bx,By,Cx,Cy,'x',Area_Upper ,Area_Lower);
   call divding_triangle_across_axes(Ax,Ay,Bx,By,Cx,Cy,'y',Area_Right ,Area_Left);
@@ -2391,14 +2409,14 @@ subroutine Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy,Area_triangle,
     elseif ((px.lt.0.) .and. (qy.ge. 0.)) then  !Second quadrant
       Key_quadrant=2
     elseif ((px.lt. 0.) .and. (qy.lt. 0.)) then !Third quadrant
-      Key_quadrant=3;  
+      Key_quadrant=3;
     elseif ((px.ge. 0.) .and. (qy.lt. 0.)) then !Forth quadrant
-      Key_quadrant=4 
+      Key_quadrant=4
     else  !
       call error_mesg('diamonds, iceberg_run', 'None of the quadrants are Key', WARNING)
       write(stderrunit,*) 'diamonds, Triangle, px,qy', px,qy
     endif
-         
+
   else  !At least one quadrant is empty, and this can be used to find the areas in the other quadrant.  Assigning quadrants. Key_quadrant is the empty quadrant.
     Area_key_quadrant=0;
     if      ( (.not. ((((Ax>0.) .and. (Ay>0.)) .or. ((Bx>0.) .and. (By> 0.))) .or. ((Cx>0.) .and. (Cy> 0.)))) .and. ((Area_Upper+Area_Right).le.Area_triangle) ) then
@@ -2420,7 +2438,7 @@ subroutine Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy,Area_triangle,
     Area_Q2=Area_Upper-Area_Q1;
     Area_Q4=Area_Right-Area_Q1;
     !Area_Q3=Area_Left-Area_Q2;   !These lines have been changes so that the sum of the 4 quadrants exactly matches the triangle area.
-    Area_Q3=Area_triangle-(Area_Q1+Area_Q2+Area_Q4);  
+    Area_Q3=Area_triangle-(Area_Q1+Area_Q2+Area_Q4);
   elseif (Key_quadrant .eq. 2) then
     Area_Q2=Area_key_quadrant;
     Area_Q1=Area_Upper-Area_Q2;
@@ -2464,7 +2482,6 @@ subroutine Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy,Area_triangle,
     endif
   endif
 
-
 end subroutine Triangle_divided_into_four_quadrants
 
 subroutine rotate_and_translate(px,py,theta,x0,y0)
@@ -2477,7 +2494,7 @@ subroutine rotate_and_translate(px,py,theta,x0,y0)
   !Rotation
   px_temp = ( cos(theta*pi/180)*px) + (sin(theta*pi/180)*py)
   py_temp = (-sin(theta*pi/180)*px) + (cos(theta*pi/180)*py)
- 
+
   !Translation
   px= px_temp + x0
   py= py_temp + y0
@@ -2508,7 +2525,7 @@ subroutine Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex ,Area_Q
 
   !Length of side of Hexagon
   S=(2/sqrt(3.))*H
-  
+
   !Finding positions of corners
   C1x=S           ; C1y=0.  !Corner 1 (right)
   C2x=H/sqrt(3.)  ; C2y=H;  !Corner 2 (top right)
@@ -2538,8 +2555,8 @@ subroutine Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex ,Area_Q
   Area_Q1=T12_Q1+T23_Q1+T34_Q1+T45_Q1+T56_Q1+T61_Q1;
   Area_Q2=T12_Q2+T23_Q2+T34_Q2+T45_Q2+T56_Q2+T61_Q2;
   Area_Q3=T12_Q3+T23_Q3+T34_Q3+T45_Q3+T56_Q3+T61_Q3;
-  Area_Q4=T12_Q4+T23_Q4+T34_Q4+T45_Q4+T56_Q4+T61_Q4; 
-  
+  Area_Q4=T12_Q4+T23_Q4+T34_Q4+T45_Q4+T56_Q4+T61_Q4;
+
   Area_Q1=max(Area_Q1,0.);
   Area_Q2=max(Area_Q2,0.);
   Area_Q3=max(Area_Q3,0.);
@@ -2587,7 +2604,6 @@ subroutine Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex ,Area_Q
    endif
 
 end subroutine Hexagon_into_quadrants_using_triangles
-
 
 subroutine interp_flds(grd, i, j, xi, yj, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, sss, cn, hi)
 ! Arguments
@@ -2643,7 +2659,7 @@ integer :: ii, jj
   sss=grd%sss(i,j) ! A-grid
   cn=grd%cn(i,j) ! A-grid
   hi=grd%hi(i,j) ! A-grid
-    
+
   ! Estimate SSH gradient in X direction
 #ifdef USE_OLD_SSH_GRADIENT
   dxp=0.5*(grd%dx(i+1,j)+grd%dx(i+1,j-1))
@@ -2685,7 +2701,7 @@ integer :: ii, jj
 #endif
   ! ssh_y is at the v-point on a C-grid
   ssh_y=yj*hxp+(1.-yj)*hxm
-  
+
   ! Rotate vectors from local grid to lat/lon coordinates
   call rotate(uo, vo, cos_rot, sin_rot)
   call rotate(ui, vi, cos_rot, sin_rot)
@@ -2704,7 +2720,7 @@ integer :: ii, jj
     write(stderrunit,*) 'diamonds, Error in interpolate: sst,cn,hi', sst, sss, cn, hi, mpp_pe()
     call error_mesg('diamonds, interp fields', 'field interpaolations has NaNs', FATAL)
 
-  endif 
+  endif
   contains
 
   real function ddx_ssh(grd,i,j)
@@ -2748,13 +2764,13 @@ end subroutine interp_flds
 
 subroutine calculate_mass_on_ocean(bergs, with_diagnostics)
 ! Arguments
-type(icebergs), pointer :: bergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
 type(iceberg), pointer :: berg
 type(icebergs_gridded), pointer :: grd
 logical, intent(in) :: with_diagnostics
 ! Local variables
-integer :: grdj, grdi   
-integer :: j, i   
+integer :: grdj, grdi
+integer :: j, i
 
   ! For convenience
   grd=>bergs%grd
@@ -2765,19 +2781,19 @@ integer :: j, i
   grd%Uvel_on_ocean(:,:,:)=0.
   grd%Vvel_on_ocean(:,:,:)=0.
 
-  do grdj = grd%jsc-1,grd%jec+1 ; do grdi = grd%isc-1,grd%iec+1  
+  do grdj = grd%jsc-1,grd%jec+1 ; do grdi = grd%isc-1,grd%iec+1
     berg=>bergs%list(grdi,grdj)%first
     do while(associated(berg))
       i=berg%ine  ;     j=berg%jne
       if (grd%area(i,j) > 0.) then
-        
+
         !Increasing Mass on ocean
         if ((bergs%add_weight_to_ocean .and. .not. bergs%time_average_weight) .or.(bergs%find_melt_using_spread_mass)) then
           call spread_mass_across_ocean_cells(bergs, berg, berg%ine, berg%jne, berg%xi, berg%yj, berg%mass,berg%mass_of_bits, berg%mass_scaling, &
                 berg%length*berg%width, berg%thickness)
         endif
 
-        !Calculated some iceberg diagnositcs  
+        !Calculated some iceberg diagnositcs
         if (with_diagnostics) call calculate_sum_over_bergs_diagnositcs(bergs,grd,berg,i,j)
 
       endif
@@ -2789,47 +2805,45 @@ integer :: j, i
 
   subroutine calculate_sum_over_bergs_diagnositcs(bergs,grd,berg,i,j)
   ! Arguments
-  type(icebergs), pointer :: bergs
+  type(icebergs), pointer :: bergs !< Container for all types and memory
   type(iceberg), pointer :: berg
   type(icebergs_gridded), pointer :: grd
   integer, intent(in) :: i, j
   ! Local variables
   real ::  Abits, Lbits, Mbits
 
-           !Virtual area diagnostic
-           if (grd%id_virtual_area>0) then
-             if (bergs%bergy_bit_erosion_fraction>0.) then
-               Lbits=min(berg%length,berg%width,berg%thickness,40.) ! assume bergy bits are smallest dimension or 40 meters
-               Abits=(berg%mass_of_bits/bergs%rho_bergs)/Lbits ! Effective bottom area (assuming T=Lbits)
-             else
-               Abits=0.0
-             endif
-             grd%virtual_area(i,j)=grd%virtual_area(i,j)+(berg%width*berg%length+Abits)*berg%mass_scaling ! m^2
-           endif
+   !Virtual area diagnostic
+   if (grd%id_virtual_area>0) then
+     if (bergs%bergy_bit_erosion_fraction>0.) then
+       Lbits=min(berg%length,berg%width,berg%thickness,40.) ! assume bergy bits are smallest dimension or 40 meters
+       Abits=(berg%mass_of_bits/bergs%rho_bergs)/Lbits ! Effective bottom area (assuming T=Lbits)
+     else
+       Abits=0.0
+     endif
+     grd%virtual_area(i,j)=grd%virtual_area(i,j)+(berg%width*berg%length+Abits)*berg%mass_scaling ! m^2
+   endif
 
-           !Mass diagnostic (also used in u_iceberg, v_iceberg
-           if ((grd%id_mass>0 ) .or. ((grd%id_u_iceberg>0) .or. (grd%id_v_iceberg>0)))   &
-                & grd%mass(i,j)=grd%mass(i,j)+berg%mass/grd%area(i,j)*berg%mass_scaling ! kg/m2
+   !Mass diagnostic (also used in u_iceberg, v_iceberg
+   if ((grd%id_mass>0 ) .or. ((grd%id_u_iceberg>0) .or. (grd%id_v_iceberg>0)))   &
+        & grd%mass(i,j)=grd%mass(i,j)+berg%mass/grd%area(i,j)*berg%mass_scaling ! kg/m2
 
-           !Finding the average iceberg velocity in a grid cell (mass weighted)
-           if (grd%id_u_iceberg>0) &
-           grd%u_iceberg(i,j)=grd%u_iceberg(i,j)+((berg%mass/grd%area(i,j)*berg%mass_scaling)*berg%uvel) ! kg/m2
-           if (grd%id_v_iceberg>0) &
-           grd%v_iceberg(i,j)=grd%v_iceberg(i,j)+((berg%mass/grd%area(i,j)*berg%mass_scaling)*berg%vvel) ! kg/m2
+   !Finding the average iceberg velocity in a grid cell (mass weighted)
+   if (grd%id_u_iceberg>0) &
+   grd%u_iceberg(i,j)=grd%u_iceberg(i,j)+((berg%mass/grd%area(i,j)*berg%mass_scaling)*berg%uvel) ! kg/m2
+   if (grd%id_v_iceberg>0) &
+   grd%v_iceberg(i,j)=grd%v_iceberg(i,j)+((berg%mass/grd%area(i,j)*berg%mass_scaling)*berg%vvel) ! kg/m2
 
-           !Mass of bergy bits
-           if (grd%id_bergy_mass>0 .or. bergs%add_weight_to_ocean)&
-                & grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+berg%mass_of_bits/grd%area(i,j)*berg%mass_scaling ! kg/m2
+   !Mass of bergy bits
+   if (grd%id_bergy_mass>0 .or. bergs%add_weight_to_ocean)&
+        & grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+berg%mass_of_bits/grd%area(i,j)*berg%mass_scaling ! kg/m2
  end subroutine calculate_sum_over_bergs_diagnositcs
 
 end subroutine calculate_mass_on_ocean
 
-! ##############################################################################
-
 subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh, sst, calving_hflx, cn, hi, &
                         stagger, stress_stagger, sss, mass_berg, ustar_berg, area_berg)
 ! Arguments
-type(icebergs), pointer :: bergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
 type(time_type), intent(in) :: time
 real, dimension(:,:), intent(inout) :: calving, calving_hflx
 real, dimension(:,:), intent(in) :: uo, vo, ui, vi, tauxa, tauya, ssh, sst, cn, hi
@@ -2839,7 +2853,7 @@ real, dimension(:,:), optional, pointer ::  mass_berg, ustar_berg, area_berg
 ! Local variables
 integer :: iyr, imon, iday, ihr, imin, isec, k
 type(icebergs_gridded), pointer :: grd
-logical :: lerr, sample_traj, write_traj, lbudget, lverbose, check_bond_quality 
+logical :: lerr, sample_traj, write_traj, lbudget, lverbose, check_bond_quality
 real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass,grdd_spread_mass, grdd_spread_area
 real :: grdd_u_iceberg, grdd_v_iceberg, grdd_ustar_iceberg, grdd_spread_uvel, grdd_spread_vvel
 integer :: i, j, Iu, ju, iv, Jv, Iu_off, ju_off, iv_off, Jv_off
@@ -2870,9 +2884,9 @@ integer :: stderrunit
   grd%bergy_src(:,:)=0.
   grd%bergy_melt(:,:)=0.
   grd%bergy_mass(:,:)=0.
-  grd%spread_mass_old(:,:)=0.  
+  grd%spread_mass_old(:,:)=0.
   !grd%spread_mass(:,:)=0.  !Don't zero this out yet, because we can first use this an add it onto the SSH
-  grd%spread_area(:,:)=0. 
+  grd%spread_area(:,:)=0.
   grd%u_iceberg(:,:)=0.
   grd%v_iceberg(:,:)=0.
   grd%spread_uvel(:,:)=0.
@@ -2880,18 +2894,18 @@ integer :: stderrunit
   grd%ustar_iceberg(:,:)=0.
   grd%mass(:,:)=0.
   grd%virtual_area(:,:)=0.
-  
+
   !Initializing _on_ocean_fields
   grd%mass_on_ocean(:,:,:)=0. ;   grd%area_on_ocean(:,:,:)=0.
   grd%Uvel_on_ocean(:,:,:)=0. ;   grd%Vvel_on_ocean(:,:,:)=0.
 
-  if (present(mass_berg)) then ;  if (associated(mass_berg)) then 
+  if (present(mass_berg)) then ;  if (associated(mass_berg)) then
     mass_berg(:,:)=0.0
   endif ;  endif
-  if (present(ustar_berg)) then ; if (associated(ustar_berg)) then 
+  if (present(ustar_berg)) then ; if (associated(ustar_berg)) then
     ustar_berg(:,:)=0.0
   endif ;  endif
-  if (present(area_berg)) then ;  if (associated(area_berg)) then 
+  if (present(area_berg)) then ;  if (associated(area_berg)) then
     area_berg(:,:)=0.0
   endif ;  endif
 
@@ -2930,7 +2944,7 @@ integer :: stderrunit
   ! Adapt calving heat flux from coupler
   grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)=calving_hflx(:,:) & ! Units of W/m2
        *grd%msk(grd%isc:grd%iec,grd%jsc:grd%jec)
-  
+
   ! Adapt calving flux from coupler for use here
   grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec)=calving(:,:) & ! Units of kg/m2/s
        *grd%msk(grd%isc:grd%iec,grd%jsc:grd%jec)
@@ -3033,7 +3047,7 @@ integer :: stderrunit
       grd%va(I,J) = mask * 0.25*((vA_tmp(i,j) + vA_tmp(i+1,j+1)) + &
                                  (vA_tmp(i+1,j) + vA_tmp(i,j+1)))
     enddo ; enddo
-    
+
     deallocate(uA_tmp, vA_tmp)
   else
     call error_mesg('diamonds, iceberg_run', 'Unrecognized value of stress_stagger!', FATAL)
@@ -3071,7 +3085,7 @@ integer :: stderrunit
   call mpp_update_domains(grd%cn, grd%domain)
   grd%hi(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=hi(:,:)
   call mpp_update_domains(grd%hi, grd%domain)
-  
+
   !Adding gridded salinity.
   if (present(sss)) then
     grd%sss(grd%isc:grd%iec,grd%jsc:grd%jec)=sss(:,:)
@@ -3089,7 +3103,7 @@ integer :: stderrunit
       grd%ua(i,j) = 0.0 ;  grd%va(i,j) = 0.0
       grd%uo(i,j) = 0.0 ;  grd%vo(i,j) = 0.0
       grd%ui(i,j) = 0.0 ;  grd%vi(i,j) = 0.0
-      grd%sst(i,j)= 0.0;  grd%sss(i,j)= 0.0  
+      grd%sst(i,j)= 0.0;  grd%sss(i,j)= 0.0
       grd%cn(i,j) = 0.0 ;  grd%hi(i,j) = 0.0
     endif
     if (grd%ua(i,j) .ne. grd%ua(i,j)) grd%ua(i,j)=0.
@@ -3106,7 +3120,7 @@ integer :: stderrunit
 
   if (debug) call bergs_chksum(bergs, 'run bergs (top)')
   if (debug) call checksum_gridded(bergs%grd, 'top of s/r run')
-  
+
 
   ! Accumulate ice from calving
   call accumulate_calving(bergs)
@@ -3158,10 +3172,10 @@ integer :: stderrunit
   call mpp_clock_end(bergs%clock_com)
 
   !Caculate mass on ocean before thermodynamics, to use in melt rate calculation
-  if (bergs%find_melt_using_spread_mass) then 
+  if (bergs%find_melt_using_spread_mass) then
     call calculate_mass_on_ocean(bergs, with_diagnostics=.false.)
     grd%spread_mass_old(:,:)=0.
-    call sum_up_spread_fields(bergs,grd%spread_mass_old(grd%isc:grd%iec,grd%jsc:grd%jec), 'mass') 
+    call sum_up_spread_fields(bergs,grd%spread_mass_old(grd%isc:grd%iec,grd%jsc:grd%jec), 'mass')
     !Reset fields
     grd%mass_on_ocean(:,:,:)=0.  ;  grd%area_on_ocean(:,:,:)=0.
     grd%Uvel_on_ocean(:,:,:)=0.  ;  grd%Vvel_on_ocean(:,:,:)=0.
@@ -3276,7 +3290,7 @@ integer :: stderrunit
 
   ! Dump icebergs to screen
   if (really_debug) call print_bergs(stderrunit,bergs,'icebergs_run, status')
-  
+
   ! Dump icebergs bonds to screen
   if (really_debug)  call show_all_bonds(bergs)
 
@@ -3284,7 +3298,7 @@ integer :: stderrunit
 
   !This is the point in the algorithem which determines which fields get passed to the ice model
   !Return what ever calving we did not use and additional icebergs melt
-  
+
   !Making sure that spread_mass has the correct mass
   !grd%spread_mass(:,:)=0.0
   !call icebergs_incr_mass(bergs, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec), within_iceberg_model=.True.)
@@ -3301,24 +3315,24 @@ integer :: stderrunit
     end where
     calving_hflx(:,:)=grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)
     !Return iceberg mass, area and ustar to pass on to ocean model
-    if (present(mass_berg)) then 
+    if (present(mass_berg)) then
       if (associated(mass_berg)) then
         if (bergs%add_weight_to_ocean) &
           mass_berg(:,:)=grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)
       endif
     endif
-    if (present(ustar_berg)) then 
+    if (present(ustar_berg)) then
       if (associated(ustar_berg)) then
         ustar_berg(:,:)=grd%ustar_iceberg(grd%isc:grd%iec,grd%jsc:grd%jec)
-      endif 
+      endif
     endif
-    if (present(area_berg)) then 
+    if (present(area_berg)) then
       if (associated(area_berg)) then
         area_berg(:,:)=grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec)
-      endif 
+      endif
     endif
   endif
-  
+
   call mpp_clock_end(bergs%clock_int)
 
   ! Diagnose budgets
@@ -3576,7 +3590,7 @@ integer :: stderrunit
 
   subroutine get_running_mean_calving(bergs,calving,calving_hflx)
   ! Arguments
-  type(icebergs), pointer :: bergs
+  type(icebergs), pointer :: bergs !< Container for all types and memory
   real, dimension(:,:), intent(inout) :: calving, calving_hflx
   ! Local variables
   real :: alpha  !Parameter used for calving relaxation time stepping.  (0<=alpha<1)
@@ -3619,11 +3633,9 @@ integer :: stderrunit
 
 end subroutine icebergs_run
 
-! ##############################################################################
-
 subroutine icebergs_incr_mass(bergs, mass, Time)
 ! Arguments
-type(icebergs), pointer :: bergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
 type(time_type), intent(in), optional :: Time
 type(icebergs_gridded), pointer :: grd
 integer :: i, j
@@ -3635,30 +3647,29 @@ real, dimension(bergs%grd%isc:bergs%grd%iec,bergs%grd%jsc:bergs%grd%jec), intent
 !the add weight to ocean flag is on, and passive mode is off. It also appears to
 !play some role in diagnostics
 
-    if (.not. associated(bergs)) return
-    if (.not. bergs%add_weight_to_ocean) return
-  
-    ! For convenience
-    grd=>bergs%grd
+  if (.not. associated(bergs)) return
+  if (.not. bergs%add_weight_to_ocean) return
 
-    !Start the clocks
-    call mpp_clock_begin(bergs%clock)
-    call mpp_clock_begin(bergs%clock_int)
+  ! For convenience
+  grd=>bergs%grd
 
-    do j=grd%jsc, grd%jec; do i=grd%isc, grd%iec
-      if (.not. bergs%passive_mode)   mass(i,j)=mass(i,j) + grd%spread_mass(i,j)
-    enddo  ;enddo
-    
+  !Start the clocks
+  call mpp_clock_begin(bergs%clock)
+  call mpp_clock_begin(bergs%clock_int)
+
+  do j=grd%jsc, grd%jec; do i=grd%isc, grd%iec
+    if (.not. bergs%passive_mode)   mass(i,j)=mass(i,j) + grd%spread_mass(i,j)
+  enddo  ;enddo
+
   !Stop the clocks
   call mpp_clock_end(bergs%clock_int)
   call mpp_clock_end(bergs%clock)
 
 end subroutine icebergs_incr_mass
 
-
 subroutine sum_up_spread_fields(bergs, field, field_name)
 ! Arguments
-type(icebergs), pointer :: bergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
 real, dimension(bergs%grd%isc:bergs%grd%iec,bergs%grd%jsc:bergs%grd%jec), intent(out) :: field
 character(len=4), intent(in) :: field_name
 ! Local variables
@@ -3681,7 +3692,7 @@ integer :: stderrunit
   if (field_name=='area') var_on_ocean(:,:,:)=grd%area_on_ocean(:,:,:)
   if (field_name=='Uvel') var_on_ocean(:,:,:)=grd%Uvel_on_ocean(:,:,:)
   if (field_name=='Vvel') var_on_ocean(:,:,:)=grd%Vvel_on_ocean(:,:,:)
-  
+
   !This line has been removed, for that routine can be used for other fields
   !if (.not. bergs%add_weight_to_ocean) return
 
@@ -3718,7 +3729,7 @@ integer :: stderrunit
 
     field(i,j)=dmda
   enddo; enddo
-  
+
   if (debug) then
     grd%tmp(:,:)=0.; grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec)=field
     if (field_name=='mass') then
@@ -3735,7 +3746,7 @@ end subroutine sum_up_spread_fields
 
 subroutine accumulate_calving(bergs)
 ! Arguments
-type(icebergs), pointer :: bergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
 ! Local variables
 type(icebergs_gridded), pointer :: grd
 real :: remaining_dist, net_calving_used
@@ -3797,7 +3808,7 @@ end subroutine accumulate_calving
 
 subroutine calve_icebergs(bergs)
 ! Arguments
-type(icebergs), pointer :: bergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
 ! Local variables
 type(icebergs_gridded), pointer :: grd
 integer :: i,j,k,icnt,icntmax
@@ -3895,22 +3906,20 @@ integer :: stderrunit
 
 end subroutine calve_icebergs
 
-! ##############################################################################
-
 subroutine evolve_icebergs(bergs)
 ! Arguments
-type(icebergs), pointer :: bergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
 ! Local variables
 type(icebergs_gridded), pointer :: grd
 type(iceberg), pointer :: berg
-real :: uveln, vveln, lonn, latn  
+real :: uveln, vveln, lonn, latn
 real :: axn, ayn, bxn, byn                                           ! Added by Alon - explicit and implicit accelations from the previous step
 real :: xi, yj
 integer :: i, j
 integer :: grdi, grdj
 integer :: stderrunit
-logical :: bounced, interactive_icebergs_on, Runge_not_Verlet 
-  
+logical :: bounced, interactive_icebergs_on, Runge_not_Verlet
+
   ! Get the stderr unit number
   stderrunit = stderr()
 
@@ -3925,7 +3934,7 @@ logical :: bounced, interactive_icebergs_on, Runge_not_Verlet
     berg=>bergs%list(grdi,grdj)%first
     do while (associated(berg)) ! loop over all bergs
       if (berg%static_berg .lt. 0.5) then  !Only allow non-static icebergs to evolve
- 
+
         !Checking it everything is ok:
         if (.not. is_point_in_cell(bergs%grd, berg%lon, berg%lat, berg%ine, berg%jne) ) then
           write(stderrunit,'(i4,a4,32i7)') mpp_pe(),'Lon',(i,i=grd%isd,grd%ied)
@@ -3945,12 +3954,12 @@ logical :: bounced, interactive_icebergs_on, Runge_not_Verlet
         if (debug) call check_position(grd, berg, 'evolve_iceberg (top)')
 
           !Time stepping schemes:
-          if (Runge_not_Verlet) then 
+          if (Runge_not_Verlet) then
             call Runge_Kutta_stepping(bergs,berg, axn, ayn, bxn, byn, uveln, vveln,lonn, latn, i, j, xi, yj)
-          endif 
-          if (.not.Runge_not_Verlet) then 
+          endif
+          if (.not.Runge_not_Verlet) then
             call verlet_stepping(bergs,berg, axn, ayn, bxn, byn, uveln, vveln)
-          endif 
+          endif
 
           !Used for testing the ocean response to fixed iceberg motion.
           if (bergs%override_iceberg_velocities) then
@@ -3959,10 +3968,10 @@ logical :: bounced, interactive_icebergs_on, Runge_not_Verlet
           endif
 
         ! Saving all the iceberg variables.
-        berg%axn=axn 
-        berg%ayn=ayn 
-        berg%bxn=bxn 
-        berg%byn=byn 
+        berg%axn=axn
+        berg%ayn=ayn
+        berg%bxn=bxn
+        berg%byn=byn
         berg%uvel=uveln
         berg%vvel=vveln
 
@@ -3971,7 +3980,7 @@ logical :: bounced, interactive_icebergs_on, Runge_not_Verlet
           berg%ine=i     ;   berg%jne=j
           berg%xi=xi     ;   berg%yj=yj
         else
-          if (.not. interactive_icebergs_on)  call update_verlet_position(bergs,berg) 
+          if (.not. interactive_icebergs_on)  call update_verlet_position(bergs,berg)
         endif
 
         !call interp_flds(grd, i, j, xi, yj, berg%uo, berg%vo, berg%ui, berg%vi, berg%ua, berg%va, berg%ssh_x, berg%ssh_y, berg%sst)
@@ -3982,15 +3991,14 @@ logical :: bounced, interactive_icebergs_on, Runge_not_Verlet
     enddo ! loop over all bergs
   enddo ; enddo
 
-
   ! When we are using interactive icebergs, we update the (old) iceberg positions and velocities in a second loop, all together (to make code order invarient)
   if (interactive_icebergs_on) then
     do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
       berg=>bergs%list(grdi,grdj)%first
       do while (associated(berg)) ! loop over all bergs
         if (berg%static_berg .lt. 0.5) then  !Only allow non-static icebergs to evolve
-         if (.not. Runge_not_Verlet)  call update_verlet_position(bergs,berg) 
-          
+         if (.not. Runge_not_Verlet)  call update_verlet_position(bergs,berg)
+
          !Updating old velocities (for use in iceberg interactions)
           berg%uvel_old=berg%uvel
           berg%vvel_old=berg%vvel
@@ -4005,138 +4013,134 @@ logical :: bounced, interactive_icebergs_on, Runge_not_Verlet
 !contains
 end subroutine evolve_icebergs
 
-!######################################################################
-
 subroutine verlet_stepping(bergs,berg, axn, ayn, bxn, byn, uveln, vveln)
-type(icebergs), pointer :: bergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
 type(iceberg), pointer, intent(inout) :: berg
 type(icebergs_gridded), pointer :: grd
 ! Local variables
 real, intent(out) :: axn, ayn, bxn, byn, uveln, vveln
 real :: lonn, latn
 real :: uvel1, vvel1,  uvel2, vvel2, uvel3, vvel3
-real :: ax1, ay1 
-real :: x1,  y1, xddot1, yddot1, xi, yj 
+real :: ax1, ay1
+real :: x1,  y1, xddot1, yddot1, xi, yj
 real :: xdot3, ydot3
 real :: xdotn, ydotn
 real :: dt, dt_2, dt_6, dydl
 real :: orientation
 logical :: bounced, on_tangential_plane, error_flag
-integer :: i, j 
+integer :: i, j
 integer :: stderrunit
 
   !Initialize variables
 
-       ! In this scheme a_n and b_n are saved from the previous timestep, giving the explicit and implicit parts of the acceleration, and a_np1, b_np1 are for the next time step
-       ! Note that ax1=a_np1/2 +b_np1, as calculated by the acceleration subrouting
-       ! Positions and velocity is updated by
-       ! X2 = X1+dt*V1+((dt^2)/2)*a_n +((dt^2)/2)*b_n = X1+dt*u_star +((dt^2)/2)*b_n 
-       ! V2 = V1+dt/2*a_n +dt/2*a_np1 +dt*b_n = u_star + dt/2*a_np1 + dt*b_np1 = u_star +dt*ax
- 
-      !*************************************************************************************************
+  ! In this scheme a_n and b_n are saved from the previous timestep, giving the explicit and implicit parts of the acceleration, and a_np1, b_np1 are for the next time step
+  ! Note that ax1=a_np1/2 +b_np1, as calculated by the acceleration subrouting
+  ! Positions and velocity is updated by
+  ! X2 = X1+dt*V1+((dt^2)/2)*a_n +((dt^2)/2)*b_n = X1+dt*u_star +((dt^2)/2)*b_n
+  ! V2 = V1+dt/2*a_n +dt/2*a_np1 +dt*b_n = u_star + dt/2*a_np1 + dt*b_np1 = u_star +dt*ax
+
+  !*************************************************************************************************
 
   ! Get the stderr unit number
-    stderrunit = stderr()
+  stderrunit = stderr()
   ! For convenience
-    grd=>bergs%grd
+  grd=>bergs%grd
   ! Common constants
-    dt=bergs%dt
-    dt_2=0.5*dt
+  dt=bergs%dt
+  dt_2=0.5*dt
 
-    orientation=bergs%initial_orientation
-    if ((bergs%iceberg_bonds_on) .and. (bergs%rotate_icebergs_for_mass_spreading)) call find_orientation_using_iceberg_bonds(grd,berg,orientation)
+  orientation=bergs%initial_orientation
+  if ((bergs%iceberg_bonds_on) .and. (bergs%rotate_icebergs_for_mass_spreading)) call find_orientation_using_iceberg_bonds(grd,berg,orientation)
 
-        lonn = berg%lon ;   latn = berg%lat
-        axn  = berg%axn ;   ayn  = berg%ayn
-        bxn=   berg%bxn ;   byn  = berg%byn
-        uvel1=berg%uvel ;   vvel1=berg%vvel
-        i=berg%ine     ;   j=berg%jne
-        xi=berg%xi      ;   yj=berg%yj
+  lonn = berg%lon ;   latn = berg%lat
+  axn  = berg%axn ;   ayn  = berg%ayn
+  bxn=   berg%bxn ;   byn  = berg%byn
+  uvel1=berg%uvel ;   vvel1=berg%vvel
+  i=berg%ine     ;   j=berg%jne
+  xi=berg%xi      ;   yj=berg%yj
 
-        ! Turn the velocities into u_star, v_star.(uvel3 is v_star) - Alon (not sure how this works with tangent plane)
-        uvel3=uvel1+(dt_2*axn)                  !Alon
-        vvel3=vvel1+(dt_2*ayn)                  !Alon
+  ! Turn the velocities into u_star, v_star.(uvel3 is v_star) - Alon (not sure how this works with tangent plane)
+  uvel3=uvel1+(dt_2*axn)                  !Alon
+  vvel3=vvel1+(dt_2*ayn)                  !Alon
 
-        !Note, the mass scaling is equal to 1 (rather than 0.25 as in RK), since
-        !this is only called once in Verlet stepping.
-        if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-          call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 1.0*berg%mass_scaling,berg%length*berg%width, berg%thickness)
+  !Note, the mass scaling is equal to 1 (rather than 0.25 as in RK), since
+  !this is only called once in Verlet stepping.
+  if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
+    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 1.0*berg%mass_scaling,berg%length*berg%width, berg%thickness)
 
-        ! Calling the acceleration   (note that the velocity is converted to u_star inside the accel script)
-        call accel(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, ax1, ay1, axn, ayn, bxn, byn) !axn, ayn, bxn, byn - Added by Alon
-  
-        !Solving for the new velocity
-        on_tangential_plane=.false.
-        if ((berg%lat>89.) .and. (bergs%grd%grid_is_latlon)) on_tangential_plane=.true.
-        if (on_tangential_plane) then
-          call rotvec_to_tang(lonn,uvel3,vvel3,xdot3,ydot3)
-          call rotvec_to_tang(lonn,ax1,ay1,xddot1,yddot1)
-          xdotn=xdot3+(dt*xddot1); ydotn=ydot3+(dt*yddot1)                                    !Alon
-          call rotvec_from_tang(lonn,xdotn,ydotn,uveln,vveln)
-        else
-          uveln=uvel3+(dt*ax1); vveln=vvel3+(dt*ay1)    !Alon , we call it uvel3, vvel3 until it is put into lat/long co-ordinates, where it becomes uveln, vveln
-        endif
+  ! Calling the acceleration   (note that the velocity is converted to u_star inside the accel script)
+  call accel(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, ax1, ay1, axn, ayn, bxn, byn) !axn, ayn, bxn, byn - Added by Alon
 
-        !if (berg%iceberg_num .eq. 1) print *, 'New velocity: ', uveln, vveln
+  !Solving for the new velocity
+  on_tangential_plane=.false.
+  if ((berg%lat>89.) .and. (bergs%grd%grid_is_latlon)) on_tangential_plane=.true.
+  if (on_tangential_plane) then
+    call rotvec_to_tang(lonn,uvel3,vvel3,xdot3,ydot3)
+    call rotvec_to_tang(lonn,ax1,ay1,xddot1,yddot1)
+    xdotn=xdot3+(dt*xddot1); ydotn=ydot3+(dt*yddot1)                                    !Alon
+    call rotvec_from_tang(lonn,xdotn,ydotn,uveln,vveln)
+  else
+    uveln=uvel3+(dt*ax1); vveln=vvel3+(dt*ay1)    !Alon , we call it uvel3, vvel3 until it is put into lat/long co-ordinates, where it becomes uveln, vveln
+  endif
 
-       
-        !!!!!!!!!!!!!!! Debugging  !!!!!!!!!!!!!!!!!!!!!!!!!!!
-        error_flag=.false.
-        if (.not.error_flag) then
-          if (.not. is_point_in_cell(bergs%grd, lonn, latn, i, j)) error_flag=.true.
-        endif
-        if (error_flag) then
-         call print_fld(grd, grd%msk, 'msk')
-         call print_fld(grd, grd%ssh, 'ssh')
-         call print_fld(grd, grd%sst, 'sst')
-         call print_fld(grd, grd%sss, 'sss')
-         call print_fld(grd, grd%hi, 'hi')
-         write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
-         write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: lonn=',lonn,berg%lon
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: latn=',latn,berg%lat
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: u3,un,u0=',uvel3,uveln,berg%uvel
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: v3,vn,v0=',vvel3,vveln,berg%vvel
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: iceberg_num=',berg%iceberg_num
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ax1=',&
-              & dt*ax1
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ay1=',&
-              & dt*ay1
-         write(stderrunit,*) 'diamonds, evolve_iceberg: on_tangential_plane=',on_tangential_plane
-         write(stderrunit,*) 'Acceleration terms for position 1'
-         error_flag=pos_within_cell(grd, lonn, latn, i, j, xi,  yj)
-         call accel(bergs, berg, i, j, xi, yj, latn, uvel3, vvel3, uvel1, vvel1, dt_2, ax1, ay1, axn, ayn, bxn, byn, debug_flag=.true.)  !axn, ayn, bxn, byn - Added by Alon
-         
-          write(stderrunit,'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'posn i,j,lon,lat,xi,yj=',i,j,lonn,latn,xi,yj
-          write(stderrunit,'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'posn box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
-          call print_berg(stderrunit, berg, 'evolve_iceberg, out of cell at end!')
-          bounced=is_point_in_cell(bergs%grd, lonn, latn, i, j,explain=.true.)
-          if (debug) call error_mesg('diamonds, evolve_iceberg','berg is out of posn at end!',FATAL)
-          write(stderrunit,'(i4,a4,32i7)') mpp_pe(),'Lon',(i,i=grd%isd,grd%ied)
-          do j=grd%jed,grd%jsd,-1
-            write(stderrunit,'(2i4,32f7.1)') mpp_pe(),j,(grd%lon(i,j),i=grd%isd,grd%ied)
-          enddo
-          write(stderrunit,'(i4,a4,32i7)') mpp_pe(),'Lat',(i,i=grd%isd,grd%ied)
-          do j=grd%jed,grd%jsd,-1
-            write(stderrunit,'(2i4,32f7.1)') mpp_pe(),j,(grd%lat(i,j),i=grd%isd,grd%ied)
-          enddo
-        endif
+  !if (berg%iceberg_num .eq. 1) print *, 'New velocity: ', uveln, vveln
+
+
+  !!!!!!!!!!!!!!! Debugging  !!!!!!!!!!!!!!!!!!!!!!!!!!!
+  error_flag=.false.
+  if (.not.error_flag) then
+    if (.not. is_point_in_cell(bergs%grd, lonn, latn, i, j)) error_flag=.true.
+  endif
+  if (error_flag) then
+    call print_fld(grd, grd%msk, 'msk')
+    call print_fld(grd, grd%ssh, 'ssh')
+    call print_fld(grd, grd%sst, 'sst')
+    call print_fld(grd, grd%sss, 'sss')
+    call print_fld(grd, grd%hi, 'hi')
+    write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
+    write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: lonn=',lonn,berg%lon
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: latn=',latn,berg%lat
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: u3,un,u0=',uvel3,uveln,berg%uvel
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: v3,vn,v0=',vvel3,vveln,berg%vvel
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: iceberg_num=',berg%iceberg_num
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ax1=',&
+         & dt*ax1
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ay1=',&
+         & dt*ay1
+    write(stderrunit,*) 'diamonds, evolve_iceberg: on_tangential_plane=',on_tangential_plane
+    write(stderrunit,*) 'Acceleration terms for position 1'
+    error_flag=pos_within_cell(grd, lonn, latn, i, j, xi,  yj)
+    call accel(bergs, berg, i, j, xi, yj, latn, uvel3, vvel3, uvel1, vvel1, dt_2, ax1, ay1, axn, ayn, bxn, byn, debug_flag=.true.)  !axn, ayn, bxn, byn - Added by Alon
+
+    write(stderrunit,'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'posn i,j,lon,lat,xi,yj=',i,j,lonn,latn,xi,yj
+    write(stderrunit,'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'posn box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
+    call print_berg(stderrunit, berg, 'evolve_iceberg, out of cell at end!')
+    bounced=is_point_in_cell(bergs%grd, lonn, latn, i, j,explain=.true.)
+    if (debug) call error_mesg('diamonds, evolve_iceberg','berg is out of posn at end!',FATAL)
+    write(stderrunit,'(i4,a4,32i7)') mpp_pe(),'Lon',(i,i=grd%isd,grd%ied)
+    do j=grd%jed,grd%jsd,-1
+      write(stderrunit,'(2i4,32f7.1)') mpp_pe(),j,(grd%lon(i,j),i=grd%isd,grd%ied)
+    enddo
+    write(stderrunit,'(i4,a4,32i7)') mpp_pe(),'Lat',(i,i=grd%isd,grd%ied)
+    do j=grd%jed,grd%jsd,-1
+      write(stderrunit,'(2i4,32f7.1)') mpp_pe(),j,(grd%lat(i,j),i=grd%isd,grd%ied)
+    enddo
+  endif
 
 end subroutine verlet_stepping
 
-!######################################################################
-
 subroutine Runge_Kutta_stepping(bergs, berg, axn, ayn, bxn, byn, uveln, vveln,lonn, latn, i, j, xi, yj)
-type(icebergs), pointer :: bergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
 type(iceberg), pointer, intent(inout) :: berg
 type(icebergs_gridded), pointer :: grd
 real , intent(out) :: axn, ayn, bxn, byn, uveln, vveln,lonn, latn, xi, yj
 integer, intent(out) :: i, j
-real :: uvel1, vvel1, lon1, lat1, u1, v1, dxdl1, ax1, ay1, axn1, ayn1 
+real :: uvel1, vvel1, lon1, lat1, u1, v1, dxdl1, ax1, ay1, axn1, ayn1
 real :: uvel2, vvel2, lon2, lat2, u2, v2, dxdl2, ax2, ay2, axn2, ayn2
 real :: uvel3, vvel3, lon3, lat3, u3, v3, dxdl3, ax3, ay3, axn3, ayn3
 real :: uvel4, vvel4, lon4, lat4, u4, v4, dxdl4, ax4, ay4, axn4, ayn4
-real :: x1, xdot1, xddot1, y1, ydot1, yddot1, xddot1n, yddot1n 
+real :: x1, xdot1, xddot1, y1, ydot1, yddot1, xddot1n, yddot1n
 real :: x2, xdot2, xddot2, y2, ydot2, yddot2, xddot2n, yddot2n
 real :: x3, xdot3, xddot3, y3, ydot3, yddot3, xddot3n, yddot3n
 real :: x4, xdot4, xddot4, y4, ydot4, yddot4, xddot4n, yddot4n
@@ -4160,317 +4164,313 @@ logical :: bounced, on_tangential_plane, error_flag
 
 
   ! Get the stderr unit number
-    stderrunit = stderr()
+  stderrunit = stderr()
   ! For convenience
-    grd=>bergs%grd
+  grd=>bergs%grd
   ! Common constants
-    dt=bergs%dt
-    dt_2=0.5*dt
-    dt_6=dt/6.
-    
-        i=berg%ine
-        j=berg%jne
-        xi=berg%xi
-        yj=berg%yj
-        bounced=.false.
-        on_tangential_plane=.false.
-        if ((berg%lat>89.) .and. (bergs%grd%grid_is_latlon)) on_tangential_plane=.true.
-        i1=i;j1=j
-        if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-          call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
+  dt=bergs%dt
+  dt_2=0.5*dt
+  dt_6=dt/6.
 
-        ! Loading past accelerations - Alon
-        axn=berg%axn; ayn=berg%ayn !Alon
-        axn1=axn; axn2=axn; axn3=axn; axn4=axn
-        ayn1=ayn; ayn2=ayn; ayn3=ayn; ayn4=ayn
-       
-        ! A1 = A(X1)
-        lon1=berg%lon; lat1=berg%lat
-        if (on_tangential_plane) call rotpos_to_tang(lon1,lat1,x1,y1)
-        
-        call  convert_from_meters_to_grid(lat1,bergs%grd%grid_is_latlon ,dxdl1,dydl)
-        !dxdl1=r180_pi/(Rearth*cos(lat1*pi_180))
-        !dydl=r180_pi/Rearth
-        uvel1=berg%uvel; vvel1=berg%vvel
-        if (on_tangential_plane) call rotvec_to_tang(lon1,uvel1,vvel1,xdot1,ydot1)
-        u1=uvel1*dxdl1; v1=vvel1*dydl
+  i=berg%ine
+  j=berg%jne
+  xi=berg%xi
+  yj=berg%yj
+  bounced=.false.
+  on_tangential_plane=.false.
+  if ((berg%lat>89.) .and. (bergs%grd%grid_is_latlon)) on_tangential_plane=.true.
+  i1=i;j1=j
+  if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
+    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
 
-        call accel(bergs, berg, i, j, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, axn1, ayn1, bxn, byn) !axn,ayn, bxn, byn  - Added by Alon
-        !call accel(bergs, berg, i, j, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt, ax1, ay1, axn1, ayn1, bxn, byn) !Note change to dt. Markpoint_1
-        if (on_tangential_plane) call rotvec_to_tang(lon1,ax1,ay1,xddot1,yddot1)
-        if (on_tangential_plane) call rotvec_to_tang(lon1,axn1,ayn1,xddot1n,yddot1n) !Alon
-        
-        !  X2 = X1+dt/2*V1 ; V2 = V1+dt/2*A1; A2=A(X2)
-       !if (debug) write(stderr(),*) 'diamonds, evolve: x2=...'
-        if (on_tangential_plane) then
-          x2=x1+dt_2*xdot1; y2=y1+dt_2*ydot1
-          xdot2=xdot1+dt_2*xddot1; ydot2=ydot1+dt_2*yddot1
-          call rotpos_from_tang(x2,y2,lon2,lat2)
-          call rotvec_from_tang(lon2,xdot2,ydot2,uvel2,vvel2)
-        else
-          lon2=lon1+dt_2*u1; lat2=lat1+dt_2*v1
-          uvel2=uvel1+dt_2*ax1; vvel2=vvel1+dt_2*ay1
-        endif
-        i=i1;j=j1;xi=berg%xi;yj=berg%yj
-        call adjust_index_and_ground(grd, lon2, lat2, uvel2, vvel2, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)
-        i2=i; j2=j
-        if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-          call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
-        ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon2,lat2,x2,y2)
-        if (.not.error_flag) then
-          if (debug .and. .not. is_point_in_cell(bergs%grd, lon2, lat2, i, j)) error_flag=.true.
-        endif
-        if (error_flag) then
-         call print_fld(grd, grd%msk, 'msk')
-         call print_fld(grd, grd%ssh, 'ssh')
-         call print_fld(grd, grd%sst, 'sst')
-         call print_fld(grd, grd%sss, 'sss')
-         call print_fld(grd, grd%hi, 'hi')
-         write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
-         write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
-         write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: i1,i2,i=',i1,i2,i
-         write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: j1,j2,j=',j1,j2,j
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: lon1,lon2=',lon1,lon2,berg%lon
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: lat1,lat2=',lat1,lat2,berg%lat
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: u1,u2,u0=',uvel1,uvel2,berg%uvel
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: v1,v2,v0=',vvel1,vvel2,berg%vvel
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ax1,ax2=',dt*ax1,dt*ax2
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ay1,ay2=',dt*ay1,dt*ay2
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* u1,u2,u0=',dt*uvel1,dt*uvel2,dt*berg%uvel
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* v1,v2,v0=',dt*vvel1,dt*vvel2,dt*berg%vvel
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* u1,u2 (deg)=',dt*u1,dt*u2
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* v1,v2 (deg)=',dt*v1,dt*v2
-         write(stderrunit,*) 'Acceleration terms for position 1'
-         error_flag=pos_within_cell(grd, lon1, lat1, i1, j1, xi, yj)
-         call accel(bergs, berg, i1, j1, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, axn1, ayn1, bxn, byn, debug_flag=.true.) !axn, ayn, bxn, byn,- Added by Alon
-          call print_berg(stderrunit, berg, 'evolve_iceberg, out of position at 2')
-          write(stderrunit,'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'pos2 i,j,lon,lat,xi,yj=',i,j,lon2,lat2,xi,yj
-          write(stderrunit,'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'pos2 box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
-          bounced=is_point_in_cell(bergs%grd, lon2, lat2, i, j,explain=.true.)
-          call error_mesg('diamonds, evolve_iceberg','berg is out of posn at 2!',FATAL)
-        endif
-        call  convert_from_meters_to_grid(lat2,bergs%grd%grid_is_latlon ,dxdl2,dydl)
-        !dxdl2=r180_pi/(Rearth*cos(lat2*pi_180))
-        u2=uvel2*dxdl2; v2=vvel2*dydl
-        call accel(bergs, berg, i, j, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt_2, ax2, ay2, axn2, ayn2, bxn, byn) !axn, ayn, bxn, byn - Added by Alon
-        !call accel(bergs, berg, i, j, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt, ax2, ay2, axn2, ayn2, bxn, byn) !Note change to dt. Markpoint_1
-        if (on_tangential_plane) call rotvec_to_tang(lon2,ax2,ay2,xddot2,yddot2)
-        if (on_tangential_plane) call rotvec_to_tang(lon2,axn2,ayn2,xddot2n,yddot2n) !Alon
-        
-        !  X3 = X1+dt/2*V2 ; V3 = V1+dt/2*A2; A3=A(X3)
-       !if (debug) write(stderr(),*) 'diamonds, evolve: x3=...'
-        if (on_tangential_plane) then
-          x3=x1+dt_2*xdot2; y3=y1+dt_2*ydot2
-          xdot3=xdot1+dt_2*xddot2; ydot3=ydot1+dt_2*yddot2
-          call rotpos_from_tang(x3,y3,lon3,lat3)
-          call rotvec_from_tang(lon3,xdot3,ydot3,uvel3,vvel3)
-        else
-          lon3=lon1+dt_2*u2; lat3=lat1+dt_2*v2
-          uvel3=uvel1+dt_2*ax2; vvel3=vvel1+dt_2*ay2
-        endif
-        i=i1;j=j1;xi=berg%xi;yj=berg%yj
-        call adjust_index_and_ground(grd, lon3, lat3, uvel3, vvel3, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)
-        i3=i; j3=j
-        if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-          call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
-        ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon3,lat3,x3,y3)
-        if (.not.error_flag) then
-          if (debug .and. .not. is_point_in_cell(bergs%grd, lon3, lat3, i, j)) error_flag=.true.
-        endif
-        if (error_flag) then
-         call print_fld(grd, grd%msk, 'msk')
-         call print_fld(grd, grd%ssh, 'ssh')
-         call print_fld(grd, grd%sst, 'sst')
-         call print_fld(grd, grd%sss, 'sss')
-         call print_fld(grd, grd%hi, 'hi')
-         write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
-         write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
-         write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: i1,i2,i3,i=',i1,i2,i3,i
-         write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: j1,j2,j3,j=',j1,j2,j3,j
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: lon1,lon2,lon3=',lon1,lon2,lon3,berg%lon
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: lat1,lat2,lat3=',lat1,lat2,lat3,berg%lat
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: u1,u2,u3,u0=',uvel1,uvel2,uvel3,berg%uvel
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: v1,v2,v3,v0=',vvel1,vvel2,vvel3,berg%vvel
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ax1,ax2,ax3=',dt*ax1,dt*ax2,dt*ax3
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ay1,ay2,ay3=',dt*ay1,dt*ay2,dt*ay3
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* u1,u2,u3,u0=',dt*uvel1,dt*uvel2,dt*uvel3,dt*berg%uvel
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* v1,v2,v3,v0=',dt*vvel1,dt*vvel2,dt*vvel3,dt*berg%vvel
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* u1,u2,u3 (deg)=',dt*u1,dt*u2,dt*u3
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* v1,v2,v3 (deg)=',dt*v1,dt*v2,dt*v3
-         write(stderrunit,*) 'Acceleration terms for position 1'
-         error_flag=pos_within_cell(grd, lon1, lat1, i1, j1, xi, yj)
-         call accel(bergs, berg, i1, j1, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, axn1, ayn1, bxn, byn, debug_flag=.true.) !axn, ayn - Added by Alon
-         write(stderrunit,*) 'Acceleration terms for position 2'
-         error_flag=pos_within_cell(grd, lon2, lat2, i2, j2, xi, yj)
-         call accel(bergs, berg, i2, j2, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt_2, ax2, ay2, axn2, ayn2, bxn, byn, debug_flag=.true.) !axn, ayn, bxn, byn - Added by Alon
-          call print_berg(stderrunit, berg, 'evolve_iceberg, out of position at 3')
-          write(stderrunit,'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'pos3 i,j,lon,lat,xi,yj=',i,j,lon3,lat3,xi,yj
-          write(stderrunit,'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'pos3 box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
-          bounced=is_point_in_cell(bergs%grd, lon2, lat2, i, j,explain=.true.)
-          call error_mesg('diamonds, evolve_iceberg','berg is out of posn at 3!',FATAL)
-        endif
-        call  convert_from_meters_to_grid(lat3,bergs%grd%grid_is_latlon ,dxdl3,dydl)
-        !dxdl3=r180_pi/(Rearth*cos(lat3*pi_180))
-        u3=uvel3*dxdl3; v3=vvel3*dydl
-        call accel(bergs, berg, i, j, xi, yj, lat3, uvel3, vvel3, uvel1, vvel1, dt, ax3, ay3, axn3, ayn3, bxn, byn) !axn, ayn, bxn, byn - Added by Alon
-        if (on_tangential_plane) call rotvec_to_tang(lon3,ax3,ay3,xddot3,yddot3)
-        if (on_tangential_plane) call rotvec_to_tang(lon3,axn3,ayn3,xddot3n,yddot3n) !Alon
-        
-        !  X4 = X1+dt*V3 ; V4 = V1+dt*A3; A4=A(X4)
-       !if (debug) write(stderr(),*) 'diamonds, evolve: x4=...'
-        if (on_tangential_plane) then
-          x4=x1+dt*xdot3; y4=y1+dt*ydot3
-          xdot4=xdot1+dt*xddot3; ydot4=ydot1+dt*yddot3
-          call rotpos_from_tang(x4,y4,lon4,lat4)
-          call rotvec_from_tang(lon4,xdot4,ydot4,uvel4,vvel4)
-        else
-          lon4=lon1+dt*u3; lat4=lat1+dt*v3
-          uvel4=uvel1+dt*ax3; vvel4=vvel1+dt*ay3
-        endif
-        i=i1;j=j1;xi=berg%xi;yj=berg%yj
-        call adjust_index_and_ground(grd, lon4, lat4, uvel4, vvel4, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)
-        i4=i; j4=j
-        ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon4,lat4,x4,y4)
-        if (.not.error_flag) then
-          if (debug .and. .not. is_point_in_cell(bergs%grd, lon4, lat4, i, j)) error_flag=.true.
-        endif
-        if (error_flag) then
-         call print_fld(grd, grd%msk, 'msk')
-         call print_fld(grd, grd%ssh, 'ssh')
-         call print_fld(grd, grd%sst, 'sst')
-         call print_fld(grd, grd%sss, 'sss')
-         call print_fld(grd, grd%hi, 'hi')
-         write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
-         write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
-         write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: i1,i2,i3,i4,i=',i1,i2,i3,i4,i
-         write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: j1,j2,j3,j4,j=',j1,j2,j3,j4,j
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: lon1,lon2,lon3,lon4=',lon1,lon2,lon3,lon4,berg%lon
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: lat1,lat2,lat3,lat4=',lat1,lat2,lat3,lat4,berg%lat
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: u1,u2,u3,u4,u0=',uvel1,uvel2,uvel3,uvel4,berg%uvel
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: v1,v2,v3,v4,v0=',vvel1,vvel2,vvel3,vvel4,berg%vvel
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ax1,ax2,ax3,ax4=',dt*ax1,dt*ax2,dt*ax3,dt*ax4
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ay1,ay2,ay3,ay4=',dt*ay1,dt*ay2,dt*ay3,dt*ay4
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* u1,u2,u3,u4,u0=',dt*uvel1,dt*uvel2,dt*uvel3,dt*uvel4,dt*berg%uvel
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* v1,v2,v3,v4,v0=',dt*vvel1,dt*vvel2,dt*vvel3,dt*vvel4,dt*berg%vvel
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* u1,u2,u3,u4 (deg)=',dt*u1,dt*u2,dt*u3,dt*u4
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* v1,v2,v3,v4 (deg)=',dt*v1,dt*v2,dt*v3,dt*v4
-         write(stderrunit,*) 'Acceleration terms for position 1'
-         error_flag=pos_within_cell(grd, lon1, lat1, i1, j1, xi, yj)
-         call accel(bergs, berg, i1, j1, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, axn1, ayn1, bxn, byn, debug_flag=.true.) !axn, ayn, bxn, byn - Added by Alon
-         write(stderrunit,*) 'Acceleration terms for position 2'
-         error_flag=pos_within_cell(grd, lon2, lat2, i2, j2, xi, yj)
-         call accel(bergs, berg, i2, j2, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt_2, ax2, ay2, axn2, ayn2, bxn, byn, debug_flag=.true.) !axn, ayn, bxn, byn - Added by Alon
-         write(stderrunit,*) 'Acceleration terms for position 3'
-         error_flag=pos_within_cell(grd, lon3, lat3, i3, j3, xi, yj)
-         call accel(bergs, berg, i3, j3, xi, yj, lat3, uvel3, vvel3, uvel1, vvel1, dt, ax3, ay3, axn3, ayn3, bxn, byn, debug_flag=.true.) !axn, ayn, bxn, byn - Added by Alon
-          call print_berg(stderrunit, berg, 'evolve_iceberg, out of position at 4')
-          write(stderrunit,'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'pos4 i,j,lon,lat,xi,yj=',i,j,lon4,lat4,xi,yj
-          write(stderrunit,'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'pos4 box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
-          bounced=is_point_in_cell(bergs%grd, lon2, lat2, i, j, explain=.true.)
-          call error_mesg('diamonds, evolve_iceberg','berg is out of posn at 4!',FATAL)
-        endif
-        call  convert_from_meters_to_grid(lat4,bergs%grd%grid_is_latlon ,dxdl4,dydl)
-        !dxdl4=r180_pi/(Rearth*cos(lat4*pi_180))
-        u4=uvel4*dxdl4; v4=vvel4*dydl
-        call accel(bergs, berg, i, j, xi, yj, lat4, uvel4, vvel4, uvel1, vvel1, dt, ax4, ay4, axn4, ayn4, bxn, byn) !axn, ayn, bxn, byn - Added by Alon
-        if (on_tangential_plane) call rotvec_to_tang(lon4,ax4,ay4,xddot4,yddot4)
-        if (on_tangential_plane) call rotvec_to_tang(lon4,axn4,ayn4,xddot4n,yddot4n)
-        
-        !  Xn = X1+dt*(V1+2*V2+2*V3+V4)/6
-        !  Vn = V1+dt*(A1+2*A2+2*A3+A4)/6
-        if (on_tangential_plane) then
-          xn=x1+dt_6*( (xdot1+xdot4)+2.*(xdot2+xdot3) )
-          yn=y1+dt_6*( (ydot1+ydot4)+2.*(ydot2+ydot3) )
-          xdotn=xdot1+dt_6*( (xddot1+xddot4)+2.*(xddot2+xddot3) )
-          ydotn=ydot1+dt_6*( (yddot1+yddot4)+2.*(yddot2+yddot3) )
-          xddotn=( (xddot1n+xddot4n)+2.*(xddot2n+xddot3n) )/6.  !Alon  
-          yddotn=( (yddot1n+yddot4n)+2.*(yddot2n+yddot3n) )/6.  !Alon  
-          call rotpos_from_tang(xn,yn,lonn,latn)
-          call rotvec_from_tang(lonn,xdotn,ydotn,uveln,vveln)
-          call rotvec_from_tang(lonn,xddotn,yddotn,axn,ayn) !Alon
-        else
-          lonn=berg%lon+dt_6*( (u1+u4)+2.*(u2+u3) )
-          latn=berg%lat+dt_6*( (v1+v4)+2.*(v2+v3) )
-          uveln=berg%uvel+dt_6*( (ax1+ax4)+2.*(ax2+ax3) )
-          vveln=berg%vvel+dt_6*( (ay1+ay4)+2.*(ay2+ay3) )
-          axn=( (axn1+axn4)+2.*(axn2+axn3) )/6. !Alon
-          ayn=( (ayn1+ayn4)+2.*(ayn2+ayn3) )/6. !Alon
-          bxn=(((ax1+ax4)+2.*(ax2+ax3) )/6)  - (axn/2)
-          byn=(((ay1+ay4)+2.*(ay2+ay3) )/6)  - (ayn/2)
-  
-        endif
-  
-  
-  
-        i=i1;j=j1;xi=berg%xi;yj=berg%yj
-        call adjust_index_and_ground(grd, lonn, latn, uveln, vveln, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)
-        if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-          call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
-  
-        if (.not.error_flag) then
-          if (.not. is_point_in_cell(bergs%grd, lonn, latn, i, j)) error_flag=.true.
-        endif
-        if (error_flag) then
-         call print_fld(grd, grd%msk, 'msk')
-         call print_fld(grd, grd%ssh, 'ssh')
-         call print_fld(grd, grd%sst, 'sst')
-         call print_fld(grd, grd%sss, 'sss')
-         call print_fld(grd, grd%hi, 'hi')
-         write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
-         write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
-         write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: i1,i2,i3,i4,i=',i1,i2,i3,i4,i
-         write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: j1,j2,j3,j4,j=',j1,j2,j3,j4,j
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: lon1,lon2,lon3,lon4,lonn=',lon1,lon2,lon3,lon4,lonn,berg%lon
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: lat1,lat2,lat3,lat4,latn=',lat1,lat2,lat3,lat4,latn,berg%lat
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: u1,u2,u3,u4,un,u0=',uvel1,uvel2,uvel3,uvel4,uveln,berg%uvel
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: v1,v2,v3,v4,vn,v0=',vvel1,vvel2,vvel3,vvel4,vveln,berg%vvel
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ax1,ax2,ax3,ax4,axn=',&
-              & dt*ax1,dt*ax2,dt*ax3,dt*ax4,dt_6*( (ax1+ax4)+2.*(ax2+ax3) )
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ay1,ay2,ay3,ay4,ayn=',&
-              & dt*ay1,dt*ay2,dt*ay3,dt*ay4,dt_6*( (ay1+ay4)+2.*(ay2+ay3) )
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* u1,u2,u3,u4,un,u0=',&
-              & dt*uvel1,dt*uvel2,dt*uvel3,dt*uvel4,dt*uveln,dt*berg%uvel
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* v1,v2,v3,v4,vn,v0=',&
-              & dt*vvel1,dt*vvel2,dt*vvel3,dt*vvel4,dt*vveln,dt*berg%vvel
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* u1,u2,u3,u4,u_rk (deg)=',&
-              & dt*u1,dt*u2,dt*u3,dt*u4,dt_6*( (u1+u4)+2.*(u2+u3) )
-         write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* v1,v2,v3,v4,v_rk (deg)=',&
-              & dt*v1,dt*v2,dt*v3,dt*v4,dt_6*( (v1+v4)+2.*(v2+v3) )
-         write(stderrunit,*) 'diamonds, evolve_iceberg: on_tangential_plane=',on_tangential_plane
-         write(stderrunit,*) 'Acceleration terms for position 1'
-         error_flag=pos_within_cell(grd, lon1, lat1, i1, j1, xi, yj)
-         call accel(bergs, berg, i1, j1, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, axn, ayn, bxn, byn, debug_flag=.true.)  !axn, ayn - Added by Alon
-         write(stderrunit,*) 'Acceleration terms for position 2'
-         error_flag=pos_within_cell(grd, lon2, lat2, i2, j2, xi, yj)
-         call accel(bergs, berg, i2, j2, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt_2, ax2, ay2, axn, ayn, bxn, byn, debug_flag=.true.)  !axn, ayn - Added by Alon
-         write(stderrunit,*) 'Acceleration terms for position 3'
-         error_flag=pos_within_cell(grd, lon3, lat3, i3, j3, xi, yj)
-         call accel(bergs, berg, i3, j3, xi, yj, lat3, uvel3, vvel3, uvel1, vvel1, dt, ax3, ay3, axn, ayn, bxn, byn, debug_flag=.true.)  !axn, ayn - Added by Alon
-         write(stderrunit,*) 'Acceleration terms for position 4'
-         error_flag=pos_within_cell(grd, lon4, lat4, i4, j4, xi, yj)
-         call accel(bergs, berg, i4, j4, xi, yj, lat4, uvel4, vvel4, uvel1, vvel1, dt, ax4, ay4, axn, ayn, bxn, byn, debug_flag=.true.)  !axn, ayn - Added by Alon
-          write(stderrunit,'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'posn i,j,lon,lat,xi,yj=',i,j,lonn,latn,xi,yj
-          write(stderrunit,'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'posn box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
-          call print_berg(stderrunit, berg, 'evolve_iceberg, out of cell at end!')
-          bounced=is_point_in_cell(bergs%grd, lonn, latn, i, j, explain=.true.)
-          if (debug) call error_mesg('diamonds, evolve_iceberg','berg is out of posn at end!',FATAL)
-          write(stderrunit,'(i4,a4,32i7)') mpp_pe(),'Lon',(i,i=grd%isd,grd%ied)
-          do j=grd%jed,grd%jsd,-1
-            write(stderrunit,'(2i4,32f7.1)') mpp_pe(),j,(grd%lon(i,j),i=grd%isd,grd%ied)
-          enddo
-          write(stderrunit,'(i4,a4,32i7)') mpp_pe(),'Lat',(i,i=grd%isd,grd%ied)
-          do j=grd%jed,grd%jsd,-1
-            write(stderrunit,'(2i4,32f7.1)') mpp_pe(),j,(grd%lat(i,j),i=grd%isd,grd%ied)
-          enddo
-        endif
+  ! Loading past accelerations - Alon
+  axn=berg%axn; ayn=berg%ayn !Alon
+  axn1=axn; axn2=axn; axn3=axn; axn4=axn
+  ayn1=ayn; ayn2=ayn; ayn3=ayn; ayn4=ayn
+
+  ! A1 = A(X1)
+  lon1=berg%lon; lat1=berg%lat
+  if (on_tangential_plane) call rotpos_to_tang(lon1,lat1,x1,y1)
+
+  call  convert_from_meters_to_grid(lat1,bergs%grd%grid_is_latlon ,dxdl1,dydl)
+  !dxdl1=r180_pi/(Rearth*cos(lat1*pi_180))
+  !dydl=r180_pi/Rearth
+  uvel1=berg%uvel; vvel1=berg%vvel
+  if (on_tangential_plane) call rotvec_to_tang(lon1,uvel1,vvel1,xdot1,ydot1)
+  u1=uvel1*dxdl1; v1=vvel1*dydl
+
+  call accel(bergs, berg, i, j, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, axn1, ayn1, bxn, byn) !axn,ayn, bxn, byn  - Added by Alon
+  !call accel(bergs, berg, i, j, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt, ax1, ay1, axn1, ayn1, bxn, byn) !Note change to dt. Markpoint_1
+  if (on_tangential_plane) call rotvec_to_tang(lon1,ax1,ay1,xddot1,yddot1)
+  if (on_tangential_plane) call rotvec_to_tang(lon1,axn1,ayn1,xddot1n,yddot1n) !Alon
+
+  !  X2 = X1+dt/2*V1 ; V2 = V1+dt/2*A1; A2=A(X2)
+  !if (debug) write(stderr(),*) 'diamonds, evolve: x2=...'
+  if (on_tangential_plane) then
+    x2=x1+dt_2*xdot1; y2=y1+dt_2*ydot1
+    xdot2=xdot1+dt_2*xddot1; ydot2=ydot1+dt_2*yddot1
+    call rotpos_from_tang(x2,y2,lon2,lat2)
+    call rotvec_from_tang(lon2,xdot2,ydot2,uvel2,vvel2)
+  else
+    lon2=lon1+dt_2*u1; lat2=lat1+dt_2*v1
+    uvel2=uvel1+dt_2*ax1; vvel2=vvel1+dt_2*ay1
+  endif
+  i=i1;j=j1;xi=berg%xi;yj=berg%yj
+  call adjust_index_and_ground(grd, lon2, lat2, uvel2, vvel2, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)
+  i2=i; j2=j
+  if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
+    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
+  ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon2,lat2,x2,y2)
+  if (.not.error_flag) then
+    if (debug .and. .not. is_point_in_cell(bergs%grd, lon2, lat2, i, j)) error_flag=.true.
+  endif
+  if (error_flag) then
+    call print_fld(grd, grd%msk, 'msk')
+    call print_fld(grd, grd%ssh, 'ssh')
+    call print_fld(grd, grd%sst, 'sst')
+    call print_fld(grd, grd%sss, 'sss')
+    call print_fld(grd, grd%hi, 'hi')
+    write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
+    write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
+    write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: i1,i2,i=',i1,i2,i
+    write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: j1,j2,j=',j1,j2,j
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: lon1,lon2=',lon1,lon2,berg%lon
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: lat1,lat2=',lat1,lat2,berg%lat
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: u1,u2,u0=',uvel1,uvel2,berg%uvel
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: v1,v2,v0=',vvel1,vvel2,berg%vvel
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ax1,ax2=',dt*ax1,dt*ax2
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ay1,ay2=',dt*ay1,dt*ay2
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* u1,u2,u0=',dt*uvel1,dt*uvel2,dt*berg%uvel
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* v1,v2,v0=',dt*vvel1,dt*vvel2,dt*berg%vvel
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* u1,u2 (deg)=',dt*u1,dt*u2
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* v1,v2 (deg)=',dt*v1,dt*v2
+    write(stderrunit,*) 'Acceleration terms for position 1'
+    error_flag=pos_within_cell(grd, lon1, lat1, i1, j1, xi, yj)
+    call accel(bergs, berg, i1, j1, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, axn1, ayn1, bxn, byn, debug_flag=.true.) !axn, ayn, bxn, byn,- Added by Alon
+    call print_berg(stderrunit, berg, 'evolve_iceberg, out of position at 2')
+    write(stderrunit,'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'pos2 i,j,lon,lat,xi,yj=',i,j,lon2,lat2,xi,yj
+    write(stderrunit,'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'pos2 box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
+    bounced=is_point_in_cell(bergs%grd, lon2, lat2, i, j,explain=.true.)
+    call error_mesg('diamonds, evolve_iceberg','berg is out of posn at 2!',FATAL)
+  endif
+  call  convert_from_meters_to_grid(lat2,bergs%grd%grid_is_latlon ,dxdl2,dydl)
+  !dxdl2=r180_pi/(Rearth*cos(lat2*pi_180))
+  u2=uvel2*dxdl2; v2=vvel2*dydl
+  call accel(bergs, berg, i, j, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt_2, ax2, ay2, axn2, ayn2, bxn, byn) !axn, ayn, bxn, byn - Added by Alon
+  !call accel(bergs, berg, i, j, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt, ax2, ay2, axn2, ayn2, bxn, byn) !Note change to dt. Markpoint_1
+  if (on_tangential_plane) call rotvec_to_tang(lon2,ax2,ay2,xddot2,yddot2)
+  if (on_tangential_plane) call rotvec_to_tang(lon2,axn2,ayn2,xddot2n,yddot2n) !Alon
+
+  !  X3 = X1+dt/2*V2 ; V3 = V1+dt/2*A2; A3=A(X3)
+  !if (debug) write(stderr(),*) 'diamonds, evolve: x3=...'
+  if (on_tangential_plane) then
+    x3=x1+dt_2*xdot2; y3=y1+dt_2*ydot2
+    xdot3=xdot1+dt_2*xddot2; ydot3=ydot1+dt_2*yddot2
+    call rotpos_from_tang(x3,y3,lon3,lat3)
+    call rotvec_from_tang(lon3,xdot3,ydot3,uvel3,vvel3)
+  else
+    lon3=lon1+dt_2*u2; lat3=lat1+dt_2*v2
+    uvel3=uvel1+dt_2*ax2; vvel3=vvel1+dt_2*ay2
+  endif
+  i=i1;j=j1;xi=berg%xi;yj=berg%yj
+  call adjust_index_and_ground(grd, lon3, lat3, uvel3, vvel3, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)
+  i3=i; j3=j
+  if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
+    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
+  ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon3,lat3,x3,y3)
+  if (.not.error_flag) then
+    if (debug .and. .not. is_point_in_cell(bergs%grd, lon3, lat3, i, j)) error_flag=.true.
+  endif
+  if (error_flag) then
+    call print_fld(grd, grd%msk, 'msk')
+    call print_fld(grd, grd%ssh, 'ssh')
+    call print_fld(grd, grd%sst, 'sst')
+    call print_fld(grd, grd%sss, 'sss')
+    call print_fld(grd, grd%hi, 'hi')
+    write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
+    write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
+    write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: i1,i2,i3,i=',i1,i2,i3,i
+    write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: j1,j2,j3,j=',j1,j2,j3,j
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: lon1,lon2,lon3=',lon1,lon2,lon3,berg%lon
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: lat1,lat2,lat3=',lat1,lat2,lat3,berg%lat
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: u1,u2,u3,u0=',uvel1,uvel2,uvel3,berg%uvel
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: v1,v2,v3,v0=',vvel1,vvel2,vvel3,berg%vvel
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ax1,ax2,ax3=',dt*ax1,dt*ax2,dt*ax3
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ay1,ay2,ay3=',dt*ay1,dt*ay2,dt*ay3
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* u1,u2,u3,u0=',dt*uvel1,dt*uvel2,dt*uvel3,dt*berg%uvel
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* v1,v2,v3,v0=',dt*vvel1,dt*vvel2,dt*vvel3,dt*berg%vvel
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* u1,u2,u3 (deg)=',dt*u1,dt*u2,dt*u3
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* v1,v2,v3 (deg)=',dt*v1,dt*v2,dt*v3
+    write(stderrunit,*) 'Acceleration terms for position 1'
+    error_flag=pos_within_cell(grd, lon1, lat1, i1, j1, xi, yj)
+    call accel(bergs, berg, i1, j1, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, axn1, ayn1, bxn, byn, debug_flag=.true.) !axn, ayn - Added by Alon
+    write(stderrunit,*) 'Acceleration terms for position 2'
+    error_flag=pos_within_cell(grd, lon2, lat2, i2, j2, xi, yj)
+    call accel(bergs, berg, i2, j2, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt_2, ax2, ay2, axn2, ayn2, bxn, byn, debug_flag=.true.) !axn, ayn, bxn, byn - Added by Alon
+    call print_berg(stderrunit, berg, 'evolve_iceberg, out of position at 3')
+    write(stderrunit,'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'pos3 i,j,lon,lat,xi,yj=',i,j,lon3,lat3,xi,yj
+    write(stderrunit,'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'pos3 box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
+    bounced=is_point_in_cell(bergs%grd, lon2, lat2, i, j,explain=.true.)
+    call error_mesg('diamonds, evolve_iceberg','berg is out of posn at 3!',FATAL)
+  endif
+  call  convert_from_meters_to_grid(lat3,bergs%grd%grid_is_latlon ,dxdl3,dydl)
+  !dxdl3=r180_pi/(Rearth*cos(lat3*pi_180))
+  u3=uvel3*dxdl3; v3=vvel3*dydl
+  call accel(bergs, berg, i, j, xi, yj, lat3, uvel3, vvel3, uvel1, vvel1, dt, ax3, ay3, axn3, ayn3, bxn, byn) !axn, ayn, bxn, byn - Added by Alon
+  if (on_tangential_plane) call rotvec_to_tang(lon3,ax3,ay3,xddot3,yddot3)
+  if (on_tangential_plane) call rotvec_to_tang(lon3,axn3,ayn3,xddot3n,yddot3n) !Alon
+
+  !  X4 = X1+dt*V3 ; V4 = V1+dt*A3; A4=A(X4)
+  !if (debug) write(stderr(),*) 'diamonds, evolve: x4=...'
+  if (on_tangential_plane) then
+    x4=x1+dt*xdot3; y4=y1+dt*ydot3
+    xdot4=xdot1+dt*xddot3; ydot4=ydot1+dt*yddot3
+    call rotpos_from_tang(x4,y4,lon4,lat4)
+    call rotvec_from_tang(lon4,xdot4,ydot4,uvel4,vvel4)
+  else
+    lon4=lon1+dt*u3; lat4=lat1+dt*v3
+    uvel4=uvel1+dt*ax3; vvel4=vvel1+dt*ay3
+  endif
+  i=i1;j=j1;xi=berg%xi;yj=berg%yj
+  call adjust_index_and_ground(grd, lon4, lat4, uvel4, vvel4, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)
+  i4=i; j4=j
+  ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon4,lat4,x4,y4)
+  if (.not.error_flag) then
+    if (debug .and. .not. is_point_in_cell(bergs%grd, lon4, lat4, i, j)) error_flag=.true.
+  endif
+  if (error_flag) then
+    call print_fld(grd, grd%msk, 'msk')
+    call print_fld(grd, grd%ssh, 'ssh')
+    call print_fld(grd, grd%sst, 'sst')
+    call print_fld(grd, grd%sss, 'sss')
+    call print_fld(grd, grd%hi, 'hi')
+    write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
+    write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
+    write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: i1,i2,i3,i4,i=',i1,i2,i3,i4,i
+    write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: j1,j2,j3,j4,j=',j1,j2,j3,j4,j
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: lon1,lon2,lon3,lon4=',lon1,lon2,lon3,lon4,berg%lon
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: lat1,lat2,lat3,lat4=',lat1,lat2,lat3,lat4,berg%lat
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: u1,u2,u3,u4,u0=',uvel1,uvel2,uvel3,uvel4,berg%uvel
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: v1,v2,v3,v4,v0=',vvel1,vvel2,vvel3,vvel4,berg%vvel
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ax1,ax2,ax3,ax4=',dt*ax1,dt*ax2,dt*ax3,dt*ax4
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ay1,ay2,ay3,ay4=',dt*ay1,dt*ay2,dt*ay3,dt*ay4
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* u1,u2,u3,u4,u0=',dt*uvel1,dt*uvel2,dt*uvel3,dt*uvel4,dt*berg%uvel
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* v1,v2,v3,v4,v0=',dt*vvel1,dt*vvel2,dt*vvel3,dt*vvel4,dt*berg%vvel
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* u1,u2,u3,u4 (deg)=',dt*u1,dt*u2,dt*u3,dt*u4
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* v1,v2,v3,v4 (deg)=',dt*v1,dt*v2,dt*v3,dt*v4
+    write(stderrunit,*) 'Acceleration terms for position 1'
+    error_flag=pos_within_cell(grd, lon1, lat1, i1, j1, xi, yj)
+    call accel(bergs, berg, i1, j1, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, axn1, ayn1, bxn, byn, debug_flag=.true.) !axn, ayn, bxn, byn - Added by Alon
+    write(stderrunit,*) 'Acceleration terms for position 2'
+    error_flag=pos_within_cell(grd, lon2, lat2, i2, j2, xi, yj)
+    call accel(bergs, berg, i2, j2, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt_2, ax2, ay2, axn2, ayn2, bxn, byn, debug_flag=.true.) !axn, ayn, bxn, byn - Added by Alon
+    write(stderrunit,*) 'Acceleration terms for position 3'
+    error_flag=pos_within_cell(grd, lon3, lat3, i3, j3, xi, yj)
+    call accel(bergs, berg, i3, j3, xi, yj, lat3, uvel3, vvel3, uvel1, vvel1, dt, ax3, ay3, axn3, ayn3, bxn, byn, debug_flag=.true.) !axn, ayn, bxn, byn - Added by Alon
+    call print_berg(stderrunit, berg, 'evolve_iceberg, out of position at 4')
+    write(stderrunit,'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'pos4 i,j,lon,lat,xi,yj=',i,j,lon4,lat4,xi,yj
+    write(stderrunit,'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'pos4 box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
+    bounced=is_point_in_cell(bergs%grd, lon2, lat2, i, j, explain=.true.)
+    call error_mesg('diamonds, evolve_iceberg','berg is out of posn at 4!',FATAL)
+  endif
+  call  convert_from_meters_to_grid(lat4,bergs%grd%grid_is_latlon ,dxdl4,dydl)
+  !dxdl4=r180_pi/(Rearth*cos(lat4*pi_180))
+  u4=uvel4*dxdl4; v4=vvel4*dydl
+  call accel(bergs, berg, i, j, xi, yj, lat4, uvel4, vvel4, uvel1, vvel1, dt, ax4, ay4, axn4, ayn4, bxn, byn) !axn, ayn, bxn, byn - Added by Alon
+  if (on_tangential_plane) call rotvec_to_tang(lon4,ax4,ay4,xddot4,yddot4)
+  if (on_tangential_plane) call rotvec_to_tang(lon4,axn4,ayn4,xddot4n,yddot4n)
+
+  !  Xn = X1+dt*(V1+2*V2+2*V3+V4)/6
+  !  Vn = V1+dt*(A1+2*A2+2*A3+A4)/6
+  if (on_tangential_plane) then
+    xn=x1+dt_6*( (xdot1+xdot4)+2.*(xdot2+xdot3) )
+    yn=y1+dt_6*( (ydot1+ydot4)+2.*(ydot2+ydot3) )
+    xdotn=xdot1+dt_6*( (xddot1+xddot4)+2.*(xddot2+xddot3) )
+    ydotn=ydot1+dt_6*( (yddot1+yddot4)+2.*(yddot2+yddot3) )
+    xddotn=( (xddot1n+xddot4n)+2.*(xddot2n+xddot3n) )/6.  !Alon
+    yddotn=( (yddot1n+yddot4n)+2.*(yddot2n+yddot3n) )/6.  !Alon
+    call rotpos_from_tang(xn,yn,lonn,latn)
+    call rotvec_from_tang(lonn,xdotn,ydotn,uveln,vveln)
+    call rotvec_from_tang(lonn,xddotn,yddotn,axn,ayn) !Alon
+  else
+    lonn=berg%lon+dt_6*( (u1+u4)+2.*(u2+u3) )
+    latn=berg%lat+dt_6*( (v1+v4)+2.*(v2+v3) )
+    uveln=berg%uvel+dt_6*( (ax1+ax4)+2.*(ax2+ax3) )
+    vveln=berg%vvel+dt_6*( (ay1+ay4)+2.*(ay2+ay3) )
+    axn=( (axn1+axn4)+2.*(axn2+axn3) )/6. !Alon
+    ayn=( (ayn1+ayn4)+2.*(ayn2+ayn3) )/6. !Alon
+    bxn=(((ax1+ax4)+2.*(ax2+ax3) )/6)  - (axn/2)
+    byn=(((ay1+ay4)+2.*(ay2+ay3) )/6)  - (ayn/2)
+  endif
+
+  i=i1;j=j1;xi=berg%xi;yj=berg%yj
+  call adjust_index_and_ground(grd, lonn, latn, uveln, vveln, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)
+  if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
+    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
+
+  if (.not.error_flag) then
+    if (.not. is_point_in_cell(bergs%grd, lonn, latn, i, j)) error_flag=.true.
+  endif
+  if (error_flag) then
+    call print_fld(grd, grd%msk, 'msk')
+    call print_fld(grd, grd%ssh, 'ssh')
+    call print_fld(grd, grd%sst, 'sst')
+    call print_fld(grd, grd%sss, 'sss')
+    call print_fld(grd, grd%hi, 'hi')
+    write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: isd,isc,iec,ied=',grd%isd,grd%isc,grd%iec,grd%ied
+    write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: jsd,jsc,jec,jed=',grd%jsd,grd%jsc,grd%jec,grd%jed
+    write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: i1,i2,i3,i4,i=',i1,i2,i3,i4,i
+    write(stderrunit,'(a,6i5)') 'diamonds, evolve_iceberg: j1,j2,j3,j4,j=',j1,j2,j3,j4,j
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: lon1,lon2,lon3,lon4,lonn=',lon1,lon2,lon3,lon4,lonn,berg%lon
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: lat1,lat2,lat3,lat4,latn=',lat1,lat2,lat3,lat4,latn,berg%lat
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: u1,u2,u3,u4,un,u0=',uvel1,uvel2,uvel3,uvel4,uveln,berg%uvel
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: v1,v2,v3,v4,vn,v0=',vvel1,vvel2,vvel3,vvel4,vveln,berg%vvel
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ax1,ax2,ax3,ax4,axn=',&
+         & dt*ax1,dt*ax2,dt*ax3,dt*ax4,dt_6*( (ax1+ax4)+2.*(ax2+ax3) )
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ay1,ay2,ay3,ay4,ayn=',&
+         & dt*ay1,dt*ay2,dt*ay3,dt*ay4,dt_6*( (ay1+ay4)+2.*(ay2+ay3) )
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* u1,u2,u3,u4,un,u0=',&
+         & dt*uvel1,dt*uvel2,dt*uvel3,dt*uvel4,dt*uveln,dt*berg%uvel
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* v1,v2,v3,v4,vn,v0=',&
+         & dt*vvel1,dt*vvel2,dt*vvel3,dt*vvel4,dt*vveln,dt*berg%vvel
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* u1,u2,u3,u4,u_rk (deg)=',&
+         & dt*u1,dt*u2,dt*u3,dt*u4,dt_6*( (u1+u4)+2.*(u2+u3) )
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* v1,v2,v3,v4,v_rk (deg)=',&
+         & dt*v1,dt*v2,dt*v3,dt*v4,dt_6*( (v1+v4)+2.*(v2+v3) )
+    write(stderrunit,*) 'diamonds, evolve_iceberg: on_tangential_plane=',on_tangential_plane
+    write(stderrunit,*) 'Acceleration terms for position 1'
+    error_flag=pos_within_cell(grd, lon1, lat1, i1, j1, xi, yj)
+    call accel(bergs, berg, i1, j1, xi, yj, lat1, uvel1, vvel1, uvel1, vvel1, dt_2, ax1, ay1, axn, ayn, bxn, byn, debug_flag=.true.)  !axn, ayn - Added by Alon
+    write(stderrunit,*) 'Acceleration terms for position 2'
+    error_flag=pos_within_cell(grd, lon2, lat2, i2, j2, xi, yj)
+    call accel(bergs, berg, i2, j2, xi, yj, lat2, uvel2, vvel2, uvel1, vvel1, dt_2, ax2, ay2, axn, ayn, bxn, byn, debug_flag=.true.)  !axn, ayn - Added by Alon
+    write(stderrunit,*) 'Acceleration terms for position 3'
+    error_flag=pos_within_cell(grd, lon3, lat3, i3, j3, xi, yj)
+    call accel(bergs, berg, i3, j3, xi, yj, lat3, uvel3, vvel3, uvel1, vvel1, dt, ax3, ay3, axn, ayn, bxn, byn, debug_flag=.true.)  !axn, ayn - Added by Alon
+    write(stderrunit,*) 'Acceleration terms for position 4'
+    error_flag=pos_within_cell(grd, lon4, lat4, i4, j4, xi, yj)
+    call accel(bergs, berg, i4, j4, xi, yj, lat4, uvel4, vvel4, uvel1, vvel1, dt, ax4, ay4, axn, ayn, bxn, byn, debug_flag=.true.)  !axn, ayn - Added by Alon
+    write(stderrunit,'(a,i3,a,2i4,4f8.3)') 'pe=',mpp_pe(),'posn i,j,lon,lat,xi,yj=',i,j,lonn,latn,xi,yj
+    write(stderrunit,'(a,i3,a,4f8.3)') 'pe=',mpp_pe(),'posn box=',grd%lon(i-1,j-1),grd%lon(i,j),grd%lat(i-1,j-1),grd%lat(i,j)
+    call print_berg(stderrunit, berg, 'evolve_iceberg, out of cell at end!')
+    bounced=is_point_in_cell(bergs%grd, lonn, latn, i, j, explain=.true.)
+    if (debug) call error_mesg('diamonds, evolve_iceberg','berg is out of posn at end!',FATAL)
+    write(stderrunit,'(i4,a4,32i7)') mpp_pe(),'Lon',(i,i=grd%isd,grd%ied)
+    do j=grd%jed,grd%jsd,-1
+      write(stderrunit,'(2i4,32f7.1)') mpp_pe(),j,(grd%lon(i,j),i=grd%isd,grd%ied)
+    enddo
+    write(stderrunit,'(i4,a4,32i7)') mpp_pe(),'Lat',(i,i=grd%isd,grd%ied)
+    do j=grd%jed,grd%jsd,-1
+      write(stderrunit,'(2i4,32f7.1)') mpp_pe(),j,(grd%lat(i,j),i=grd%isd,grd%ied)
+    enddo
+  endif
 end subroutine Runge_Kutta_stepping
-
 
 !#######################################################################
 !MP6
 subroutine update_verlet_position(bergs,berg)
-type(icebergs), intent(in), pointer :: bergs 
-type(iceberg), intent(in), pointer :: berg 
+type(icebergs), intent(in), pointer :: bergs
+type(iceberg), intent(in), pointer :: berg
 type(icebergs_gridded), pointer :: grd
 !Local variable
 real :: lonn, latn
@@ -4487,111 +4487,111 @@ logical :: on_tangential_plane, error_flag, bounced
 integer :: stderrunit
 
   ! Get the stderr unit number
-    stderrunit = stderr()
+  stderrunit = stderr()
 
   ! For convenience
-    grd=>bergs%grd
+  grd=>bergs%grd
   ! Common constants
   dt=bergs%dt
   dt_2=0.5*dt
 
 
-      on_tangential_plane=.false.
-      if ((berg%lat>89.) .and. (grd%grid_is_latlon)) on_tangential_plane=.true.
+  on_tangential_plane=.false.
+  if ((berg%lat>89.) .and. (grd%grid_is_latlon)) on_tangential_plane=.true.
 
-        lon1=berg%lon; lat1=berg%lat
-        if (on_tangential_plane) call rotpos_to_tang(lon1,lat1,x1,y1,berg%iceberg_num)
-        !dxdl1=r180_pi/(Rearth*cos(lat1*pi_180))
-        !dydl=r180_pi/Rearth
-        call  convert_from_meters_to_grid(lat1,grd%grid_is_latlon ,dxdl1,dydl)
-        uvel1=berg%uvel; vvel1=berg%vvel
+  lon1=berg%lon; lat1=berg%lat
+  if (on_tangential_plane) call rotpos_to_tang(lon1,lat1,x1,y1,berg%iceberg_num)
+  !dxdl1=r180_pi/(Rearth*cos(lat1*pi_180))
+  !dydl=r180_pi/Rearth
+  call  convert_from_meters_to_grid(lat1,grd%grid_is_latlon ,dxdl1,dydl)
+  uvel1=berg%uvel; vvel1=berg%vvel
 
-        ! Loading past acceleartions - Alon
-        axn=berg%axn; ayn=berg%ayn !Alon
-        bxn=berg%bxn; byn=berg%byn !Alon 
-  
-        ! Velocities used to update the position
-        uvel2=uvel1+(dt_2*axn)+(dt_2*bxn)                    !Alon
-        vvel2=vvel1+(dt_2*ayn)+(dt_2*byn)                    !Alon
+  ! Loading past acceleartions - Alon
+  axn=berg%axn; ayn=berg%ayn !Alon
+  bxn=berg%bxn; byn=berg%byn !Alon
 
-        !dx=(dt*(uvel1+(dt_2*axn)+(dt_2*bxn)))
+  ! Velocities used to update the position
+  uvel2=uvel1+(dt_2*axn)+(dt_2*bxn)                    !Alon
+  vvel2=vvel1+(dt_2*ayn)+(dt_2*byn)                    !Alon
 
-        if (on_tangential_plane) call rotvec_to_tang(lon1,uvel2,vvel2,xdot2,ydot2)
-        u2=uvel2*dxdl1; v2=vvel2*dydl
-  
-        ! Solving for new position
-        if (on_tangential_plane) then
-          xn=x1+(dt*xdot2) ; yn=y1+(dt*ydot2)             !Alon
-          call rotpos_from_tang(xn,yn,lonn,latn)
-        else
-          lonn=lon1+(dt*u2) ; latn=lat1+(dt*v2)  !Alon
-        endif
-  
-        ! Turn the velocities into u_star, v_star.(uvel3 is v_star) - Alon (not sure how this works with tangent plane)
-        uvel3=uvel1+(dt_2*axn)                  !Alon
-        vvel3=vvel1+(dt_2*ayn)                  !Alon
+  !dx=(dt*(uvel1+(dt_2*axn)+(dt_2*bxn)))
 
-        ! Adjusting mass...
-        !MP3
-        i=berg%ine;  j=berg%jne;  xi = berg%xi;  yj = berg%yj
-        call adjust_index_and_ground(grd, lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)  !Alon:"unclear which velocity to use here?"
+  if (on_tangential_plane) call rotvec_to_tang(lon1,uvel2,vvel2,xdot2,ydot2)
+  u2=uvel2*dxdl1; v2=vvel2*dydl
 
-        !if (bounced) then
-        !  print *, 'you have been bounce: big time!',mpp_pe(),berg%iceberg_num,lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag 
-        !  berg%axn=0.0  ;  berg%ayn=0.0
-        !  berg%bxn=0.0  ;  berg%byn=0.0
-        !  berg%uvel=0.0 ;  berg%vvel=0.0
-        !endif
+  ! Solving for new position
+  if (on_tangential_plane) then
+    xn=x1+(dt*xdot2) ; yn=y1+(dt*ydot2)             !Alon
+    call rotpos_from_tang(xn,yn,lonn,latn)
+  else
+    lonn=lon1+(dt*u2) ; latn=lat1+(dt*v2)  !Alon
+  endif
 
-        !Updating positions and index
-        berg%lon=lonn      ;  berg%lat=latn
-        berg%ine=i    ;  berg%jne=j
-        berg%xi=xi    ;  berg%yj=yj
+  ! Turn the velocities into u_star, v_star.(uvel3 is v_star) - Alon (not sure how this works with tangent plane)
+  uvel3=uvel1+(dt_2*axn)                  !Alon
+  vvel3=vvel1+(dt_2*ayn)                  !Alon
+
+  ! Adjusting mass...
+  !MP3
+  i=berg%ine;  j=berg%jne;  xi = berg%xi;  yj = berg%yj
+  call adjust_index_and_ground(grd, lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)  !Alon:"unclear which velocity to use here?"
+
+  !if (bounced) then
+  !  print *, 'you have been bounce: big time!',mpp_pe(),berg%iceberg_num,lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag
+  !  berg%axn=0.0  ;  berg%ayn=0.0
+  !  berg%bxn=0.0  ;  berg%byn=0.0
+  !  berg%uvel=0.0 ;  berg%vvel=0.0
+  !endif
+
+  !Updating positions and index
+  berg%lon=lonn      ;  berg%lat=latn
+  berg%ine=i    ;  berg%jne=j
+  berg%xi=xi    ;  berg%yj=yj
 
 end subroutine update_verlet_position
 
 !#######################################################################
 
-  subroutine rotpos_from_tang(x, y, lon, lat)
+subroutine rotpos_from_tang(x, y, lon, lat)
   ! Arguments
   real, intent(in) :: x, y
   real, intent(out) :: lon, lat
   ! Local variables
   real :: r
 
-    r=sqrt(x**2+y**2)
-    lat=90.-(r180_pi*r/Rearth)
-    lon=r180_pi*acos(x/r)*sign(1.,y)
+  r=sqrt(x**2+y**2)
+  lat=90.-(r180_pi*r/Rearth)
+  lon=r180_pi*acos(x/r)*sign(1.,y)
 
-  end subroutine rotpos_from_tang
+end subroutine rotpos_from_tang
 
-  subroutine rotvec_to_tang(lon, uvel, vvel, xdot, ydot)
+subroutine rotvec_to_tang(lon, uvel, vvel, xdot, ydot)
   ! Arguments
   real, intent(in) :: lon, uvel, vvel
   real, intent(out) :: xdot, ydot
   ! Local variables
   real :: clon,slon
 
-    clon=cos(lon*pi_180)
-    slon=sin(lon*pi_180)
-    xdot=-slon*uvel-clon*vvel
-    ydot=clon*uvel-slon*vvel
+  clon=cos(lon*pi_180)
+  slon=sin(lon*pi_180)
+  xdot=-slon*uvel-clon*vvel
+  ydot=clon*uvel-slon*vvel
 
-  end subroutine rotvec_to_tang
+end subroutine rotvec_to_tang
 
-  subroutine rotvec_from_tang(lon, xdot, ydot, uvel, vvel)
+subroutine rotvec_from_tang(lon, xdot, ydot, uvel, vvel)
   ! Arguments
   real, intent(in) :: lon, xdot, ydot
   real, intent(out) :: uvel, vvel
   ! Local variables
   real :: clon,slon
 
-    clon=cos(lon*pi_180)
-    slon=sin(lon*pi_180)
-    uvel=-slon*xdot+clon*ydot
-    vvel=-clon*xdot-slon*ydot
+  clon=cos(lon*pi_180)
+  slon=sin(lon*pi_180)
+  uvel=-slon*xdot+clon*ydot
+  vvel=-clon*xdot-slon*ydot
 
-  end subroutine rotvec_from_tang
+end subroutine rotvec_from_tang
 
 ! ##############################################################################
 
@@ -4611,7 +4611,7 @@ integer :: stderrunit
 logical :: point_in_cell_using_xi_yj
 
   ! Get the stderr unit number
-    stderrunit = stderr()
+  stderrunit = stderr()
 
   bounced=.false.
   error=.false.
@@ -4783,9 +4783,9 @@ logical :: point_in_cell_using_xi_yj
     if (debug) then
       write(stderrunit,*) 'diamonds, adjust: lon0, lat0=',lon0,lat0
       write(stderrunit,*) 'diamonds, adjust: xi0, yj0=',xi0,yj0
-      write(stderrunit,*) 'diamonds, adjust: i0,j0=',i0,j0 
+      write(stderrunit,*) 'diamonds, adjust: i0,j0=',i0,j0
       write(stderrunit,*) 'diamonds, adjust: lon, lat=',lon,lat
-      write(stderrunit,*) 'diamonds, adjust: xi,yj=',xi,yj 
+      write(stderrunit,*) 'diamonds, adjust: xi,yj=',xi,yj
       write(stderrunit,*) 'diamonds, adjust: i,j=',i,j
       write(stderrunit,*) 'diamonds, adjust: inm,jnm=',inm,jnm
       write(stderrunit,*) 'diamonds, adjust: icount=',icount
@@ -4852,24 +4852,24 @@ subroutine rotpos_to_tang(lon, lat, x, y, iceberg_num_in)
   if (present(iceberg_num_in)) then
         iceberg_num=iceberg_num_in
   endif
-        
+
   if (lat>90.) then
       write(stderrunit,*) 'diamonds, rotpos_to_tang: lat>90 already!',lat, lon, iceberg_num
       call error_mesg('diamonds, rotpos_to_tang','Something went very wrong!',FATAL)
-    endif
-    if (lat==90.) then
-      write(stderrunit,*) 'diamonds, rotpos_to_tang: lat==90 already!',lat, lon
-      call error_mesg('diamonds, rotpos_to_tang','Something went wrong!',FATAL)
-    endif
+  endif
+  if (lat==90.) then
+    write(stderrunit,*) 'diamonds, rotpos_to_tang: lat==90 already!',lat, lon
+    call error_mesg('diamonds, rotpos_to_tang','Something went wrong!',FATAL)
+  endif
 
-    colat=90.-lat
-    r=Rearth*(colat*pi_180)
-    clon=cos(lon*pi_180)
-    slon=sin(lon*pi_180)
-    x=r*clon
-    y=r*slon
+  colat=90.-lat
+  r=Rearth*(colat*pi_180)
+  clon=cos(lon*pi_180)
+  slon=sin(lon*pi_180)
+  x=r*clon
+  y=r*slon
 
-  end subroutine rotpos_to_tang
+end subroutine rotpos_to_tang
 
 ! ##############################################################################
 
@@ -4877,17 +4877,17 @@ subroutine icebergs_stock_pe(bergs, index, value)
 ! Modules
 use stock_constants_mod, only : ISTOCK_WATER, ISTOCK_HEAT
 ! Arguments
-type(icebergs), pointer :: bergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
 integer, intent(in) :: index
 real, intent(out) :: value
 ! Local variables
 type(icebergs_gridded), pointer :: grd
 real :: berg_mass, stored_mass
 
-! For convenience
-grd=>bergs%grd
+  ! For convenience
+  grd=>bergs%grd
 
-select case (index)
+  select case (index)
 
   case (ISTOCK_WATER)
     berg_mass=sum_mass(bergs)
@@ -4902,7 +4902,7 @@ select case (index)
   case default
     value = 0.0
 
-end select
+  end select
 
 end subroutine icebergs_stock_pe
 
@@ -4910,7 +4910,7 @@ end subroutine icebergs_stock_pe
 
 subroutine icebergs_save_restart(bergs)
 ! Arguments
-type(icebergs), pointer :: bergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
 ! Local variables
 
   if (.not.associated(bergs)) return
@@ -4926,7 +4926,7 @@ end subroutine icebergs_save_restart
 
 subroutine icebergs_end(bergs)
 ! Arguments
-type(icebergs), pointer :: bergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
 ! Local variables
 type(iceberg), pointer :: this, next
 
@@ -5055,6 +5055,5 @@ real :: cd, cddvmod, tau2
 end subroutine invert_tau_for_du
 
 ! ##############################################################################
-
 
 end module

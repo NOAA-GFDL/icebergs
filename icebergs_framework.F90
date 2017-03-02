@@ -1,4 +1,7 @@
+!> Provides utilites for managing bergs in linked lists, and bonds between bergs
 module ice_bergs_framework
+
+! This file is part of NOAA-GFDL/icebergs. See LICENSE.md for the license.
 
 use constants_mod, only: radius, pi, omega, HLF
 
@@ -15,33 +18,33 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 
 implicit none ; private
 
-integer :: buffer_width=27 !Changed from 20 to 28 by Alon 
+integer :: buffer_width=27 !Changed from 20 to 28 by Alon
 integer :: buffer_width_traj=31  !Changed from 23 by Alon
-!integer, parameter :: buffer_width=26 !Changed from 20 to 26 by Alon 
+!integer, parameter :: buffer_width=26 !Changed from 20 to 26 by Alon
 !integer, parameter :: buffer_width_traj=29  !Changed from 23 by Alon
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 
 !Local Vars
 ! Global data (minimal for debugging)
-logical :: folded_north_on_pe = .false.
-logical :: verbose=.false. ! Be verbose to stderr
-logical :: budget=.true. ! Calculate budgets
-logical :: debug=.false. ! Turn on debugging
-logical :: really_debug=.false. ! Turn on debugging
-logical :: parallel_reprod=.true. ! Reproduce across different PE decompositions
-logical :: use_slow_find=.true. ! Use really slow (but robust) find_cell for reading restarts
-logical :: ignore_ij_restart=.false. ! Read i,j location from restart if available (needed to use restarts on different grids)
-logical :: generate_test_icebergs=.false. ! Create icebergs in absence of a restart file
-logical :: use_roundoff_fix=.true. ! Use a "fix" for the round-off discrepancy between is_point_in_cell() and pos_within_cell()
-logical :: old_bug_rotated_weights=.false. ! Skip the rotation of off-center weights for rotated halo updates
-logical :: make_calving_reproduce=.false. ! Make the calving.res.nc file reproduce across pe count changes.
-logical :: old_bug_bilin=.true. ! If true, uses the inverted bilin function (use False to get correct answer)
-character(len=10) :: restart_input_dir = 'INPUT/'
-integer, parameter :: delta_buf=25 ! Size by which to increment buffers
-real, parameter :: pi_180=pi/180. ! Converts degrees to radians
-logical :: fix_restart_dates=.true. ! After a restart, check that bergs were created before the current model date
-logical :: do_unit_tests=.false. ! Conduct some unit tests
-logical :: force_all_pes_traj=.false. ! Force all pes write trajectory files regardless of io_layout
+logical :: folded_north_on_pe = .false. !< If true, indicates the presence of the tri-polar grid
+logical :: verbose=.false. !< Be verbose to stderr
+logical :: budget=.true. !< Calculate budgets
+logical :: debug=.false. !< Turn on debugging
+logical :: really_debug=.false. !< Turn on debugging
+logical :: parallel_reprod=.true. !< Reproduce across different PE decompositions
+logical :: use_slow_find=.true. !< Use really slow (but robust) find_cell for reading restarts
+logical :: ignore_ij_restart=.false. !< Read i,j location from restart if available (needed to use restarts on different grids)
+logical :: generate_test_icebergs=.false. !< Create icebergs in absence of a restart file
+logical :: use_roundoff_fix=.true. !< Use a "fix" for the round-off discrepancy between is_point_in_cell() and pos_within_cell()
+logical :: old_bug_rotated_weights=.false. !< Skip the rotation of off-center weights for rotated halo updates
+logical :: make_calving_reproduce=.false. !< Make the calving.res.nc file reproduce across pe count changes.
+logical :: old_bug_bilin=.true. !< If true, uses the inverted bilinear function (use False to get correct answer)
+character(len=10) :: restart_input_dir = 'INPUT/' !< Directory to look for restart files
+integer, parameter :: delta_buf=25 !< Size by which to increment buffers
+real, parameter :: pi_180=pi/180. !< Converts degrees to radians
+logical :: fix_restart_dates=.true. !< After a restart, check that bergs were created before the current model date
+logical :: do_unit_tests=.false. !< Conduct some unit tests
+logical :: force_all_pes_traj=.false. !< Force all pes write trajectory files regardless of io_layout
 
 !Public params !Niki: write a subroutine to expose these
 public nclasses,buffer_width,buffer_width_traj
@@ -50,7 +53,7 @@ public ignore_ij_restart, use_slow_find,generate_test_icebergs,old_bug_rotated_w
 public orig_read, force_all_pes_traj
 
 !Public types
-public icebergs_gridded, xyt, iceberg, icebergs, buffer, bond 
+public icebergs_gridded, xyt, iceberg, icebergs, buffer, bond
 
 !Public subs
 public ice_bergs_framework_init
@@ -58,7 +61,7 @@ public send_bergs_to_other_pes
 public update_halo_icebergs
 public pack_berg_into_buffer2, unpack_berg_from_buffer2
 public pack_traj_into_buffer2, unpack_traj_from_buffer2
-public increase_ibuffer 
+public increase_ibuffer
 public add_new_berg_to_list, count_out_of_order, check_for_duplicates
 public insert_berg_into_list, create_iceberg, delete_iceberg_from_list, destroy_iceberg
 public print_fld,print_berg, print_bergs,record_posn, push_posn, append_posn, check_position
@@ -76,76 +79,91 @@ public is_point_within_xi_yj_bounds
 public test_check_for_duplicate_ids_in_list
 public check_for_duplicates_in_parallel
 
+!> Container for gridded fields
 type :: icebergs_gridded
-  type(domain2D), pointer :: domain ! MPP domain
-  integer :: halo ! Nominal halo width
-  integer :: isc, iec, jsc, jec ! Indices of computational domain
-  integer :: isd, ied, jsd, jed ! Indices of data domain
-  integer :: isg, ieg, jsg, jeg ! Indices of global domain
-  integer :: my_pe, pe_N, pe_S, pe_E, pe_W ! MPI PE idenLx ! Length of domain, for periodic boundary condition (Ly to be adde later if needed)
-  logical :: grid_is_latlon !Flag to say whether the coordinate is in lat lon degrees, or meters
-  logical :: grid_is_regular !Flag to say whether point in cell can be found assuming regular cartesian grid
-  real :: Lx !Length of the domain in x direction
-  real, dimension(:,:), pointer :: lon=>null() ! Longitude of cell corners
-  real, dimension(:,:), pointer :: lat=>null() ! Latitude of cell corners
-  real, dimension(:,:), pointer :: lonc=>null() ! Longitude of cell centers
-  real, dimension(:,:), pointer :: latc=>null() ! Latitude of cell centers
-  real, dimension(:,:), pointer :: dx=>null() ! Length of cell edge (m)
-  real, dimension(:,:), pointer :: dy=>null() ! Length of cell edge (m)
-  real, dimension(:,:), pointer :: area=>null() ! Area of cell (m^2)
-  real, dimension(:,:), pointer :: msk=>null() ! Ocean-land mask (1=ocean)
-  real, dimension(:,:), pointer :: cos=>null() ! Cosine from rotation matrix to lat-lon coords
-  real, dimension(:,:), pointer :: sin=>null() ! Sine from rotation matrix to lat-lon coords
-  real, dimension(:,:), pointer :: ocean_depth=>NULL() ! Depth of ocean (m)
-  real, dimension(:,:), pointer :: uo=>null() ! Ocean zonal flow (m/s)
-  real, dimension(:,:), pointer :: vo=>null() ! Ocean meridional flow (m/s)
-  real, dimension(:,:), pointer :: ui=>null() ! Ice zonal flow (m/s)
-  real, dimension(:,:), pointer :: vi=>null() ! Ice meridional flow (m/s)
-  real, dimension(:,:), pointer :: ua=>null() ! Atmosphere zonal flow (m/s)
-  real, dimension(:,:), pointer :: va=>null() ! Atmosphere meridional flow (m/s)
-  real, dimension(:,:), pointer :: ssh=>null() ! Sea surface height (m)
-  real, dimension(:,:), pointer :: sst=>null() ! Sea surface temperature (oC)
-  real, dimension(:,:), pointer :: sss=>null() ! Sea surface salinity (psu)
-  real, dimension(:,:), pointer :: cn=>null() ! Sea-ice concentration (0 to 1)
-  real, dimension(:,:), pointer :: hi=>null() ! Sea-ice thickness (m)
-  real, dimension(:,:), pointer :: calving=>null() ! Calving mass rate [frozen runoff] (kg/s) (into stored ice)
-  real, dimension(:,:), pointer :: calving_hflx=>null() ! Calving heat flux [heat content of calving] (W/m2) (into stored ice)
-  real, dimension(:,:), pointer :: floating_melt=>null() ! Net melting rate to icebergs + bits (kg/s/m^2)
-  real, dimension(:,:), pointer :: berg_melt=>null() ! Melting+erosion rate of icebergs (kg/s/m^2)
-  real, dimension(:,:), pointer :: melt_buoy=>null() ! Buoyancy componenet of melting rate (kg/s/m^2)
-  real, dimension(:,:), pointer :: melt_eros=>null() ! Erosion component of melting rate (kg/s/m^2)
-  real, dimension(:,:), pointer :: melt_conv=>null() ! Convective component of melting rate (kg/s/m^2)
-  real, dimension(:,:), pointer :: bergy_src=>null() ! Mass flux from berg erosion into bergy bits (kg/s/m^2)
-  real, dimension(:,:), pointer :: bergy_melt=>null() ! Melting rate of bergy bits (kg/s/m^2)
-  real, dimension(:,:), pointer :: bergy_mass=>null() ! Mass distribution of bergy bits (kg/s/m^2)
-  real, dimension(:,:), pointer :: spread_mass=>null() ! Mass of icebergs after spreading (kg/m^2)
-  real, dimension(:,:), pointer :: spread_mass_old=>null() ! Mass of icebergs after spreading old (kg/m^2)
-  real, dimension(:,:), pointer :: spread_area=>null() ! Area of icebergs after spreading (m^2/m^2)
-  real, dimension(:,:), pointer :: u_iceberg=>null() ! Average iceberg velocity in grid cell (mass weighted - but not spread mass weighted)
-  real, dimension(:,:), pointer :: v_iceberg=>null() ! Average iceberg velocity in grid cell (mass weighted - but not spread mass weighted)
-  real, dimension(:,:), pointer :: spread_uvel=>null() ! Average iceberg velocity in grid cell (spread area weighted)
-  real, dimension(:,:), pointer :: spread_vvel=>null() ! Average iceberg velocity in grid cell (spread area weighted)
-  real, dimension(:,:), pointer :: ustar_iceberg=>null() ! Frictional velocity below icebergs to be passed to ocean
-  real, dimension(:,:), pointer :: virtual_area=>null() ! Virtual surface coverage by icebergs (m^2)
-  real, dimension(:,:), pointer :: mass=>null() ! Mass distribution (kg/m^2)
-  real, dimension(:,:,:), pointer :: mass_on_ocean=>null() ! Mass distribution partitioned by neighbor (kg)  
-  real, dimension(:,:,:), pointer :: area_on_ocean=>null() ! Area distribution partitioned by neighbor (m^2)  
-  real, dimension(:,:,:), pointer :: Uvel_on_ocean=>null() ! zonal velocity distribution partitioned by neighbor (m^2* m/s)  
-  real, dimension(:,:,:), pointer :: Vvel_on_ocean=>null() ! meridional momentum distribution partitioned by neighbor (m^2 m/s)  
-  real, dimension(:,:), pointer :: tmp=>null() ! Temporary work space
-  real, dimension(:,:), pointer :: tmpc=>null() ! Temporary work space
-  real, dimension(:,:,:), pointer :: stored_ice=>null() ! Accumulated ice mass flux at calving locations (kg)
-  real, dimension(:,:), pointer :: rmean_calving=>null() ! Running mean for ice calving
-  real, dimension(:,:), pointer :: rmean_calving_hflx=>null() ! Running mean for ice calving
-  real, dimension(:,:), pointer :: stored_heat=>null() ! Heat content of stored ice (J)
-  real, dimension(:,:,:), pointer :: real_calving=>null() ! Calving rate into iceberg class at calving locations (kg/s)
-  real, dimension(:,:), pointer :: iceberg_heat_content=>null() ! Distributed heat content of bergs (J/m^2)
-  real, dimension(:,:), pointer :: parity_x=>null() ! X component of vector point from i,j to i+1,j+1 (for detecting tri-polar fold)
-  real, dimension(:,:), pointer :: parity_y=>null() ! Y component of vector point from i,j to i+1,j+1 (for detecting tri-polar fold)
-  integer, dimension(:,:), pointer :: iceberg_counter_grd=>null() ! Counts icebergs created for naming purposes
-  logical :: rmean_calving_initialized = .false. ! True if rmean_calving(:,:) has been filled with meaningful data
-  logical :: rmean_calving_hflx_initialized = .false. ! True if rmean_calving_hflx(:,:) has been filled with meaningful data
-  ! Diagnostics handles
+  type(domain2D), pointer :: domain !< MPP parallel domain
+  integer :: halo !< Nominal halo width
+  integer :: isc !< Start i-index of computational domain
+  integer :: iec !< End i-index of computational domain
+  integer :: jsc !< Start j-index of computational domain
+  integer :: jec !< End j-index of computational domain
+  integer :: isd !< Start i-index of data domain
+  integer :: ied !< End i-index of data domain
+  integer :: jsd !< Start j-index of data domain
+  integer :: jed !< End j-index of data domain
+  integer :: isg !< Start i-index of global domain
+  integer :: ieg !< End i-index of global domain
+  integer :: jsg !< Start j-index of global domain
+  integer :: jeg !< End j-index of global domain
+  integer :: my_pe !< MPI PE index
+  integer :: pe_N !< MPI PE index of PE to the north
+  integer :: pe_S !< MPI PE index of PE to the south
+  integer :: pe_E !< MPI PE index of PE to the east
+  integer :: pe_W !< MPI PE index of PE to the west
+  logical :: grid_is_latlon !< Flag to say whether the coordinate is in lat-lon degrees, or meters
+  logical :: grid_is_regular !< Flag to say whether point in cell can be found assuming regular Cartesian grid
+  real :: Lx !< Length of the domain in x direction
+  real, dimension(:,:), pointer :: lon=>null() !< Longitude of cell corners (degree E)
+  real, dimension(:,:), pointer :: lat=>null() !< Latitude of cell corners (degree N)
+  real, dimension(:,:), pointer :: lonc=>null() !< Longitude of cell centers (degree E)
+  real, dimension(:,:), pointer :: latc=>null() !< Latitude of cell centers (degree N)
+  real, dimension(:,:), pointer :: dx=>null() !< Length of cell edge (m)
+  real, dimension(:,:), pointer :: dy=>null() !< Length of cell edge (m)
+  real, dimension(:,:), pointer :: area=>null() !< Area of cell (m^2)
+  real, dimension(:,:), pointer :: msk=>null() !< Ocean-land mask (1=ocean)
+  real, dimension(:,:), pointer :: cos=>null() !< Cosine from rotation matrix to lat-lon coords
+  real, dimension(:,:), pointer :: sin=>null() !< Sine from rotation matrix to lat-lon coords
+  real, dimension(:,:), pointer :: ocean_depth=>NULL() !< Depth of ocean (m)
+  real, dimension(:,:), pointer :: uo=>null() !< Ocean zonal flow (m/s)
+  real, dimension(:,:), pointer :: vo=>null() !< Ocean meridional flow (m/s)
+  real, dimension(:,:), pointer :: ui=>null() !< Ice zonal flow (m/s)
+  real, dimension(:,:), pointer :: vi=>null() !< Ice meridional flow (m/s)
+  real, dimension(:,:), pointer :: ua=>null() !< Atmosphere zonal flow (m/s)
+  real, dimension(:,:), pointer :: va=>null() !< Atmosphere meridional flow (m/s)
+  real, dimension(:,:), pointer :: ssh=>null() !< Sea surface height (m)
+  real, dimension(:,:), pointer :: sst=>null() !< Sea surface temperature (oC)
+  real, dimension(:,:), pointer :: sss=>null() !< Sea surface salinity (psu)
+  real, dimension(:,:), pointer :: cn=>null() !< Sea-ice concentration (0 to 1)
+  real, dimension(:,:), pointer :: hi=>null() !< Sea-ice thickness (m)
+  real, dimension(:,:), pointer :: calving=>null() !< Calving mass rate [frozen runoff] (kg/s) (into stored ice)
+  real, dimension(:,:), pointer :: calving_hflx=>null() !< Calving heat flux [heat content of calving] (W/m2) (into stored ice)
+  real, dimension(:,:), pointer :: floating_melt=>null() !< Net melting rate to icebergs + bits (kg/s/m^2)
+  real, dimension(:,:), pointer :: berg_melt=>null() !< Melting+erosion rate of icebergs (kg/s/m^2)
+  real, dimension(:,:), pointer :: melt_buoy=>null() !< Buoyancy component of melting rate (kg/s/m^2)
+  real, dimension(:,:), pointer :: melt_eros=>null() !< Erosion component of melting rate (kg/s/m^2)
+  real, dimension(:,:), pointer :: melt_conv=>null() !< Convective component of melting rate (kg/s/m^2)
+  real, dimension(:,:), pointer :: bergy_src=>null() !< Mass flux from berg erosion into bergy bits (kg/s/m^2)
+  real, dimension(:,:), pointer :: bergy_melt=>null() !< Melting rate of bergy bits (kg/s/m^2)
+  real, dimension(:,:), pointer :: bergy_mass=>null() !< Mass distribution of bergy bits (kg/s/m^2)
+  real, dimension(:,:), pointer :: spread_mass=>null() !< Mass of icebergs after spreading (kg/m^2)
+  real, dimension(:,:), pointer :: spread_mass_old=>null() !< Mass of icebergs after spreading old (kg/m^2)
+  real, dimension(:,:), pointer :: spread_area=>null() !< Area of icebergs after spreading (m^2/m^2)
+  real, dimension(:,:), pointer :: u_iceberg=>null() !< Average iceberg velocity in grid cell (mass weighted - but not spread mass weighted)
+  real, dimension(:,:), pointer :: v_iceberg=>null() !< Average iceberg velocity in grid cell (mass weighted - but not spread mass weighted)
+  real, dimension(:,:), pointer :: spread_uvel=>null() !< Average iceberg velocity in grid cell (spread area weighted)
+  real, dimension(:,:), pointer :: spread_vvel=>null() !< Average iceberg velocity in grid cell (spread area weighted)
+  real, dimension(:,:), pointer :: ustar_iceberg=>null() !< Frictional velocity below icebergs to be passed to ocean
+  real, dimension(:,:), pointer :: virtual_area=>null() !< Virtual surface coverage by icebergs (m^2)
+  real, dimension(:,:), pointer :: mass=>null() !< Mass distribution (kg/m^2)
+  real, dimension(:,:,:), pointer :: mass_on_ocean=>null() !< Mass distribution partitioned by neighbor (kg)
+  real, dimension(:,:,:), pointer :: area_on_ocean=>null() !< Area distribution partitioned by neighbor (m^2)
+  real, dimension(:,:,:), pointer :: Uvel_on_ocean=>null() !< zonal velocity distribution partitioned by neighbor (m^2* m/s)
+  real, dimension(:,:,:), pointer :: Vvel_on_ocean=>null() !< meridional momentum distribution partitioned by neighbor (m^2 m/s)
+  real, dimension(:,:), pointer :: tmp=>null() !< Temporary work space
+  real, dimension(:,:), pointer :: tmpc=>null() !< Temporary work space
+  real, dimension(:,:,:), pointer :: stored_ice=>null() !< Accumulated ice mass flux at calving locations (kg)
+  real, dimension(:,:), pointer :: rmean_calving=>null() !< Running mean for ice calving
+  real, dimension(:,:), pointer :: rmean_calving_hflx=>null() !< Running mean for ice calving
+  real, dimension(:,:), pointer :: stored_heat=>null() !< Heat content of stored ice (J)
+  real, dimension(:,:,:), pointer :: real_calving=>null() !< Calving rate into iceberg class at calving locations (kg/s)
+  real, dimension(:,:), pointer :: iceberg_heat_content=>null() !< Distributed heat content of bergs (J/m^2)
+  real, dimension(:,:), pointer :: parity_x=>null() !< X component of vector point from i,j to i+1,j+1 (for detecting tri-polar fold)
+  real, dimension(:,:), pointer :: parity_y=>null() !< Y component of vector point from i,j to i+1,j+1 (for detecting tri-polar fold)
+  integer, dimension(:,:), pointer :: iceberg_counter_grd=>null() !< Counts icebergs created for naming purposes
+  logical :: rmean_calving_initialized = .false. !< True if rmean_calving(:,:) has been filled with meaningful data
+  logical :: rmean_calving_hflx_initialized = .false. !< True if rmean_calving_hflx(:,:) has been filled with meaningful data
+  !>@{
+  !! Diagnostic handle
   integer :: id_uo=-1, id_vo=-1, id_calving=-1, id_stored_ice=-1, id_accum=-1, id_unused=-1, id_floating_melt=-1
   integer :: id_melt_buoy=-1, id_melt_eros=-1, id_melt_conv=-1, id_virtual_area=-1, id_real_calving=-1
   integer :: id_calving_hflx_in=-1, id_stored_heat=-1, id_melt_hflx=-1, id_heat_content=-1
@@ -158,134 +176,216 @@ type :: icebergs_gridded
   integer :: id_spread_uvel=-1, id_spread_vvel=-1
   integer :: id_melt_m_per_year=-1
   integer :: id_ocean_depth=-1
+  !>@}
 
-  real :: clipping_depth=0. ! The effective depth at which to clip the weight felt by the ocean [m].
+  real :: clipping_depth=0. !< The effective depth at which to clip the weight felt by the ocean [m].
 
 end type icebergs_gridded
 
+!> A link in the trajectory record (diagnostic)
 type :: xyt
-  real :: lon, lat, day
-  real :: mass, thickness, width, length, uvel, vvel
-  real :: axn, ayn, bxn, byn, uvel_old, vvel_old, lat_old, lon_old  !Explicit and implicit accelerations !Alon 
-  real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, sss, cn, hi, halo_berg, static_berg
-  real :: mass_of_bits, heat_density
-  integer :: year, iceberg_num
-  type(xyt), pointer :: next=>null()
+  real :: lon !< Longitude of berg (degree N or unit of grid coordinate)
+  real :: lat !< Latitude of berg (degree N or unit of grid coordinate)
+  real :: day !< Day of this record (days)
+  real :: mass !< Mass of berg (kg)
+  real :: thickness !< Thickness of berg (m)
+  real :: width !< Width of berg (m)
+  real :: length !< Length of berg (m)
+  real :: uvel !< Zonal velocity of berg (m/s)
+  real :: vvel !< Meridional velocity of berg (m/s)
+  real :: axn
+  real :: ayn
+  real :: bxn
+  real :: byn
+  real :: uvel_old
+  real :: vvel_old
+  real :: lat_old
+  real :: lon_old
+  real :: uo !< Zonal velocity of ocean (m/s)
+  real :: vo !< Meridional velocity of ocean (m/s)
+  real :: ui !< Zonal velocity of ice (m/s)
+  real :: vi !< Meridional velocity of ice (m/s)
+  real :: ua !< Zonal velocity of atmosphere (m/s)
+  real :: va !< Meridional velocity of atmosphere (m/s)
+  real :: ssh_x !< Zonal gradient of sea-surface height (nondim)
+  real :: ssh_y !< Meridional gradient of sea-surface height (nondim)
+  real :: sst !< Sea-surface temperature (Celsius)
+  real :: sss !< Sea-surface salinity (1e-3)
+  real :: cn !< Sea-ice concentration (nondim)
+  real :: hi !< Sea-ice thickness (m)
+  real :: halo_berg
+  real :: static_berg
+  real :: mass_of_bits !< Mass of bergy bits (kg)
+  real :: heat_density !< Heat density of berg (???)
+  integer :: year !< Year of this record (years)
+  integer :: iceberg_num !< Iceberg identifier
+  type(xyt), pointer :: next=>null() !< Next link in list
 end type xyt
 
+!> An iceberg object, used as a link in a linked list
 type :: iceberg
-  type(iceberg), pointer :: prev=>null(), next=>null()
+  type(iceberg), pointer :: prev=>null() !< Previous link in list
+  type(iceberg), pointer :: next=>null() !< Next link in list
   ! State variables (specific to the iceberg, needed for restarts)
-  real :: lon, lat, uvel, vvel, mass, thickness, width, length
-  real :: axn, ayn, bxn, byn, uvel_old, vvel_old, lon_old, lat_old !Explicit and implicit accelerations !Alon 
-  real :: start_lon, start_lat, start_day, start_mass, mass_scaling
-  real :: mass_of_bits, heat_density
+  real :: lon !< Longitude of berg (degree N or unit of grid coordinate)
+  real :: lat !< Latitude of berg (degree E or unit of grid coordinate)
+  real :: uvel !< Zonal velocity of berg (m/s)
+  real :: vvel !< Meridional velocity of berg (m/s)
+  real :: mass !< Mass of berg (kg)
+  real :: thickness !< Thickness of berg (m)
+  real :: width !< Width of berg (m)
+  real :: length !< Length of berg (m)
+  real :: axn
+  real :: ayn
+  real :: bxn
+  real :: byn
+  real :: uvel_old
+  real :: vvel_old
+  real :: lon_old
+  real :: lat_old
+  real :: start_lon !< Longitude where berg was created (degree N or unit of grid coordinate)
+  real :: start_lat !< Latitude where berg was created (degree E or unit of grid coordinate)
+  real :: start_day !< Day that berg was created (days)
+  real :: start_mass !< Mass berg had when created (kg)
+  real :: mass_scaling !< Multiplier to scale mass when interpreting berg as a cloud of bergs (nondim)
+  real :: mass_of_bits !< Mass of bergy bits following berg (kg)
+  real :: heat_density !< Heat density of berg (???)
   real :: halo_berg  ! Equal to zero for bergs on computational domain, and =1 for bergs on the halo
   real :: static_berg  ! Equal to 1 for icebergs which are static (not allowed to move). Might be extended to grounding later.
-  integer :: start_year
-  integer :: iceberg_num
-  integer :: ine, jne ! nearest index in NE direction (for convenience)
-  real :: xi, yj ! Non-dimensional coords within current cell (0..1)
+  integer :: start_year !< Year that berg was created (years)
+  integer :: iceberg_num !< Iceberg identifier
+  integer :: ine !< Nearest i-index in NE direction (for convenience)
+  integer :: jne !< Nearest j-index in NE direction (for convenience)
+  real :: xi !< Non-dimensional x-coordinate within current cell (0..1)
+  real :: yj !< Non-dimensional y-coordinate within current cell (0..1)
   ! Environment variables (as seen by the iceberg)
-  real :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, sss, cn, hi
-  type(xyt), pointer :: trajectory=>null()
-  type(bond), pointer :: first_bond=>null()  !First element of bond list.
+  real :: uo !< Zonal velocity of ocean (m/s)
+  real :: vo !< Meridional velocity of ocean (m/s)
+  real :: ui !< Zonal velocity of ice (m/s)
+  real :: vi !< Meridional velocity of ice (m/s)
+  real :: ua !< Zonal velocity of atmosphere (m/s)
+  real :: va !< Meridional velocity of atmosphere (m/s)
+  real :: ssh_x !< Zonal gradient of sea-surface height (nondim)
+  real :: ssh_y !< Meridional gradient of sea-surface height (nondim)
+  real :: sst !< Sea-surface temperature (Celsius)
+  real :: sss !< Sea-surface salinity (1e-3)
+  real :: cn !< Sea-ice concentration (nondim)
+  real :: hi !< Sea-ice thickness (m)
+  type(xyt), pointer :: trajectory=>null() !< Trajectory for this berg
+  type(bond), pointer :: first_bond=>null() !< First element of bond list.
 end type iceberg
 
+!> A bond object connecting two bergs, used as a link in a linked list
 type :: bond
-  type(bond), pointer :: prev_bond=>null(), next_bond=>null()
+  type(bond), pointer :: prev_bond=>null() !< Previous link in list
+  type(bond), pointer :: next_bond=>null() !< Next link in list
   type(iceberg), pointer :: other_berg=>null()
-  integer :: other_berg_num, other_berg_ine, other_berg_jne 
+  integer :: other_berg_num
+  integer :: other_berg_ine
+  integer :: other_berg_jne
 end type bond
 
+! A dynamic buffer, used for communication, that packs types into rectangular memory
 type :: buffer
-  integer :: size=0
-  real, dimension(:,:), pointer :: data
+  integer :: size=0 !< Size of buffer
+  real, dimension(:,:), pointer :: data !< Buffer memory
 end type buffer
 
+!> A wrapper for the iceberg linked list (since an array of pointers is not allowed)
 type :: linked_list
-  type(iceberg), pointer :: first=>null()
+  type(iceberg), pointer :: first=>null() !< Pointer to the beginning of a linked list of bergs
 end type linked_list
 
-type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io cannot compile if this is private!
-  type(icebergs_gridded), pointer :: grd
-  type(linked_list), dimension(:,:), allocatable :: list
-  type(xyt), pointer :: trajectories=>null()
-  real :: dt           ! Time-step between iceberg calls (should make adaptive?)
-  integer :: current_year
-  real :: current_yearday ! 1.00-365.99
-  integer :: traj_sample_hrs, traj_write_hrs
-  integer :: verbose_hrs
+!> Container for all types and memory
+type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_io cannot compile if this is private!
+  type(icebergs_gridded), pointer :: grd !< Container with all gridded data
+  type(linked_list), dimension(:,:), allocatable :: list !< Linked list of icebergs
+  type(xyt), pointer :: trajectories=>null() !< A linked list for detached segments of trajectories
+  real :: dt !< Time-step between iceberg calls
+             !! \todo Should make dt adaptive?
+  integer :: current_year !< Current year (years)
+  real :: current_yearday !< Current year-day, 1.00-365.99, (days)
+  integer :: traj_sample_hrs !< Period between sampling for trajectories (hours)
+  integer :: traj_write_hrs !< Period between writing of trajectories (hours)
+  integer :: verbose_hrs !< Period between terminal status reports (hours)
   integer :: max_bonds
-  integer :: clock, clock_mom, clock_the, clock_int, clock_cal, clock_com, clock_ini, clock_ior, clock_iow, clock_dia ! ids for fms timers
+  !>@{
+  !! Handles for clocks
+  integer :: clock, clock_mom, clock_the, clock_int, clock_cal, clock_com, clock_ini, clock_ior, clock_iow, clock_dia
   integer :: clock_trw, clock_trp
-  real :: rho_bergs ! Density of icebergs [kg/m^3]
-  real :: spring_coef  ! Spring contant for iceberg interactions 
-  real :: bond_coef  ! Spring contant for iceberg bonds 
-  real :: radial_damping_coef     ! Coef for relative iceberg motion damping (radial component) -Alon
-  real :: tangental_damping_coef     ! Coef for relative iceberg motion damping (tangental component) -Alon
-  real :: LoW_ratio ! Initial ratio L/W for newly calved icebergs
-  real :: bergy_bit_erosion_fraction ! Fraction of erosion melt flux to divert to bergy bits
-  real :: sicn_shift ! Shift of sea-ice concentration in erosion flux modulation (0<sicn_shift<1)
-  real :: lat_ref=0. ! Reference latitude for f-plane (when this option is on)
-  real :: u_override=0.0 ! Overrides the u velocity of icebergs (for ocean testing)
-  real :: v_override=0.0 ! Overrides the v velocity of icebergs (for ocean testing)
-  real :: utide_icebergs= 0.      ! Tidal speeds, set to zero for now.
-  real :: ustar_icebergs_bg=0.001 ! Background u_star under icebergs. This should be linked to a value felt by the ocean boundary layer
-  real :: cdrag_icebergs =  1.5e-3 !Momentum Drag coef, taken from HJ99  (Holland and Jenkins 1999)
-  real :: initial_orientation=0. ! Iceberg orientaion relative to this angle (in degrees). Used for hexagonal mass spreading.
-  real :: Gamma_T_3EQ=0.022 ! Nondimensional heat-transfer coefficient
-  real :: melt_cutoff=-1.0 !Minimum ocean thickness for melting to occur (is not applied for values < 0)
-  logical :: const_gamma=.True. !If true uses a constant heat tranfer coefficient, from which the salt transfer is calculated
+  !>@}
+  real :: rho_bergs !< Density of icebergs [kg/m^3]
+  real :: spring_coef !< Spring constant for iceberg interactions
+  real :: bond_coef !< Spring constant for iceberg bonds
+  real :: radial_damping_coef !< Coefficient for relative iceberg motion damping (radial component) -Alon
+  real :: tangental_damping_coef !< Coefficient for relative iceberg motion damping (tangential component) -Alon
+  real :: LoW_ratio !< Initial ratio L/W for newly calved icebergs
+  real :: bergy_bit_erosion_fraction !< Fraction of erosion melt flux to divert to bergy bits
+  real :: sicn_shift !< Shift of sea-ice concentration in erosion flux modulation (0<sicn_shift<1)
+  real :: lat_ref=0. !< Reference latitude for f-plane (when this option is on)
+  real :: u_override=0.0 !< Overrides the u velocity of icebergs (for ocean testing)
+  real :: v_override=0.0 !< Overrides the v velocity of icebergs (for ocean testing)
+  real :: utide_icebergs= 0. !< Tidal speeds, set to zero for now.
+  real :: ustar_icebergs_bg=0.001 !< Background u_star under icebergs. This should be linked to a value felt by the ocean boundary layer
+  real :: cdrag_icebergs =  1.5e-3 !< Momentum Drag coef, taken from HJ99 (Holland and Jenkins 1999)
+  real :: initial_orientation=0. !< Iceberg orientation relative to this angle (in degrees). Used for hexagonal mass spreading.
+  real :: Gamma_T_3EQ=0.022 !< Non-dimensional heat-transfer coefficient
+  real :: melt_cutoff=-1.0 !< Minimum ocean thickness for melting to occur (is not applied for values < 0)
+  logical :: const_gamma=.True. !< If true uses a constant heat transfer coefficient, from which the salt transfer is calculated
   real, dimension(:), pointer :: initial_mass, distribution, mass_scaling
   real, dimension(:), pointer :: initial_thickness, initial_width, initial_length
-  logical :: restarted=.false. ! Indicate whether we read state from a restart or not
-  logical :: use_operator_splitting=.true. ! Use first order operator splitting for thermodynamics
-  logical :: add_weight_to_ocean=.true. ! Add weight of bergs to ocean
-  logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
-  logical :: time_average_weight=.false. ! Time average the weight on the ocean
-  logical :: Runge_not_Verlet=.True.  !True=Runge Kuttai, False=Verlet.  - Added by Alon 
-  logical :: use_mixed_melting=.False.  !If true, then the melt is determined partly using 3 eq model partly using iceberg parametrizations (according to iceberg bond number)
-  logical :: apply_thickness_cutoff_to_gridded_melt=.False.  !Prevents melt for ocean thickness below melt_cuttoff (applied to gridded melt fields)
-  logical :: apply_thickness_cutoff_to_bergs_melt=.False.  !Prevents melt for ocean thickness below melt_cuttoff (applied to bergs)
-  logical :: use_updated_rolling_scheme=.false. ! True to use the aspect ratio based rolling scheme rather than incorrect version of WM scheme   (set tip_parameter=1000. for correct WM scheme)
-  logical :: pass_fields_to_ocean_model=.False. !Iceberg area, mass and ustar fields are prepared to pass to ocean model
-  logical :: use_mixed_layer_salinity_for_thermo=.False.  !If true, then model uses ocean salinity for 3 and 2 equation melt model.
-  logical :: find_melt_using_spread_mass=.False.  !If true, then the model calculates ice loss by looping at the spread_mass before and after.
-  logical :: Use_three_equation_model=.True.  !Uses 3 equation model for melt when ice shelf type thermodynamics are used.
-  logical :: melt_icebergs_as_ice_shelf=.False.  !Uses iceshelf type thermodynamics
-  logical :: Iceberg_melt_without_decay=.False.  !Allows icebergs meltwater fluxes to enter the ocean, without the iceberg decaying or changing shape.
-  logical :: add_iceberg_thickness_to_SSH=.False.  !Adds the iceberg contribution to SSH.   
-  logical :: override_iceberg_velocities=.False.  !Allows you to set a fixed iceberg velocity for all non-static icebergs.
-  logical :: use_f_plane=.False.  !Flag to use a f-plane for the rotation
-  logical :: rotate_icebergs_for_mass_spreading=.True.  !Flag allows icebergs to rotate for spreading their mass (in hexagonal spreading mode)
-  logical :: set_melt_rates_to_zero=.False.  !Sets all melt rates to zero, for testing purposes (thermodynamics routine is still run)
-  logical :: hexagonal_icebergs=.False. !True treats icebergs as rectangles, False as hexagonal elements (for the purpose of mass spreading)
-  logical :: allow_bergs_to_roll=.True. !Allows icebergs to roll over when rolling conditions are met
-  logical :: ignore_missing_restart_bergs=.False.  !True Allows the model to ignorm icebergs missing in the restart. 
-  logical :: Static_icebergs=.False.  !True= icebergs do no move
-  logical :: only_interactive_forces=.False.  !Icebergs only feel interactive forces, and not ocean, wind... 
-  logical :: halo_debugging=.False.  !Use for debugging halos (remove when its working) 
-  logical :: save_short_traj=.True.  !True saves only lon,lat,time,iceberg_num in iceberg_trajectory.nc 
-  logical :: ignore_traj=.False.  !If true, then model does not traj trajectory data at all 
-  logical :: iceberg_bonds_on=.False.  !True=Allow icebergs to have bonds, False=don't allow. 
-  logical :: manually_initialize_bonds=.False.  !True= Bonds are initialize manually. 
-  logical :: use_new_predictive_corrective =.False.  !Flag to use Bob's predictive corrective iceberg scheme- Added by Alon 
-  logical :: interactive_icebergs_on=.false.  !Turn on/off interactions between icebergs  - Added by Alon 
-  logical :: critical_interaction_damping_on=.true.  !Sets the damping on relative iceberg velocity to critical value - Added by Alon 
-  logical :: use_old_spreading=.true. ! If true, spreads iceberg mass as if the berg is one grid cell wide
-  logical :: read_ocean_depth_from_file=.false. ! If true, ocean depth is read from a file.
-  integer :: debug_iceberg_with_id = -1 ! If positive, monitors a berg with this id
+  logical :: restarted=.false. !< Indicate whether we read state from a restart or not
+  logical :: use_operator_splitting=.true. !< Use first order operator splitting for thermodynamics
+  logical :: add_weight_to_ocean=.true. !< Add weight of bergs to ocean
+  logical :: passive_mode=.false. !< Add weight of icebergs + bits to ocean
+  logical :: time_average_weight=.false. !< Time average the weight on the ocean
+  logical :: Runge_not_Verlet=.True. !< True=Runge-Kutta, False=Verlet.
+  logical :: use_mixed_melting=.False. !< If true, then the melt is determined partly using 3 eq model partly using iceberg parameterizations (according to iceberg bond number)
+  logical :: apply_thickness_cutoff_to_gridded_melt=.False. !< Prevents melt for ocean thickness below melt_cuttoff (applied to gridded melt fields)
+  logical :: apply_thickness_cutoff_to_bergs_melt=.False. !< Prevents melt for ocean thickness below melt_cuttoff (applied to bergs)
+  logical :: use_updated_rolling_scheme=.false. !< True to use the aspect ratio based rolling scheme rather than incorrect version of WM scheme (set tip_parameter=1000. for correct WM scheme)
+  logical :: pass_fields_to_ocean_model=.False. !< Iceberg area, mass and ustar fields are prepared to pass to ocean model
+  logical :: use_mixed_layer_salinity_for_thermo=.False. !< If true, then model uses ocean salinity for 3 and 2 equation melt model.
+  logical :: find_melt_using_spread_mass=.False. !< If true, then the model calculates ice loss by looping at the spread_mass before and after.
+  logical :: Use_three_equation_model=.True. !< Uses 3 equation model for melt when ice shelf type thermodynamics are used.
+  logical :: melt_icebergs_as_ice_shelf=.False. !< Uses iceshelf type thermodynamics
+  logical :: Iceberg_melt_without_decay=.False. !< Allows icebergs meltwater fluxes to enter the ocean, without the iceberg decaying or changing shape.
+  logical :: add_iceberg_thickness_to_SSH=.False. !< Adds the iceberg contribution to SSH.
+  logical :: override_iceberg_velocities=.False. !< Allows you to set a fixed iceberg velocity for all non-static icebergs.
+  logical :: use_f_plane=.False. !< Flag to use a f-plane for the rotation
+  logical :: rotate_icebergs_for_mass_spreading=.True. !< Flag allows icebergs to rotate for spreading their mass (in hexagonal spreading mode)
+  logical :: set_melt_rates_to_zero=.False. !< Sets all melt rates to zero, for testing purposes (thermodynamics routine is still run)
+  logical :: hexagonal_icebergs=.False. !< True treats icebergs as rectangles, False as hexagonal elements (for the purpose of mass spreading)
+  logical :: allow_bergs_to_roll=.True. !< Allows icebergs to roll over when rolling conditions are met
+  logical :: ignore_missing_restart_bergs=.False. !< True Allows the model to ignore icebergs missing in the restart.
+  logical :: Static_icebergs=.False. !< True= icebergs do no move
+  logical :: only_interactive_forces=.False. !< Icebergs only feel interactive forces, and not ocean, wind...
+  logical :: halo_debugging=.False. !< Use for debugging halos (remove when its working)
+  logical :: save_short_traj=.True. !< True saves only lon,lat,time,iceberg_num in iceberg_trajectory.nc
+  logical :: ignore_traj=.False. !< If true, then model does not write trajectory data at all
+  logical :: iceberg_bonds_on=.False. !< True=Allow icebergs to have bonds, False=don't allow.
+  logical :: manually_initialize_bonds=.False. !< True= Bonds are initialize manually.
+  logical :: use_new_predictive_corrective =.False. !< Flag to use Bob's predictive corrective iceberg scheme- Added by Alon
+  logical :: interactive_icebergs_on=.false. !< Turn on/off interactions between icebergs  - Added by Alon
+  logical :: critical_interaction_damping_on=.true. !< Sets the damping on relative iceberg velocity to critical value - Added by Alon
+  logical :: use_old_spreading=.true. !< If true, spreads iceberg mass as if the berg is one grid cell wide
+  logical :: read_ocean_depth_from_file=.false. !< If true, ocean depth is read from a file.
+  integer :: debug_iceberg_with_id = -1 !< If positive, monitors a berg with this id
 
-  real :: speed_limit=0. ! CFL speed limit for a berg [m/s]
-  real :: tau_calving=0. ! Time scale for smoothing out calving field (years)
-  real :: tip_parameter=0. ! parameter to override iceberg rollilng critica ratio (use zero to get parameter directly from ice and seawater densities) 
-  real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
-  type(buffer), pointer :: obuffer_n=>null(), ibuffer_n=>null()
-  type(buffer), pointer :: obuffer_s=>null(), ibuffer_s=>null()
-  type(buffer), pointer :: obuffer_e=>null(), ibuffer_e=>null()
-  type(buffer), pointer :: obuffer_w=>null(), ibuffer_w=>null()
-  type(buffer), pointer :: obuffer_io=>null(), ibuffer_io=>null()
+  real :: speed_limit=0. !< CFL speed limit for a berg [m/s]
+  real :: tau_calving=0. !< Time scale for smoothing out calving field (years)
+  real :: tip_parameter=0. !< parameter to override iceberg rolling critical ratio (use zero to get parameter directly from ice and seawater densities)
+  real :: grounding_fraction=0. !< Fraction of water column depth at which grounding occurs
+  type(buffer), pointer :: obuffer_n=>null() !< Buffer for outgoing bergs to the north
+  type(buffer), pointer :: ibuffer_n=>null() !< Buffer for incoming bergs from the north
+  type(buffer), pointer :: obuffer_s=>null() !< Buffer for outgoing bergs to the south
+  type(buffer), pointer :: ibuffer_s=>null() !< Buffer for incoming bergs from the south
+  type(buffer), pointer :: obuffer_e=>null() !< Buffer for outgoing bergs to the east
+  type(buffer), pointer :: ibuffer_e=>null() !< Buffer for incoming bergs from the east
+  type(buffer), pointer :: obuffer_w=>null() !< Buffer for outgoing bergs to the west
+  type(buffer), pointer :: ibuffer_w=>null() !< Buffer for incoming bergs from the west
+  type(buffer), pointer :: obuffer_io=>null() !< Buffer for outgoing bergs during i/o
+  type(buffer), pointer :: ibuffer_io=>null() !< Buffer for incoming bergs during i/o
   ! Budgets
   real :: net_calving_received=0., net_calving_returned=0.
   real :: net_incoming_calving=0., net_outgoing_calving=0.
@@ -316,10 +416,11 @@ type :: icebergs !; private!Niki: Ask Alistair why this is private. ice_bergs_io
   integer, dimension(:), pointer :: nbergs_calved_by_class=>null()
 end type icebergs
 
-! Needs to be module global so can be public to icebergs_mod.
-! Remove when backward compatibility no longer needed
+!> Read original restarts. Needs to be module global so can be public to icebergs_mod.
+!! \todo Remove when backward compatibility no longer needed
 logical :: orig_read=.false.
 
+!> Version of file provided by CPP macro (usually set to git hash)
 #ifdef _FILE_VERSION
   character(len=128) :: version = _FILE_VERSION
 #else
@@ -328,9 +429,7 @@ logical :: orig_read=.false.
 
 contains
 
-
-! ##############################################################################
-
+!> Initializes parallel framework
 subroutine ice_bergs_framework_init(bergs, &
              gni, gnj, layout, io_layout, axes, dom_x_flags, dom_y_flags, &
              dt, Time, ice_lon, ice_lat, ice_wet, ice_dx, ice_dy, ice_area, &
@@ -353,17 +452,27 @@ use diag_manager_mod, only: register_diag_field, register_static_field, send_dat
 use diag_manager_mod, only: diag_axis_init
 
 ! Arguments
-type(icebergs), pointer :: bergs
-integer, intent(in) :: gni, gnj, layout(2), io_layout(2), axes(2)
-integer, intent(in) :: dom_x_flags, dom_y_flags
-real, intent(in) :: dt
-type (time_type), intent(in) :: Time ! current time
-real, dimension(:,:), intent(in) :: ice_lon, ice_lat, ice_wet
-real, dimension(:,:), intent(in) :: ice_dx, ice_dy, ice_area
-real, dimension(:,:), intent(in) :: cos_rot, sin_rot
-real, dimension(:,:), intent(in),optional :: ocean_depth
-logical, intent(in), optional :: maskmap(:,:)
-logical, intent(in), optional :: fractional_area
+type(icebergs), pointer :: bergs !< Container for all types and memory
+integer, intent(in) :: gni !< Number grid cells in i-direction
+integer, intent(in) :: gnj !< Number grid cells in j-direction
+integer, intent(in) :: layout(2) !< Number of processing cores in i,j direction
+integer, intent(in) :: io_layout(2) !< Number of i/o cores in i,j direction
+integer, intent(in) :: axes(2) !< Diagnostic axes
+integer, intent(in) :: dom_x_flags !< Domain flags in i-direction
+integer, intent(in) :: dom_y_flags !< Domain flags in j-direction
+real, intent(in) :: dt !< Time-step (s)
+type (time_type), intent(in) :: Time ! Current model time
+real, dimension(:,:), intent(in) :: ice_lon !< Longitude of cell corners using NE convention (degree E)
+real, dimension(:,:), intent(in) :: ice_lat !< Latitude of cell corners using NE conventino (degree N)
+real, dimension(:,:), intent(in) :: ice_wet !< Wet/dry mask (1 is wet, 0 is dry) of cell centers
+real, dimension(:,:), intent(in) :: ice_dx !< Zonal length of cell on northern side (m)
+real, dimension(:,:), intent(in) :: ice_dy !< Meridional length of cell on eastern side (m)
+real, dimension(:,:), intent(in) :: ice_area !< Area of cells (m^2, or non-dim is fractional_area=True)
+real, dimension(:,:), intent(in) :: cos_rot !< Cosine from rotation matrix to lat-lon coords
+real, dimension(:,:), intent(in) :: sin_rot !< Sine from rotation matrix to lat-lon coords
+real, dimension(:,:), intent(in),optional :: ocean_depth !< Depth of ocean bottom (m)
+logical, intent(in), optional :: maskmap(:,:) !< Masks out parallel cores
+logical, intent(in), optional :: fractional_area !< If true, ice_area contains cell area as fraction of entire spherical surface
 
 ! Namelist parameters (and defaults)
 integer :: halo=4 ! Width of halo region
@@ -372,10 +481,10 @@ integer :: traj_write_hrs=480 ! Period between writing sampled trajectories to d
 integer :: verbose_hrs=24 ! Period between verbose messages
 integer :: max_bonds=6 ! Maximum number of iceberg bond passed between processors
 real :: rho_bergs=850. ! Density of icebergs
-real :: spring_coef=1.e-8  ! Spring contant for iceberg interactions (this seems to be the highest stable value)
-real :: bond_coef=1.e-8 ! Spring contant for iceberg bonds - not being used right now
-real :: radial_damping_coef=1.e-4     ! Coef for relative iceberg motion damping (radial component) -Alon
-real :: tangental_damping_coef=2.e-5     ! Coef for relative iceberg motion damping (tangental component) -Alon
+real :: spring_coef=1.e-8 ! Spring constant for iceberg interactions (this seems to be the highest stable value)
+real :: bond_coef=1.e-8 ! Spring constant for iceberg bonds - not being used right now
+real :: radial_damping_coef=1.e-4 ! Coefficient for relative iceberg motion damping (radial component) -Alon
+real :: tangental_damping_coef=2.e-5 ! Coefficient for relative iceberg motion damping (tangential component) -Alon
 real :: LoW_ratio=1.5 ! Initial ratio L/W for newly calved icebergs
 real :: bergy_bit_erosion_fraction=0. ! Fraction of erosion melt flux to divert to bergy bits
 real :: sicn_shift=0. ! Shift of sea-ice concentration in erosion flux modulation (0<sicn_shift<1)
@@ -383,63 +492,62 @@ real :: lat_ref=0. ! Reference latitude for f-plane (when this option is on)
 real :: u_override=0.0 ! Overrides the u velocity of icebergs (for ocean testing)
 real :: v_override=0.0 ! Overrides the v velocity of icebergs (for ocean testing)
 real :: Lx=360. ! Length of domain in x direction, used for periodicity (use a huge number for non-periodic)
-real :: initial_orientation=0. ! Iceberg orientaion relative to this angle (in degrees). Used for hexagonal mass spreading.
-real :: utide_icebergs= 0.      ! Tidal speeds, set to zero for now.
+real :: initial_orientation=0. ! Iceberg orientation relative to this angle (in degrees). Used for hexagonal mass spreading.
+real :: utide_icebergs= 0. ! Tidal speeds, set to zero for now.
 real :: ustar_icebergs_bg=0.001 ! Background u_star under icebergs. This should be linked to a value felt by the ocean boundary layer
-real :: cdrag_icebergs =  1.5e-3 !Momentum Drag coef, taken from HJ99  (Holland and Jenkins 1999)
-real :: Gamma_T_3EQ=0.022 ! Nondimensional heat-transfer coefficient
-real :: melt_cutoff=-1.0 !Minimum ocean thickness for melting to occur (is not applied for values < 0)
-logical :: const_gamma=.True. !If true uses a constant heat tranfer coefficient, from which the salt transfer is calculated
+real :: cdrag_icebergs =  1.5e-3 ! Momentum Drag coef, taken from HJ99  (Holland and Jenkins 1999)
+real :: Gamma_T_3EQ=0.022 ! Non-dimensional heat-transfer coefficient
+real :: melt_cutoff=-1.0 ! Minimum ocean thickness for melting to occur (is not applied for values < 0)
+logical :: const_gamma=.True. ! If true uses a constant heat transfer coefficient, from which the salt transfer is calculated
 logical :: use_operator_splitting=.true. ! Use first order operator splitting for thermodynamics
 logical :: add_weight_to_ocean=.true. ! Add weight of icebergs + bits to ocean
 logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
 logical :: time_average_weight=.false. ! Time average the weight on the ocean
 real :: speed_limit=0. ! CFL speed limit for a berg
 real :: tau_calving=0. ! Time scale for smoothing out calving field (years)
-real :: tip_parameter=0. ! parameter to override iceberg rollilng critica ratio (use zero to get parameter directly from ice and seawater densities
+real :: tip_parameter=0. ! Parameter to override iceberg rolling critical ratio (use zero to get parameter directly from ice and seawater densities
 real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
-logical :: Runge_not_Verlet=.True.  !True=Runge Kutta, False=Verlet.  - Added by Alon 
-logical :: use_mixed_melting=.False.  !If true, then the melt is determined partly using 3 eq model partly using iceberg parametrizations (according to iceberg bond number)
-logical :: apply_thickness_cutoff_to_gridded_melt=.False.  !Prevents melt for ocean thickness below melt_cuttoff (applied to gridded melt fields)
-logical :: apply_thickness_cutoff_to_bergs_melt=.False.  !Prevents melt for ocean thickness below melt_cuttoff (applied to bergs)
-logical :: use_updated_rolling_scheme=.false. ! Use the corrected Rolling Scheme rather than the erronios one
-logical :: pass_fields_to_ocean_model=.False. !Iceberg area, mass and ustar fields are prepared to pass to ocean model
-logical :: use_mixed_layer_salinity_for_thermo=.False.  !If true, then model uses ocean salinity for 3 and 2 equation melt model.
-logical :: find_melt_using_spread_mass=.False.  !If true, then the model calculates ice loss by looping at the spread_mass before and after.
-logical :: Use_three_equation_model=.True.  !Uses 3 equation model for melt when ice shelf type thermodynamics are used.
-logical :: melt_icebergs_as_ice_shelf=.False.  !Uses iceshelf type thermodynamics
-logical :: Iceberg_melt_without_decay=.False.  !Allows icebergs meltwater fluxes to enter the ocean, without the iceberg decaying or changing shape.
-logical :: add_iceberg_thickness_to_SSH=.False.  !Adds the iceberg contribution to SSH.   
-logical :: override_iceberg_velocities=.False.  !Allows you to set a fixed iceberg velocity for all non-static icebergs.
-logical :: use_f_plane=.False.  !Flag to use a f-plane for the rotation
-logical :: grid_is_latlon=.True.  !True means that the grid is specified in lat lon, and uses to radius of the earth to convert to distance
-logical :: grid_is_regular=.True. !Flag to say whether point in cell can be found assuming regular cartesian grid
-logical :: rotate_icebergs_for_mass_spreading=.True.  !Flag allows icebergs to rotate for spreading their mass (in hexagonal spreading mode)
-logical :: set_melt_rates_to_zero=.False.  !Sets all melt rates to zero, for testing purposes (thermodynamics routine is still run)
-logical :: allow_bergs_to_roll=.True. !Allows icebergs to roll over when rolling conditions are met
-logical :: hexagonal_icebergs=.False. !True treats icebergs as rectangles, False as hexagonal elements (for the purpose of mass spreading)
-logical :: ignore_missing_restart_bergs=.False.  !True Allows the model to ignorm icebergs missing in the restart. 
-logical :: Static_icebergs=.False.  !True= icebergs do no move
-logical :: only_interactive_forces=.False.  !Icebergs only feel interactive forces, and not ocean, wind... 
-logical :: halo_debugging=.False.  !Use for debugging halos (remove when its working) 
-logical :: save_short_traj=.True.  !True saves only lon,lat,time,iceberg_num in iceberg_trajectory.nc 
-logical :: ignore_traj=.False.  !If true, then model does not traj trajectory data at all 
-logical :: iceberg_bonds_on=.False.  !True=Allow icebergs to have bonds, False=don't allow. 
-logical :: manually_initialize_bonds=.False.  !True= Bonds are initialize manually. 
-logical :: use_new_predictive_corrective =.False.  !Flag to use Bob's predictive corrective iceberg scheme- Added by Alon 
-logical :: interactive_icebergs_on=.false.  !Turn on/off interactions between icebergs  - Added by Alon 
-logical :: critical_interaction_damping_on=.true.  !Sets the damping on relative iceberg velocity to critical value - Added by Alon 
+logical :: Runge_not_Verlet=.True. ! True=Runge Kutta, False=Verlet.
+logical :: use_mixed_melting=.False. ! If true, then the melt is determined partly using 3 eq model partly using iceberg parameterizations (according to iceberg bond number)
+logical :: apply_thickness_cutoff_to_gridded_melt=.False. ! Prevents melt for ocean thickness below melt_cuttoff (applied to gridded melt fields)
+logical :: apply_thickness_cutoff_to_bergs_melt=.False. ! Prevents melt for ocean thickness below melt_cuttoff (applied to bergs)
+logical :: use_updated_rolling_scheme=.false. ! Use the corrected Rolling Scheme rather than the erroneous one
+logical :: pass_fields_to_ocean_model=.False. ! Iceberg area, mass and ustar fields are prepared to pass to ocean model
+logical :: use_mixed_layer_salinity_for_thermo=.False. ! If true, then model uses ocean salinity for 3 and 2 equation melt model.
+logical :: find_melt_using_spread_mass=.False. ! If true, then the model calculates ice loss by looping at the spread_mass before and after.
+logical :: Use_three_equation_model=.True. ! Uses 3 equation model for melt when ice shelf type thermodynamics are used.
+logical :: melt_icebergs_as_ice_shelf=.False. ! Uses iceshelf type thermodynamics
+logical :: Iceberg_melt_without_decay=.False. ! Allows icebergs meltwater fluxes to enter the ocean, without the iceberg decaying or changing shape.
+logical :: add_iceberg_thickness_to_SSH=.False. ! Adds the iceberg contribution to SSH.
+logical :: override_iceberg_velocities=.False. ! Allows you to set a fixed iceberg velocity for all non-static icebergs.
+logical :: use_f_plane=.False. ! Flag to use a f-plane for the rotation
+logical :: grid_is_latlon=.True. ! True means that the grid is specified in lat lon, and uses to radius of the earth to convert to distance
+logical :: grid_is_regular=.True. ! Flag to say whether point in cell can be found assuming regular Cartesian grid
+logical :: rotate_icebergs_for_mass_spreading=.True. ! Flag allows icebergs to rotate for spreading their mass (in hexagonal spreading mode)
+logical :: set_melt_rates_to_zero=.False. ! Sets all melt rates to zero, for testing purposes (thermodynamics routine is still run)
+logical :: allow_bergs_to_roll=.True. ! Allows icebergs to roll over when rolling conditions are met
+logical :: hexagonal_icebergs=.False. ! True treats icebergs as rectangles, False as hexagonal elements (for the purpose of mass spreading)
+logical :: ignore_missing_restart_bergs=.False. ! True Allows the model to ignore icebergs missing in the restart.
+logical :: Static_icebergs=.False. ! True= icebergs do no move
+logical :: only_interactive_forces=.False. ! Icebergs only feel interactive forces, and not ocean, wind...
+logical :: halo_debugging=.False. ! Use for debugging halos (remove when its working)
+logical :: save_short_traj=.True. ! True saves only lon,lat,time,iceberg_num in iceberg_trajectory.nc
+logical :: ignore_traj=.False. ! If true, then model does not traj trajectory data at all
+logical :: iceberg_bonds_on=.False. ! True=Allow icebergs to have bonds, False=don't allow.
+logical :: manually_initialize_bonds=.False. ! True= Bonds are initialize manually.
+logical :: use_new_predictive_corrective =.False. ! Flag to use Bob's predictive corrective iceberg scheme- Added by Alon
+logical :: interactive_icebergs_on=.false. ! Turn on/off interactions between icebergs  - Added by Alon
+logical :: critical_interaction_damping_on=.true. ! Sets the damping on relative iceberg velocity to critical value - Added by Alon
 logical :: do_unit_tests=.false. ! Conduct some unit tests
 logical :: input_freq_distribution=.false. ! Flag to show if input distribution is freq or mass dist (=1 if input is a freq dist, =0 to use an input mass dist)
 logical :: read_old_restarts=.false. ! Legacy option that does nothing
 logical :: use_old_spreading=.true. ! If true, spreads iceberg mass as if the berg is one grid cell wide
 logical :: read_ocean_depth_from_file=.false. ! If true, ocean depth is read from a file.
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
-real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim) , 
+real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim) ,
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
 real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
 integer :: debug_iceberg_with_id = -1 ! If positive, monitors a berg with this id
-
 
 namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,Static_icebergs,  &
          distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef, radial_damping_coef, tangental_damping_coef, only_interactive_forces, &
@@ -451,7 +559,7 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          grid_is_regular,override_iceberg_velocities,u_override,v_override,add_iceberg_thickness_to_SSH,Iceberg_melt_without_decay,melt_icebergs_as_ice_shelf, &
          Use_three_equation_model,find_melt_using_spread_mass,use_mixed_layer_salinity_for_thermo,utide_icebergs,ustar_icebergs_bg,cdrag_icebergs, pass_fields_to_ocean_model, &
          const_gamma, Gamma_T_3EQ, ignore_traj, debug_iceberg_with_id,use_updated_rolling_scheme, tip_parameter, read_old_restarts, tau_calving, read_ocean_depth_from_file, melt_cutoff,&
-         apply_thickness_cutoff_to_gridded_melt, apply_thickness_cutoff_to_bergs_melt,use_mixed_melting 
+         apply_thickness_cutoff_to_gridded_melt, apply_thickness_cutoff_to_bergs_melt,use_mixed_melting
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -459,7 +567,7 @@ type(icebergs_gridded), pointer :: grd
 real :: lon_mod, big_number
 logical :: lerr
 integer :: stdlogunit, stderrunit
-real :: Total_mass  !Added by Alon 
+real :: Total_mass  !Added by Alon
 
   ! Get the stderr and stdlog unit numbers
   stderrunit=stderr()
@@ -525,7 +633,7 @@ real :: Total_mass  !Added by Alon
   call mpp_get_neighbor_pe(grd%domain, WEST, grd%pe_W)
 
 
-  folded_north_on_pe = ((dom_y_flags == FOLD_NORTH_EDGE) .and. (grd%jec == gnj)) 
+  folded_north_on_pe = ((dom_y_flags == FOLD_NORTH_EDGE) .and. (grd%jec == gnj))
  !write(stderrunit,'(a,6i4)') 'diamonds, icebergs_init: pe,n,s,e,w =',mpp_pe(),grd%pe_N,grd%pe_S,grd%pe_E,grd%pe_W, NULL_PE
 
  !if (verbose) &
@@ -629,7 +737,7 @@ real :: Total_mass  !Added by Alon
     if(fractional_area) grd%area(is:ie,js:je)=ice_area(:,:) *(4.*pi*radius*radius)
   endif
   if(present(ocean_depth)) grd%ocean_depth(is:ie,js:je)=ocean_depth(:,:)
-  
+
   ! Copy data declared on ice model data domain
   is=grd%isc-1; ie=grd%iec+1; js=grd%jsc-1; je=grd%jec+1
   grd%dx(is:ie,js:je)=ice_dx(:,:)
@@ -684,11 +792,11 @@ real :: Total_mass  !Added by Alon
   endif
 
   if ((Lx.gt.1E15 ) .and. (mpp_pe().eq.mpp_root_pe())) then
-          call error_mesg('diamonds, framework', 'Model does not enjoy the domain being larger than 1E15. Not sure why. Probably to do with floating point precision.', WARNING) 
+          call error_mesg('diamonds, framework', 'Model does not enjoy the domain being larger than 1E15. Not sure why. Probably to do with floating point precision.', WARNING)
   endif
   if ((.not. grid_is_latlon) .and. (Lx.eq.360.)) then
     if (mpp_pe().eq.mpp_root_pe())  then
-            call error_mesg('diamonds, framework', 'Since the lat/lon grid is off, the x-direction is being set as non-periodic. Set Lx not equal to 360 override.', WARNING) 
+            call error_mesg('diamonds, framework', 'Since the lat/lon grid is off, the x-direction is being set as non-periodic. Set Lx not equal to 360 override.', WARNING)
     endif
     Lx=-1.
   endif
@@ -771,32 +879,32 @@ if (input_freq_distribution) then
      do j=1,nclasses
            distribution(j)=(distribution(j)*initial_mass(j))/Total_mass
      enddo
-endif 
+endif
 
 if ((halo .lt. 3) .and. (rotate_icebergs_for_mass_spreading .and. iceberg_bonds_on) )   then
     halo=3
-    call error_mesg('diamonds, framework', 'Setting iceberg halos =3, since halos must be >= 3 for rotating icebergs for mass spreading', WARNING) 
+    call error_mesg('diamonds, framework', 'Setting iceberg halos =3, since halos must be >= 3 for rotating icebergs for mass spreading', WARNING)
 elseif  ((halo .lt. 2) .and. (interactive_icebergs_on .or. iceberg_bonds_on) )   then
     halo=2
-    call error_mesg('diamonds, framework', 'Setting iceberg halos =2, since halos must be >= 2 for interactions', WARNING) 
+    call error_mesg('diamonds, framework', 'Setting iceberg halos =2, since halos must be >= 2 for interactions', WARNING)
 endif
 
 if (interactive_icebergs_on) then
   if (Runge_not_Verlet) then
     !Runge_not_Verlet=.false.  ! Iceberg interactions only with Verlet
-    call error_mesg('diamonds, framework', 'It is unlcear whther interactive icebergs work with Runge Kutta stepping.', WARNING) 
+    call error_mesg('diamonds, framework', 'It is unlcear whther interactive icebergs work with Runge Kutta stepping.', WARNING)
   endif
 endif
 if (.not.interactive_icebergs_on) then
-  if (iceberg_bonds_on) then  
-    !iceberg_bonds_on=.false.  
-    call error_mesg('diamonds, framework', 'Interactive icebergs off requires iceberg bonds off (turning bonds off).', WARNING) 
+  if (iceberg_bonds_on) then
+    !iceberg_bonds_on=.false.
+    call error_mesg('diamonds, framework', 'Interactive icebergs off requires iceberg bonds off (turning bonds off).', WARNING)
   endif
 endif
 if (.not. iceberg_bonds_on) then
    max_bonds=0
 else
-  buffer_width=buffer_width+(max_bonds*3) ! Increase buffer width to include bonds being passed between processors 
+  buffer_width=buffer_width+(max_bonds*3) ! Increase buffer width to include bonds being passed between processors
 endif
 if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffer used for abrevated traj
 if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files should be ignored
@@ -811,8 +919,8 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
   bergs%verbose_hrs=verbose_hrs
   bergs%grd%halo=halo
   bergs%grd%Lx=Lx
-  bergs%grd%grid_is_latlon=grid_is_latlon  
-  bergs%grd%grid_is_regular=grid_is_regular 
+  bergs%grd%grid_is_latlon=grid_is_latlon
+  bergs%grd%grid_is_regular=grid_is_regular
   bergs%max_bonds=max_bonds
   bergs%rho_bergs=rho_bergs
   bergs%spring_coef=spring_coef
@@ -829,36 +937,36 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
   bergs%tau_calving=tau_calving
   bergs%tip_parameter=tip_parameter
   bergs%use_updated_rolling_scheme=use_updated_rolling_scheme  !Alon
-  bergs%Runge_not_Verlet=Runge_not_Verlet   
-  bergs%use_mixed_melting=use_mixed_melting   
+  bergs%Runge_not_Verlet=Runge_not_Verlet
+  bergs%use_mixed_melting=use_mixed_melting
   bergs%apply_thickness_cutoff_to_bergs_melt=apply_thickness_cutoff_to_bergs_melt
   bergs%apply_thickness_cutoff_to_gridded_melt=apply_thickness_cutoff_to_gridded_melt
-  bergs%melt_cutoff=melt_cutoff 
+  bergs%melt_cutoff=melt_cutoff
   bergs%read_ocean_depth_from_file=read_ocean_depth_from_file
-  bergs%const_gamma=const_gamma 
+  bergs%const_gamma=const_gamma
   bergs%Gamma_T_3EQ=Gamma_T_3EQ
-  bergs%pass_fields_to_ocean_model=pass_fields_to_ocean_model 
-  bergs%ustar_icebergs_bg=ustar_icebergs_bg   
-  bergs%utide_icebergs=utide_icebergs  
-  bergs%cdrag_icebergs=cdrag_icebergs  
-  bergs%use_mixed_layer_salinity_for_thermo=use_mixed_layer_salinity_for_thermo 
-  bergs%find_melt_using_spread_mass=find_melt_using_spread_mass 
-  bergs%Use_three_equation_model=Use_three_equation_model 
-  bergs%melt_icebergs_as_ice_shelf=melt_icebergs_as_ice_shelf 
-  bergs%Iceberg_melt_without_decay=Iceberg_melt_without_decay 
-  bergs%add_iceberg_thickness_to_SSH=add_iceberg_thickness_to_SSH  
-  bergs%override_iceberg_velocities=override_iceberg_velocities 
-  bergs%use_f_plane=use_f_plane 
-  bergs%rotate_icebergs_for_mass_spreading=rotate_icebergs_for_mass_spreading 
+  bergs%pass_fields_to_ocean_model=pass_fields_to_ocean_model
+  bergs%ustar_icebergs_bg=ustar_icebergs_bg
+  bergs%utide_icebergs=utide_icebergs
+  bergs%cdrag_icebergs=cdrag_icebergs
+  bergs%use_mixed_layer_salinity_for_thermo=use_mixed_layer_salinity_for_thermo
+  bergs%find_melt_using_spread_mass=find_melt_using_spread_mass
+  bergs%Use_three_equation_model=Use_three_equation_model
+  bergs%melt_icebergs_as_ice_shelf=melt_icebergs_as_ice_shelf
+  bergs%Iceberg_melt_without_decay=Iceberg_melt_without_decay
+  bergs%add_iceberg_thickness_to_SSH=add_iceberg_thickness_to_SSH
+  bergs%override_iceberg_velocities=override_iceberg_velocities
+  bergs%use_f_plane=use_f_plane
+  bergs%rotate_icebergs_for_mass_spreading=rotate_icebergs_for_mass_spreading
   bergs%lat_ref=lat_ref
   bergs%u_override=u_override
   bergs%v_override=v_override
   bergs%initial_orientation=initial_orientation
-  bergs%set_melt_rates_to_zero=set_melt_rates_to_zero 
-  bergs%allow_bergs_to_roll=allow_bergs_to_roll 
-  bergs%hexagonal_icebergs=hexagonal_icebergs 
+  bergs%set_melt_rates_to_zero=set_melt_rates_to_zero
+  bergs%allow_bergs_to_roll=allow_bergs_to_roll
+  bergs%hexagonal_icebergs=hexagonal_icebergs
   bergs%ignore_missing_restart_bergs=ignore_missing_restart_bergs
-  bergs%Static_icebergs=Static_icebergs 
+  bergs%Static_icebergs=Static_icebergs
   bergs%only_interactive_forces=only_interactive_forces
   bergs%halo_debugging=halo_debugging
   bergs%iceberg_bonds_on=iceberg_bonds_on   !Alon
@@ -1008,12 +1116,12 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
   call mpp_clock_end(bergs%clock)
 
 end subroutine ice_bergs_framework_init
-! ##############################################################################
 
+!> Adjust berg dates to allow use of restarts from later dates
 subroutine offset_berg_dates(bergs,Time)
 ! Arguments
-type(icebergs), pointer :: bergs
-type(time_type), intent(in) :: Time
+type(icebergs), pointer :: bergs !< Container for all types and memory
+type(time_type), intent(in) :: Time !< Model time
 ! Local variables
 type(iceberg), pointer :: this
 integer :: iyr, imon, iday, ihr, imin, isec, yr_offset
@@ -1052,11 +1160,11 @@ integer :: grdi, grdj
 
 end subroutine offset_berg_dates
 
-! #############################################################################
-
-subroutine move_berg_between_cells(bergs)  !Move icebergs onto the correct lists if they have moved from cell to cell.
+!> Moves icebergs between lists if they have moved from cell to cell
+subroutine move_berg_between_cells(bergs)
 ! Arguments
-type(icebergs), pointer :: bergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
+! Local variables
 type(icebergs_gridded), pointer :: grd => null()
 type(iceberg), pointer :: moving_berg => null(), this => null()
 integer :: grdi, grdj
@@ -1071,7 +1179,7 @@ do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
       if ((this%ine.ne.grdi) .or. (this%jne.ne.grdj))  then
         moving_berg=>this
         this=>this%next
-        
+
         !Removing the iceberg from the old list
         if (associated(moving_berg%prev)) then
           moving_berg%prev%next=>moving_berg%next
@@ -1080,7 +1188,7 @@ do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
         endif
         if (associated(moving_berg%next)) moving_berg%next%prev=>moving_berg%prev
 
-        !Inserting the iceberg into the new list 
+        !Inserting the iceberg into the new list
         call insert_berg_into_list(bergs%list(moving_berg%ine,moving_berg%jne)%first,moving_berg)
 
         !Clear moving_berg
@@ -1094,12 +1202,10 @@ enddo ; enddo
 
 end subroutine move_berg_between_cells
 
-
-! #############################################################################
-
+!> Populates the halo lists with bergs from neighbor processers
 subroutine update_halo_icebergs(bergs)
 ! Arguments
-type(icebergs), pointer :: bergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
 ! Local variables
 type(iceberg), pointer :: kick_the_bucket, this
 integer :: nbergs_to_send_e, nbergs_to_send_w
@@ -1115,31 +1221,29 @@ integer :: temp1, temp2
 real :: current_halo_status
 logical :: halo_debugging
 
-halo_width=bergs%grd%halo  
-halo_debugging=bergs%halo_debugging  
+  halo_width=bergs%grd%halo
+  halo_debugging=bergs%halo_debugging
 
- ! Get the stderr unit number
-   stderrunit = stderr()
+  ! Get the stderr unit number
+  stderrunit = stderr()
 
- ! For convenience
-   grd=>bergs%grd
+  ! For convenience
+  grd=>bergs%grd
 
-!For debugging, MP1
-if (halo_debugging) then
-  do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
-    this=>bergs%list(grdi,grdj)%first
-    do while (associated(this))
-        write(stderrunit,*) 'A', this%iceberg_num, mpp_pe(), this%halo_berg, grdi, grdj
-      this=>this%next
-    enddo
-  enddo; enddo
-  ! Use when debugging:
-  call show_all_bonds(bergs)
-endif
+  ! For debugging, MP1
+  if (halo_debugging) then
+    do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
+      this=>bergs%list(grdi,grdj)%first
+      do while (associated(this))
+          write(stderrunit,*) 'A', this%iceberg_num, mpp_pe(), this%halo_berg, grdi, grdj
+        this=>this%next
+      enddo
+    enddo; enddo
+    ! Use when debugging:
+    call show_all_bonds(bergs)
+  endif
 
-
-! Step 1: Clear the current halos
-
+  ! Step 1: Clear the current halos
   call mpp_sync_self()
   do grdj = grd%jsd,grd%jsc-1 ;  do grdi = grd%isd,grd%ied
     call delete_all_bergs_in_list(bergs, grdj, grdi)
@@ -1158,61 +1262,56 @@ endif
   enddo ; enddo
 
   call mpp_sync_self()
-!##############################
 
-!For debugging
-if (halo_debugging) then
-  do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
-    this=>bergs%list(grdi,grdj)%first
-      do while (associated(this))
-      write(stderrunit,*) 'B', this%iceberg_num, mpp_pe(), this%halo_berg, grdi, grdj
-    this=>this%next
-    enddo
-  enddo; enddo
-endif
+  ! For debugging
+  if (halo_debugging) then
+    do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
+      this=>bergs%list(grdi,grdj)%first
+        do while (associated(this))
+        write(stderrunit,*) 'B', this%iceberg_num, mpp_pe(), this%halo_berg, grdi, grdj
+      this=>this%next
+      enddo
+    enddo; enddo
+  endif
   if (debug) then
     nbergs_start=count_bergs(bergs)
   endif
 
   call mpp_sync_self()
-!#######################################################
 
-! Step 2: Updating the halos  - This code is mostly copied from send_to_other_pes
-
+  ! Step 2: Updating the halos  - This code is mostly copied from send_to_other_pes
 
   ! Find number of bergs that headed east/west
   nbergs_to_send_e=0
   nbergs_to_send_w=0
-  !Bergs on eastern side of the processor
-  do grdj = grd%jsc,grd%jec ; do grdi = grd%iec-halo_width+2,grd%iec  
+  ! Bergs on eastern side of the processor
+  do grdj = grd%jsc,grd%jec ; do grdi = grd%iec-halo_width+2,grd%iec
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
     !write(stderrunit,*)  'sending east', this%iceberg_num, this%ine, this%jne, mpp_pe()
-        kick_the_bucket=>this
-        this=>this%next
-        nbergs_to_send_e=nbergs_to_send_e+1
-        current_halo_status=kick_the_bucket%halo_berg
-        kick_the_bucket%halo_berg=1.
-        call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_e, nbergs_to_send_e, bergs%max_bonds)
-        kick_the_bucket%halo_berg=current_halo_status
+      kick_the_bucket=>this
+      this=>this%next
+      nbergs_to_send_e=nbergs_to_send_e+1
+      current_halo_status=kick_the_bucket%halo_berg
+      kick_the_bucket%halo_berg=1.
+      call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_e, nbergs_to_send_e, bergs%max_bonds)
+      kick_the_bucket%halo_berg=current_halo_status
     enddo
   enddo; enddo
 
-
-  !Bergs on the western side of the processor
-  do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%isc+halo_width-1 
+  ! Bergs on the western side of the processor
+  do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%isc+halo_width-1
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
       kick_the_bucket=>this
       this=>this%next
       nbergs_to_send_w=nbergs_to_send_w+1
-       current_halo_status=kick_the_bucket%halo_berg
-       kick_the_bucket%halo_berg=1.
-       call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_w, nbergs_to_send_w, bergs%max_bonds)
-       kick_the_bucket%halo_berg=current_halo_status
-    enddo 
+      current_halo_status=kick_the_bucket%halo_berg
+      kick_the_bucket%halo_berg=1.
+      call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_w, nbergs_to_send_w, bergs%max_bonds)
+      kick_the_bucket%halo_berg=current_halo_status
+    enddo
   enddo; enddo
-
 
   ! Send bergs east
   if (grd%pe_E.ne.NULL_PE) then
@@ -1266,13 +1365,11 @@ endif
     nbergs_rcvd_from_e=0
   endif
 
-
- ! Find number of bergs that headed north/south
+  ! Find number of bergs that headed north/south
   nbergs_to_send_n=0
   nbergs_to_send_s=0
-  
 
-  !Bergs on north side of the processor
+  ! Bergs on north side of the processor
   do grdj = grd%jec-halo_width+2,grd%jec ; do grdi = grd%isd,grd%ied
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
@@ -1286,35 +1383,33 @@ endif
     enddo
   enddo; enddo
 
-
-  !Bergs on south side of the processor
+  ! Bergs on south side of the processor
   do grdj = grd%jsc,grd%jsc+halo_width-1 ; do grdi = grd%isd,grd%ied
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
       kick_the_bucket=>this
       this=>this%next
       nbergs_to_send_s=nbergs_to_send_s+1
-       current_halo_status=kick_the_bucket%halo_berg
-       kick_the_bucket%halo_berg=1.
-       call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_s, nbergs_to_send_s,bergs%max_bonds )
-       kick_the_bucket%halo_berg=current_halo_status
+      current_halo_status=kick_the_bucket%halo_berg
+      kick_the_bucket%halo_berg=1.
+      call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_s, nbergs_to_send_s,bergs%max_bonds )
+      kick_the_bucket%halo_berg=current_halo_status
     enddo
   enddo; enddo
-
 
  ! Send bergs north
   if (grd%pe_N.ne.NULL_PE) then
     if(folded_north_on_pe) then
-       call mpp_send(nbergs_to_send_n, plen=1, to_pe=grd%pe_N, tag=COMM_TAG_9)
+      call mpp_send(nbergs_to_send_n, plen=1, to_pe=grd%pe_N, tag=COMM_TAG_9)
     else
-       call mpp_send(nbergs_to_send_n, plen=1, to_pe=grd%pe_N, tag=COMM_TAG_5)
+      call mpp_send(nbergs_to_send_n, plen=1, to_pe=grd%pe_N, tag=COMM_TAG_5)
     endif
     if (nbergs_to_send_n.gt.0) then
-       if(folded_north_on_pe) then
-          call mpp_send(bergs%obuffer_n%data, nbergs_to_send_n*buffer_width, grd%pe_N, tag=COMM_TAG_10)
-       else
-          call mpp_send(bergs%obuffer_n%data, nbergs_to_send_n*buffer_width, grd%pe_N, tag=COMM_TAG_6)
-       endif
+      if(folded_north_on_pe) then
+        call mpp_send(bergs%obuffer_n%data, nbergs_to_send_n*buffer_width, grd%pe_N, tag=COMM_TAG_10)
+      else
+        call mpp_send(bergs%obuffer_n%data, nbergs_to_send_n*buffer_width, grd%pe_N, tag=COMM_TAG_6)
+      endif
     endif
   endif
 
@@ -1325,7 +1420,6 @@ endif
       call mpp_send(bergs%obuffer_s%data, nbergs_to_send_s*buffer_width, grd%pe_S, tag=COMM_TAG_8)
     endif
   endif
-
 
   ! Receive bergs from south
   if (grd%pe_S.ne.NULL_PE) then
@@ -1349,9 +1443,9 @@ endif
   if (grd%pe_N.ne.NULL_PE) then
     nbergs_rcvd_from_n=-999
     if(folded_north_on_pe) then
-       call mpp_recv(nbergs_rcvd_from_n, glen=1, from_pe=grd%pe_N, tag=COMM_TAG_9)
+      call mpp_recv(nbergs_rcvd_from_n, glen=1, from_pe=grd%pe_N, tag=COMM_TAG_9)
     else
-       call mpp_recv(nbergs_rcvd_from_n, glen=1, from_pe=grd%pe_N, tag=COMM_TAG_7)
+      call mpp_recv(nbergs_rcvd_from_n, glen=1, from_pe=grd%pe_N, tag=COMM_TAG_7)
     endif
     if (nbergs_rcvd_from_n.lt.0) then
       write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_n,' from',grd%pe_N,' (N) !!!!!!!!!!!!!!!!!!!!!!'
@@ -1359,9 +1453,9 @@ endif
     if (nbergs_rcvd_from_n.gt.0) then
       call increase_ibuffer(bergs%ibuffer_n, nbergs_rcvd_from_n,buffer_width)
       if(folded_north_on_pe) then
-         call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_10)
+        call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_10)
       else
-         call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_8)
+        call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_8)
       endif
       do i=1, nbergs_rcvd_from_n
         call unpack_berg_from_buffer2(bergs, bergs%ibuffer_n, i, grd, max_bonds_in=bergs%max_bonds )
@@ -1371,23 +1465,20 @@ endif
     nbergs_rcvd_from_n=0
   endif
 
+  ! For debugging
+  if (halo_debugging) then
+    call mpp_sync_self()
+    do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
+      this=>bergs%list(grdi,grdj)%first
+      do while (associated(this))
+        write(stderrunit,*)  'C', this%iceberg_num, mpp_pe(), this%halo_berg,  grdi, grdj
+        this=>this%next
+      enddo
+    enddo; enddo
+    call show_all_bonds(bergs)
+  endif
 
-
-!For debugging
-if (halo_debugging) then
-  call mpp_sync_self()
-  do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
-    this=>bergs%list(grdi,grdj)%first
-    do while (associated(this))
-      write(stderrunit,*)  'C', this%iceberg_num, mpp_pe(), this%halo_berg,  grdi, grdj
-      this=>this%next
-    enddo
-  enddo; enddo
-  call show_all_bonds(bergs)
-endif
-
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!Debugging!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!111
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!Debugging!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   if (debug) then
     nbergs_end=count_bergs(bergs)
     i=nbergs_rcvd_from_n+nbergs_rcvd_from_s+nbergs_rcvd_from_e+nbergs_rcvd_from_w &
@@ -1427,34 +1518,32 @@ endif
       call error_mesg('diamonds, update_halos:', 'there are bergs still in halos!', FATAL)
     endif ! root_pe
   endif ! debug
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!Debugging!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!111
+  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!Debugging!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!111
 
 end subroutine update_halo_icebergs
 
-
-
-subroutine delete_all_bergs_in_list(bergs,grdj,grdi)
-  type(icebergs), pointer :: bergs
+!> Destroys all bergs in a list
+subroutine delete_all_bergs_in_list(bergs, grdj, grdi)
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  integer :: grdi !< i-index of list
+  integer :: grdj !< j-index of list
   ! Local variables
   type(iceberg), pointer :: kick_the_bucket, this
-  integer :: grdi, grdj
   this=>bergs%list(grdi,grdj)%first
   do while (associated(this))
     kick_the_bucket=>this
     this=>this%next
     call destroy_iceberg(kick_the_bucket)
-!    call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
+   !call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
   enddo
   bergs%list(grdi,grdj)%first=>null()
 end  subroutine delete_all_bergs_in_list
 
 
-! #############################################################################
-
+!> Send bergs in halo lists to other processors
 subroutine send_bergs_to_other_pes(bergs)
 ! Arguments
-type(icebergs), pointer :: bergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
 ! Local variables
 type(iceberg), pointer :: kick_the_bucket, this
 integer :: nbergs_to_send_e, nbergs_to_send_w
@@ -1595,7 +1684,7 @@ integer :: grdi, grdj
   if (grd%pe_N.ne.NULL_PE) then
     if(folded_north_on_pe) then
        call mpp_send(nbergs_to_send_n, plen=1, to_pe=grd%pe_N, tag=COMM_TAG_9)
-    else 
+    else
        call mpp_send(nbergs_to_send_n, plen=1, to_pe=grd%pe_N, tag=COMM_TAG_5)
     endif
     if (nbergs_to_send_n.gt.0) then
@@ -1704,379 +1793,377 @@ integer :: grdi, grdj
 
 end subroutine send_bergs_to_other_pes
 
-  subroutine pack_berg_into_buffer2(berg, buff, n, max_bonds_in)
-  ! Arguments
-  type(iceberg), pointer :: berg
-  type(buffer), pointer :: buff
-  integer, intent(in) :: n
-  integer, optional :: max_bonds_in
-  !integer, intent(in) :: max_bonds  ! Change this later
-  ! Local variables
-  integer :: counter, k, max_bonds
-  type(bond), pointer :: current_bond
- 
-    max_bonds=0
-    if (present(max_bonds_in)) max_bonds=max_bonds_in
+!> Pack a berg into a buffer
+subroutine pack_berg_into_buffer2(berg, buff, n, max_bonds_in)
+! Arguments
+type(iceberg), pointer :: berg !< Iceberg to pack into buffer
+type(buffer), pointer :: buff !< Buffer to pack berg into
+integer, intent(in) :: n !< Position in buffer to place berg
+integer, optional :: max_bonds_in !< <undocumented>
+!integer, intent(in) :: max_bonds  ! Change this later
+! Local variables
+integer :: counter, k, max_bonds
+type(bond), pointer :: current_bond
 
+  max_bonds=0
+  if (present(max_bonds_in)) max_bonds=max_bonds_in
 
-    if (.not.associated(buff)) call increase_ibuffer(buff,n,buffer_width)
-    if (n>buff%size) call increase_ibuffer(buff,n,buffer_width)
+  if (.not.associated(buff)) call increase_ibuffer(buff,n,buffer_width)
+  if (n>buff%size) call increase_ibuffer(buff,n,buffer_width)
 
-    buff%data(1,n)=berg%lon
-    buff%data(2,n)=berg%lat
-    buff%data(3,n)=berg%uvel
-    buff%data(4,n)=berg%vvel
-    buff%data(5,n)=berg%xi
-    buff%data(6,n)=berg%yj
-    buff%data(7,n)=berg%start_lon
-    buff%data(8,n)=berg%start_lat
-    buff%data(9,n)=float(berg%start_year)
-    buff%data(10,n)=berg%start_day
-    buff%data(11,n)=berg%start_mass
-    buff%data(12,n)=berg%mass
-    buff%data(13,n)=berg%thickness
-    buff%data(14,n)=berg%width
-    buff%data(15,n)=berg%length
-    buff%data(16,n)=berg%mass_scaling
-    buff%data(17,n)=berg%mass_of_bits
-    buff%data(18,n)=berg%heat_density
-    buff%data(19,n)=berg%ine
-    buff%data(20,n)=berg%jne
-    buff%data(21,n)=berg%axn  !Alon
-    buff%data(22,n)=berg%ayn  !Alon
-    buff%data(23,n)=berg%bxn  !Alon
-    buff%data(24,n)=berg%byn  !Alon
-    buff%data(25,n)=float(berg%iceberg_num)
-    buff%data(26,n)=berg%halo_berg 
-    buff%data(27,n)=berg%static_berg 
+  buff%data(1,n)=berg%lon
+  buff%data(2,n)=berg%lat
+  buff%data(3,n)=berg%uvel
+  buff%data(4,n)=berg%vvel
+  buff%data(5,n)=berg%xi
+  buff%data(6,n)=berg%yj
+  buff%data(7,n)=berg%start_lon
+  buff%data(8,n)=berg%start_lat
+  buff%data(9,n)=float(berg%start_year)
+  buff%data(10,n)=berg%start_day
+  buff%data(11,n)=berg%start_mass
+  buff%data(12,n)=berg%mass
+  buff%data(13,n)=berg%thickness
+  buff%data(14,n)=berg%width
+  buff%data(15,n)=berg%length
+  buff%data(16,n)=berg%mass_scaling
+  buff%data(17,n)=berg%mass_of_bits
+  buff%data(18,n)=berg%heat_density
+  buff%data(19,n)=berg%ine
+  buff%data(20,n)=berg%jne
+  buff%data(21,n)=berg%axn  !Alon
+  buff%data(22,n)=berg%ayn  !Alon
+  buff%data(23,n)=berg%bxn  !Alon
+  buff%data(24,n)=berg%byn  !Alon
+  buff%data(25,n)=float(berg%iceberg_num)
+  buff%data(26,n)=berg%halo_berg
+  buff%data(27,n)=berg%static_berg
 
-    if (max_bonds .gt. 0) then
-      counter=27 !how many data points being passed so far (must match above)
-      current_bond=>berg%first_bond
-      do k = 1,max_bonds
-        if (associated(current_bond)) then
-          buff%data(counter+(3*(k-1)+1),n)=float(current_bond%other_berg_num) 
-          buff%data(counter+(3*(k-1)+2),n)=float(current_bond%other_berg_ine)
-          buff%data(counter+(3*(k-1)+3),n)=float(current_bond%other_berg_jne)
-          current_bond=>current_bond%next_bond
+  if (max_bonds .gt. 0) then
+    counter=27 !how many data points being passed so far (must match above)
+    current_bond=>berg%first_bond
+    do k = 1,max_bonds
+      if (associated(current_bond)) then
+        buff%data(counter+(3*(k-1)+1),n)=float(current_bond%other_berg_num)
+        buff%data(counter+(3*(k-1)+2),n)=float(current_bond%other_berg_ine)
+        buff%data(counter+(3*(k-1)+3),n)=float(current_bond%other_berg_jne)
+        current_bond=>current_bond%next_bond
+      else
+        buff%data(counter+(3*(k-1)+1),n)=0.
+        buff%data(counter+(3*(k-1)+2),n)=0.
+        buff%data(counter+(3*(k-1)+3),n)=0.
+      endif
+    enddo
+  endif
+
+  ! Clearing berg pointer from partner bonds
+  !if (berg%halo_berg .lt. 0.5) then
+  !  call clear_berg_from_partners_bonds(berg)
+  !endif
+
+end subroutine pack_berg_into_buffer2
+
+subroutine clear_berg_from_partners_bonds(berg)
+! Arguments
+type(iceberg), intent(in), pointer :: berg
+! Local variables
+type(iceberg), pointer :: other_berg
+type(bond), pointer :: current_bond, matching_bond
+integer ::  stderrunit
+! Get the stderr unit number
+stderrunit = stderr()
+
+  current_bond=>berg%first_bond
+  do while (associated(current_bond)) !Looping over bonds
+    other_berg=>current_bond%other_berg
+    if (associated(other_berg)) then
+      !write(stderrunit,*) , 'Other berg', berg%iceberg_num, other_berg%iceberg_num, mpp_pe()
+      matching_bond=>other_berg%first_bond
+      do while (associated(matching_bond))  ! Looping over possible matching bonds in other_berg
+        if (matching_bond%other_berg_num .eq. berg%iceberg_num) then
+          !write(stderrunit,*) , 'Clearing', berg%iceberg_num, matching_bond%other_berg_num,other_berg%iceberg_num, mpp_pe()
+          matching_bond%other_berg=>null()
+          matching_bond=>null()
         else
-          buff%data(counter+(3*(k-1)+1),n)=0. 
-          buff%data(counter+(3*(k-1)+2),n)=0.
-          buff%data(counter+(3*(k-1)+3),n)=0.
+          matching_bond=>matching_bond%next_bond
         endif
       enddo
+    else
+     ! Note: This is meant to be unmatched after you have cleared the first berg
+     ! call error_mesg('diamonds, clear berg from partners', 'The bond you are trying to clear is unmatched!', WARNING)
     endif
-   
-    ! Clearing berg pointer from partner bonds
-    !if (berg%halo_berg .lt. 0.5) then
-    !  call clear_berg_from_partners_bonds(berg)
-    !endif
+    current_bond=>current_bond%next_bond
+  enddo !End loop over bonds
 
-  end subroutine pack_berg_into_buffer2
+end subroutine clear_berg_from_partners_bonds
 
-
-!###########################################################################3
-
-  subroutine clear_berg_from_partners_bonds(berg) 
-  !Arguments
-  type(iceberg), intent(in), pointer :: berg
-  type(iceberg), pointer :: other_berg
-  type(bond), pointer :: current_bond, matching_bond
-  integer ::  stderrunit
-  ! Get the stderr unit number
-  stderrunit = stderr()
-
-    current_bond=>berg%first_bond
-    do while (associated(current_bond)) !Looping over bonds
-      other_berg=>current_bond%other_berg
-      if (associated(other_berg)) then
-        !write(stderrunit,*) , 'Other berg', berg%iceberg_num, other_berg%iceberg_num, mpp_pe()
-        matching_bond=>other_berg%first_bond
-        do while (associated(matching_bond))  ! Looping over possible matching bonds in other_berg
-          if (matching_bond%other_berg_num .eq. berg%iceberg_num) then
-            !write(stderrunit,*) , 'Clearing', berg%iceberg_num, matching_bond%other_berg_num,other_berg%iceberg_num, mpp_pe()
-            matching_bond%other_berg=>null()
-            matching_bond=>null()
-          else
-            matching_bond=>matching_bond%next_bond
-          endif
-        enddo
-      else
-       ! Note: This is meant to be unmatched after you have cleared the first berg       
-       ! call error_mesg('diamonds, clear berg from partners', 'The bond you are trying to clear is unmatched!', WARNING) 
-      endif
-      current_bond=>current_bond%next_bond
-    enddo !End loop over bonds
-
-  end subroutine clear_berg_from_partners_bonds
-
-
-  subroutine unpack_berg_from_buffer2(bergs, buff, n,grd, force_append, max_bonds_in)
-  ! Arguments
-  type(icebergs), pointer :: bergs
-  type(buffer), pointer :: buff
-  integer, intent(in) :: n
-  type(icebergs_gridded), pointer :: grd  
-  logical, optional :: force_append
-  integer, optional :: max_bonds_in
- ! Local variables
- !real :: lon, lat, uvel, vvel, xi, yj
-
- !real :: start_lon, start_lat, start_day, start_mass
- !integer :: ine, jne, start_year
-  logical :: lres
-  type(iceberg) :: localberg
-  type(iceberg), pointer :: this
-  integer :: other_berg_num, other_berg_ine, other_berg_jne
-  integer :: counter, k, max_bonds
-  integer :: stderrunit
-  logical :: force_app
-  logical :: quick
+!> Unpacks a berg entry from a buffer to a new berg
+subroutine unpack_berg_from_buffer2(bergs, buff, n, grd, force_append, max_bonds_in)
+! Arguments
+type(icebergs), pointer :: bergs !< Container for all types and memory
+type(buffer), pointer :: buff !< Buffer from which to unpack berg
+integer, intent(in) :: n !< Position in buffer to unpack
+type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+logical, optional :: force_append !< <undocumented>
+integer, optional :: max_bonds_in !< <undocumented>
+! Local variables
+!real :: lon, lat, uvel, vvel, xi, yj
+!real :: start_lon, start_lat, start_day, start_mass
+!integer :: ine, jne, start_year
+logical :: lres
+type(iceberg) :: localberg
+type(iceberg), pointer :: this
+integer :: other_berg_num, other_berg_ine, other_berg_jne
+integer :: counter, k, max_bonds
+integer :: stderrunit
+logical :: force_app
+logical :: quick
 
   ! Get the stderr unit number
   stderrunit = stderr()
- 
+
   quick=.false.
   max_bonds=0
   if (present(max_bonds_in)) max_bonds=max_bonds_in
 
   force_app = .false.
   if(present(force_append)) force_app = force_append
-     
-    localberg%lon=buff%data(1,n)
-    localberg%lat=buff%data(2,n)
-    localberg%uvel=buff%data(3,n)
-    localberg%vvel=buff%data(4,n)
-    localberg%xi=buff%data(5,n)
-    localberg%yj=buff%data(6,n)
-    localberg%start_lon=buff%data(7,n)
-    localberg%start_lat=buff%data(8,n)
-    localberg%start_year=nint(buff%data(9,n))
-    localberg%start_day=buff%data(10,n)
-    localberg%start_mass=buff%data(11,n)
-    localberg%mass=buff%data(12,n)
-    localberg%thickness=buff%data(13,n)
-    localberg%width=buff%data(14,n)
-    localberg%length=buff%data(15,n)
-    localberg%mass_scaling=buff%data(16,n)
-    localberg%mass_of_bits=buff%data(17,n)
-    localberg%heat_density=buff%data(18,n)
 
-    localberg%axn=buff%data(21,n) 
-    localberg%ayn=buff%data(22,n) 
-    localberg%bxn=buff%data(23,n) 
-    localberg%byn=buff%data(24,n) 
-    localberg%iceberg_num=nint(buff%data(25,n))
-    localberg%halo_berg=buff%data(26,n) 
-    localberg%static_berg=buff%data(27,n) 
-    counter=27 !how many data points being passed so far (must match largest number directly above)
+  localberg%lon=buff%data(1,n)
+  localberg%lat=buff%data(2,n)
+  localberg%uvel=buff%data(3,n)
+  localberg%vvel=buff%data(4,n)
+  localberg%xi=buff%data(5,n)
+  localberg%yj=buff%data(6,n)
+  localberg%start_lon=buff%data(7,n)
+  localberg%start_lat=buff%data(8,n)
+  localberg%start_year=nint(buff%data(9,n))
+  localberg%start_day=buff%data(10,n)
+  localberg%start_mass=buff%data(11,n)
+  localberg%mass=buff%data(12,n)
+  localberg%thickness=buff%data(13,n)
+  localberg%width=buff%data(14,n)
+  localberg%length=buff%data(15,n)
+  localberg%mass_scaling=buff%data(16,n)
+  localberg%mass_of_bits=buff%data(17,n)
+  localberg%heat_density=buff%data(18,n)
 
-    !These quantities no longer need to be passed between processors
-    localberg%uvel_old=localberg%uvel
-    localberg%vvel_old=localberg%vvel
-    localberg%lon_old=localberg%lon 
-    localberg%lat_old=localberg%lat
+  localberg%axn=buff%data(21,n)
+  localberg%ayn=buff%data(22,n)
+  localberg%bxn=buff%data(23,n)
+  localberg%byn=buff%data(24,n)
+  localberg%iceberg_num=nint(buff%data(25,n))
+  localberg%halo_berg=buff%data(26,n)
+  localberg%static_berg=buff%data(27,n)
+  counter=27 !how many data points being passed so far (must match largest number directly above)
 
-    ! force_app=.true.
-    if(force_app) then !force append with origin ine,jne (for I/O)
+  !These quantities no longer need to be passed between processors
+  localberg%uvel_old=localberg%uvel
+  localberg%vvel_old=localberg%vvel
+  localberg%lon_old=localberg%lon
+  localberg%lat_old=localberg%lat
 
-      localberg%ine=buff%data(19,n) 
-      localberg%jne=buff%data(20,n) 
-      call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg,quick,this) 
+  ! force_app=.true.
+  if(force_app) then !force append with origin ine,jne (for I/O)
+
+    localberg%ine=buff%data(19,n)
+    localberg%jne=buff%data(20,n)
+    call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg,quick,this)
+  else
+    lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+    if (lres) then
+      lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
+      call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg,quick,this)
     else
-      lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+      lres=find_cell_wide(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
       if (lres) then
         lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
         call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg,quick,this)
       else
-        lres=find_cell_wide(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
-        if (lres) then
-          lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
-          call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg,quick,this)
-        else
-          write(stderrunit,'("diamonds, unpack_berg_from_buffer pe=(",i3,a,2i4,a,2f8.2)')&
-           & mpp_pe(),') Failed to find i,j=',localberg%ine,localberg%jne,' for lon,lat=',localberg%lon,localberg%lat
-          write(stderrunit,*) localberg%lon,localberg%lat
-          write(stderrunit,*) localberg%uvel,localberg%vvel
-          write(stderrunit,*) localberg%axn,localberg%ayn !Alon
-          write(stderrunit,*) localberg%bxn,localberg%byn !Alon
-          write(stderrunit,*) localberg%uvel_old,localberg%vvel_old 
-          write(stderrunit,*) localberg%lon_old,localberg%lat_old 
-          write(stderrunit,*) grd%isc,grd%iec,grd%jsc,grd%jec
-          write(stderrunit,*) grd%isd,grd%ied,grd%jsd,grd%jed
-          write(stderrunit,*) grd%lon(grd%isc-1,grd%jsc-1),grd%lon(grd%iec,grd%jsc)
-          write(stderrunit,*) grd%lat(grd%isc-1,grd%jsc-1),grd%lat(grd%iec,grd%jec)
-          write(stderrunit,*) grd%lon(grd%isd,grd%jsd),grd%lon(grd%ied,grd%jsd)
-          write(stderrunit,*) grd%lat(grd%isd,grd%jsd),grd%lat(grd%ied,grd%jed)
-          write(stderrunit,*) lres
-          call error_mesg('diamonds, unpack_berg_from_buffer', 'can not find a cell to place berg in!', FATAL)
-        endif
+        write(stderrunit,'("diamonds, unpack_berg_from_buffer pe=(",i3,a,2i4,a,2f8.2)')&
+         & mpp_pe(),') Failed to find i,j=',localberg%ine,localberg%jne,' for lon,lat=',localberg%lon,localberg%lat
+        write(stderrunit,*) localberg%lon,localberg%lat
+        write(stderrunit,*) localberg%uvel,localberg%vvel
+        write(stderrunit,*) localberg%axn,localberg%ayn !Alon
+        write(stderrunit,*) localberg%bxn,localberg%byn !Alon
+        write(stderrunit,*) localberg%uvel_old,localberg%vvel_old
+        write(stderrunit,*) localberg%lon_old,localberg%lat_old
+        write(stderrunit,*) grd%isc,grd%iec,grd%jsc,grd%jec
+        write(stderrunit,*) grd%isd,grd%ied,grd%jsd,grd%jed
+        write(stderrunit,*) grd%lon(grd%isc-1,grd%jsc-1),grd%lon(grd%iec,grd%jsc)
+        write(stderrunit,*) grd%lat(grd%isc-1,grd%jsc-1),grd%lat(grd%iec,grd%jec)
+        write(stderrunit,*) grd%lon(grd%isd,grd%jsd),grd%lon(grd%ied,grd%jsd)
+        write(stderrunit,*) grd%lat(grd%isd,grd%jsd),grd%lat(grd%ied,grd%jed)
+        write(stderrunit,*) lres
+        call error_mesg('diamonds, unpack_berg_from_buffer', 'can not find a cell to place berg in!', FATAL)
       endif
     endif
+  endif
 
-    !#  Do stuff to do with bonds here MP1
+  !#  Do stuff to do with bonds here MP1
+  this%first_bond=>null()
+  if (max_bonds .gt. 0) then
+    do k = 1,max_bonds
+      other_berg_num=nint(buff%data(counter+(3*(k-1)+1),n))
+      other_berg_ine=nint(buff%data(counter+(3*(k-1)+2),n))
+      other_berg_jne=nint(buff%data(counter+(3*(k-1)+3),n))
+      if (other_berg_num .gt. 0.5) then
+        call form_a_bond(this, other_berg_num, other_berg_ine, other_berg_jne)
+      endif
+    enddo
+  endif
+  this=>null()
 
-    this%first_bond=>null()
-    if (max_bonds .gt. 0) then
-      do k = 1,max_bonds
-        other_berg_num=nint(buff%data(counter+(3*(k-1)+1),n))
-        other_berg_ine=nint(buff%data(counter+(3*(k-1)+2),n))
-        other_berg_jne=nint(buff%data(counter+(3*(k-1)+3),n))
-        if (other_berg_num .gt. 0.5) then
-          call form_a_bond(this, other_berg_num, other_berg_ine, other_berg_jne)
-        endif
-      enddo
-    endif
-    this=>null()
+end subroutine unpack_berg_from_buffer2
 
-    !##############################
+!> Increase size of buffer
+!!
+!! This routine checks if the buffer size is smaller than nbergs
+!! If it is, the buffer size is increased by delta_buf.
+!! The buffer increases by more than 1 so that the buffer does not have to increase every time.
+subroutine increase_ibuffer(old, num_bergs, width)
+! Arguments
+type(buffer), pointer :: old !< Buffer to expand
+integer, intent(in) :: num_bergs !< Number of bergs
+integer, intent(in) :: width !< Width of buffer (first dimension)
+! Local variables
+type(buffer), pointer :: new
+integer :: new_size, old_size
 
-  end subroutine unpack_berg_from_buffer2
-
-  subroutine increase_ibuffer(old,num_bergs,width)
-  ! Arguments
-  type(buffer), pointer :: old
-  integer, intent(in) :: num_bergs,width
-  ! Local variables
-  type(buffer), pointer :: new
-  integer :: new_size, old_size
-  !This routine checks if the buffer size is smaller than nbergs
-  !If it is, the buffer size is increased by delta_buf
-  !The buffer increases by more than 1 so that the buffer does not have to increase every time
-
-    if (.not.associated(old)) then
-      new_size=num_bergs+delta_buf
-      old_size=0
+  if (.not.associated(old)) then
+    new_size=num_bergs+delta_buf
+    old_size=0
+  else
+    old_size=old%size
+    if (num_bergs<old%size) then
+      new_size=old%size
     else
-      old_size=old%size
-      if (num_bergs<old%size) then
-        new_size=old%size
-      else
-        new_size=num_bergs+delta_buf
-      endif
+      new_size=num_bergs+delta_buf
     endif
+  endif
 
-    if (old_size.ne.new_size) then
-      allocate(new)
-      !allocate(new%data(buffer_width,new_size))
-      allocate(new%data(width,new_size))
-      new%size=new_size
-      if (associated(old)) then
-        new%data(:,1:old%size)=old%data(:,1:old%size)
-        deallocate(old%data)
-        deallocate(old)
-      endif
-      old=>new
-     !write(stderr(),*) 'diamonds, increase_ibuffer',mpp_pe(),' increased to',new_size
+  if (old_size.ne.new_size) then
+    allocate(new)
+    !allocate(new%data(buffer_width,new_size))
+    allocate(new%data(width,new_size))
+    new%size=new_size
+    if (associated(old)) then
+      new%data(:,1:old%size)=old%data(:,1:old%size)
+      deallocate(old%data)
+      deallocate(old)
     endif
+    old=>new
+   !write(stderr(),*) 'diamonds, increase_ibuffer',mpp_pe(),' increased to',new_size
+  endif
 
-  end subroutine increase_ibuffer
+end subroutine increase_ibuffer
 
-  subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj)
-  ! Arguments
-  type(xyt), pointer :: traj
-  type(buffer), pointer :: buff
-  integer, intent(in) :: n
-  logical, intent(in) :: save_short_traj
-  ! Local variables
+!> Packs a trajectory entry into a buffer
+subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj)
+! Arguments
+type(xyt), pointer :: traj !< Trajectory entry to pack
+type(buffer), pointer :: buff !< Buffer to pack entry into
+integer, intent(in) :: n !< Position in buffer to place entry
+logical, intent(in) :: save_short_traj !< If true, only use a subset of trajectory data
 
-    if (.not.associated(buff)) call increase_ibuffer(buff,n,buffer_width_traj)
-    if (n>buff%size) call increase_ibuffer(buff,n,buffer_width_traj)
+  if (.not.associated(buff)) call increase_ibuffer(buff,n,buffer_width_traj)
+  if (n>buff%size) call increase_ibuffer(buff,n,buffer_width_traj)
 
-    buff%data(1,n)=traj%lon
-    buff%data(2,n)=traj%lat
-    buff%data(3,n)=float(traj%year)
-    buff%data(4,n)=traj%day
-    buff%data(5,n)=float(traj%iceberg_num)
-    if (.not. save_short_traj) then
-      buff%data(6,n)=traj%uvel
-      buff%data(7,n)=traj%vvel
-      buff%data(8,n)=traj%mass
-      buff%data(9,n)=traj%mass_of_bits
-      buff%data(10,n)=traj%heat_density
-      buff%data(11,n)=traj%thickness
-      buff%data(12,n)=traj%width
-      buff%data(13,n)=traj%length
-      buff%data(14,n)=traj%uo
-      buff%data(15,n)=traj%vo
-      buff%data(16,n)=traj%ui
-      buff%data(17,n)=traj%vi
-      buff%data(18,n)=traj%ua
-      buff%data(19,n)=traj%va
-      buff%data(20,n)=traj%ssh_x
-      buff%data(21,n)=traj%ssh_y
-      buff%data(22,n)=traj%sst
-      buff%data(23,n)=traj%cn
-      buff%data(24,n)=traj%hi
-      buff%data(25,n)=traj%axn !Alon
-      buff%data(26,n)=traj%ayn !Alon
-      buff%data(27,n)=traj%bxn !Alon
-      buff%data(28,n)=traj%byn !Alon
-      buff%data(29,n)=traj%halo_berg !Alon
-      buff%data(30,n)=traj%static_berg !Alon
-      buff%data(31,n)=traj%sss
-    endif
+  buff%data(1,n)=traj%lon
+  buff%data(2,n)=traj%lat
+  buff%data(3,n)=float(traj%year)
+  buff%data(4,n)=traj%day
+  buff%data(5,n)=float(traj%iceberg_num)
+  if (.not. save_short_traj) then
+    buff%data(6,n)=traj%uvel
+    buff%data(7,n)=traj%vvel
+    buff%data(8,n)=traj%mass
+    buff%data(9,n)=traj%mass_of_bits
+    buff%data(10,n)=traj%heat_density
+    buff%data(11,n)=traj%thickness
+    buff%data(12,n)=traj%width
+    buff%data(13,n)=traj%length
+    buff%data(14,n)=traj%uo
+    buff%data(15,n)=traj%vo
+    buff%data(16,n)=traj%ui
+    buff%data(17,n)=traj%vi
+    buff%data(18,n)=traj%ua
+    buff%data(19,n)=traj%va
+    buff%data(20,n)=traj%ssh_x
+    buff%data(21,n)=traj%ssh_y
+    buff%data(22,n)=traj%sst
+    buff%data(23,n)=traj%cn
+    buff%data(24,n)=traj%hi
+    buff%data(25,n)=traj%axn !Alon
+    buff%data(26,n)=traj%ayn !Alon
+    buff%data(27,n)=traj%bxn !Alon
+    buff%data(28,n)=traj%byn !Alon
+    buff%data(29,n)=traj%halo_berg !Alon
+    buff%data(30,n)=traj%static_berg !Alon
+    buff%data(31,n)=traj%sss
+  endif
 
-  end subroutine pack_traj_into_buffer2
+end subroutine pack_traj_into_buffer2
 
-  subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj)
-  ! Arguments
-  type(xyt), pointer :: first
-  type(buffer), pointer :: buff
-  integer, intent(in) :: n
- ! Local variables
-  type(xyt) :: traj
-  integer :: stderrunit
-  logical, intent(in) :: save_short_traj 
-  ! Get the stderr unit number
-  stderrunit = stderr()
+!> Unpacks a trajectory entry from a buffer
+subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj)
+! Arguments
+type(xyt), pointer :: first !< Trajectory list
+type(buffer), pointer :: buff !< Buffer from which to unpack
+integer, intent(in) :: n !< Position in buffer to unpack
+logical, intent(in) :: save_short_traj !< If true, only use a subset of trajectory data
+! Local variables
+type(xyt) :: traj
 
-    traj%lon=buff%data(1,n)
-    traj%lat=buff%data(2,n)
-    traj%year=nint(buff%data(3,n))
-    traj%day=buff%data(4,n)
-    traj%iceberg_num=nint(buff%data(5,n))
-    if (.not. save_short_traj) then
-      traj%uvel=buff%data(6,n)
-      traj%vvel=buff%data(7,n)
-      traj%mass=buff%data(8,n)
-      traj%mass_of_bits=buff%data(9,n)
-      traj%heat_density=buff%data(10,n)
-      traj%thickness=buff%data(11,n)
-      traj%width=buff%data(12,n)
-      traj%length=buff%data(13,n)
-      traj%uo=buff%data(14,n)
-      traj%vo=buff%data(15,n)
-      traj%ui=buff%data(16,n)
-      traj%vi=buff%data(17,n)
-      traj%ua=buff%data(18,n)
-      traj%va=buff%data(19,n)
-      traj%ssh_x=buff%data(20,n)
-      traj%ssh_y=buff%data(21,n)
-      traj%sst=buff%data(22,n)
-      traj%cn=buff%data(23,n)
-      traj%hi=buff%data(24,n)
-      traj%axn=buff%data(25,n) !Alon
-      traj%ayn=buff%data(26,n) !Alon
-      traj%bxn=buff%data(27,n) !Alon
-      traj%byn=buff%data(28,n) !Alon
-      traj%halo_berg=buff%data(29,n) !Alon
-      traj%static_berg=buff%data(30,n) !Alon
-      traj%sss=buff%data(31,n)
-    endif
-    call append_posn(first, traj)
+  traj%lon=buff%data(1,n)
+  traj%lat=buff%data(2,n)
+  traj%year=nint(buff%data(3,n))
+  traj%day=buff%data(4,n)
+  traj%iceberg_num=nint(buff%data(5,n))
+  if (.not. save_short_traj) then
+    traj%uvel=buff%data(6,n)
+    traj%vvel=buff%data(7,n)
+    traj%mass=buff%data(8,n)
+    traj%mass_of_bits=buff%data(9,n)
+    traj%heat_density=buff%data(10,n)
+    traj%thickness=buff%data(11,n)
+    traj%width=buff%data(12,n)
+    traj%length=buff%data(13,n)
+    traj%uo=buff%data(14,n)
+    traj%vo=buff%data(15,n)
+    traj%ui=buff%data(16,n)
+    traj%vi=buff%data(17,n)
+    traj%ua=buff%data(18,n)
+    traj%va=buff%data(19,n)
+    traj%ssh_x=buff%data(20,n)
+    traj%ssh_y=buff%data(21,n)
+    traj%sst=buff%data(22,n)
+    traj%cn=buff%data(23,n)
+    traj%hi=buff%data(24,n)
+    traj%axn=buff%data(25,n) !Alon
+    traj%ayn=buff%data(26,n) !Alon
+    traj%bxn=buff%data(27,n) !Alon
+    traj%byn=buff%data(28,n) !Alon
+    traj%halo_berg=buff%data(29,n) !Alon
+    traj%static_berg=buff%data(30,n) !Alon
+    traj%sss=buff%data(31,n)
+  endif
+  call append_posn(first, traj)
 
-  end subroutine unpack_traj_from_buffer2
+end subroutine unpack_traj_from_buffer2
 
-
-! ##############################################################################
-
+!> Add a new berg to a list by copying values
+!!
+!! The input berg are a berg with set values whose memory is assumed to be
+!! temporary. This routine allocates memory for a new berg and copies the
+!! the input values into it. The memory for the new berg is pointed to
+!! by newberg_return (if present).
 subroutine add_new_berg_to_list(first, bergvals, quick, newberg_return)
 ! Arguments
-type(iceberg), pointer :: first
-type(iceberg), intent(in) :: bergvals
-type(iceberg), intent(out), pointer, optional :: newberg_return
-logical, intent(in), optional :: quick
+type(iceberg), pointer :: first !< List of icebergs
+type(iceberg), intent(in) :: bergvals !< Berg values to copy
+type(iceberg), intent(out), pointer, optional :: newberg_return !< New berg
+logical, intent(in), optional :: quick !< If true, use the quick insertion algorithm
 ! Local variables
 type(iceberg), pointer :: new=>null()
 
@@ -2103,12 +2190,12 @@ type(iceberg), pointer :: new=>null()
 
 end subroutine add_new_berg_to_list
 
-! ##############################################################################
 
+!> Scans all lists and checks that bergs are in a sorted order in each list
 subroutine count_out_of_order(bergs,label)
 ! Arguments
-type(icebergs), pointer :: bergs
-character(len=*) :: label
+type(icebergs), pointer :: bergs !< Container for all types and memory
+character(len=*) :: label !< Label to add to messages
 ! Local variables
 type(iceberg), pointer :: this, next
 integer :: i, icnt1, icnt2, icnt3
@@ -2157,12 +2244,11 @@ integer :: grdi, grdj
 
 end subroutine count_out_of_order
 
-! ##############################################################################
-
+!> Scans all lists and checks for duplicate identifiers between lists
 subroutine check_for_duplicates(bergs,label)
 ! Arguments
-type(icebergs), pointer :: bergs
-character(len=*) :: label
+type(icebergs), pointer :: bergs !< Container for all types and memory
+character(len=*) :: label !< Label to add to message
 ! Local variables
 type(iceberg), pointer :: this1, next1, this2, next2
 integer :: icnt_id, icnt_same
@@ -2201,12 +2287,14 @@ integer :: grdi_inner, grdj_inner
 
 end subroutine check_for_duplicates
 
-! ##############################################################################
-
+!> Prints a particular berg's vitals
+!!
+!! All lists are scanned and if a berg has the identifier equal to
+!! debug_iceberg_with_id then the state of that berg is printed.
 subroutine monitor_a_berg(bergs, label)
 ! Arguments
-type(icebergs), pointer :: bergs
-character(len=*) :: label
+type(icebergs), pointer :: bergs !< Container for all types and memory
+character(len=*) :: label !< Label to add to message
 ! Local variables
 type(iceberg), pointer :: this
 integer :: grdi, grdj
@@ -2227,12 +2315,13 @@ integer :: stderrunit
 
 end subroutine monitor_a_berg
 
-! ##############################################################################
-
+!> Inserts a berg into a list
 subroutine insert_berg_into_list(first, newberg, quick)
 ! Arguments
-type(iceberg), pointer :: first, newberg
-logical, intent(in), optional :: quick
+type(iceberg), pointer :: first !< List of bergs
+type(iceberg), pointer :: newberg !< New berg to insert
+logical, intent(in), optional :: quick !< If true, use the quick insertion algorithm
+                                       !! \todo Delete arguments since the code does not appear to use it.
 ! Local variables
 type(iceberg), pointer :: this, prev
 logical :: quickly
@@ -2277,11 +2366,13 @@ logical :: quickly
 
 end subroutine insert_berg_into_list
 
-! ##############################################################################
-
+!> Returns True when berg1 and berg2 are in sorted order
+!! \todo inorder() should use the iceberg identifier for efficiency and simplicity
+!! instead of dates and properties
 logical function inorder(berg1, berg2)  !MP Alon - Change to include iceberg_num
 ! Arguments
-type(iceberg), pointer :: berg1, berg2
+type(iceberg), pointer :: berg1 !< An iceberg
+type(iceberg), pointer :: berg2 !< An iceberg
 ! Local variables
   if (berg1%start_year<berg2%start_year) then ! want newer first
     inorder=.true.
@@ -2321,27 +2412,30 @@ type(iceberg), pointer :: berg1, berg2
   inorder=.true. ! passing the above tests mean the bergs 1 and 2 are identical?
 end function inorder
 
-! ##############################################################################
 
-  real function time_hash(berg)!  Alon: Think about removing this.
-  ! Arguments
-  type(iceberg), pointer :: berg
-    time_hash=berg%start_day+366.*float(berg%start_year)
-  end function time_hash
+!> Returns a hash of a berg's start year and day
+!! \todo Should be able to remove this function if using identifiers properly
+real function time_hash(berg)!  Alon: Think about removing this.
+! Arguments
+type(iceberg), pointer :: berg
+  time_hash=berg%start_day+366.*float(berg%start_year)
+end function time_hash
 
-! ##############################################################################
+!> Returns a hash of a berg's start position
+!! \todo Should be able to remove this function if using identifiers properly
+real function pos_hash(berg)
+! Arguments
+type(iceberg), pointer :: berg !< An iceberg
+  pos_hash=berg%start_lon+360.*(berg%start_lat+90.)
+end function pos_hash
 
-  real function pos_hash(berg)
-  ! Arguments
-  type(iceberg), pointer :: berg
-    pos_hash=berg%start_lon+360.*(berg%start_lat+90.)
-  end function pos_hash
-
-! ##############################################################################
-
+!> Returns True if berg1 and berg2 have the identifying properties
+!!
+!! This function compares the start year, day, mass and position of the bergs.
 logical function sameid(berg1, berg2) !  Alon: MP updat this.
 ! Arguments
-type(iceberg), pointer :: berg1, berg2
+type(iceberg), pointer :: berg1 !< An iceberg
+type(iceberg), pointer :: berg2 !< An iceberg
 ! Local variables
   sameid=.false.
   if (berg1%start_year.ne.berg2%start_year) return
@@ -2352,11 +2446,12 @@ type(iceberg), pointer :: berg1, berg2
   sameid=.true. ! passing the above tests means that bergs 1 and 2 have the same id
 end function sameid
 
-! ##############################################################################
-
+!> Returns True if berg1 and berg2 are identical in both identifying properties
+!! and dynamic properties
 logical function sameberg(berg1, berg2)
 ! Arguments
-type(iceberg), pointer :: berg1, berg2
+type(iceberg), pointer :: berg1 !< An iceberg
+type(iceberg), pointer :: berg2 !< An iceberg
 ! Local variables
   sameberg=.false.
   if (.not. sameid(berg1, berg2)) return
@@ -2379,22 +2474,24 @@ type(iceberg), pointer :: berg1, berg2
   sameberg=.true. ! passing the above tests mean that bergs 1 and 2 are identical
 end function sameberg
 
-! ##############################################################################
-
+!> Returns the year day (a single float for the day of the year, range 0-365.999...)
 real function yearday(imon, iday, ihr, imin, isec)
 ! Arguments
-integer, intent(in) :: imon, iday, ihr, imin, isec
+integer, intent(in) :: imon !< Month of year (1-12)
+integer, intent(in) :: iday !< Day of month (1-31)
+integer, intent(in) :: ihr !< Hour of day (0-23)
+integer, intent(in) :: imin !< Minute of hour (0-59)
+integer, intent(in) :: isec !< Second of minute (0-59)
 
   yearday=float(imon-1)*31.+float(iday-1)+(float(ihr)+(float(imin)+float(isec)/60.)/60.)/24.
 
 end function yearday
 
-! ##############################################################################
-
+!> Create a new berg with given values
 subroutine create_iceberg(berg, bergvals)
 ! Arguments
-type(iceberg), pointer :: berg
-type(iceberg), intent(in) :: bergvals
+type(iceberg), pointer :: berg !< Berg to be created
+type(iceberg), intent(in) :: bergvals !< Values to assign
 ! Local variables
 integer :: stderrunit
 
@@ -2413,11 +2510,13 @@ integer :: stderrunit
 end subroutine create_iceberg
 
 
-! ##############################################################################
-
+!> Delete a berg from a list and destroy the memory for the berg
+!!
+!! first is needed when berg is the first in the list
 subroutine delete_iceberg_from_list(first, berg)
 ! Arguments
-type(iceberg), pointer :: first, berg
+type(iceberg), pointer :: first !< List of bergs
+type(iceberg), pointer :: berg !< Berg to be deleted
 ! Local variables
 
   ! Connect neighbors to each other
@@ -2433,14 +2532,15 @@ type(iceberg), pointer :: first, berg
 
 end subroutine delete_iceberg_from_list
 
-! ##############################################################################
-
+!> Destroy a berg
+!!
+!! Deallocates memory for a berg after deleting links to the berg recorded in bonds
 subroutine destroy_iceberg(berg)
 ! Arguments
 type(iceberg), pointer :: berg
 ! Local variables
 
-  ! Clears all matching bonds before deallocint memory
+  ! Clears all matching bonds before deallocating memory
   call clear_berg_from_partners_bonds(berg)
 
   ! Bye-bye berg
@@ -2448,14 +2548,14 @@ type(iceberg), pointer :: berg
 
 end subroutine destroy_iceberg
 
-! ##############################################################################
-
+!> Print the state of a particular berg
 subroutine print_berg(iochan, berg, label, il, jl)
 ! Arguments
-integer, intent(in) :: iochan
-type(iceberg), pointer :: berg
-character(len=*) :: label
-integer, optional, intent(in) :: il, jl !< Indices of cell berg should be in
+integer, intent(in) :: iochan !< Standard channel to use (usually stdout or stderr)
+type(iceberg), pointer :: berg !< Berg to print
+character(len=*) :: label !< Label to use in messages
+integer, optional, intent(in) :: il !< i-index of cell berg should be in
+integer, optional, intent(in) :: jl !< j-index of cell berg should be in
 ! Local variables
 
   write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,a,2f10.4,i5,f7.2,es12.4,f5.1)') &
@@ -2489,13 +2589,12 @@ integer, optional, intent(in) :: il, jl !< Indices of cell berg should be in
     ' ui,vi=', berg%ui, berg%vi
 end subroutine print_berg
 
-! ##############################################################################
-
+!> Print the state of all bergs
 subroutine print_bergs(iochan, bergs, label)
 ! Arguments
-integer, intent(in) :: iochan
-type(icebergs), pointer :: bergs
-character(len=*) :: label
+integer, intent(in) :: iochan !< Standard channel to use (usually stdout or stderr)
+type(icebergs), pointer :: bergs !< Container for all types and memory
+character(len=*) :: label !< Label to use in messages
 ! Local variables
 integer :: nbergs, nnbergs
 type(iceberg), pointer :: this
@@ -2515,11 +2614,8 @@ integer :: grdi, grdj
 
 end subroutine print_bergs
 
-
-! ##############################################################################
-
 subroutine form_a_bond(berg, other_berg_num, other_berg_ine, other_berg_jne, other_berg)
-
+! Arguments
 type(iceberg), pointer :: berg
 type(iceberg), optional,  pointer :: other_berg
 type(bond) , pointer :: new_bond, first_bond
@@ -2528,9 +2624,9 @@ integer, optional  :: other_berg_ine, other_berg_jne
 integer :: stderrunit
 
  stderrunit = stderr()
-    
+
 if (berg%iceberg_num .ne. other_berg_num) then
-              
+
  !write (stderrunit,*) , 'Forming a bond!!!', mpp_pe(), berg%iceberg_num, other_berg_num, berg%halo_berg, berg%ine, berg%jne
 
   ! Step 1: Create a new bond
@@ -2570,7 +2666,8 @@ end subroutine form_a_bond
 ! #############################################################################
 
 subroutine bond_address_update(bergs)
-type(icebergs), pointer :: bergs
+! Arguments
+type(icebergs), pointer :: bergs !< Container for all types and memory
 type(iceberg), pointer :: other_berg, berg
 type(icebergs_gridded), pointer :: grd
 integer :: grdi, grdj, nbonds
@@ -2589,7 +2686,7 @@ type(bond) , pointer :: current_bond
           current_bond%other_berg_ine=current_bond%other_berg%ine
           current_bond%other_berg_jne=current_bond%other_berg%jne
         else
-          if (berg%halo_berg .lt. 0.5) then     
+          if (berg%halo_berg .lt. 0.5) then
             call error_mesg('diamonds, bond address update', 'other berg in bond not assosiated!', FATAL)
           endif
         endif
@@ -2603,10 +2700,8 @@ type(bond) , pointer :: current_bond
 
 end subroutine bond_address_update
 
-!###################################################################################################
-
 subroutine show_all_bonds(bergs)
-type(icebergs), pointer :: bergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
 type(iceberg), pointer :: other_berg, berg
 type(icebergs_gridded), pointer :: grd
 integer :: grdi, grdj, nbonds
@@ -2640,9 +2735,8 @@ type(bond) , pointer :: current_bond
 
 end subroutine show_all_bonds
 
-
 subroutine connect_all_bonds(bergs)
-type(icebergs), pointer :: bergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
 type(iceberg), pointer :: other_berg, berg
 type(icebergs_gridded), pointer :: grd
 integer :: i, j
@@ -2674,10 +2768,10 @@ bond_matched=.false.
               if (other_berg%iceberg_num .eq. current_bond%other_berg_num) then
                 current_bond%other_berg=>other_berg
                 other_berg=>null()
-                bond_matched=.true. 
+                bond_matched=.true.
               else
                 other_berg=>other_berg%next
-              endif 
+              endif
             enddo
           endif
           if (.not.bond_matched) then
@@ -2692,24 +2786,24 @@ bond_matched=.false.
                     if (other_berg%iceberg_num .eq. current_bond%other_berg_num) then
                       current_bond%other_berg=>other_berg
                       other_berg=>null()
-                      bond_matched=.true.  
+                      bond_matched=.true.
                     else
                       other_berg=>other_berg%next
-                    endif 
+                    endif
                   enddo
                 endif
               endif
             enddo;enddo
           endif
-          if (.not.bond_matched) then      
+          if (.not.bond_matched) then
             if (berg%halo_berg .lt. 0.5) then
-              missing_bond=.true.    
-              print * ,'non-halo berg unmatched: ', berg%iceberg_num, mpp_pe(), current_bond%other_berg_num, current_bond%other_berg_ine 
+              missing_bond=.true.
+              print * ,'non-halo berg unmatched: ', berg%iceberg_num, mpp_pe(), current_bond%other_berg_num, current_bond%other_berg_ine
               call error_mesg('diamonds, connect_all_bonds', 'A non-halo bond is missing!!!', FATAL)
             else  ! This is not a problem if the partner berg is not yet in the halo
               !if (  (current_bond%other_berg_ine .gt.grd%isd-1) .and. (current_bond%other_berg_ine .lt.grd%ied+1) &
-                !.and.  (current_bond%other_berg_jne .gt.grd%jsd-1) .and. (current_bond%other_berg_jne .lt.grd%jed+1) ) then      
-                !print * ,'halo berg unmatched: ',mpp_pe(),  berg%iceberg_num, current_bond%other_berg_num, current_bond%other_berg_ine,current_bond%other_berg_jne 
+                !.and.  (current_bond%other_berg_jne .gt.grd%jsd-1) .and. (current_bond%other_berg_jne .lt.grd%jed+1) ) then
+                !print * ,'halo berg unmatched: ',mpp_pe(),  berg%iceberg_num, current_bond%other_berg_num, current_bond%other_berg_ine,current_bond%other_berg_jne
                 !call error_mesg('diamonds, connect_all_bonds', 'A halo bond is missing!!!', WARNING)
               !endif
             endif
@@ -2728,11 +2822,9 @@ bond_matched=.false.
   endif
 end subroutine connect_all_bonds
 
-
-! #############################################################################
 subroutine count_bonds(bergs, number_of_bonds, check_bond_quality)
 
-type(icebergs), pointer :: bergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
 type(iceberg), pointer :: berg
 type(iceberg), pointer :: other_berg
 type(icebergs_gridded), pointer :: grd
@@ -2744,7 +2836,7 @@ logical :: bond_is_good
 logical, intent(inout), optional :: check_bond_quality
 logical :: quality_check
 integer :: num_unmatched_bonds,num_unmatched_bonds_all_pe
-integer :: num_unassosiated_bond_pairs, num_unassosiated_bond_pairs_all_pe 
+integer :: num_unassosiated_bond_pairs, num_unassosiated_bond_pairs_all_pe
 integer :: stderrunit
 
 !  print *, "starting bond_check"
@@ -2776,12 +2868,12 @@ integer :: stderrunit
           other_berg=>current_bond%other_berg
           if (associated(other_berg)) then
             other_berg_bond=>other_berg%first_bond
-            do while (associated(other_berg_bond))  !loops over the icebergs in the other icebergs bond list           
+            do while (associated(other_berg_bond))  !loops over the icebergs in the other icebergs bond list
               if (associated(other_berg_bond%other_berg)) then
                 if (other_berg_bond%other_berg%iceberg_num .eq.berg%iceberg_num) then
                   bond_is_good=.True.  !Bond_is_good becomes true when the corresponding bond is found
                 endif
-              endif                 
+              endif
               if (bond_is_good) then
                 other_berg_bond=>null()
               else
@@ -2791,12 +2883,12 @@ integer :: stderrunit
 
             if (bond_is_good) then
               if (debug) write(stderrunit,*) 'Perfect quality Bond:', berg%iceberg_num, current_bond%other_berg_num
-            else  
+            else
               if (debug) write(stderrunit,*) 'Non-matching bond...:', berg%iceberg_num, current_bond%other_berg_num
               num_unmatched_bonds=num_unmatched_bonds+1
             endif
           else
-            if (debug) write(stderrunit,*) 'Opposite berg is not assosiated:', berg%iceberg_num, current_bond%other_berg%iceberg_num    
+            if (debug) write(stderrunit,*) 'Opposite berg is not assosiated:', berg%iceberg_num, current_bond%other_berg%iceberg_num
             num_unassosiated_bond_pairs=0
           endif
         endif
@@ -2811,7 +2903,7 @@ integer :: stderrunit
     call mpp_sum(number_of_bonds_all_pe)
 
     bergs%nbonds=number_of_bonds_all_pe !Total number of bonds across all pe's
-    if (debug) then 
+    if (debug) then
       if (number_of_bonds .gt. 0) then
         write(stderrunit,*) "Bonds on PE:",number_of_bonds, "Total bonds", number_of_bonds_all_PE, "on PE number:",  mpp_pe()
       endif
@@ -2844,14 +2936,11 @@ integer :: stderrunit
 
 end subroutine count_bonds
 
-
-
-! ##############################################################################
-
+!> Returns number of bergs across all lists
 integer function count_bergs(bergs, with_halos)
 ! Arguments
-type(icebergs), pointer :: bergs
-logical, optional :: with_halos
+type(icebergs), pointer :: bergs !< Container for all types and memory
+logical, optional :: with_halos !< If true, include halo lists
 ! Local variables
 integer :: grdi, grdj, is, ie, js, je
 logical :: include_halos
@@ -2871,11 +2960,10 @@ logical :: include_halos
 
 end function count_bergs
 
-! ##############################################################################
-
+!> Returns number of bergs in a list
 integer function count_bergs_in_list(first)
 ! Arguments
-type(iceberg), pointer :: first
+type(iceberg), pointer :: first !< List of bergs
 ! Local variables
 type(iceberg), pointer :: this
 
@@ -2888,11 +2976,10 @@ type(iceberg), pointer :: this
 
 end function count_bergs_in_list
 
-! ##############################################################################
-
+!> Add a record to the trajectory of each berg
 subroutine record_posn(bergs)
 ! Arguments
-type(icebergs), pointer :: bergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
 ! Local variables
 type(xyt) :: posn
 type(iceberg), pointer :: this
@@ -2938,21 +3025,20 @@ integer :: grdi, grdj
         posn%halo_berg=this%halo_berg
         posn%static_berg=this%static_berg
       endif
-  
+
       call push_posn(this%trajectory, posn)
-  
+
       this=>this%next
     enddo
   enddo ; enddo
 
 end subroutine record_posn
 
-! ##############################################################################
-
+!> Add trajectory values as a new record in a trajectory
 subroutine push_posn(trajectory, posn_vals)
 ! Arguments
-type(xyt), pointer :: trajectory
-type(xyt) :: posn_vals
+type(xyt), pointer :: trajectory !< Trajectory list
+type(xyt) :: posn_vals !< Values to add
 ! Local variables
 type(xyt), pointer :: new_posn
 
@@ -2963,11 +3049,12 @@ type(xyt), pointer :: new_posn
 
 end subroutine push_posn
 
+!> Appends trajectory values to the end of the trajectory list (slow)
+!! \todo append_posn() is very slow and should be removed a.s.a.p.
 subroutine append_posn(trajectory, posn_vals)
-! This routine appends a new position leaf to the end of the given trajectory 
 ! Arguments
-type(xyt), pointer :: trajectory
-type(xyt) :: posn_vals
+type(xyt), pointer :: trajectory !< Trajectory list
+type(xyt) :: posn_vals !< Values to add
 ! Local variables
 type(xyt), pointer :: new_posn,next,last
 
@@ -2987,12 +3074,11 @@ type(xyt), pointer :: new_posn,next,last
   endif
 end subroutine append_posn
 
-! ##############################################################################
-
+!> Disconnect a trajectory from a berg and add it to a list of trajectory segments
 subroutine move_trajectory(bergs, berg)
 ! Arguments
-type(icebergs), pointer :: bergs
-type(iceberg), pointer :: berg
+type(icebergs), pointer :: bergs !< Container for all types and memory
+type(iceberg), pointer :: berg !< Berg containing trajectory
 ! Local variables
 type(xyt), pointer :: next, last
 type(xyt) :: vals
@@ -3030,17 +3116,17 @@ type(xyt) :: vals
 
 end subroutine move_trajectory
 
-! ##############################################################################
-
+!> Scan all bergs in a list and disconnect trajectories and more to the list of trajectory segments
+!! \todo The argument delete_bergs should be removed.
 subroutine move_all_trajectories(bergs, delete_bergs)
 ! Arguments
-type(icebergs),    pointer    :: bergs
-logical, optional, intent(in) :: delete_bergs
+type(icebergs),    pointer    :: bergs !< Container for all types and memory
+logical, optional, intent(in) :: delete_bergs !< If true, delete bergs after disconnecting its trajectory
 ! Local variables
 type(iceberg), pointer :: this, next
 logical :: delete_bergs_after_moving_traj
 integer :: grdi, grdj
-  
+
   if (bergs%ignore_traj) return
 
   delete_bergs_after_moving_traj = .false.
@@ -3057,22 +3143,23 @@ integer :: grdi, grdj
 
 end subroutine move_all_trajectories
 
-! ##############################################################################
-
+!> Search the grid for a cell containing position x,y
 logical function find_cell_by_search(grd, x, y, i, j)
 ! Arguments
-type(icebergs_gridded), pointer :: grd
-real, intent(in) :: x, y
-integer, intent(inout) :: i, j
+type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+real, intent(in) :: x !< Longitude of position
+real, intent(in) :: y !< Latitude of position
+integer, intent(inout) :: i !< i-index of cell containing x,y
+integer, intent(inout) :: j !< j-index of cell containing x,y
 ! Local variables
 integer :: is,ie,js,je,di,dj,io,jo,icnt
 real :: d0,d1,d2,d3,d4,d5,d6,d7,d8,dmin
 logical :: explain=.false.
 real :: Lx
- 
+
 911 continue
 
-  Lx=grd%Lx  
+  Lx=grd%Lx
   find_cell_by_search=.false.
   is=grd%isc; ie=grd%iec; js=grd%jsc; je=grd%jec
 
@@ -3100,7 +3187,7 @@ real :: Lx
     find_cell_by_search=.true.
     return
   endif
-    
+
   do icnt=1, 1*(ie-is+je-js)
     io=i; jo=j
 
@@ -3143,7 +3230,7 @@ real :: Lx
       find_cell_by_search=.true.
       return
     endif
-    
+
     if ((i==io.and.j==jo) &
         .and. .not.find_better_min(grd, x, y, 3, i, j) &
        ) then
@@ -3191,7 +3278,7 @@ real :: Lx
 
   contains
 
-! # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+! # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
   real function dcost(x1, y1, x2, y2,Lx)
   ! Arguments
@@ -3204,11 +3291,11 @@ real :: Lx
     dcost=(x2-x1m)**2+(y2-y1)**2
   end function dcost
 
-! # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+! # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
   logical function find_better_min(grd, x, y, w, oi, oj)
   ! Arguments
-  type(icebergs_gridded), intent(in) :: grd
+  type(icebergs_gridded), intent(in) :: grd !< Container for gridded fields
   real, intent(in) :: x, y
   integer, intent(in) :: w
   integer, intent(inout) :: oi, oj
@@ -3237,11 +3324,11 @@ real :: Lx
 
   end function find_better_min
 
-! # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # 
+! # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
   logical function find_cell_loc(grd, x, y, is, ie, js, je, w, oi, oj)
   ! Arguments
-  type(icebergs_gridded), intent(in) :: grd
+  type(icebergs_gridded), intent(in) :: grd !< Container for gridded fields
   real, intent(in) :: x, y
   integer, intent(in) :: is, ie, js, je, w
   integer, intent(inout) :: oi, oj
@@ -3265,18 +3352,19 @@ real :: Lx
 
 end function find_cell_by_search
 
-
-! ##############################################################################
-
-subroutine find_individual_iceberg(bergs,iceberg_num, ine, jne, berg_found, search_data_domain)
-type(icebergs), pointer :: bergs
+!> Returns the i,j of cell containing an iceberg with the given identifier
+subroutine find_individual_iceberg(bergs, iceberg_num, ine, jne, berg_found, search_data_domain)
+! Arguments
+type(icebergs), pointer :: bergs !< Container for all types and memory
+integer, intent(in) :: iceberg_num !< Berg identifier
+integer, intent(out) :: ine !< i-index of cell containing berg
+integer, intent(out) :: jne !< j-index of cell containing berg
+logical, intent(in) :: search_data_domain !< If true, search halos too
+real, intent(out) :: berg_found !< Returns 1.0 if berg is found, 0. otherwise
+! Local variables
 type(iceberg), pointer :: this
 type(icebergs_gridded), pointer :: grd
 integer :: grdi, grdj
-integer, intent(in) :: iceberg_num
-logical, intent(in) :: search_data_domain
-integer, intent(out) :: ine, jne
-real, intent(out) :: berg_found
 integer :: ilim1, ilim2, jlim1, jlim2
 
 berg_found=0.0
@@ -3284,7 +3372,7 @@ ine=999
 jne=999
   ! For convenience
     grd=>bergs%grd
-    
+
     if (search_data_domain) then
         ilim1 = grd%isd  ; ilim2=grd%ied  ; jlim1 = grd%jsd  ; jlim2=grd%jed
     else
@@ -3306,17 +3394,17 @@ jne=999
         endif
         this=>this%next
       enddo
-    enddo ; enddo                                                                             
-end subroutine  find_individual_iceberg 
+    enddo ; enddo
+end subroutine  find_individual_iceberg
 
-
-! ##############################################################################
-
-logical function find_cell(grd, x, y, oi, oj) 
+!> Scans each computational grid cell until is_point_in_cell() is true
+logical function find_cell(grd, x, y, oi, oj)
 ! Arguments
-type(icebergs_gridded), intent(in) :: grd
-real, intent(in) :: x, y
-integer, intent(out) :: oi, oj
+type(icebergs_gridded), intent(in) :: grd !< Container for gridded fields
+real, intent(in) :: x !< Longitude of position
+real, intent(in) :: y !< Latitude of position
+integer, intent(out) :: oi !< i-index of cell containing position or -999
+integer, intent(out) :: oj !< j-index of cell containing position or -999
 ! Local variables
 integer :: i,j
 
@@ -3331,13 +3419,14 @@ integer :: i,j
 
 end function find_cell
 
-! ##############################################################################
-
+!> Scans each all grid cells until is_point_in_cell() is true (includes halos)
 logical function find_cell_wide(grd, x, y, oi, oj)
 ! Arguments
-type(icebergs_gridded), intent(in) :: grd
-real, intent(in) :: x, y
-integer, intent(out) :: oi, oj
+type(icebergs_gridded), intent(in) :: grd !< Container for gridded fields
+real, intent(in) :: x !< Longitude of position
+real, intent(in) :: y !< Latitude of position
+integer, intent(out) :: oi !< i-index of cell containing position or -999
+integer, intent(out) :: oj !< j-index of cell containing position or -999
 ! Local variables
 integer :: i,j
 
@@ -3352,14 +3441,15 @@ integer :: i,j
 
 end function find_cell_wide
 
-! ##############################################################################
-
+!> Returns True if x,y is in cell i,j
 logical function is_point_in_cell(grd, x, y, i, j, explain)
 ! Arguments
-type(icebergs_gridded), intent(in) :: grd
-real, intent(in) :: x, y
-integer, intent(in) :: i, j
-logical, intent(in), optional :: explain
+type(icebergs_gridded), intent(in) :: grd !< Container for gridded fields
+real, intent(in) :: x !< Longitude of position
+real, intent(in) :: y !< Latitude of position
+integer, intent(in) :: i !< i-index of cell
+integer, intent(in) :: j !< j-index of cell
+logical, intent(in), optional :: explain !< If true, print debugging
 ! Local variables
 real :: xlo, xhi, ylo, yhi
 integer :: stderrunit
@@ -3381,11 +3471,11 @@ real :: tol
   is_point_in_cell=.false.
 
   ! Test crude bounds
-  xlo=min( apply_modulo_around_point(grd%lon(i-1,j-1)   ,x,  Lx), & 
+  xlo=min( apply_modulo_around_point(grd%lon(i-1,j-1)   ,x,  Lx), &
            apply_modulo_around_point(grd%lon(i  ,j-1)   ,x,  Lx), &
            apply_modulo_around_point(grd%lon(i-1,j  )   ,x,  Lx), &
            apply_modulo_around_point(grd%lon(i  ,j  )   ,x,  Lx) )
-  xhi=max( apply_modulo_around_point(grd%lon(i-1,j-1)   ,x,  Lx), & 
+  xhi=max( apply_modulo_around_point(grd%lon(i-1,j-1)   ,x,  Lx), &
            apply_modulo_around_point(grd%lon(i  ,j-1)   ,x,  Lx), &
            apply_modulo_around_point(grd%lon(i-1,j  )   ,x,  Lx), &
            apply_modulo_around_point(grd%lon(i  ,j  )   ,x,  Lx) )
@@ -3393,57 +3483,66 @@ real :: tol
   ! The modolo function inside sum_sign_dot_prod leads to a roundoff.
   !Adding adding a tolorance to the crude bounds avoids excluding the cell which
   !would be correct after roundoff. This is a bit of a hack.
-  tol=0.1 
+  tol=0.1
   if (x.lt.(xlo-tol) .or. x.gt.(xhi+tol)) return
 
   ylo=min( grd%lat(i-1,j-1), grd%lat(i,j-1), grd%lat(i-1,j), grd%lat(i,j) )
   yhi=max( grd%lat(i-1,j-1), grd%lat(i,j-1), grd%lat(i-1,j), grd%lat(i,j) )
   if (y.lt.ylo .or. y.gt.yhi) return
-  
+
   if ((grd%lat(i,j).gt.89.999).and. (grd%grid_is_latlon))   then
     is_point_in_cell=sum_sign_dot_prod5(grd%lon(i-1,j-1),grd%lat(i-1,j-1), &
                                         grd%lon(i  ,j-1),grd%lat(i  ,j-1), &
                                         grd%lon(i  ,j-1),grd%lat(i  ,j  ), &
                                         grd%lon(i-1,j  ),grd%lat(i  ,j  ), &
                                         grd%lon(i-1,j  ),grd%lat(i-1,j  ), &
-                                        x, y, Lx,explain=explain) 
+                                        x, y, Lx,explain=explain)
   elseif ((grd%lat(i-1,j).gt.89.999) .and. (grd%grid_is_latlon))  then
     is_point_in_cell=sum_sign_dot_prod5(grd%lon(i-1,j-1),grd%lat(i-1,j-1), &
                                         grd%lon(i  ,j-1),grd%lat(i  ,j-1), &
                                         grd%lon(i  ,j  ),grd%lat(i  ,j  ), &
                                         grd%lon(i  ,j  ),grd%lat(i-1,j  ), &
                                         grd%lon(i-1,j-1),grd%lat(i-1,j  ), &
-                                        x, y,Lx, explain=explain) 
+                                        x, y,Lx, explain=explain)
   elseif ((grd%lat(i-1,j-1).gt.89.999) .and. (grd%grid_is_latlon))  then
     is_point_in_cell=sum_sign_dot_prod5(grd%lon(i-1,j  ),grd%lat(i-1,j-1), &
                                         grd%lon(i  ,j-1),grd%lat(i-1,j-1), &
                                         grd%lon(i  ,j-1),grd%lat(i  ,j-1), &
                                         grd%lon(i  ,j  ),grd%lat(i  ,j  ), &
                                         grd%lon(i-1,j  ),grd%lat(i-1,j  ), &
-                                        x, y,Lx, explain=explain) 
+                                        x, y,Lx, explain=explain)
   elseif ((grd%lat(i,j-1).gt.89.999) .and. (grd%grid_is_latlon)) then
     is_point_in_cell=sum_sign_dot_prod5(grd%lon(i-1,j-1),grd%lat(i-1,j-1), &
                                         grd%lon(i-1,j-1),grd%lat(i  ,j-1), &
                                         grd%lon(i  ,j  ),grd%lat(i  ,j-1), &
                                         grd%lon(i  ,j  ),grd%lat(i  ,j  ), &
                                         grd%lon(i-1,j  ),grd%lat(i-1,j  ), &
-                                        x, y, Lx,explain=explain) 
+                                        x, y, Lx,explain=explain)
   else
   is_point_in_cell=sum_sign_dot_prod4(grd%lon(i-1,j-1),grd%lat(i-1,j-1), &
                                       grd%lon(i  ,j-1),grd%lat(i  ,j-1), &
                                       grd%lon(i  ,j  ),grd%lat(i  ,j  ), &
                                       grd%lon(i-1,j  ),grd%lat(i-1,j  ), &
-                                      x, y,Lx, explain=explain) 
+                                      x, y,Lx, explain=explain)
   endif
 
 end function is_point_in_cell
 
-! ##############################################################################
-
-logical function sum_sign_dot_prod4(x0, y0, x1, y1, x2, y2, x3, y3, x, y,Lx, explain)
+!> Returns true if point x,y is inside polygon with four corners
+logical function sum_sign_dot_prod4(x0, y0, x1, y1, x2, y2, x3, y3, x, y, Lx, explain)
 ! Arguments
-real, intent(in) :: x0, y0, x1, y1, x2, y2, x3, y3, x, y, Lx
-logical, intent(in), optional :: explain
+real, intent(in) :: x0 !< Longitude of first corner
+real, intent(in) :: y0 !< Latitude of first corner
+real, intent(in) :: x1 !< Longitude of second corner
+real, intent(in) :: y1 !< Latitude of second corner
+real, intent(in) :: x2 !< Longitude of third corner
+real, intent(in) :: y2 !< Latitude of third corner
+real, intent(in) :: x3 !< Longitude of fourth corner
+real, intent(in) :: y3 !< Latitude of fourth corner
+real, intent(in) :: x !< Longitude of point
+real, intent(in) :: y !< Latitude of point
+real, intent(in) :: Lx !< Length of domain in zonal direction
+logical, intent(in), optional :: explain !< If true, print debugging
 ! Local variables
 real :: p0,p1,p2,p3,xx
 real :: l0,l1,l2,l3
@@ -3466,7 +3565,7 @@ integer :: stderrunit
   l2=(xx-xx2)*(y3-y2)-(y-y2)*(xx3-xx2)
   l3=(xx-xx3)*(y0-y3)-(y-y3)*(xx0-xx3)
 
-  !We use an assymerty between South and East line boundaries and North and East
+  !We use an asymmetry between South and East line boundaries and North and East
   !to avoid icebergs appearing to two cells (half values used for debugging)
   !This is intended to make the South and East boundaries be part of the
   !cell, while the North and West are not part of the cell.
@@ -3497,12 +3596,23 @@ integer :: stderrunit
 
 end function sum_sign_dot_prod4
 
-! ##############################################################################
-
+!> Returns true if point x,y is inside polygon with five corners
 logical function sum_sign_dot_prod5(x0, y0, x1, y1, x2, y2, x3, y3, x4, y4, x, y, Lx, explain)
 ! Arguments
-real, intent(in) :: x0, y0, x1, y1, x2, y2, x3, y3, x4, y4, x, y, Lx
-logical, intent(in), optional :: explain
+real, intent(in) :: x0 !< Longitude of first corner
+real, intent(in) :: y0 !< Latitude of first corner
+real, intent(in) :: x1 !< Longitude of second corner
+real, intent(in) :: y1 !< Latitude of second corner
+real, intent(in) :: x2 !< Longitude of third corner
+real, intent(in) :: y2 !< Latitude of third corner
+real, intent(in) :: x3 !< Longitude of fourth corner
+real, intent(in) :: y3 !< Latitude of fourth corner
+real, intent(in) :: x4 !< Longitude of fifth corner
+real, intent(in) :: y4 !< Latitude of fifth corner
+real, intent(in) :: x !< Longitude of point
+real, intent(in) :: y !< Latitude of point
+real, intent(in) :: Lx !< Length of domain in zonal direction
+logical, intent(in), optional :: explain !< If true, print debugging
 ! Local variables
 real :: p0,p1,p2,p3,p4,xx
 real :: l0,l1,l2,l3,l4
@@ -3554,15 +3664,17 @@ integer :: stderrunit
 
 end function sum_sign_dot_prod5
 
-! ##############################################################################
-
+!> Calculates non-dimensional position with cell i,j and returns true if point is in cell
 logical function pos_within_cell(grd, x, y, i, j, xi, yj, explain)
 ! Arguments
-type(icebergs_gridded), intent(in) :: grd
-real, intent(in) :: x, y
-integer, intent(in) :: i, j
-real, intent(out) :: xi, yj
-logical, intent(in), optional :: explain
+type(icebergs_gridded), intent(in) :: grd !< Container for gridded fields
+real, intent(in) :: x !< Longitude of position
+real, intent(in) :: y !< Latitude of position
+integer, intent(in) :: i !< i-index of cell
+integer, intent(in) :: j !< j-index of cell
+real, intent(out) :: xi !< Non-dimensional x-position within cell
+real, intent(out) :: yj !< Non-dimensional y-position within cell
+logical, intent(in), optional :: explain !< If true, print debugging
 ! Local variables
 real :: x1,y1,x2,y2,x3,y3,x4,y4,xx,yy,fac
 integer :: stderrunit
@@ -3692,11 +3804,23 @@ logical :: is_point_in_cell_using_xi_yj
 
   contains
 
-  subroutine calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, x, y, xi, yj,Lx, explain)
+  !> Calculates non-dimension position of x,y within a polygon with four corners
+  subroutine calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, x, y, xi, yj, Lx, explain)
   ! Arguments
-  real,  intent(in) :: x1, x2, x3, x4, y1, y2, y3, y4, x, y, Lx
-  real, intent(out) :: xi, yj
-  logical, intent(in), optional :: explain
+  real, intent(in) :: x1 !< Longitude of first corner
+  real, intent(in) :: y1 !< Latitude of first corner
+  real, intent(in) :: x2 !< Longitude of second corner
+  real, intent(in) :: y2 !< Latitude of second corner
+  real, intent(in) :: x3 !< Longitude of third corner
+  real, intent(in) :: y3 !< Latitude of third corner
+  real, intent(in) :: x4 !< Longitude of fourth corner
+  real, intent(in) :: y4 !< Latitude of fourth corner
+  real, intent(in) :: x !< Longitude of point
+  real, intent(in) :: y !< Latitude of point
+  real, intent(out) :: xi !< Non-dimensional x-position within cell
+  real, intent(out) :: yj !< Non-dimensional y-position within cell
+  real, intent(in) :: Lx !< Length of domain in zonal direction
+  logical, intent(in), optional :: explain !< If true, print debugging
   ! Local variables
   real :: alpha, beta, gamma, delta, epsilon, kappa, a, b, c, d, dx, dy, yy1, yy2
   logical :: expl=.false.
@@ -3780,11 +3904,14 @@ logical :: is_point_in_cell_using_xi_yj
 
 end function pos_within_cell
 
-! ##############################################################################
-
+!> Returns true if non-dimensional position xi,yj is in unit interval
+!!
+!! Includes South and East boundaries, and excludes North and West.
+!! \todo Double check definition of is_point_within_xi_yj_bounds()
 logical function is_point_within_xi_yj_bounds(xi,yj)
 ! Arguments
-real, intent(in) :: xi, yj
+real, intent(in) :: xi !< Non-dimensional x-position
+real, intent(in) :: yj !< Non-dimensional y-position
 ! Local variables
 !Includes South and East boundaries, and excludes North and West  (double check this is the way that is needed)
   is_point_within_xi_yj_bounds=.False.
@@ -3795,13 +3922,17 @@ real, intent(in) :: xi, yj
   endif
 end function is_point_within_xi_yj_bounds
 
-real function apply_modulo_around_point(x,y,Lx)
+!> Modulo value of x in an interval [y-(Lx/2)  y+(Lx/2)]
+!!
+!! Gives the modulo value of x in an interval [y-(Lx/2)  y+(Lx/2)]  , modulo Lx
+!! If Lx<=0, then it returns x without applying modulo arithmetic.
+real function apply_modulo_around_point(x, y, Lx)
 ! Arguments
-real, intent(in) :: x ,y ,Lx
+real, intent(in) :: x !< Value to apply modulo arithmetic to
+real, intent(in) :: y !< Center of modulo range
+real, intent(in) :: Lx !< Modulo width
 !Local_variables
 real ::Lx_2
-!Gives the modula value of x in an interval [y-(Lx/2)  y+(Lx/2)]  , modulo Lx
-!If Lx<=0, then it returns x without applying modulo arithmetic.
 
   if (Lx>0.) then
     Lx_2=Lx/2.
@@ -3812,12 +3943,14 @@ real ::Lx_2
 
 end function apply_modulo_around_point
 
+!> Checks that a berg's position metrics are consistent
 subroutine check_position(grd, berg, label, il, jl)
 ! Arguments
-type(icebergs_gridded), pointer :: grd
-type(iceberg), pointer :: berg
-character(len=*) :: label
-integer, optional, intent(in) :: il, jl !< Indices of cell berg should be in
+type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+type(iceberg), pointer :: berg !< Berg to check
+character(len=*) :: label !< Label to add to messages
+integer, optional, intent(in) :: il !< i-index of cell berg should be in
+integer, optional, intent(in) :: jl !< j-index of cell berg should be in
 ! Local variables
 real :: xi, yj
 logical :: lret
@@ -3840,12 +3973,12 @@ integer :: stderrunit
 
 end subroutine check_position
 
-! ##############################################################################
-
-real function sum_mass(bergs,justbits,justbergs)
+!> Add up the mass of bergs and/or bergy bits
+real function sum_mass(bergs, justbits, justbergs)
 ! Arguments
-type(icebergs), pointer :: bergs
-logical, intent(in), optional :: justbits, justbergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
+logical, intent(in), optional :: justbits !< If present, add up mass of just bergy bits
+logical, intent(in), optional :: justbergs !< If present, add up mass of just bergs
 ! Local variables
 type(iceberg), pointer :: this
 integer :: grdi, grdj
@@ -3867,12 +4000,12 @@ integer :: grdi, grdj
 
 end function sum_mass
 
-! ##############################################################################
-
+!> Add up the heat content of bergs and/or bergy bits
 real function sum_heat(bergs,justbits,justbergs)
 ! Arguments
-type(icebergs), pointer :: bergs
-logical, intent(in), optional :: justbits, justbergs
+type(icebergs), pointer :: bergs !< Container for all types and memory
+logical, intent(in), optional :: justbits !< If present, add up heat content of just bergy bits
+logical, intent(in), optional :: justbergs !< If present, add up heat content of just bergs
 ! Local variables
 type(iceberg), pointer :: this
 real :: dm
@@ -3897,11 +4030,11 @@ integer :: grdi, grdj
 
 end function sum_heat
 
-
-subroutine sanitize_field(arr,val)
+!> Set elements of an array to 0. if the absolute value is larger than a given value
+subroutine sanitize_field(arr, val)
 ! Arguments
-real, dimension(:,:),intent(inout) :: arr
-real, intent(in) :: val
+real, dimension(:,:),intent(inout) :: arr !< Array to sanitize
+real, intent(in) :: val !< Threshold value to use for sanitizing
 ! Local variables
 integer :: i, j
 
@@ -3913,17 +4046,11 @@ integer :: i, j
 
 end subroutine sanitize_field
 
-! ##############################################################################
-
-
-
-
-! ##############################################################################
-
+!> Calculates checksums for all gridded fields
 subroutine checksum_gridded(grd, label)
 ! Arguments
-type(icebergs_gridded), pointer :: grd
-character(len=*) :: label
+type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+character(len=*) :: label !< Label to use in messages
 ! Local variables
 
   if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') 'diamonds: checksumming gridded data @ ',trim(label)
@@ -3985,13 +4112,12 @@ character(len=*) :: label
 
 end subroutine checksum_gridded
 
-! ##############################################################################
-
+!> Calculates checksum for a 3d field
 subroutine grd_chksum3(grd, fld, txt)
 ! Arguments
-type(icebergs_gridded), pointer :: grd
-real, dimension(:,:,:), intent(in) :: fld
-character(len=*), intent(in) :: txt
+type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+real, dimension(:,:,:), intent(in) :: fld !< Field to checksum
+character(len=*), intent(in) :: txt !< Label to use in message
 ! Local variables
 integer :: i, j, k, halo, icount, io, jo
 real :: mean, rms, SD, minv, maxv
@@ -4057,13 +4183,12 @@ real, dimension(lbound(fld,1):ubound(fld,1), lbound(fld,2):ubound(fld,2), lbound
 
 end subroutine grd_chksum3
 
-! ##############################################################################
-
+!> Calculates checksum for a 2d field
 subroutine grd_chksum2(grd, fld, txt)
 ! Arguments
-type(icebergs_gridded), pointer :: grd
-real, dimension(grd%isd:grd%ied,grd%jsd:grd%jed), intent(in) :: fld
-character(len=*), intent(in) :: txt
+type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+real, dimension(grd%isd:grd%ied,grd%jsd:grd%jed), intent(in) :: fld !< Field to checksum
+character(len=*), intent(in) :: txt !< Label to use in message
 ! Local variables
 integer :: i, j, icount
 real :: mean, rms, SD, minv, maxv
@@ -4115,12 +4240,11 @@ real :: mean, rms, SD, minv, maxv
 
 end subroutine grd_chksum2
 
-! ##############################################################################
-
+!> Calculates checksums for all bergs
 subroutine bergs_chksum(bergs, txt, ignore_halo_violation)
 ! Arguments
-type(icebergs), pointer :: bergs
-character(len=*), intent(in) :: txt
+type(icebergs), pointer :: bergs !< Container for all types and memory
+character(len=*), intent(in) :: txt !< Label to use in messages
 logical, optional :: ignore_halo_violation
 ! Local variables
 integer :: i, nbergs, ichk1, ichk2, ichk3, ichk4, ichk5, iberg
@@ -4217,11 +4341,10 @@ integer :: grdi, grdj
 
 end subroutine bergs_chksum
 
-! ##############################################################################
-
+!> Checksum a list of bergs
 integer function list_chksum(first)
 ! Arguments
-type(iceberg), pointer :: first
+type(iceberg), pointer :: first !< List of bergs
 ! Local variables
 integer :: i
 type(iceberg), pointer :: this
@@ -4236,11 +4359,10 @@ type(iceberg), pointer :: this
 
 end function list_chksum
 
-! ##############################################################################
-
+!> Checksum a berg
 integer function berg_chksum(berg)
 ! Arguments
-type(iceberg), pointer :: berg
+type(iceberg), pointer :: berg !< An iceberg
 ! Local variables
 real :: rtmp(38) !Changed from 28 to 34 by Alon
 integer :: itmp(38+4), i8=0, ichk1, ichk2, ichk3 !Changed from 28 to 34 by Alon
@@ -4274,24 +4396,24 @@ integer :: i
   rtmp(26)=berg%ssh_y
   rtmp(27)=berg%cn
   rtmp(28)=berg%hi
-  rtmp(29)=berg%axn 
-  rtmp(30)=berg%ayn 
-  rtmp(31)=berg%bxn 
-  rtmp(32)=berg%byn 
-  rtmp(33)=berg%uvel_old 
-  rtmp(34)=berg%vvel_old 
-  rtmp(35)=berg%lat_old 
-  rtmp(36)=berg%lon_old 
-  itmp(37)=berg%halo_berg 
-  itmp(38)=berg%static_berg 
-  itmp(1:38)=transfer(rtmp,i8) 
-  itmp(39)=berg%start_year 
-  itmp(40)=berg%ine 
-  itmp(41)=berg%jne 
-  itmp(42)=berg%iceberg_num 
+  rtmp(29)=berg%axn
+  rtmp(30)=berg%ayn
+  rtmp(31)=berg%bxn
+  rtmp(32)=berg%byn
+  rtmp(33)=berg%uvel_old
+  rtmp(34)=berg%vvel_old
+  rtmp(35)=berg%lat_old
+  rtmp(36)=berg%lon_old
+  itmp(37)=berg%halo_berg
+  itmp(38)=berg%static_berg
+  itmp(1:38)=transfer(rtmp,i8)
+  itmp(39)=berg%start_year
+  itmp(40)=berg%ine
+  itmp(41)=berg%jne
+  itmp(42)=berg%iceberg_num
 
   ichk1=0; ichk2=0; ichk3=0
-  do i=1,38+4 
+  do i=1,38+4
    ichk1=ichk1+itmp(i)
    ichk2=ichk2+itmp(i)*i
    ichk3=ichk3+itmp(i)*i*i
@@ -4300,13 +4422,15 @@ integer :: i
 
 end function berg_chksum
 
-! ##############################################################################
-
+!> Bi-linear interpolate a field at corners in cell i,j to non-dimensional position xi,yj
 real function bilin(grd, fld, i, j, xi, yj)
 ! Arguments
-type(icebergs_gridded), pointer :: grd
-real, intent(in) :: fld(grd%isd:grd%ied,grd%jsd:grd%jed), xi, yj
-integer, intent(in) :: i, j
+type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+real, intent(in) :: fld(grd%isd:grd%ied,grd%jsd:grd%jed) !< Field to interpolate
+real, intent(in) :: xi !< Non-dimensional x-position within cell
+real, intent(in) :: yj !< Non-dimensional y-position within cell
+integer, intent(in) :: i !< i-index of cell
+integer, intent(in) :: j !< j-index of cell
 ! Local variables
 
   if (old_bug_bilin) then
@@ -4318,13 +4442,12 @@ integer, intent(in) :: i, j
   endif
 end function bilin
 
-! ##############################################################################
-
+!> Prints a field
 subroutine print_fld(grd, fld, label)
 ! Arguments
-type(icebergs_gridded), pointer :: grd
-real, intent(in) :: fld(grd%isd:grd%ied,grd%jsd:grd%jed)
-character(len=*) :: label
+type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+real, intent(in) :: fld(grd%isd:grd%ied,grd%jsd:grd%jed) !< Field to print
+character(len=*) :: label !< Label to use in title
 ! Local variables
 integer :: i, j
 integer :: stderrunit
@@ -4339,12 +4462,11 @@ integer :: stderrunit
 
 end subroutine print_fld
 
-! ##############################################################################
-
+!> Invoke some unit tests
 logical function unitTests(bergs)
-  type(icebergs), pointer :: bergs
-  type(icebergs_gridded), pointer :: grd
+  type(icebergs), pointer :: bergs !< Container for all types and memory
   ! Local variables
+  type(icebergs_gridded), pointer :: grd
   integer :: stderrunit,i,j
 
   ! This function returns True is a unit test fails
@@ -4352,7 +4474,7 @@ logical function unitTests(bergs)
   ! For convenience
   grd=>bergs%grd
   stderrunit=stderr()
-  
+
   i=grd%isc; j=grd%jsc
   call localTest( bilin(grd, grd%lon, i, j, 0., 1.), grd%lon(i-1,j) )
   call localTest( bilin(grd, grd%lon, i, j, 1., 1.), grd%lon(i,j) )
@@ -4360,6 +4482,8 @@ logical function unitTests(bergs)
   call localTest( bilin(grd, grd%lat, i, j, 1., 1.), grd%lat(i,j) )
 
   contains
+
+  !> Checks answer to right answer and prints results if different
   subroutine localTest(answer, rightAnswer)
   real, intent(in) :: answer, rightAnswer
   if (answer==rightAnswer) return
@@ -4368,12 +4492,11 @@ logical function unitTests(bergs)
   end subroutine localTest
 end function unitTests
 
-! ##############################################################################
-
 !> Check for duplicates of icebergs on and across processors and issue an error
 !! if any are detected
 subroutine check_for_duplicates_in_parallel(bergs)
-  type(icebergs), pointer :: bergs !< Icebergs
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
   ! Local variables
   type(icebergs_gridded), pointer :: grd
   type(iceberg), pointer :: this
@@ -4410,9 +4533,11 @@ end subroutine check_for_duplicates_in_parallel
 
 !> Returns error count of duplicates of integer values in a distributed list
 integer function check_for_duplicate_ids_in_list(nbergs, ids, verbose)
+  ! Arguments
   integer,               intent(in)    :: nbergs !< Length of ids
   integer, dimension(:), intent(inout) :: ids !< List of ids
   logical,               intent(in)    :: verbose !< True if messages should be written
+  ! Local variables
   integer :: stderrunit, i, j, k, l, nbergs_total, ii, lowest_id, nonexistent_id
   logical :: have_berg
 
@@ -4478,7 +4603,9 @@ integer function check_for_duplicate_ids_in_list(nbergs, ids, verbose)
 
 end function check_for_duplicate_ids_in_list
 
+!> Unit test for check_for_duplicate_ids_in_list()
 subroutine test_check_for_duplicate_ids_in_list()
+  ! Local variables
   integer :: k
   integer, dimension(:), allocatable :: ids
   integer :: error_count
