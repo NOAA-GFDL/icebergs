@@ -82,33 +82,33 @@ subroutine icebergs_init(bergs, &
              gni, gnj, layout, io_layout, axes, dom_x_flags, dom_y_flags, &
              dt, Time, ice_lon, ice_lat, ice_wet, ice_dx, ice_dy, ice_area, &
              cos_rot, sin_rot, ocean_depth, maskmap, fractional_area)
-! Arguments
-type(icebergs), pointer :: bergs !< Container for all types and memory
-integer, intent(in) :: gni !< Number of global points in i-direction
-integer, intent(in) :: gnj !< Number of global points in j-direction
-integer, intent(in) :: layout(2) !< Parallel decomposition of computational processors in i/j direction
-integer, intent(in) :: io_layout(2) !< Parallel decomposition of i/o processors in i/j direction
-integer, intent(in) :: axes(2) !< Diagnostic axes
-integer, intent(in) :: dom_x_flags !< Decomposition flags for i-direction
-integer, intent(in) :: dom_y_flags !< Decomposition flags for j-direction
-real, intent(in) :: dt !< Time step (s)
-type (time_type), intent(in) :: Time !< Model time
-real, dimension(:,:), intent(in) :: ice_lon !< Longitude of cell corners using NE convention (degree E)
-real, dimension(:,:), intent(in) :: ice_lat !< Latitude of cell corners using NE conventino (degree N)
-real, dimension(:,:), intent(in) :: ice_wet !< Wet/dry mask (1 is wet, 0 is dry) of cell centers
-real, dimension(:,:), intent(in) :: ice_dx !< Zonal length of cell on northern side (m)
-real, dimension(:,:), intent(in) :: ice_dy !< Meridional length of cell on eastern side (m)
-real, dimension(:,:), intent(in) :: ice_area !< Area of cells (m^2, or non-dim is fractional_area=True)
-real, dimension(:,:), intent(in) :: cos_rot !< Cosine from rotation matrix to lat-lon coords
-real, dimension(:,:), intent(in) :: sin_rot !< Sine from rotation matrix to lat-lon coords
-real, dimension(:,:), intent(in),optional :: ocean_depth !< Depth of ocean bottom (m)
-logical, intent(in), optional :: maskmap(:,:) !< Masks out parallel cores
-logical, intent(in), optional :: fractional_area !< If true, ice_area contains cell area as fraction of entire spherical surface
-! Local variables
-type(icebergs_gridded), pointer :: grd => null()
-integer :: nbonds
-logical :: check_bond_quality
-integer :: stdlogunit, stderrunit
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  integer, intent(in) :: gni !< Number of global points in i-direction
+  integer, intent(in) :: gnj !< Number of global points in j-direction
+  integer, intent(in) :: layout(2) !< Parallel decomposition of computational processors in i/j direction
+  integer, intent(in) :: io_layout(2) !< Parallel decomposition of i/o processors in i/j direction
+  integer, intent(in) :: axes(2) !< Diagnostic axes
+  integer, intent(in) :: dom_x_flags !< Decomposition flags for i-direction
+  integer, intent(in) :: dom_y_flags !< Decomposition flags for j-direction
+  real, intent(in) :: dt !< Time step (s)
+  type (time_type), intent(in) :: Time !< Model time
+  real, dimension(:,:), intent(in) :: ice_lon !< Longitude of cell corners using NE convention (degree E)
+  real, dimension(:,:), intent(in) :: ice_lat !< Latitude of cell corners using NE conventino (degree N)
+  real, dimension(:,:), intent(in) :: ice_wet !< Wet/dry mask (1 is wet, 0 is dry) of cell centers
+  real, dimension(:,:), intent(in) :: ice_dx !< Zonal length of cell on northern side (m)
+  real, dimension(:,:), intent(in) :: ice_dy !< Meridional length of cell on eastern side (m)
+  real, dimension(:,:), intent(in) :: ice_area !< Area of cells (m^2, or non-dim is fractional_area=True)
+  real, dimension(:,:), intent(in) :: cos_rot !< Cosine from rotation matrix to lat-lon coords
+  real, dimension(:,:), intent(in) :: sin_rot !< Sine from rotation matrix to lat-lon coords
+  real, dimension(:,:), intent(in),optional :: ocean_depth !< Depth of ocean bottom (m)
+  logical, intent(in), optional :: maskmap(:,:) !< Masks out parallel cores
+  logical, intent(in), optional :: fractional_area !< If true, ice_area contains cell area as fraction of entire spherical surface
+  ! Local variables
+  type(icebergs_gridded), pointer :: grd => null()
+  integer :: nbonds
+  logical :: check_bond_quality
+  integer :: stdlogunit, stderrunit
 
   ! Get the stderr and stdlog unit numbers
   stderrunit=stderr()
@@ -158,24 +158,24 @@ end subroutine icebergs_init
 
 !> Invoke some unit testing
 subroutine unit_testing(bergs)
-! Arguments
-type(icebergs), pointer :: bergs !< Container for all types and memory
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
 
-call hexagon_test()
-call point_in_triangle_test()
-call basal_melt_test(bergs)
-call test_check_for_duplicate_ids_in_list()
+  call hexagon_test()
+  call point_in_triangle_test()
+  call basal_melt_test(bergs)
+  call test_check_for_duplicate_ids_in_list()
 
 end subroutine unit_testing
 
 !> Test find_basal_melt()
 subroutine basal_melt_test(bergs)
-! Arguments
-type(icebergs), pointer :: bergs !< Container for all types and memory
-! Local variables
-real :: dvo,lat,salt,temp, basal_melt, thickness
-integer :: iceberg_num
-logical :: Use_three_equation_model
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  ! Local variables
+  real :: dvo,lat,salt,temp, basal_melt, thickness
+  integer :: iceberg_num
+  logical :: Use_three_equation_model
 
   if (mpp_pe() .eq. mpp_root_pe() ) print *, 'Begining Basal Melting Unit Test'
   dvo=0.2 ;lat=0.0 ; salt=35.0 ; temp=2.0 ;thickness=100.; iceberg_num=0
@@ -191,10 +191,10 @@ end subroutine basal_melt_test
 
 !> Test point_in_triangle()
 subroutine point_in_triangle_test()
-! Arguments
-real :: Ax,Ay,Bx,By,Cx,Cy  !Position of icebergs
-logical :: fail_unit_test
-integer :: stderrunit
+  ! Local variables
+  real :: Ax,Ay,Bx,By,Cx,Cy  !Position of icebergs
+  logical :: fail_unit_test
+  integer :: stderrunit
 
   ! Get the stderr unit number.
   stderrunit = stderr()
@@ -212,13 +212,13 @@ end subroutine point_in_triangle_test
 
 !> Test Hexagon_into_quadrants_using_triangles()
 subroutine hexagon_test()
-! Arguments
-real :: x0,y0  !Position of icebergs
-real :: H,theta,S !Apothen of iceberg and angle.
-real :: Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4 ! Areas of icebergs
-real :: tol
-logical :: fail_unit_test
-integer :: stderrunit
+  ! Local variables
+  real :: x0,y0  !Position of icebergs
+  real :: H,theta,S !Apothen of iceberg and angle.
+  real :: Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4 ! Areas of icebergs
+  real :: tol
+  logical :: fail_unit_test
+  integer :: stderrunit
 
   ! Get the stderr unit number.
   stderrunit = stderr()
@@ -317,24 +317,23 @@ integer :: stderrunit
 
   if (fail_unit_test) call error_mesg('diamonds, hexagon unit testing:', 'Hexagon unit testing does not pass!', FATAL)
 
-
 end subroutine hexagon_test
 
 !> Initializes bonds
 subroutine initialize_iceberg_bonds(bergs)
-! Arguments
-type(icebergs), pointer :: bergs !< Container for all types and memory
-! Local variables
-type(iceberg), pointer :: berg
-type(iceberg), pointer :: other_berg
-type(icebergs_gridded), pointer :: grd
-real :: T1, L1, W1, lon1, lat1, x1, y1, R1, A1   !Current iceberg
-real :: T2, L2, W2, lon2, lat2, x2, y2, R2, A2   !Other iceberg
-real :: dlon,dlat
-real :: dx_dlon,dy_dlat, lat_ref
-real :: r_dist_x, r_dist_y, r_dist
-integer :: grdi_outer, grdj_outer
-integer :: grdi_inner, grdj_inner
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  ! Local variables
+  type(iceberg), pointer :: berg
+  type(iceberg), pointer :: other_berg
+  type(icebergs_gridded), pointer :: grd
+  real :: T1, L1, W1, lon1, lat1, x1, y1, R1, A1   !Current iceberg
+  real :: T2, L2, W2, lon2, lat2, x2, y2, R2, A2   !Other iceberg
+  real :: dlon,dlat
+  real :: dx_dlon,dy_dlat, lat_ref
+  real :: r_dist_x, r_dist_y, r_dist
+  integer :: grdi_outer, grdj_outer
+  integer :: grdi_inner, grdj_inner
 
   ! For convenience
   grd=>bergs%grd
@@ -380,11 +379,11 @@ end subroutine initialize_iceberg_bonds
 
 ! Returns metric converting grid distances to meters
 subroutine convert_from_grid_to_meters(lat_ref, grid_is_latlon, dx_dlon, dy_dlat)
-! Arguments
-real, intent(in) :: lat_ref
-logical, intent(in) :: grid_is_latlon
-real, intent(out) :: dx_dlon
-real, intent(out) :: dy_dlat
+  ! Arguments
+  real, intent(in) :: lat_ref !< Latitude at which to make metric conversion (degree N)
+  logical, intent(in) :: grid_is_latlon !< True if grid model grid is in lat-lon coordinates
+  real, intent(out) :: dx_dlon !< Metric dx/dlon
+  real, intent(out) :: dy_dlat !< Metric dy/dlat
 
   if (grid_is_latlon) then
     dx_dlon=(pi/180.)*Rearth*cos((lat_ref)*(pi/180.))
@@ -394,15 +393,15 @@ real, intent(out) :: dy_dlat
     dy_dlat=1.
   endif
 
-end subroutine  convert_from_grid_to_meters
+end subroutine convert_from_grid_to_meters
 
 ! Returns metric converting distance in meters to grid distance
 subroutine  convert_from_meters_to_grid(lat_ref,grid_is_latlon ,dlon_dx,dlat_dy)
-! Arguments
-real, intent(in) :: lat_ref
-logical, intent(in) :: grid_is_latlon
-real, intent(out) :: dlon_dx
-real, intent(out) :: dlat_dy
+  ! Arguments
+  real, intent(in) :: lat_ref !< Latitude at which to make metric conversion (degree N)
+  logical, intent(in) :: grid_is_latlon !< True if grid model grid is in lat-lon coordinates
+  real, intent(out) :: dlon_dx !< Metric dlon/dx
+  real, intent(out) :: dlat_dy !< Metric dlat/dy
 
   if (grid_is_latlon) then
     dlon_dx=(180./pi)/(Rearth*cos((lat_ref)*(pi/180.)))
@@ -412,34 +411,34 @@ real, intent(out) :: dlat_dy
     dlat_dy=1.
   endif
 
-end subroutine  convert_from_meters_to_grid
+end subroutine convert_from_meters_to_grid
 
+!> Calculates interactive forcs between two bergs.
 subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
                              P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y)
-!Calculating interactive force between icebergs. Alon,  Markpoint_4
-! Arguments
-type(icebergs), pointer :: bergs !< Container for all types and memory
-type(iceberg), pointer :: berg
-type(iceberg), pointer :: other_berg
-type(bond), pointer :: current_bond
-real, intent(in) :: u0
-real, intent(in) :: v0
-real, intent(in) :: u1
-real, intent(in) :: v1
-real, intent(out) :: IA_x
-real, intent(out) :: IA_y
-real, intent(out) :: P_ia_11
-real, intent(out) :: P_ia_12
-real, intent(out) :: P_ia_22
-real, intent(out) :: P_ia_21
-real, intent(out) :: P_ia_times_u_x
-real, intent(out) :: P_ia_times_u_y
-! Local variables
-real :: u2, v2
-logical :: critical_interaction_damping_on
-integer :: grdi, grdj
-logical :: iceberg_bonds_on
-logical :: bonded
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  type(iceberg), pointer :: berg !< Primary iceberg
+  type(iceberg), pointer :: other_berg !< Berg that primary is interacting with
+  real, intent(in) :: u0
+  real, intent(in) :: v0
+  real, intent(in) :: u1
+  real, intent(in) :: v1
+  real, intent(out) :: IA_x
+  real, intent(out) :: IA_y
+  real, intent(out) :: P_ia_11
+  real, intent(out) :: P_ia_12
+  real, intent(out) :: P_ia_22
+  real, intent(out) :: P_ia_21
+  real, intent(out) :: P_ia_times_u_x
+  real, intent(out) :: P_ia_times_u_y
+  ! Local variables
+  type(bond), pointer :: current_bond
+  real :: u2, v2
+  logical :: critical_interaction_damping_on
+  integer :: grdi, grdj
+  logical :: iceberg_bonds_on
+  logical :: bonded
 
   iceberg_bonds_on=bergs%iceberg_bonds_on
 
@@ -480,25 +479,26 @@ logical :: bonded
   contains
 
   subroutine calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, &
-                             P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y,bonded)
-  !Arguments
-  type(icebergs), pointer :: bergs !< Container for all types and memory
-  type(iceberg), pointer :: berg
-  type(iceberg), pointer :: other_berg
-  real :: T1, L1, W1, lon1, lat1, x1, y1, R1, A1   !Current iceberg
-  real :: T2, L2, W2, lon2, lat2, x2, y2, R2, A2   !Other iceberg
-  real :: dlon, dlat
-  real :: r_dist_x, r_dist_y, r_dist, A_o, A_min, trapped, T_min
-  real, intent(in) :: u0,v0, u1, v1
-  real :: P_11, P_12, P_21, P_22
-  real :: M1, M2, M_min
-  real :: u2, v2
-  real :: lat_ref, dx_dlon, dy_dlat
-  logical :: critical_interaction_damping_on
-  real :: spring_coef, accel_spring, radial_damping_coef, p_ia_coef, tangental_damping_coef, bond_coef
-  real, intent(inout) :: IA_x, IA_y
-  real, intent(inout) :: P_ia_11, P_ia_12, P_ia_22, P_ia_21, P_ia_times_u_x, P_ia_times_u_y
-  logical ,intent(in) :: bonded
+                             P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y, bonded)
+    ! Arguments
+    type(icebergs), pointer :: bergs !< Container for all types and memory
+    type(iceberg), pointer :: berg !< Primary berg
+    type(iceberg), pointer :: other_berg !< Berg that primary is interacting with
+    real, intent(inout) :: IA_x, IA_y
+    real, intent(in) :: u0, v0, u1, v1
+    real, intent(inout) :: P_ia_11, P_ia_12, P_ia_22, P_ia_21, P_ia_times_u_x, P_ia_times_u_y
+    logical ,intent(in) :: bonded
+    ! Local variables
+    real :: T1, L1, W1, lon1, lat1, x1, y1, R1, A1   !Current iceberg
+    real :: T2, L2, W2, lon2, lat2, x2, y2, R2, A2   !Other iceberg
+    real :: dlon, dlat
+    real :: r_dist_x, r_dist_y, r_dist, A_o, A_min, trapped, T_min
+    real :: P_11, P_12, P_21, P_22
+    real :: M1, M2, M_min
+    real :: u2, v2
+    real :: lat_ref, dx_dlon, dy_dlat
+    logical :: critical_interaction_damping_on
+    real :: spring_coef, accel_spring, radial_damping_coef, p_ia_coef, tangental_damping_coef, bond_coef
 
     spring_coef=bergs%spring_coef
     !bond_coef=bergs%bond_coef
@@ -631,14 +631,14 @@ logical :: bonded
   end subroutine calculate_force
 
   subroutine overlap_area(R1, R2, d, A, trapped)
-  ! Arguments
-  real, intent(in) :: R1
-  real, intent(in) :: R2
-  real, intent(in) :: d
-  real, intent(out) :: A
-  real, intent(out) :: Trapped
-  ! Local variables
-  real :: R1_sq, R2_sq, d_sq
+    ! Arguments
+    real, intent(in) :: R1
+    real, intent(in) :: R2
+    real, intent(in) :: d
+    real, intent(out) :: A
+    real, intent(out) :: Trapped
+    ! Local variables
+    real :: R1_sq, R2_sq, d_sq
 
     R1_sq=R1**2
     R2_sq=R2**2
@@ -665,48 +665,47 @@ logical :: bonded
 end subroutine interactive_force
 
 !> Calculates the instantaneous acceleration of an iceberg
-subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, axn, ayn, bxn, byn, debug_flag) !Saving  acceleration for Verlet, Adding Verlet flag - Alon  MP1
-!subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, debug_flag) !old version commmented out by Alon
-! Arguments
-type(icebergs), pointer :: bergs !< Container for all types and memory
-type(iceberg), pointer :: berg !< An iceberg
-integer, intent(in) :: i !< i-index of cell berg is in
-integer, intent(in) :: j !< j-index of cell berg is in
-real, intent(in) :: xi !< Non-dimensional x-position within cell of berg
-real, intent(in) :: yj !< Non-dimensional y-position within cell of berg
-real, intent(in) :: lat !< Latitude of berg (degree N)
-real, intent(in) :: uvel !< Zonal velocity of berg (m/s)
-real, intent(in) :: vvel !< Meridional velocity of berg (m/s)
-real, intent(in) :: uvel0
-real, intent(in) :: vvel0
-real, intent(in) :: dt !< Time step (s)
-real, intent(out) :: ax !< Zonal acceleration (m/s2)
-real, intent(out) :: ay !< Meridional acceleration (m/s2)
-real, intent(inout) :: axn
-real, intent(inout) :: ayn
-real, intent(inout) :: bxn
-real, intent(inout) :: byn ! Added implicit and explicit accelerations to output -Alon
-logical, optional :: debug_flag !< If true, print debugging
-! Local variables
-type(icebergs_gridded), pointer :: grd
-real :: uo, vo, ui, vi, ua, va, uwave, vwave, ssh_x, ssh_y, sst, sss, cn, hi
-real :: f_cori, T, D, W, L, M, F
-real :: drag_ocn, drag_atm, drag_ice, wave_rad
-real :: c_ocn, c_atm, c_ice
-real :: ampl, wmod, Cr, Lwavelength, Lcutoff, Ltop
-real, parameter :: accel_lim=1.e-2, Cr0=0.06, vel_lim=15.
-real :: alpha, beta, C_N
-real :: lambda, detA, A11, A12, A21, A22, RHS_x, RHS_y, D_hi
-real :: uveln, vveln, us, vs, speed, loc_dx, new_speed
-real :: u_star, v_star    !Added by Alon
-real :: IA_x, IA_y    !Added by Alon
-real :: P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y    !Added by Alon
-logical :: dumpit
-logical :: interactive_icebergs_on  ! Flag to decide whether to use forces between icebergs.
-logical :: Runge_not_Verlet  ! Flag to specify whether it is Runge-Kutta or Verlet
-logical :: use_new_predictive_corrective !Flad to use Bob's predictive corrective scheme. (default off)
-integer :: itloop
-integer :: stderrunit
+subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, axn, ayn, bxn, byn, debug_flag)
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  type(iceberg), pointer :: berg !< An iceberg
+  integer, intent(in) :: i !< i-index of cell berg is in
+  integer, intent(in) :: j !< j-index of cell berg is in
+  real, intent(in) :: xi !< Non-dimensional x-position within cell of berg
+  real, intent(in) :: yj !< Non-dimensional y-position within cell of berg
+  real, intent(in) :: lat !< Latitude of berg (degree N)
+  real, intent(in) :: uvel !< Zonal velocity of berg (m/s)
+  real, intent(in) :: vvel !< Meridional velocity of berg (m/s)
+  real, intent(in) :: uvel0 !< Zonal velocity of berg at beginning of time-step (m/s)
+  real, intent(in) :: vvel0 !< Meridional velocity of berg at beginning of time-step (m/s)
+  real, intent(in) :: dt !< Time step (s)
+  real, intent(out) :: ax !< Zonal acceleration (m/s2)
+  real, intent(out) :: ay !< Meridional acceleration (m/s2)
+  real, intent(inout) :: axn !< Explicit estimate of zonal acceleration (m/s2)
+  real, intent(inout) :: ayn !< Explicit estimate of meridional acceleration (m/s2)
+  real, intent(inout) :: bxn !< Implicit component of zonal acceleration (m/s2)
+  real, intent(inout) :: byn !< Implicit component of meridional acceleration (m/s2)
+  logical, optional :: debug_flag !< If true, print debugging
+  ! Local variables
+  type(icebergs_gridded), pointer :: grd
+  real :: uo, vo, ui, vi, ua, va, uwave, vwave, ssh_x, ssh_y, sst, sss, cn, hi
+  real :: f_cori, T, D, W, L, M, F
+  real :: drag_ocn, drag_atm, drag_ice, wave_rad
+  real :: c_ocn, c_atm, c_ice
+  real :: ampl, wmod, Cr, Lwavelength, Lcutoff, Ltop
+  real, parameter :: accel_lim=1.e-2, Cr0=0.06, vel_lim=15.
+  real :: alpha, beta, C_N
+  real :: lambda, detA, A11, A12, A21, A22, RHS_x, RHS_y, D_hi
+  real :: uveln, vveln, us, vs, speed, loc_dx, new_speed
+  real :: u_star, v_star    !Added by Alon
+  real :: IA_x, IA_y    !Added by Alon
+  real :: P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y    !Added by Alon
+  logical :: dumpit
+  logical :: interactive_icebergs_on  ! Flag to decide whether to use forces between icebergs.
+  logical :: Runge_not_Verlet  ! Flag to specify whether it is Runge-Kutta or Verlet
+  logical :: use_new_predictive_corrective !Flad to use Bob's predictive corrective scheme. (default off)
+  integer :: itloop
+  integer :: stderrunit
 
   Runge_not_Verlet=bergs%Runge_not_Verlet  ! Loading directly from namelist/default , Alon
   interactive_icebergs_on=bergs%interactive_icebergs_on  ! Loading directly from namelist/default , Alon
@@ -880,7 +879,6 @@ integer :: stderrunit
     endif
     !print *,'Before calculation:', berg%iceberg_num, IA_x, IA_y, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y
   endif
-
 
   ! Solve for implicit accelerations
   if (alpha+beta.gt.0.) then
@@ -1097,75 +1095,74 @@ integer :: stderrunit
   contains
 
   subroutine dump_locfld(grd,i0,j0,A,lbl)
-  ! Arguments
-  type(icebergs_gridded), pointer :: grd
-  integer, intent(in) :: i0, j0
-  real, dimension(grd%isd:grd%ied,grd%jsd:grd%jed), intent(in) :: A
-  character(len=*) :: lbl
-! Local variables
-  integer :: i, j, ii, jj
-  real :: B(-1:1,-1:1), fac
+    ! Arguments
+    type(icebergs_gridded), pointer :: grd
+    integer, intent(in) :: i0, j0
+    real, dimension(grd%isd:grd%ied,grd%jsd:grd%jed), intent(in) :: A
+    character(len=*) :: lbl
+    ! Local variables
+    integer :: i, j, ii, jj
+    real :: B(-1:1,-1:1), fac
 
-  do jj=-1,1
-    j=max(grd%jsd,min(grd%jed,jj+j0))
-    do ii=-1,1
-      i=max(grd%isd,min(grd%ied,ii+i0))
-      B(ii,jj)=A(i,j)
-      if ((i.ne.ii+i0).or.(j.ne.jj+j0)) B(ii,jj)=-9.999999e-99
+    do jj=-1,1
+      j=max(grd%jsd,min(grd%jed,jj+j0))
+      do ii=-1,1
+        i=max(grd%isd,min(grd%ied,ii+i0))
+        B(ii,jj)=A(i,j)
+        if ((i.ne.ii+i0).or.(j.ne.jj+j0)) B(ii,jj)=-9.999999e-99
+      enddo
     enddo
-  enddo
-  write(stderrunit,'("pe=",i3,x,a8,3i12)') mpp_pe(),lbl,(i0+ii,ii=-1,1)
-  do jj=1,-1,-1
-    write(stderrunit,'("pe=",i3,x,i8,3es12.4)') mpp_pe(),j0+jj,(B(ii,jj),ii=-1,1)
-  enddo
+    write(stderrunit,'("pe=",i3,x,a8,3i12)') mpp_pe(),lbl,(i0+ii,ii=-1,1)
+    do jj=1,-1,-1
+      write(stderrunit,'("pe=",i3,x,i8,3es12.4)') mpp_pe(),j0+jj,(B(ii,jj),ii=-1,1)
+    enddo
   end subroutine dump_locfld
 
   subroutine dump_locvel(grd,i0,j0,A,lbl)
-  ! Arguments
-  type(icebergs_gridded), pointer :: grd
-  integer, intent(in) :: i0, j0
-  real, dimension(grd%isd:grd%ied,grd%jsd:grd%jed), intent(in) :: A
-  character(len=*) :: lbl
-! Local variables
-  integer :: i, j, ii, jj
-  real :: B(-1:0,-1:0), fac
+    ! Arguments
+    type(icebergs_gridded), pointer :: grd
+    integer, intent(in) :: i0, j0
+    real, dimension(grd%isd:grd%ied,grd%jsd:grd%jed), intent(in) :: A
+    character(len=*) :: lbl
+    ! Local variables
+    integer :: i, j, ii, jj
+    real :: B(-1:0,-1:0), fac
 
-  do jj=-1,0
-    j=max(grd%jsd,min(grd%jed,jj+j0))
-    do ii=-1,0
-      i=max(grd%isd,min(grd%ied,ii+i0))
-      B(ii,jj)=A(i,j)
-      if ((i.ne.ii+i0).or.(j.ne.jj+j0)) B(ii,jj)=-9.999999e-99
+    do jj=-1,0
+      j=max(grd%jsd,min(grd%jed,jj+j0))
+      do ii=-1,0
+        i=max(grd%isd,min(grd%ied,ii+i0))
+        B(ii,jj)=A(i,j)
+        if ((i.ne.ii+i0).or.(j.ne.jj+j0)) B(ii,jj)=-9.999999e-99
+      enddo
     enddo
-  enddo
-  write(stderrunit,'("pe=",i3,x,a8,3i12)') mpp_pe(),lbl,(i0+ii,ii=-1,0)
-  do jj=0,-1,-1
-    write(stderrunit,'("pe=",i3,x,i8,3es12.4)') mpp_pe(),j0+jj,(B(ii,jj),ii=-1,0)
-  enddo
+    write(stderrunit,'("pe=",i3,x,a8,3i12)') mpp_pe(),lbl,(i0+ii,ii=-1,0)
+    do jj=0,-1,-1
+      write(stderrunit,'("pe=",i3,x,i8,3es12.4)') mpp_pe(),j0+jj,(B(ii,jj),ii=-1,0)
+    enddo
   end subroutine dump_locvel
 
 end subroutine accel
 
-! ##############################################################################
-
+!> Steps forward thermodynamic state of all bergs
 subroutine thermodynamics(bergs)
-! Arguments
-type(icebergs), pointer :: bergs !< Container for all types and memory
-! Local variables
-type(icebergs_gridded), pointer :: grd
-type(bond), pointer :: current_bond
-real :: M, T, W, L, SST, Vol, Ln, Wn, Tn, nVol, IC, Dn
-real :: Mv, Me, Mb, melt, dvo, dva, dM, Ss, dMe, dMb, dMv
-real :: Mnew, Mnew1, Mnew2, Hocean
-real :: Mbits, nMbits, dMbitsE, dMbitsM, Lbits, Abits, Mbb
-real :: tip_parameter
-real :: Ms, N_bonds, N_max !Ice shelf melt, Number of bonds, Max_number of bonds
-real :: Delta, q
-integer :: i,j, stderrunit
-type(iceberg), pointer :: this, next
-real, parameter :: perday=1./86400.
-integer :: grdi, grdj
-real :: SSS !Temporarily here
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  ! Local variables
+  type(icebergs_gridded), pointer :: grd
+  type(bond), pointer :: current_bond
+  real :: M, T, W, L, SST, Vol, Ln, Wn, Tn, nVol, IC, Dn
+  real :: Mv, Me, Mb, melt, dvo, dva, dM, Ss, dMe, dMb, dMv
+  real :: Mnew, Mnew1, Mnew2, Hocean
+  real :: Mbits, nMbits, dMbitsE, dMbitsM, Lbits, Abits, Mbb
+  real :: tip_parameter
+  real :: Ms, N_bonds, N_max !Ice shelf melt, Number of bonds, Max_number of bonds
+  real :: Delta, q
+  integer :: i,j, stderrunit
+  type(iceberg), pointer :: this, next
+  real, parameter :: perday=1./86400.
+  integer :: grdi, grdj
+  real :: SSS !Temporarily here
 
   ! For convenience
   grd=>bergs%grd
@@ -1425,9 +1422,9 @@ real :: SSS !Temporarily here
   contains
 
   subroutine swap_variables(x,y)
-  ! Arguments
-  real, intent(inout) :: x, y
-  real :: temp
+    ! Arguments
+    real, intent(inout) :: x, y
+    real :: temp
     temp=x
     x=y
     y=temp
@@ -1536,87 +1533,88 @@ real :: tmp
   endif
 end subroutine create_gridded_icebergs_fields
 
+!> Calculates basl melt for given thermodynamic properties
 subroutine find_basal_melt(bergs, dvo, lat, salt, temp, Use_three_equation_model, thickness, basal_melt, iceberg_num)
-! Arguments
-type(icebergs), pointer :: bergs !< Container for all types and memory
-real, intent(in) :: dvo !< Speed of iceberg relative to ocean mixed layer
-real, intent(in) :: lat !< Latitude (for boundary layer calculation)
-real, intent(in) :: salt !< Salinity of mixed layer
-real, intent(in) :: temp !< Temperature of mixed layer
-logical, intent(in) :: Use_three_equation_model !< True uses the 3 equation model, False uses the 2 equation model.
-real, intent(in) :: thickness !< Ice thickness - needed to work out the pressure below the ice
-real, intent(out) :: basal_melt !< Melt rate underneath the icebergs
-integer, intent(in) :: iceberg_num !< Iceberg number, used for debugging (error messages)
-! Local variables
-real :: ustar, f_cori, absf,tfreeze
-real :: Hml !Mixed layer depth
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  real, intent(in) :: dvo !< Speed of iceberg relative to ocean mixed layer
+  real, intent(in) :: lat !< Latitude (for boundary layer calculation)
+  real, intent(in) :: salt !< Salinity of mixed layer
+  real, intent(in) :: temp !< Temperature of mixed layer
+  logical, intent(in) :: Use_three_equation_model !< True uses the 3 equation model, False uses the 2 equation model.
+  real, intent(in) :: thickness !< Ice thickness - needed to work out the pressure below the ice
+  real, intent(out) :: basal_melt !< Melt rate underneath the icebergs
+  integer, intent(in) :: iceberg_num !< Iceberg number, used for debugging (error messages)
+  ! Local variables
+  real :: ustar, f_cori, absf,tfreeze
+  real :: Hml !Mixed layer depth
 
-!These could also be useful output variables if needed.
-real :: t_flux, exch_vel_t, exch_vel_s,tflux_shelf,lprec
+  !These could also be useful output variables if needed.
+  real :: t_flux, exch_vel_t, exch_vel_s,tflux_shelf,lprec
 
-real ::  Rhoml   ! Ocean mixed layer density in kg m-3.
-real ::  p_int   ! The pressure at the ice-ocean interface, in Pa.
+  real ::  Rhoml   ! Ocean mixed layer density in kg m-3.
+  real ::  p_int   ! The pressure at the ice-ocean interface, in Pa.
 
-real, parameter :: VK    = 0.40     ! Von Karman's constant - dimensionless
-real :: ZETA_N = 0.052   ! The fraction of the boundary layer over which the
-                         ! viscosity is linearly increasing. (Was 1/8. Why?)
-real, parameter :: RC    = 0.20     ! critical flux Richardson number.
-real :: I_ZETA_N  ! The inverse of ZETA_N.
-real :: I_LF  ! Inverse of Latent Heat of fusion (J kg-1)
-real :: I_VK      ! The inverse of VK.
-real :: PR, SC    ! The Prandtl number and Schmidt number, nondim.
+  real, parameter :: VK    = 0.40     ! Von Karman's constant - dimensionless
+  real :: ZETA_N = 0.052   ! The fraction of the boundary layer over which the
+                           ! viscosity is linearly increasing. (Was 1/8. Why?)
+  real, parameter :: RC    = 0.20     ! critical flux Richardson number.
+  real :: I_ZETA_N  ! The inverse of ZETA_N.
+  real :: I_LF  ! Inverse of Latent Heat of fusion (J kg-1)
+  real :: I_VK      ! The inverse of VK.
+  real :: PR, SC    ! The Prandtl number and Schmidt number, nondim.
 
-! 3 equation formulation variables
-real :: Sbdry     !   Salinities in the ocean at the interface with the
-real :: Sbdry_it  ! the ice shelf, in PSU.
-real :: dS_it     ! The interface salinity change during an iteration, in PSU.
-real :: hBL_neut  ! The neutral boundary layer thickness, in m.
-real :: hBL_neut_h_molec ! The ratio of the neutral boundary layer thickness
-                         ! to the molecular boundary layer thickness, ND.
-real :: wT_flux ! The vertical fluxes of heat and buoyancy just inside the
-real :: wB_flux ! ocean, in C m s-1 and m2 s-3, ###CURRENTLY POSITIVE UPWARD.
-real :: dB_dS  ! The derivative of buoyancy with salinity, in m s-2 PSU-1.
-real :: dB_dT  ! The derivative of buoyancy with temperature, in m s-2 C-1.
-real :: I_n_star, n_star_term
-real :: dIns_dwB  ! The partial derivative of I_n_star with wB_flux, in ???.
-real :: dT_ustar, dS_ustar
-real :: ustar_h
-real :: Gam_turb
-real :: Gam_mol_t, Gam_mol_s
-real :: RhoCp
-real :: I_RhoLF
-real :: Rho0
-real :: ln_neut
-real :: mass_exch
-real :: Sb_min, Sb_max
-real :: dS_min, dS_max
-real :: density_ice
+  ! 3 equation formulation variables
+  real :: Sbdry     !   Salinities in the ocean at the interface with the
+  real :: Sbdry_it  ! the ice shelf, in PSU.
+  real :: dS_it     ! The interface salinity change during an iteration, in PSU.
+  real :: hBL_neut  ! The neutral boundary layer thickness, in m.
+  real :: hBL_neut_h_molec ! The ratio of the neutral boundary layer thickness
+                           ! to the molecular boundary layer thickness, ND.
+  real :: wT_flux ! The vertical fluxes of heat and buoyancy just inside the
+  real :: wB_flux ! ocean, in C m s-1 and m2 s-3, ###CURRENTLY POSITIVE UPWARD.
+  real :: dB_dS  ! The derivative of buoyancy with salinity, in m s-2 PSU-1.
+  real :: dB_dT  ! The derivative of buoyancy with temperature, in m s-2 C-1.
+  real :: I_n_star, n_star_term
+  real :: dIns_dwB  ! The partial derivative of I_n_star with wB_flux, in ???.
+  real :: dT_ustar, dS_ustar
+  real :: ustar_h
+  real :: Gam_turb
+  real :: Gam_mol_t, Gam_mol_s
+  real :: RhoCp
+  real :: I_RhoLF
+  real :: Rho0
+  real :: ln_neut
+  real :: mass_exch
+  real :: Sb_min, Sb_max
+  real :: dS_min, dS_max
+  real :: density_ice
 
-! Variables used in iterating for wB_flux.
-real :: wB_flux_new, DwB, dDwB_dwB_in
-real :: I_Gam_T, I_Gam_S
-real :: dG_dwB, iDens
-logical :: Sb_min_set, Sb_max_set
-logical :: out_of_bounds
+  ! Variables used in iterating for wB_flux.
+  real :: wB_flux_new, DwB, dDwB_dwB_in
+  real :: I_Gam_T, I_Gam_S
+  real :: dG_dwB, iDens
+  logical :: Sb_min_set, Sb_max_set
+  logical :: out_of_bounds
 
-real, parameter :: c2_3 = 2.0/3.0
-integer ::  it1, it3
+  real, parameter :: c2_3 = 2.0/3.0
+  integer ::  it1, it3
 
-!Parameters copied ice shelf module defaults (could be entered in the namelist later)
-real, parameter :: dR0_dT = -0.038357 ! Partial derivative of the mixed layer density with temperature, in units of kg m-3 K-1.
-real, parameter :: dR0_dS = 0.805876 ! Partial derivative of the mixed layer density with salinity, in units of kg m-3 psu-1.
-real, parameter :: RHO_T0_S0 = 999.910681 ! Density of water with T=0, S=0 for linear EOS
-real, parameter :: Salin_Ice =0.0 !Salinity of ice
-real, parameter :: Temp_Ice = -15.0 !Salinity of ice
-real, parameter :: kd_molec_salt=  8.02e-10 !The molecular diffusivity of salt in sea water at the freezing point
-real, parameter :: kd_molec_temp=  1.41e-7 !The molecular diffusivity of heat in sea water at the freezing point
-real, parameter :: kv_molec=  1.95e-6 !The molecular molecular kinematic viscosity of sea water at the freezing point
-real, parameter :: Cp_Ice =  2009.0 !Specific heat capacity of ice, taking from HJ99 (Holland and Jenkins 1999)
-real, parameter :: Cp_ml =  3974.0 !Specific heat capacity of mixed layer, taking from HJ99 (Holland and Jenkins 1999)
-real, parameter :: LF =  3.335e5 !Latent heat of fusion, taken from HJ99 (Holland and Jenkins 1999)
-real, parameter :: gamma_t =  0.0 ! Exchange velocity used in 2 equation model. Whn gamma_t is >0, the exchange velocity is independent of u_star.
-                                ! When gamma_t=0.0, then gamma_t is not used, and the exchange velocity is found using u_star.
-real, parameter :: p_atm =  101325 ! Average atmospheric pressure (Pa) - from Google.
+  !Parameters copied ice shelf module defaults (could be entered in the namelist later)
+  real, parameter :: dR0_dT = -0.038357 ! Partial derivative of the mixed layer density with temperature, in units of kg m-3 K-1.
+  real, parameter :: dR0_dS = 0.805876 ! Partial derivative of the mixed layer density with salinity, in units of kg m-3 psu-1.
+  real, parameter :: RHO_T0_S0 = 999.910681 ! Density of water with T=0, S=0 for linear EOS
+  real, parameter :: Salin_Ice =0.0 !Salinity of ice
+  real, parameter :: Temp_Ice = -15.0 !Salinity of ice
+  real, parameter :: kd_molec_salt=  8.02e-10 !The molecular diffusivity of salt in sea water at the freezing point
+  real, parameter :: kd_molec_temp=  1.41e-7 !The molecular diffusivity of heat in sea water at the freezing point
+  real, parameter :: kv_molec=  1.95e-6 !The molecular molecular kinematic viscosity of sea water at the freezing point
+  real, parameter :: Cp_Ice =  2009.0 !Specific heat capacity of ice, taking from HJ99 (Holland and Jenkins 1999)
+  real, parameter :: Cp_ml =  3974.0 !Specific heat capacity of mixed layer, taking from HJ99 (Holland and Jenkins 1999)
+  real, parameter :: LF =  3.335e5 !Latent heat of fusion, taken from HJ99 (Holland and Jenkins 1999)
+  real, parameter :: gamma_t =  0.0 ! Exchange velocity used in 2 equation model. Whn gamma_t is >0, the exchange velocity is independent of u_star.
+                                  ! When gamma_t=0.0, then gamma_t is not used, and the exchange velocity is found using u_star.
+  real, parameter :: p_atm =  101325 ! Average atmospheric pressure (Pa) - from Google.
 
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   density_ice = bergs%rho_bergs
