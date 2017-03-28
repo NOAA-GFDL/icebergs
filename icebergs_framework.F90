@@ -422,9 +422,9 @@ logical :: orig_read=.false.
 
 !> Version of file provided by CPP macro (usually set to git hash)
 #ifdef _FILE_VERSION
-  character(len=128) :: version = _FILE_VERSION
+character(len=128) :: version = _FILE_VERSION !< Version of file
 #else
-  character(len=128) :: version = 'unknown'
+character(len=128) :: version = 'unknown' !< Version of file
 #endif
 
 contains
@@ -3276,11 +3276,9 @@ real :: Lx
   endif
   find_cell_by_search=.false.
 
-  contains
+end function find_cell_by_search
 
-! # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-
-  real function dcost(x1, y1, x2, y2,Lx)
+real function dcost(x1, y1, x2, y2,Lx)
   ! Arguments
   real, intent(in) :: x1, x2, y1, y2,Lx
   ! Local variables
@@ -3289,11 +3287,9 @@ real :: Lx
     x1m=apply_modulo_around_point(x1,x2,Lx)
   ! dcost=(x2-x1)**2+(y2-y1)**2
     dcost=(x2-x1m)**2+(y2-y1)**2
-  end function dcost
+end function dcost
 
-! # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-
-  logical function find_better_min(grd, x, y, w, oi, oj)
+logical function find_better_min(grd, x, y, w, oi, oj)
   ! Arguments
   type(icebergs_gridded), intent(in) :: grd !< Container for gridded fields
   real, intent(in) :: x, y
@@ -3322,11 +3318,9 @@ real :: Lx
       endif
   enddo; enddo
 
-  end function find_better_min
+end function find_better_min
 
-! # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
-
-  logical function find_cell_loc(grd, x, y, is, ie, js, je, w, oi, oj)
+logical function find_cell_loc(grd, x, y, is, ie, js, je, w, oi, oj)
   ! Arguments
   type(icebergs_gridded), intent(in) :: grd !< Container for gridded fields
   real, intent(in) :: x, y
@@ -3348,9 +3342,7 @@ real :: Lx
         endif
     enddo; enddo
 
-  end function find_cell_loc
-
-end function find_cell_by_search
+end function find_cell_loc
 
 !> Returns the i,j of cell containing an iceberg with the given identifier
 subroutine find_individual_iceberg(bergs, iceberg_num, ine, jne, berg_found, search_data_domain)
@@ -3802,107 +3794,105 @@ logical :: is_point_in_cell_using_xi_yj
     endif
   endif
 
-  contains
-
-  !> Calculates non-dimension position of x,y within a polygon with four corners
-  subroutine calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, x, y, xi, yj, Lx, explain)
-  ! Arguments
-  real, intent(in) :: x1 !< Longitude of first corner
-  real, intent(in) :: y1 !< Latitude of first corner
-  real, intent(in) :: x2 !< Longitude of second corner
-  real, intent(in) :: y2 !< Latitude of second corner
-  real, intent(in) :: x3 !< Longitude of third corner
-  real, intent(in) :: y3 !< Latitude of third corner
-  real, intent(in) :: x4 !< Longitude of fourth corner
-  real, intent(in) :: y4 !< Latitude of fourth corner
-  real, intent(in) :: x !< Longitude of point
-  real, intent(in) :: y !< Latitude of point
-  real, intent(out) :: xi !< Non-dimensional x-position within cell
-  real, intent(out) :: yj !< Non-dimensional y-position within cell
-  real, intent(in) :: Lx !< Length of domain in zonal direction
-  logical, intent(in), optional :: explain !< If true, print debugging
-  ! Local variables
-  real :: alpha, beta, gamma, delta, epsilon, kappa, a, b, c, d, dx, dy, yy1, yy2
-  logical :: expl=.false.
-  integer :: stderrunit
-
-  ! Get the stderr unit number
-  stderrunit=stderr()
-
-  expl=.false.
-  if (present(explain)) then
-     if(explain) expl=.true.
-  endif
-
-  alpha=x2-x1
-  delta=y2-y1
-  beta=x4-x1
-  epsilon=y4-y1
-  gamma=(x3-x1)-(alpha+beta)
-  kappa=(y3-y1)-(delta+epsilon)
-  if (expl) write(stderrunit,'(a,1p6e12.4)') 'calc_xiyj: coeffs alpha,beta,gamma',alpha,beta,gamma,delta,epsilon,kappa
-  if (expl) write(stderrunit,'(a,1p6e12.4)') 'calc_xiyj: coeffs delta,epsilon,kappa',alpha,beta,gamma,delta,epsilon,kappa
-
-  a=(kappa*beta-gamma*epsilon)
-  dx= apply_modulo_around_point(x,x1,Lx)-x1
-
-  dy=y-y1
-  b=(delta*beta-alpha*epsilon)-(kappa*dx-gamma*dy)
-  c=(alpha*dy-delta*dx)
-  if (expl) write(stderrunit,'(a,1p6e12.4)') 'calc_xiyj: coeffs dx,dy=',dx,dy
-  if (expl) write(stderrunit,'(a,1p6e12.4)') 'calc_xiyj: coeffs A,B,C=',a,b,c
-  if (abs(a)>1.e-12) then
-    d=0.25*(b**2)-a*c
-    if (expl) write(stderrunit,'(a,1p6e12.4)') 'calc_xiyj: coeffs D=',d
-    if (d.ge.0.) then
-      if (expl) write(stderrunit,'(a,1p3e12.4)') 'Roots for b/2a, sqrt(d) = ',-0.5*b/a,sqrt(d)/a
-      yy1=-(0.5*b+sqrt(d))/a
-      yy2=-(0.5*b-sqrt(d))/a
-      if (abs(yy1-0.5).lt.abs(yy2-0.5)) then; yj=yy1; else; yj=yy2; endif
-      if (expl) write(stderrunit,'(a,1p3e12.4)') 'Roots for y = ',yy1,yy2,yj
-    else
-      write(stderrunit,'(a,i3,a,4(f8.2,a))') 'calc_xiyj: ',mpp_pe(),'lon=[',x1,',',x2,',',x3,',',x4,']'
-      write(stderrunit,'(a,i3,3f8.2)') 'calc_xiyj: x2..x4 - x1',mpp_pe(),x2-x1,x3-x1,x4-x1
-      write(stderrunit,'(a,i3,a,4(f8.2,a))') 'calc_xiyj: ',mpp_pe(),'lat=[',y1,',',y2,',',y3,',',y4,']'
-      write(stderrunit,'(a,i3,3f8.2)') 'calc_xiyj: y2..y4 - x1',mpp_pe(),y2-y1,y3-y1,y4-y1
-      write(stderrunit,'(a,i3,1p6e12.4)') 'calc_xiyj: coeffs alpha..kappa',mpp_pe(),alpha,beta,gamma,delta,epsilon,kappa
-      write(stderrunit,'(a,i3)') 'calc_xiyj: b<0 in quadratic root solver!!!!',mpp_pe()
-      write(stderrunit,'(a,i3,1p6e12.4)') 'calc_xiyj: coeffs a,b,c,d,dx,dy',mpp_pe(),a,b,c,d,dx,dy
-      call error_mesg('diamonds, calc_xiyj', 'We have complex roots. The grid must be very distorted!', FATAL)
-    endif
-  else
-    if (b.ne.0.) then
-      yj=-c/b
-    else
-      yj=0.
-    endif
-  endif
-
-  a=(alpha+gamma*yj)
-  b=(delta+kappa*yj)
-  if (a.ne.0.) then
-    xi=(dx-beta*yj)/a
-  elseif (b.ne.0.) then
-    xi=(dy-epsilon*yj)/b
-  else
-    c=(epsilon*alpha-beta*delta)+(epsilon*gamma-beta*kappa)*yj
-    if (c.ne.0.) then
-      xi=(epsilon*dx-beta*dy)/c
-    else
-      write(stderrunit,'(a,i3,4f8.2)') 'calc_xiyj: x1..x4 ',mpp_pe(),x1,x2,x3,x4
-      write(stderrunit,'(a,i3,3f8.2)') 'calc_xiyj: x2..x4 - x1',mpp_pe(),x2-x1,x3-x1,x4-x1
-      write(stderrunit,'(a,i3,4f8.2)') 'calc_xiyj: y1..y4 ',mpp_pe(),y1,y2,y3,y4
-      write(stderrunit,'(a,i3,3f8.2)') 'calc_xiyj: y2..y4 - x1',mpp_pe(),y2-y1,y3-y1,y4-y1
-      write(stderrunit,'(a,i3,1p6e12.4)') 'calc_xiyj: coeffs alpha..kappa',mpp_pe(),alpha,beta,gamma,delta,epsilon,kappa
-      write(stderrunit,'(a,i3,1p2e12.4)') 'calc_xiyj: coeffs a,b',mpp_pe(),a,b
-      call error_mesg('diamonds, calc_xiyj', 'Can not invert either linear equaton for xi! This should not happen!', FATAL)
-    endif
-  endif
-  if (expl) write(stderrunit,'(a,2e12.4)') 'calc_xiyj: xi,yj=',xi,yj
-
-  end subroutine calc_xiyj
-
 end function pos_within_cell
+
+!> Calculates non-dimension position of x,y within a polygon with four corners
+subroutine calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, x, y, xi, yj, Lx, explain)
+! Arguments
+real, intent(in) :: x1 !< Longitude of first corner
+real, intent(in) :: y1 !< Latitude of first corner
+real, intent(in) :: x2 !< Longitude of second corner
+real, intent(in) :: y2 !< Latitude of second corner
+real, intent(in) :: x3 !< Longitude of third corner
+real, intent(in) :: y3 !< Latitude of third corner
+real, intent(in) :: x4 !< Longitude of fourth corner
+real, intent(in) :: y4 !< Latitude of fourth corner
+real, intent(in) :: x !< Longitude of point
+real, intent(in) :: y !< Latitude of point
+real, intent(out) :: xi !< Non-dimensional x-position within cell
+real, intent(out) :: yj !< Non-dimensional y-position within cell
+real, intent(in) :: Lx !< Length of domain in zonal direction
+logical, intent(in), optional :: explain !< If true, print debugging
+! Local variables
+real :: alpha, beta, gamma, delta, epsilon, kappa, a, b, c, d, dx, dy, yy1, yy2
+logical :: expl=.false.
+integer :: stderrunit
+
+! Get the stderr unit number
+stderrunit=stderr()
+
+expl=.false.
+if (present(explain)) then
+   if(explain) expl=.true.
+endif
+
+alpha=x2-x1
+delta=y2-y1
+beta=x4-x1
+epsilon=y4-y1
+gamma=(x3-x1)-(alpha+beta)
+kappa=(y3-y1)-(delta+epsilon)
+if (expl) write(stderrunit,'(a,1p6e12.4)') 'calc_xiyj: coeffs alpha,beta,gamma',alpha,beta,gamma,delta,epsilon,kappa
+if (expl) write(stderrunit,'(a,1p6e12.4)') 'calc_xiyj: coeffs delta,epsilon,kappa',alpha,beta,gamma,delta,epsilon,kappa
+
+a=(kappa*beta-gamma*epsilon)
+dx= apply_modulo_around_point(x,x1,Lx)-x1
+
+dy=y-y1
+b=(delta*beta-alpha*epsilon)-(kappa*dx-gamma*dy)
+c=(alpha*dy-delta*dx)
+if (expl) write(stderrunit,'(a,1p6e12.4)') 'calc_xiyj: coeffs dx,dy=',dx,dy
+if (expl) write(stderrunit,'(a,1p6e12.4)') 'calc_xiyj: coeffs A,B,C=',a,b,c
+if (abs(a)>1.e-12) then
+  d=0.25*(b**2)-a*c
+  if (expl) write(stderrunit,'(a,1p6e12.4)') 'calc_xiyj: coeffs D=',d
+  if (d.ge.0.) then
+    if (expl) write(stderrunit,'(a,1p3e12.4)') 'Roots for b/2a, sqrt(d) = ',-0.5*b/a,sqrt(d)/a
+    yy1=-(0.5*b+sqrt(d))/a
+    yy2=-(0.5*b-sqrt(d))/a
+    if (abs(yy1-0.5).lt.abs(yy2-0.5)) then; yj=yy1; else; yj=yy2; endif
+    if (expl) write(stderrunit,'(a,1p3e12.4)') 'Roots for y = ',yy1,yy2,yj
+  else
+    write(stderrunit,'(a,i3,a,4(f8.2,a))') 'calc_xiyj: ',mpp_pe(),'lon=[',x1,',',x2,',',x3,',',x4,']'
+    write(stderrunit,'(a,i3,3f8.2)') 'calc_xiyj: x2..x4 - x1',mpp_pe(),x2-x1,x3-x1,x4-x1
+    write(stderrunit,'(a,i3,a,4(f8.2,a))') 'calc_xiyj: ',mpp_pe(),'lat=[',y1,',',y2,',',y3,',',y4,']'
+    write(stderrunit,'(a,i3,3f8.2)') 'calc_xiyj: y2..y4 - x1',mpp_pe(),y2-y1,y3-y1,y4-y1
+    write(stderrunit,'(a,i3,1p6e12.4)') 'calc_xiyj: coeffs alpha..kappa',mpp_pe(),alpha,beta,gamma,delta,epsilon,kappa
+    write(stderrunit,'(a,i3)') 'calc_xiyj: b<0 in quadratic root solver!!!!',mpp_pe()
+    write(stderrunit,'(a,i3,1p6e12.4)') 'calc_xiyj: coeffs a,b,c,d,dx,dy',mpp_pe(),a,b,c,d,dx,dy
+    call error_mesg('diamonds, calc_xiyj', 'We have complex roots. The grid must be very distorted!', FATAL)
+  endif
+else
+  if (b.ne.0.) then
+    yj=-c/b
+  else
+    yj=0.
+  endif
+endif
+
+a=(alpha+gamma*yj)
+b=(delta+kappa*yj)
+if (a.ne.0.) then
+  xi=(dx-beta*yj)/a
+elseif (b.ne.0.) then
+  xi=(dy-epsilon*yj)/b
+else
+  c=(epsilon*alpha-beta*delta)+(epsilon*gamma-beta*kappa)*yj
+  if (c.ne.0.) then
+    xi=(epsilon*dx-beta*dy)/c
+  else
+    write(stderrunit,'(a,i3,4f8.2)') 'calc_xiyj: x1..x4 ',mpp_pe(),x1,x2,x3,x4
+    write(stderrunit,'(a,i3,3f8.2)') 'calc_xiyj: x2..x4 - x1',mpp_pe(),x2-x1,x3-x1,x4-x1
+    write(stderrunit,'(a,i3,4f8.2)') 'calc_xiyj: y1..y4 ',mpp_pe(),y1,y2,y3,y4
+    write(stderrunit,'(a,i3,3f8.2)') 'calc_xiyj: y2..y4 - x1',mpp_pe(),y2-y1,y3-y1,y4-y1
+    write(stderrunit,'(a,i3,1p6e12.4)') 'calc_xiyj: coeffs alpha..kappa',mpp_pe(),alpha,beta,gamma,delta,epsilon,kappa
+    write(stderrunit,'(a,i3,1p2e12.4)') 'calc_xiyj: coeffs a,b',mpp_pe(),a,b
+    call error_mesg('diamonds, calc_xiyj', 'Can not invert either linear equaton for xi! This should not happen!', FATAL)
+  endif
+endif
+if (expl) write(stderrunit,'(a,2e12.4)') 'calc_xiyj: xi,yj=',xi,yj
+
+end subroutine calc_xiyj
 
 !> Returns true if non-dimensional position xi,yj is in unit interval
 !!
@@ -4476,21 +4466,25 @@ logical function unitTests(bergs)
   stderrunit=stderr()
 
   i=grd%isc; j=grd%jsc
-  call localTest( bilin(grd, grd%lon, i, j, 0., 1.), grd%lon(i-1,j) )
-  call localTest( bilin(grd, grd%lon, i, j, 1., 1.), grd%lon(i,j) )
-  call localTest( bilin(grd, grd%lat, i, j, 1., 0.), grd%lat(i,j-1) )
-  call localTest( bilin(grd, grd%lat, i, j, 1., 1.), grd%lat(i,j) )
+  call localTest( unitTests, bilin(grd, grd%lon, i, j, 0., 1.), grd%lon(i-1,j) )
+  call localTest( unitTests, bilin(grd, grd%lon, i, j, 1., 1.), grd%lon(i,j) )
+  call localTest( unitTests, bilin(grd, grd%lat, i, j, 1., 0.), grd%lat(i,j-1) )
+  call localTest( unitTests, bilin(grd, grd%lat, i, j, 1., 1.), grd%lat(i,j) )
 
-  contains
-
-  !> Checks answer to right answer and prints results if different
-  subroutine localTest(answer, rightAnswer)
-  real, intent(in) :: answer, rightAnswer
-  if (answer==rightAnswer) return
-  unitTests=.true.
-  write(stderrunit,*) 'a=',answer,'b=',rightAnswer
-  end subroutine localTest
 end function unitTests
+
+!> Checks answer to right answer and prints results if different
+subroutine localTest(unit_test, answer, rightAnswer)
+  logical, intent(inout) :: unit_test !< Set to true answer is wrong
+  real, intent(in) :: answer !< Calculated answer
+  real, intent(in) :: rightAnswer !< Correct answer
+  ! Local variables
+  integer :: stderrunit
+  stderrunit=stderr()
+  if (answer==rightAnswer) return
+  unit_test=.true.
+  write(stderrunit,*) 'a=',answer,'b=',rightAnswer
+end subroutine localTest
 
 !> Check for duplicates of icebergs on and across processors and issue an error
 !! if any are detected

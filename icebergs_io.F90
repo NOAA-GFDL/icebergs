@@ -400,23 +400,22 @@ integer :: grdi, grdj
     call grd_chksum2(bergs%grd, bergs%grd%rmean_calving_hflx, 'write mean calving_hflx')
     call write_data(filename, 'rmean_calving_hflx', bergs%grd%rmean_calving_hflx, bergs%grd%domain)
   endif
-  contains
-
-  !> Find the last berg in a linked list.
-  function last_berg(berg)
-  ! Arguments
-  type(iceberg), pointer :: berg !< Pointer to an iceberg
-  type(iceberg), pointer :: last_berg
-  ! Local variables
-
-    last_berg=>berg
-    do while (associated(last_berg%next))
-      last_berg=>last_berg%next
-    enddo
-
-  end function last_berg
 
 end subroutine write_restart
+
+!> Find the last berg in a linked list.
+function last_berg(berg)
+! Arguments
+type(iceberg), pointer :: berg !< Pointer to an iceberg
+type(iceberg), pointer :: last_berg
+! Local variables
+
+  last_berg=>berg
+  do while (associated(last_berg%next))
+    last_berg=>last_berg%next
+  enddo
+
+end function last_berg
 
 !> Read an iceberg restart file (original implementation)
 subroutine read_restart_bergs_orig(bergs,Time)
@@ -600,7 +599,7 @@ integer :: stderrunit, iNg, jNg, i, j
 
   if (k.ne.nbergs_in_file) call error_mesg('diamonds, read_restart_bergs', 'wrong number of bergs read!', FATAL)
 
-  if (.not. found_restart .and. bergs%nbergs_start==0 .and. generate_test_icebergs) call generate_bergs(bergs,Time)
+  if (.not. found_restart .and. bergs%nbergs_start==0 .and. generate_test_icebergs) call generate_bergs_orig(bergs,Time)
 
   bergs%floating_mass_start=sum_mass(bergs)
   call mpp_sum( bergs%floating_mass_start )
@@ -610,104 +609,103 @@ integer :: stderrunit, iNg, jNg, i, j
   call mpp_sum( bergs%bergy_mass_start )
   if (mpp_pe().eq.mpp_root_pe().and.verbose) write(*,'(a)') 'diamonds, read_restart_bergs: completed'
 
-contains
-
-  !> Read a real value from a file and optionally return a default value if variable is missing
-  real function get_real_from_file(ncid, varid, k, value_if_not_in_file)
-  integer, intent(in) :: ncid, varid, k
-  real, optional :: value_if_not_in_file
-
-  if (varid<1.and.present(value_if_not_in_file)) then
-    get_real_from_file=value_if_not_in_file
-  else
-    get_real_from_file=get_double(ncid, ncid, k)
-  endif
-  end function get_real_from_file
-
-  !> Generate bergs for the purpose of debugging
-  subroutine generate_bergs(bergs,Time)
-  ! Arguments
-  type(icebergs), pointer :: bergs !< Icebergs container
-  type(time_type), intent(in) :: Time !< Model time
-  ! Local variables
-  integer :: i,j
-  integer :: iNg, jNg  !Total number of points gloablly in i and j direction
-  type(iceberg) :: localberg ! NOT a pointer but an actual local variable
-  integer :: iyr, imon, iday, ihr, imin, isec
-
-    ! For convenience
-    grd=>bergs%grd
-    iNg=(grd%ieg-grd%isg+1) ! Total number of points globally in i direction
-    jNg=(grd%jeg-grd%jsg+1) ! Total number of points globally in j direction
-
-    call get_date(Time, iyr, imon, iday, ihr, imin, isec)
-
-    do j=grd%jsc,grd%jec; do i=grd%isc,grd%iec
-      if (grd%msk(i,j)>0. .and. abs(grd%latc(i,j))>60.) then
-        localberg%xi=0.5
-        localberg%yj=0.5
-        localberg%ine=i
-        localberg%jne=j
-        localberg%lon=bilin(grd, grd%lon, i, j, localberg%xi, localberg%yj)
-        localberg%lat=bilin(grd, grd%lat, i, j, localberg%xi, localberg%yj)
-        localberg%lon_old=bilin(grd, grd%lon, i, j, localberg%xi, localberg%yj) !Alon
-        localberg%lat_old=bilin(grd, grd%lat, i, j, localberg%xi, localberg%yj) !Alon
-        localberg%mass=bergs%initial_mass(1)
-        localberg%thickness=bergs%initial_thickness(1)
-        localberg%width=bergs%initial_width(1)
-        localberg%length=bergs%initial_length(1)
-        localberg%start_lon=localberg%lon
-        localberg%start_lat=localberg%lat
-        localberg%start_year=iyr
-        localberg%start_day=float(iday)+(float(ihr)+float(imin)/60.)/24.
-        localberg%start_mass=localberg%mass
-        localberg%mass_scaling=bergs%mass_scaling(1)
-        localberg%mass_of_bits=0.
-        localberg%halo_berg=0.
-        localberg%static_berg=0.
-        localberg%heat_density=0.
-        localberg%axn=0. !Alon
-        localberg%ayn=0. !Alon
-        localberg%uvel_old=0. !Alon
-        localberg%vvel_old=0. !Alon
-        localberg%bxn=0. !Alon
-        localberg%byn=0. !Alon
-
-        !Berg A
-        localberg%uvel=1.
-        localberg%vvel=0.
-        localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
-        grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
-        call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
-        !Berg B
-        localberg%uvel=-1.
-        localberg%vvel=0.
-        localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
-        grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
-        call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
-        !Berg C
-        localberg%uvel=0.
-        localberg%vvel=1.
-        localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
-        grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
-        call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
-        !Berg D
-        localberg%uvel=0.
-        localberg%vvel=-1.
-        localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
-        grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
-        call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
-      endif
-    enddo; enddo
-
-    bergs%nbergs_start=count_bergs(bergs)
-    call mpp_sum(bergs%nbergs_start)
-    if (mpp_pe().eq.mpp_root_pe()) &
-      write(*,'(a,i8,a)') 'diamonds, generate_bergs: ',bergs%nbergs_start,' were generated'
-
-  end subroutine generate_bergs
-
 end subroutine read_restart_bergs_orig
+
+!> Read a real value from a file and optionally return a default value if variable is missing
+real function get_real_from_file(ncid, varid, k, value_if_not_in_file)
+integer, intent(in) :: ncid, varid, k
+real, optional :: value_if_not_in_file
+
+if (varid<1.and.present(value_if_not_in_file)) then
+  get_real_from_file=value_if_not_in_file
+else
+  get_real_from_file=get_double(ncid, ncid, k)
+endif
+end function get_real_from_file
+
+!> Generate bergs for the purpose of debugging
+subroutine generate_bergs_orig(bergs, Time)
+! Arguments
+type(icebergs), pointer :: bergs !< Icebergs container
+type(time_type), intent(in) :: Time !< Model time
+! Local variables
+type(icebergs_gridded), pointer :: grd
+integer :: i,j
+integer :: iNg, jNg  !Total number of points gloablly in i and j direction
+type(iceberg) :: localberg ! NOT a pointer but an actual local variable
+integer :: iyr, imon, iday, ihr, imin, isec
+
+  ! For convenience
+  grd=>bergs%grd
+  iNg=(grd%ieg-grd%isg+1) ! Total number of points globally in i direction
+  jNg=(grd%jeg-grd%jsg+1) ! Total number of points globally in j direction
+
+  call get_date(Time, iyr, imon, iday, ihr, imin, isec)
+
+  do j=grd%jsc,grd%jec; do i=grd%isc,grd%iec
+    if (grd%msk(i,j)>0. .and. abs(grd%latc(i,j))>60.) then
+      localberg%xi=0.5
+      localberg%yj=0.5
+      localberg%ine=i
+      localberg%jne=j
+      localberg%lon=bilin(grd, grd%lon, i, j, localberg%xi, localberg%yj)
+      localberg%lat=bilin(grd, grd%lat, i, j, localberg%xi, localberg%yj)
+      localberg%lon_old=bilin(grd, grd%lon, i, j, localberg%xi, localberg%yj) !Alon
+      localberg%lat_old=bilin(grd, grd%lat, i, j, localberg%xi, localberg%yj) !Alon
+      localberg%mass=bergs%initial_mass(1)
+      localberg%thickness=bergs%initial_thickness(1)
+      localberg%width=bergs%initial_width(1)
+      localberg%length=bergs%initial_length(1)
+      localberg%start_lon=localberg%lon
+      localberg%start_lat=localberg%lat
+      localberg%start_year=iyr
+      localberg%start_day=float(iday)+(float(ihr)+float(imin)/60.)/24.
+      localberg%start_mass=localberg%mass
+      localberg%mass_scaling=bergs%mass_scaling(1)
+      localberg%mass_of_bits=0.
+      localberg%halo_berg=0.
+      localberg%static_berg=0.
+      localberg%heat_density=0.
+      localberg%axn=0. !Alon
+      localberg%ayn=0. !Alon
+      localberg%uvel_old=0. !Alon
+      localberg%vvel_old=0. !Alon
+      localberg%bxn=0. !Alon
+      localberg%byn=0. !Alon
+
+      !Berg A
+      localberg%uvel=1.
+      localberg%vvel=0.
+      localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
+      grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
+      call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
+      !Berg B
+      localberg%uvel=-1.
+      localberg%vvel=0.
+      localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
+      grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
+      call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
+      !Berg C
+      localberg%uvel=0.
+      localberg%vvel=1.
+      localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
+      grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
+      call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
+      !Berg D
+      localberg%uvel=0.
+      localberg%vvel=-1.
+      localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
+      grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
+      call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
+    endif
+  enddo; enddo
+
+  bergs%nbergs_start=count_bergs(bergs)
+  call mpp_sum(bergs%nbergs_start)
+  if (mpp_pe().eq.mpp_root_pe()) &
+    write(*,'(a,i8,a)') 'diamonds, generate_bergs: ',bergs%nbergs_start,' were generated'
+
+end subroutine generate_bergs_orig
 
 !> Read an iceberg restart file
 subroutine read_restart_bergs(bergs,Time)
@@ -973,154 +971,152 @@ integer, allocatable, dimension(:) :: ine,       &
   call mpp_sum( bergs%bergy_mass_start )
   if (mpp_pe().eq.mpp_root_pe().and.verbose) write(*,'(a)') 'diamonds, read_restart_bergs: completed'
 
-contains
-
-  !> Read a vector of reals from file and use a default value if variable is missing
-  subroutine read_real_vector(filename, varname, values, domain, value_if_not_in_file)
-    character(len=*), intent(in)  :: filename !< Name of file to read from
-    character(len=*), intent(in)  :: varname !< Name of variable to read
-    real,             intent(out) :: values(:) !< Returned vector of reals
-    type(domain2D),   intent(in)  :: domain !< Parallel decomposition
-    real, optional,   intent(in)  :: value_if_not_in_file !< Value to use if variable is not in file
-
-    if (present(value_if_not_in_file).and..not.field_exist(filename, varname)) then
-      values(:)=value_if_not_in_file
-    else
-      call read_unlimited_axis(filename,varname,values,domain=domain)
-    endif
-  end subroutine read_real_vector
-
-  !> Read a vector of integers from file and use a default value if variable is missing
-  subroutine read_int_vector(filename, varname, values, domain, value_if_not_in_file)
-    character(len=*),  intent(in)  :: filename !< Name of file to read from
-    character(len=*),  intent(in)  :: varname !< Name of variable to read
-    integer,           intent(out) :: values(:) !< Returned vector of integers
-    type(domain2D),    intent(in)  :: domain !< Parallel decomposition
-    integer, optional, intent(in)  :: value_if_not_in_file !< Value to use if variable is not in file
-
-    if (present(value_if_not_in_file).and..not.field_exist(filename, varname)) then
-      values(:)=value_if_not_in_file
-    else
-      call read_unlimited_axis(filename,varname,values,domain=domain)
-    endif
-  end subroutine read_int_vector
-
-  !> Generate bergs for the purpose of debugging
-  subroutine generate_bergs(bergs,Time)
-  ! Arguments
-  type(icebergs), pointer :: bergs !< Icebergs container
-  type(time_type), intent(in) :: Time !< Model time
-  ! Local variables
-  integer :: i,j
-  integer :: iNg, jNg  !Total number of points gloablly in i and j direction
-  type(iceberg) :: localberg ! NOT a pointer but an actual local variable
-  integer :: iyr, imon, iday, ihr, imin, isec
-  logical :: lres
-
-    ! For convenience
-    grd=>bergs%grd
-    iNg=(grd%ieg-grd%isg+1) ! Total number of points globally in i direction
-    jNg=(grd%jeg-grd%jsg+1) ! Total number of points globally in j direction
-
-    call get_date(Time, iyr, imon, iday, ihr, imin, isec)
-
-    do j=grd%jsc,grd%jec; do i=grd%isc,grd%iec
-      if (grd%msk(i,j)>0. .and. abs(grd%latc(i,j))>80.0) then
-        if (max(grd%lat(i,j),grd%lat(i-1,j),grd%lat(i,j-1),grd%lat(i-1,j-1))>89.999) cycle ! Cannot use this at Pole cells
-        localberg%xi=-999.
-        localberg%yj=-999.
-        localberg%ine=i
-        localberg%jne=j
-        localberg%lon=grd%lonc(i,j)
-        localberg%lat=grd%latc(i,j)
-        localberg%lon_old=localberg%lon
-        localberg%lat_old=localberg%lat
-        localberg%mass=bergs%initial_mass(1)
-        localberg%thickness=bergs%initial_thickness(1)
-        localberg%width=bergs%initial_width(1)
-        localberg%length=bergs%initial_length(1)
-        localberg%start_lon=localberg%lon
-        localberg%start_lat=localberg%lat
-        localberg%start_year=iyr
-        localberg%start_day=float(iday)+(float(ihr)+float(imin)/60.)/24.
-        localberg%start_mass=localberg%mass
-        localberg%mass_scaling=bergs%mass_scaling(1)
-        localberg%mass_of_bits=0.
-        localberg%halo_berg=0.
-        localberg%static_berg=0.
-        localberg%heat_density=0.
-        localberg%axn=0. !Alon
-        localberg%ayn=0. !Alon
-        localberg%uvel_old=0. !Alon
-        localberg%vvel_old=0. !Alon
-        localberg%bxn=0. !Alon
-        localberg%byn=0. !Alon
-
-        !Berg A
-        call loc_set_berg_pos(grd, 0.9, 0.5, 1., 0., localberg)
-        localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
-        grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
-        call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
-        !Berg B
-        call loc_set_berg_pos(grd, 0.1, 0.5, -1., 0., localberg)
-        localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
-        grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
-        call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
-        !Berg C
-        call loc_set_berg_pos(grd, 0.5, 0.9, 0., 1., localberg)
-        localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
-        grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
-        call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
-        !Berg D
-        call loc_set_berg_pos(grd, 0.5, 0.1, 0., -1., localberg)
-        localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
-        grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
-        call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
-      endif
-    enddo; enddo
-
-    bergs%nbergs_start=count_bergs(bergs)
-    call mpp_sum(bergs%nbergs_start)
-    if (mpp_pe().eq.mpp_root_pe()) &
-      write(*,'(a,i8,a)') 'diamonds, generate_bergs: ',bergs%nbergs_start,' were generated'
-
-  end subroutine generate_bergs
-
-  subroutine loc_set_berg_pos(grd, xi, yj, uvel, vvel, berg)
-    type(icebergs_gridded), pointer :: grd !< Container for gridded fields
-    real, intent(in) :: xi !< Non-dimensional x-position within cell to give berg
-    real, intent(in) :: yj !< Non-dimensional y-position within cell to give berg
-    real, intent(in) :: uvel !< Zonal velocity to give berg
-    real, intent(in) :: vvel !< Meridional velocity to give berg
-    type(iceberg), intent(inout) :: berg !< An iceberg
-    integer :: i, j
-    logical :: lres
-    i = berg%ine ; j = berg%jne
-    if (max(grd%lat(i,j),grd%lat(i-1,j),grd%lat(i,j-1),grd%lat(i-1,j-1))>89.999) then
-      berg%lon=grd%lonc(i,j)
-      berg%lat=grd%latc(i,j)
-      berg%xi=0.5 ; berg%yj=0.5
-    else
-      berg%lon=bilin(grd, grd%lon, i, j, xi, yj)
-      berg%lat=bilin(grd, grd%lat, i, j, xi, yj)
-      berg%xi=xi ; berg%yj=yj
-    endif
-    berg%uvel=uvel ; berg%vvel=vvel
-    berg%lon_old=berg%lon ; berg%lat_old=berg%lat
-    berg%start_lon=berg%lon ; berg%start_lat=berg%lat
-    lres=pos_within_cell(grd, berg%lon, berg%lat, berg%ine, berg%jne, berg%xi, berg%yj)
-    if (.not. lres) then
-      lres=pos_within_cell(grd, berg%lon, berg%lat, berg%ine, berg%jne, berg%xi, berg%yj, explain=.true.)
-      write(0,*) lres, i, j, xi, yj, uvel, vvel
-      write(0,*) lres, berg%ine, berg%jne, berg%xi, berg%yj
-      write(0,*) 'bx=',berg%lon, 'gx=',grd%lon(i-1,j-1), grd%lon(i,j-1), grd%lon(i,j), grd%lon(i-1,j),'cx=', grd%lonc(i,j)
-      write(0,*) 'by=',berg%lat, 'gy=',grd%lat(i-1,j-1), grd%lat(i,j-1), grd%lat(i,j), grd%lat(i-1,j),'cy=', grd%latc(i,j)
-      stop 'generate_bergs, loc_set_berg_pos(): VERY FATAL!'
-    endif
-  end subroutine loc_set_berg_pos
-
 end subroutine read_restart_bergs
 
+!> Read a vector of reals from file and use a default value if variable is missing
+subroutine read_real_vector(filename, varname, values, domain, value_if_not_in_file)
+  character(len=*), intent(in)  :: filename !< Name of file to read from
+  character(len=*), intent(in)  :: varname !< Name of variable to read
+  real,             intent(out) :: values(:) !< Returned vector of reals
+  type(domain2D),   intent(in)  :: domain !< Parallel decomposition
+  real, optional,   intent(in)  :: value_if_not_in_file !< Value to use if variable is not in file
+
+  if (present(value_if_not_in_file).and..not.field_exist(filename, varname)) then
+    values(:)=value_if_not_in_file
+  else
+    call read_unlimited_axis(filename,varname,values,domain=domain)
+  endif
+end subroutine read_real_vector
+
+!> Read a vector of integers from file and use a default value if variable is missing
+subroutine read_int_vector(filename, varname, values, domain, value_if_not_in_file)
+  character(len=*),  intent(in)  :: filename !< Name of file to read from
+  character(len=*),  intent(in)  :: varname !< Name of variable to read
+  integer,           intent(out) :: values(:) !< Returned vector of integers
+  type(domain2D),    intent(in)  :: domain !< Parallel decomposition
+  integer, optional, intent(in)  :: value_if_not_in_file !< Value to use if variable is not in file
+
+  if (present(value_if_not_in_file).and..not.field_exist(filename, varname)) then
+    values(:)=value_if_not_in_file
+  else
+    call read_unlimited_axis(filename,varname,values,domain=domain)
+  endif
+end subroutine read_int_vector
+
+!> Generate bergs for the purpose of debugging
+subroutine generate_bergs(bergs,Time)
+! Arguments
+type(icebergs), pointer :: bergs !< Icebergs container
+type(time_type), intent(in) :: Time !< Model time
+! Local variables
+type(icebergs_gridded), pointer :: grd
+integer :: i,j
+integer :: iNg, jNg  !Total number of points gloablly in i and j direction
+type(iceberg) :: localberg ! NOT a pointer but an actual local variable
+integer :: iyr, imon, iday, ihr, imin, isec
+logical :: lres
+
+  ! For convenience
+  grd=>bergs%grd
+  iNg=(grd%ieg-grd%isg+1) ! Total number of points globally in i direction
+  jNg=(grd%jeg-grd%jsg+1) ! Total number of points globally in j direction
+
+  call get_date(Time, iyr, imon, iday, ihr, imin, isec)
+
+  do j=grd%jsc,grd%jec; do i=grd%isc,grd%iec
+    if (grd%msk(i,j)>0. .and. abs(grd%latc(i,j))>80.0) then
+      if (max(grd%lat(i,j),grd%lat(i-1,j),grd%lat(i,j-1),grd%lat(i-1,j-1))>89.999) cycle ! Cannot use this at Pole cells
+      localberg%xi=-999.
+      localberg%yj=-999.
+      localberg%ine=i
+      localberg%jne=j
+      localberg%lon=grd%lonc(i,j)
+      localberg%lat=grd%latc(i,j)
+      localberg%lon_old=localberg%lon
+      localberg%lat_old=localberg%lat
+      localberg%mass=bergs%initial_mass(1)
+      localberg%thickness=bergs%initial_thickness(1)
+      localberg%width=bergs%initial_width(1)
+      localberg%length=bergs%initial_length(1)
+      localberg%start_lon=localberg%lon
+      localberg%start_lat=localberg%lat
+      localberg%start_year=iyr
+      localberg%start_day=float(iday)+(float(ihr)+float(imin)/60.)/24.
+      localberg%start_mass=localberg%mass
+      localberg%mass_scaling=bergs%mass_scaling(1)
+      localberg%mass_of_bits=0.
+      localberg%halo_berg=0.
+      localberg%static_berg=0.
+      localberg%heat_density=0.
+      localberg%axn=0. !Alon
+      localberg%ayn=0. !Alon
+      localberg%uvel_old=0. !Alon
+      localberg%vvel_old=0. !Alon
+      localberg%bxn=0. !Alon
+      localberg%byn=0. !Alon
+
+      !Berg A
+      call loc_set_berg_pos(grd, 0.9, 0.5, 1., 0., localberg)
+      localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
+      grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
+      call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
+      !Berg B
+      call loc_set_berg_pos(grd, 0.1, 0.5, -1., 0., localberg)
+      localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
+      grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
+      call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
+      !Berg C
+      call loc_set_berg_pos(grd, 0.5, 0.9, 0., 1., localberg)
+      localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
+      grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
+      call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
+      !Berg D
+      call loc_set_berg_pos(grd, 0.5, 0.1, 0., -1., localberg)
+      localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
+      grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
+      call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
+    endif
+  enddo; enddo
+
+  bergs%nbergs_start=count_bergs(bergs)
+  call mpp_sum(bergs%nbergs_start)
+  if (mpp_pe().eq.mpp_root_pe()) &
+    write(*,'(a,i8,a)') 'diamonds, generate_bergs: ',bergs%nbergs_start,' were generated'
+
+end subroutine generate_bergs
+
+subroutine loc_set_berg_pos(grd, xi, yj, uvel, vvel, berg)
+  type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+  real, intent(in) :: xi !< Non-dimensional x-position within cell to give berg
+  real, intent(in) :: yj !< Non-dimensional y-position within cell to give berg
+  real, intent(in) :: uvel !< Zonal velocity to give berg
+  real, intent(in) :: vvel !< Meridional velocity to give berg
+  type(iceberg), intent(inout) :: berg !< An iceberg
+  integer :: i, j
+  logical :: lres
+  i = berg%ine ; j = berg%jne
+  if (max(grd%lat(i,j),grd%lat(i-1,j),grd%lat(i,j-1),grd%lat(i-1,j-1))>89.999) then
+    berg%lon=grd%lonc(i,j)
+    berg%lat=grd%latc(i,j)
+    berg%xi=0.5 ; berg%yj=0.5
+  else
+    berg%lon=bilin(grd, grd%lon, i, j, xi, yj)
+    berg%lat=bilin(grd, grd%lat, i, j, xi, yj)
+    berg%xi=xi ; berg%yj=yj
+  endif
+  berg%uvel=uvel ; berg%vvel=vvel
+  berg%lon_old=berg%lon ; berg%lat_old=berg%lat
+  berg%start_lon=berg%lon ; berg%start_lat=berg%lat
+  lres=pos_within_cell(grd, berg%lon, berg%lat, berg%ine, berg%jne, berg%xi, berg%yj)
+  if (.not. lres) then
+    lres=pos_within_cell(grd, berg%lon, berg%lat, berg%ine, berg%jne, berg%xi, berg%yj, explain=.true.)
+    write(0,*) lres, i, j, xi, yj, uvel, vvel
+    write(0,*) lres, berg%ine, berg%jne, berg%xi, berg%yj
+    write(0,*) 'bx=',berg%lon, 'gx=',grd%lon(i-1,j-1), grd%lon(i,j-1), grd%lon(i,j), grd%lon(i-1,j),'cx=', grd%lonc(i,j)
+    write(0,*) 'by=',berg%lat, 'gy=',grd%lat(i-1,j-1), grd%lat(i,j-1), grd%lat(i,j), grd%lat(i-1,j),'cy=', grd%latc(i,j)
+    stop 'generate_bergs, loc_set_berg_pos(): VERY FATAL!'
+  endif
+end subroutine loc_set_berg_pos
 
 !> Read bond restart file
 subroutine read_restart_bonds(bergs,Time)

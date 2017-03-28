@@ -476,204 +476,202 @@ subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
   !print *,'P_ia_11',P_ia_11,'P_ia_12',P_ia_12, 'P_ia_21',P_ia_21,'P_ia_22', P_ia_22
   !print *, 'P_ia_times_u_x', P_ia_times_u_x, 'P_ia_times_u_y', P_ia_times_u_y
 
-  contains
+end subroutine interactive_force
 
-  !> Calculate interactive forces between two bergs
-  subroutine calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, &
-                             P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y, bonded)
-    ! Arguments
-    type(icebergs), pointer :: bergs !< Container for all types and memory
-    type(iceberg), pointer :: berg !< Primary berg
-    type(iceberg), pointer :: other_berg !< Berg that primary is interacting with
-    real, intent(inout) :: IA_x !< Net zonal acceleration of berg due to interactions (m/s2)
-    real, intent(inout) :: IA_y !< Net meridional acceleration of berg due to interactions (m/s2)
-    real, intent(in) :: u0 !< Zonal velocity of primary berg (m/s)
-    real, intent(in) :: v0 !< Meridional velocity of primary berg (m/s)
-    real, intent(in) :: u1 !< Zonal velocity of other berg (m/s)
-    real, intent(in) :: v1 !< Meridional velocity of other berg (m/s)
-    real, intent(inout) :: P_ia_11
-    real, intent(inout) :: P_ia_12
-    real, intent(inout) :: P_ia_22
-    real, intent(inout) :: P_ia_21
-    real, intent(inout) :: P_ia_times_u_x
-    real, intent(inout) :: P_ia_times_u_y
-    logical ,intent(in) :: bonded
-    ! Local variables
-    real :: T1, L1, W1, lon1, lat1, x1, y1, R1, A1 ! Current iceberg
-    real :: T2, L2, W2, lon2, lat2, x2, y2, R2, A2 ! Other iceberg
-    real :: dlon, dlat
-    real :: r_dist_x, r_dist_y, r_dist, A_o, A_min, trapped, T_min
-    real :: P_11, P_12, P_21, P_22
-    real :: M1, M2, M_min
-    real :: u2, v2
-    real :: lat_ref, dx_dlon, dy_dlat
-    logical :: critical_interaction_damping_on
-    real :: spring_coef, accel_spring, radial_damping_coef, p_ia_coef, tangental_damping_coef, bond_coef
+!> Calculate interactive forces between two bergs
+subroutine calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, &
+                           P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y, bonded)
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  type(iceberg), pointer :: berg !< Primary berg
+  type(iceberg), pointer :: other_berg !< Berg that primary is interacting with
+  real, intent(inout) :: IA_x !< Net zonal acceleration of berg due to interactions (m/s2)
+  real, intent(inout) :: IA_y !< Net meridional acceleration of berg due to interactions (m/s2)
+  real, intent(in) :: u0 !< Zonal velocity of primary berg (m/s)
+  real, intent(in) :: v0 !< Meridional velocity of primary berg (m/s)
+  real, intent(in) :: u1 !< Zonal velocity of other berg (m/s)
+  real, intent(in) :: v1 !< Meridional velocity of other berg (m/s)
+  real, intent(inout) :: P_ia_11
+  real, intent(inout) :: P_ia_12
+  real, intent(inout) :: P_ia_22
+  real, intent(inout) :: P_ia_21
+  real, intent(inout) :: P_ia_times_u_x
+  real, intent(inout) :: P_ia_times_u_y
+  logical ,intent(in) :: bonded
+  ! Local variables
+  real :: T1, L1, W1, lon1, lat1, x1, y1, R1, A1 ! Current iceberg
+  real :: T2, L2, W2, lon2, lat2, x2, y2, R2, A2 ! Other iceberg
+  real :: dlon, dlat
+  real :: r_dist_x, r_dist_y, r_dist, A_o, A_min, trapped, T_min
+  real :: P_11, P_12, P_21, P_22
+  real :: M1, M2, M_min
+  real :: u2, v2
+  real :: lat_ref, dx_dlon, dy_dlat
+  logical :: critical_interaction_damping_on
+  real :: spring_coef, accel_spring, radial_damping_coef, p_ia_coef, tangental_damping_coef, bond_coef
 
-    spring_coef=bergs%spring_coef
-    !bond_coef=bergs%bond_coef
-    radial_damping_coef=bergs%radial_damping_coef
-    tangental_damping_coef=bergs%tangental_damping_coef
-    critical_interaction_damping_on=bergs%critical_interaction_damping_on
+  spring_coef=bergs%spring_coef
+  !bond_coef=bergs%bond_coef
+  radial_damping_coef=bergs%radial_damping_coef
+  tangental_damping_coef=bergs%tangental_damping_coef
+  critical_interaction_damping_on=bergs%critical_interaction_damping_on
 
-    ! Using critical values for damping rather than manually setting the damping.
-    if (critical_interaction_damping_on) then
-      radial_damping_coef=2.*sqrt(spring_coef) ! Critical damping
-      tangental_damping_coef=(2.*sqrt(spring_coef))/4 ! Critical damping (just a guess)
+  ! Using critical values for damping rather than manually setting the damping.
+  if (critical_interaction_damping_on) then
+    radial_damping_coef=2.*sqrt(spring_coef) ! Critical damping
+    tangental_damping_coef=(2.*sqrt(spring_coef))/4 ! Critical damping (just a guess)
+  endif
+
+  if (berg%iceberg_num .ne. other_berg%iceberg_num) then
+    ! From Berg 1
+    L1=berg%length
+    W1=berg%width
+    T1=berg%thickness
+    M1=berg%mass
+    A1=L1*W1
+    lon1=berg%lon_old; lat1=berg%lat_old
+    !call rotpos_to_tang(lon1,lat1,x1,y1)
+
+    ! From Berg 1
+    L2=other_berg%length
+    W2=other_berg%width
+    T2=other_berg%thickness
+    M2=other_berg%mass
+    u2=other_berg%uvel_old !Old values are used to make it order invariant
+    v2=other_berg%vvel_old !Old values are used to make it order invariant
+    A2=L2*W2
+    lon2=other_berg%lon_old; lat2=other_berg%lat_old !Old values are used to make it order invariant
+
+    !call rotpos_to_tang(lon2,lat2,x2,y2)
+
+    dlon=lon1-lon2
+    dlat=lat1-lat2
+
+    ! Note that this is not the exact distance along a great circle.
+    ! Approximation for small distances. Should be fine.
+    !r_dist_x=x1-x2 ; r_dist_y=y1-y2
+    !r_dist=sqrt( ((x1-x2)**2) + ((y1-y2)**2) )
+    lat_ref=0.5*(lat1+lat2)
+    call convert_from_grid_to_meters(lat_ref,bergs%grd%grid_is_latlon,dx_dlon,dy_dlat)
+
+    r_dist_x=dlon*dx_dlon
+    r_dist_y=dlat*dy_dlat
+    r_dist=sqrt( (r_dist_x**2) + (r_dist_y**2) )
+
+    if (bergs%hexagonal_icebergs) then
+      R1=sqrt(A1/(2.*sqrt(3.)))
+      R2=sqrt(A2/(2.*sqrt(3.)))
+    else !square packing
+      R1=sqrt(A1/pi) ! Interaction radius of the iceberg (assuming circular icebergs)
+      R2=sqrt(A2/pi) ! Interaction radius of the other iceberg
     endif
-
-    if (berg%iceberg_num .ne. other_berg%iceberg_num) then
-      ! From Berg 1
-      L1=berg%length
-      W1=berg%width
-      T1=berg%thickness
-      M1=berg%mass
-      A1=L1*W1
-      lon1=berg%lon_old; lat1=berg%lat_old
-      !call rotpos_to_tang(lon1,lat1,x1,y1)
-
-      ! From Berg 1
-      L2=other_berg%length
-      W2=other_berg%width
-      T2=other_berg%thickness
-      M2=other_berg%mass
-      u2=other_berg%uvel_old !Old values are used to make it order invariant
-      v2=other_berg%vvel_old !Old values are used to make it order invariant
-      A2=L2*W2
-      lon2=other_berg%lon_old; lat2=other_berg%lat_old !Old values are used to make it order invariant
-
-      !call rotpos_to_tang(lon2,lat2,x2,y2)
-
-      dlon=lon1-lon2
-      dlat=lat1-lat2
-
-      ! Note that this is not the exact distance along a great circle.
-      ! Approximation for small distances. Should be fine.
-      !r_dist_x=x1-x2 ; r_dist_y=y1-y2
-      !r_dist=sqrt( ((x1-x2)**2) + ((y1-y2)**2) )
-      lat_ref=0.5*(lat1+lat2)
-      call convert_from_grid_to_meters(lat_ref,bergs%grd%grid_is_latlon,dx_dlon,dy_dlat)
-
-      r_dist_x=dlon*dx_dlon
-      r_dist_y=dlat*dy_dlat
-      r_dist=sqrt( (r_dist_x**2) + (r_dist_y**2) )
-
-      if (bergs%hexagonal_icebergs) then
-        R1=sqrt(A1/(2.*sqrt(3.)))
-        R2=sqrt(A2/(2.*sqrt(3.)))
-      else !square packing
-        R1=sqrt(A1/pi) ! Interaction radius of the iceberg (assuming circular icebergs)
-        R2=sqrt(A2/pi) ! Interaction radius of the other iceberg
-      endif
-      !!!!!!!!!!!!!!!!!!!!!!!!!!!debugging!!!!!!!!!!!!!!!!!!!!!!!!!!MP1
-      ! if (berg%iceberg_num .eq. 1) then
-      !   print *, 'Comparing longitudes: ', lon1, lon2, r_dist_x, dlon
-      !   print *, 'Comparing latitudes: ', lat1, lat2, r_dist_y, dlat
-      !   print *, 'Outside, iceberg_num, r_dist', berg%iceberg_num, r_dist,bonded
-      !   print *, 'Halo_status', berg%halo_berg,other_berg%halo_berg
-      ! endif
-      ! print *, 'outside the loop',R1, R2,r_dist, bonded
-      !!!!!!!!!!!!!!!!!!!!!!!!!!!debugging!!!!!!!!!!!!!!!!!!!!!!!!!!
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!debugging!!!!!!!!!!!!!!!!!!!!!!!!!!MP1
+    ! if (berg%iceberg_num .eq. 1) then
+    !   print *, 'Comparing longitudes: ', lon1, lon2, r_dist_x, dlon
+    !   print *, 'Comparing latitudes: ', lat1, lat2, r_dist_y, dlat
+    !   print *, 'Outside, iceberg_num, r_dist', berg%iceberg_num, r_dist,bonded
+    !   print *, 'Halo_status', berg%halo_berg,other_berg%halo_berg
+    ! endif
+    ! print *, 'outside the loop',R1, R2,r_dist, bonded
+    !!!!!!!!!!!!!!!!!!!!!!!!!!!debugging!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 
-      !call overlap_area(R1,R2,r_dist,A_o,trapped)
-      !T_min=min(T1,T2)
-      !A_min = min((pi*R1**R1),(pi*R2*R2))
-      M_min=min(M1,M2)
-      !Calculating spring force  (later this should only be done on the first time around)
-      if ((r_dist>0.) .AND. ((r_dist< (R1+R2).AND. (.not. bonded)) .OR. ( (r_dist> (R1+R2)) .AND. (bonded) ) )) then
-        ! Spring force
-        !accel_spring=spring_coef*(T_min/T1)*(A_o/A1) ! Old version dependent on area
-        accel_spring=spring_coef*(M_min/M1)*(R1+R2-r_dist)
-        IA_x=IA_x+(accel_spring*(r_dist_x/r_dist))
-        IA_y=IA_y+(accel_spring*(r_dist_y/r_dist))
+    !call overlap_area(R1,R2,r_dist,A_o,trapped)
+    !T_min=min(T1,T2)
+    !A_min = min((pi*R1**R1),(pi*R2*R2))
+    M_min=min(M1,M2)
+    !Calculating spring force  (later this should only be done on the first time around)
+    if ((r_dist>0.) .AND. ((r_dist< (R1+R2).AND. (.not. bonded)) .OR. ( (r_dist> (R1+R2)) .AND. (bonded) ) )) then
+      ! Spring force
+      !accel_spring=spring_coef*(T_min/T1)*(A_o/A1) ! Old version dependent on area
+      accel_spring=spring_coef*(M_min/M1)*(R1+R2-r_dist)
+      IA_x=IA_x+(accel_spring*(r_dist_x/r_dist))
+      IA_y=IA_y+(accel_spring*(r_dist_y/r_dist))
 
 
-        if (r_dist < 5*(R1+R2)) then
+      if (r_dist < 5*(R1+R2)) then
 
-          !MP1
-          !if (berg%iceberg_num .eq. 1) then
-          !  !print *,  '************************************************************'
-          !  print *, 'INSIDE, r_dist', berg%iceberg_num, other_berg%iceberg_num, r_dist, bonded
-          !endif
-          !print *, 'in the loop1', spring_coef, (M_min/M1), accel_spring,(R1+R2-r_dist)
-          !print *, 'in the loop2', IA_x, IA_y, R1, R2,r_dist, berg%iceberg_num,other_berg%iceberg_num
-          ! Damping force:
-          ! Paralel velocity
-          P_11=(r_dist_x*r_dist_x)/(r_dist**2)
-          P_12=(r_dist_x*r_dist_y)/(r_dist**2)
-          P_21=(r_dist_x*r_dist_y)/(r_dist**2)
-          P_22=(r_dist_y*r_dist_y)/(r_dist**2)
-          !p_ia_coef=radial_damping_coef*(T_min/T1)*(A_min/A1)
-          p_ia_coef=radial_damping_coef*(M_min/M1)
-          p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2)) &
-          + sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
+        !MP1
+        !if (berg%iceberg_num .eq. 1) then
+        !  !print *,  '************************************************************'
+        !  print *, 'INSIDE, r_dist', berg%iceberg_num, other_berg%iceberg_num, r_dist, bonded
+        !endif
+        !print *, 'in the loop1', spring_coef, (M_min/M1), accel_spring,(R1+R2-r_dist)
+        !print *, 'in the loop2', IA_x, IA_y, R1, R2,r_dist, berg%iceberg_num,other_berg%iceberg_num
+        ! Damping force:
+        ! Paralel velocity
+        P_11=(r_dist_x*r_dist_x)/(r_dist**2)
+        P_12=(r_dist_x*r_dist_y)/(r_dist**2)
+        P_21=(r_dist_x*r_dist_y)/(r_dist**2)
+        P_22=(r_dist_y*r_dist_y)/(r_dist**2)
+        !p_ia_coef=radial_damping_coef*(T_min/T1)*(A_min/A1)
+        p_ia_coef=radial_damping_coef*(M_min/M1)
+        p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2)) &
+        + sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
 
-          P_ia_11=P_ia_11+p_ia_coef*P_11
-          P_ia_12=P_ia_12+p_ia_coef*P_12
-          P_ia_21=P_ia_21+p_ia_coef*P_21
-          P_ia_22=P_ia_22+p_ia_coef*P_22
-          P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
-          P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
-          !print *, 'Paralel: ',berg%iceberg_num,  p_ia_coef, IA_x, P_ia_11, P_ia_21,P_ia_12, P_ia_22
+        P_ia_11=P_ia_11+p_ia_coef*P_11
+        P_ia_12=P_ia_12+p_ia_coef*P_12
+        P_ia_21=P_ia_21+p_ia_coef*P_21
+        P_ia_22=P_ia_22+p_ia_coef*P_22
+        P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
+        P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
+        !print *, 'Paralel: ',berg%iceberg_num,  p_ia_coef, IA_x, P_ia_11, P_ia_21,P_ia_12, P_ia_22
 
-          ! Normal velocities
-          P_11=1-P_11  ;  P_12=-P_12 ; P_21= -P_21 ;    P_22=1-P_22
-          !p_ia_coef=tangental_damping_coef*(T_min/T1)*(A_min/A1)
-          p_ia_coef=tangental_damping_coef*(M_min/M1)
-          p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2))  &
-          + sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
-          P_ia_11=P_ia_11+p_ia_coef*P_11
-          P_ia_12=P_ia_12+p_ia_coef*P_12
-          P_ia_21=P_ia_21+p_ia_coef*P_21
-          P_ia_22=P_ia_22+p_ia_coef*P_22
-          P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
-          P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
-          !print *, 'Perp: ',berg%iceberg_num,  p_ia_coef, IA_x, P_ia_11, P_ia_21,P_ia_12, P_ia_22
-          !print *, 'P_11',P_11
-          !print *, 'P_21',P_21
-          !print *, 'P_12',P_12
-          !print *, 'P_22',P_22
-        endif
+        ! Normal velocities
+        P_11=1-P_11  ;  P_12=-P_12 ; P_21= -P_21 ;    P_22=1-P_22
+        !p_ia_coef=tangental_damping_coef*(T_min/T1)*(A_min/A1)
+        p_ia_coef=tangental_damping_coef*(M_min/M1)
+        p_ia_coef=p_ia_coef*(0.5*(sqrt((((P_11*(u2-u1))+(P_12*(v2-v1)))**2)+ (((P_12*(u2-u1))+(P_22*(v2-v1)))**2))  &
+        + sqrt((((P_11*(u2-u0))+(P_12*(v2-v0)))**2)+(((P_12*(u2-u0)) +(P_22*(v2-v0)))**2))))
+        P_ia_11=P_ia_11+p_ia_coef*P_11
+        P_ia_12=P_ia_12+p_ia_coef*P_12
+        P_ia_21=P_ia_21+p_ia_coef*P_21
+        P_ia_22=P_ia_22+p_ia_coef*P_22
+        P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
+        P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
+        !print *, 'Perp: ',berg%iceberg_num,  p_ia_coef, IA_x, P_ia_11, P_ia_21,P_ia_12, P_ia_22
+        !print *, 'P_11',P_11
+        !print *, 'P_21',P_21
+        !print *, 'P_12',P_12
+        !print *, 'P_22',P_22
       endif
     endif
+  endif
 
-  end subroutine calculate_force
+end subroutine calculate_force
 
-  !> Calculates area of overlap between two circular bergs
-  subroutine overlap_area(R1, R2, d, A, trapped)
-    ! Arguments
-    real, intent(in) :: R1 !< Radius of berg 1 (m)
-    real, intent(in) :: R2 !< Radius of berg 2 (m)
-    real, intent(in) :: d !< Separation of berg centers (m)
-    real, intent(out) :: A !< Overlap area (m2)
-    real, intent(out) :: Trapped !< =1. if one berg is completely inside the other, =0. otherwise
-    ! Local variables
-    real :: R1_sq, R2_sq, d_sq
+!> Calculates area of overlap between two circular bergs
+subroutine overlap_area(R1, R2, d, A, trapped)
+  ! Arguments
+  real, intent(in) :: R1 !< Radius of berg 1 (m)
+  real, intent(in) :: R2 !< Radius of berg 2 (m)
+  real, intent(in) :: d !< Separation of berg centers (m)
+  real, intent(out) :: A !< Overlap area (m2)
+  real, intent(out) :: Trapped !< =1. if one berg is completely inside the other, =0. otherwise
+  ! Local variables
+  real :: R1_sq, R2_sq, d_sq
 
-    R1_sq=R1**2
-    R2_sq=R2**2
-    d_sq=d**2
-    Trapped=0.
+  R1_sq=R1**2
+  R2_sq=R2**2
+  d_sq=d**2
+  Trapped=0.
 
-    if (d>0.) then
-      if (d<(R1+R2)) then
-        if (d>abs(R1-R2)) then
-          A=(R1_sq*acos((d_sq+R1_sq-R2_sq)/(2.*d*R1))) + (R2_sq*acos((d_sq+R2_sq-R1_sq)/(2.*d*R2))) - (0.5*sqrt((-d+R1+R2)*(d+R1-R2)*(d-R1+R2)*(d+R1+R2)))
-        else
-          A=min(pi*R1_sq,pi*R2_sq)
-          Trapped=1.
-        endif
+  if (d>0.) then
+    if (d<(R1+R2)) then
+      if (d>abs(R1-R2)) then
+        A=(R1_sq*acos((d_sq+R1_sq-R2_sq)/(2.*d*R1))) + (R2_sq*acos((d_sq+R2_sq-R1_sq)/(2.*d*R2))) - (0.5*sqrt((-d+R1+R2)*(d+R1-R2)*(d-R1+R2)*(d+R1+R2)))
       else
-        A=0.
+        A=min(pi*R1_sq,pi*R2_sq)
+        Trapped=1.
       endif
     else
-      A=0. ! No area of perfectly overlapping bergs (ie: a berg interacting with itself)
+      A=0.
     endif
+  else
+    A=0. ! No area of perfectly overlapping bergs (ie: a berg interacting with itself)
+  endif
 
-   end subroutine overlap_area
-
-end subroutine interactive_force
+end subroutine overlap_area
 
 !> Calculates the instantaneous acceleration of an iceberg
 subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, ax, ay, axn, ayn, bxn, byn, debug_flag)
@@ -1103,61 +1101,63 @@ subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, a
     bxn = 0.0;  byn = 0.0
   endif
 
-  contains
-
-  !> Print 3x3 cells from 2d array A
-  subroutine dump_locfld(grd, i0, j0, A, lbl)
-    ! Arguments
-    type(icebergs_gridded), pointer :: grd !< Container for gridded fields
-    integer, intent(in) :: i0 !< i-index of center of 3x3 patch to print
-    integer, intent(in) :: j0 !< j-index of center of 3x3 patch to print
-    real, dimension(grd%isd:grd%ied,grd%jsd:grd%jed), intent(in) :: A !< Field to print
-    character(len=*) :: lbl !< Label to add to messages
-    ! Local variables
-    integer :: i, j, ii, jj
-    real :: B(-1:1,-1:1), fac
-
-    do jj=-1,1
-      j=max(grd%jsd,min(grd%jed,jj+j0))
-      do ii=-1,1
-        i=max(grd%isd,min(grd%ied,ii+i0))
-        B(ii,jj)=A(i,j)
-        if ((i.ne.ii+i0).or.(j.ne.jj+j0)) B(ii,jj)=-9.999999e-99
-      enddo
-    enddo
-    write(stderrunit,'("pe=",i3,x,a8,3i12)') mpp_pe(),lbl,(i0+ii,ii=-1,1)
-    do jj=1,-1,-1
-      write(stderrunit,'("pe=",i3,x,i8,3es12.4)') mpp_pe(),j0+jj,(B(ii,jj),ii=-1,1)
-    enddo
-  end subroutine dump_locfld
-
-  !> Print 2x2 cells from 2d array A
-  subroutine dump_locvel(grd, i0, j0, A, lbl)
-    ! Arguments
-    type(icebergs_gridded), pointer :: grd !< Container for gridded fields
-    integer, intent(in) :: i0 !< i-index of NE-cell of 2x2 patch to print
-    integer, intent(in) :: j0 !< j-index of NE-cell of 2x2 patch to print
-    real, dimension(grd%isd:grd%ied,grd%jsd:grd%jed), intent(in) :: A !< Field to print
-    character(len=*) :: lbl !< Label to add to messages
-    ! Local variables
-    integer :: i, j, ii, jj
-    real :: B(-1:0,-1:0), fac
-
-    do jj=-1,0
-      j=max(grd%jsd,min(grd%jed,jj+j0))
-      do ii=-1,0
-        i=max(grd%isd,min(grd%ied,ii+i0))
-        B(ii,jj)=A(i,j)
-        if ((i.ne.ii+i0).or.(j.ne.jj+j0)) B(ii,jj)=-9.999999e-99
-      enddo
-    enddo
-    write(stderrunit,'("pe=",i3,x,a8,3i12)') mpp_pe(),lbl,(i0+ii,ii=-1,0)
-    do jj=0,-1,-1
-      write(stderrunit,'("pe=",i3,x,i8,3es12.4)') mpp_pe(),j0+jj,(B(ii,jj),ii=-1,0)
-    enddo
-  end subroutine dump_locvel
-
 end subroutine accel
+
+!> Print 3x3 cells from 2d array A
+subroutine dump_locfld(grd, i0, j0, A, lbl)
+  ! Arguments
+  type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+  integer, intent(in) :: i0 !< i-index of center of 3x3 patch to print
+  integer, intent(in) :: j0 !< j-index of center of 3x3 patch to print
+  real, dimension(grd%isd:grd%ied,grd%jsd:grd%jed), intent(in) :: A !< Field to print
+  character(len=*) :: lbl !< Label to add to messages
+  ! Local variables
+  integer :: i, j, ii, jj
+  real :: B(-1:1,-1:1), fac
+  integer :: stderrunit
+  stderrunit = stderr()
+
+  do jj=-1,1
+    j=max(grd%jsd,min(grd%jed,jj+j0))
+    do ii=-1,1
+      i=max(grd%isd,min(grd%ied,ii+i0))
+      B(ii,jj)=A(i,j)
+      if ((i.ne.ii+i0).or.(j.ne.jj+j0)) B(ii,jj)=-9.999999e-99
+    enddo
+  enddo
+  write(stderrunit,'("pe=",i3,x,a8,3i12)') mpp_pe(),lbl,(i0+ii,ii=-1,1)
+  do jj=1,-1,-1
+    write(stderrunit,'("pe=",i3,x,i8,3es12.4)') mpp_pe(),j0+jj,(B(ii,jj),ii=-1,1)
+  enddo
+end subroutine dump_locfld
+
+!> Print 2x2 cells from 2d array A
+subroutine dump_locvel(grd, i0, j0, A, lbl)
+  ! Arguments
+  type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+  integer, intent(in) :: i0 !< i-index of NE-cell of 2x2 patch to print
+  integer, intent(in) :: j0 !< j-index of NE-cell of 2x2 patch to print
+  real, dimension(grd%isd:grd%ied,grd%jsd:grd%jed), intent(in) :: A !< Field to print
+  character(len=*) :: lbl !< Label to add to messages
+  ! Local variables
+  integer :: i, j, ii, jj
+  real :: B(-1:0,-1:0), fac
+  integer :: stderrunit
+  stderrunit = stderr()
+
+  do jj=-1,0
+    j=max(grd%jsd,min(grd%jed,jj+j0))
+    do ii=-1,0
+      i=max(grd%isd,min(grd%ied,ii+i0))
+      B(ii,jj)=A(i,j)
+      if ((i.ne.ii+i0).or.(j.ne.jj+j0)) B(ii,jj)=-9.999999e-99
+    enddo
+  enddo
+  write(stderrunit,'("pe=",i3,x,a8,3i12)') mpp_pe(),lbl,(i0+ii,ii=-1,0)
+  do jj=0,-1,-1
+    write(stderrunit,'("pe=",i3,x,i8,3es12.4)') mpp_pe(),j0+jj,(B(ii,jj),ii=-1,0)
+  enddo
+end subroutine dump_locvel
 
 !> Steps forward thermodynamic state of all bergs
 subroutine thermodynamics(bergs)
@@ -1842,50 +1842,48 @@ subroutine find_basal_melt(bergs, dvo, lat, salt, temp, Use_three_equation_model
   ! melt in m/s (melts of ice melted per second)
   basal_melt = lprec /density_ice
 
-contains
-
-  !> Calculates freezing point potential temperature of seawater using a linear relation
-  !!
-  !! This subroutine computes the freezing point potential temperature
-  !! (in deg C) from salinity (in psu), and pressure (in Pa) using a simple
-  !! linear expression, with coefficients passed in as arguments.
-  !!
-  !! Copied from subroutine calculate_TFreeze_linear_scalar (in MOM/equation_of_state)
-  subroutine calculate_TFreeze(S, pres, T_Fr)
-    ! Arguments
-    real, intent(in) :: S !< Salinity (1e-3)
-    real, intent(in) :: pres !< Presure (Pa)
-    real, intent(out) :: T_Fr !< Freezing point (C)
-    ! Local variables
-    real, parameter :: dTFr_dp    = -7.53E-08    !DTFREEZE_DP in MOM_input
-    real, parameter :: dTFr_dS    = -0.0573      !DTFREEZE_DS in MOM_input
-    real, parameter :: TFr_S0_P0  =0.0832        !TFREEZE_S0_P0 in MOM_input
-    ! TFr_S0_P0 - The freezing point at S=0, p=0, in deg C.
-    ! dTFr_dS - The derivatives of freezing point with salinity, in deg C PSU-1.
-    ! dTFr_dp - The derivatives of freezing point with pressure, in deg C Pa-1.
-    T_Fr = (TFr_S0_P0 + dTFr_dS*S) + dTFr_dp*pres
-  end subroutine calculate_TFreeze
-
-  !> Calculates density of seawater using a linear equation of state
-  !!
-  !! This subroutine computes the density of sea water with a trivial
-  !! linear equation of state (in kg/m^3) from salinity (sal in psu),
-  !! potential temperature (T in deg C), and pressure in Pa.
-  !!
-  !! Copied from subroutine calculate_density_scalar_linear (in MOM/equation_of_state)
-  subroutine calculate_density(T, S, pressure, rho, Rho_T0_S0, dRho_dT, dRho_dS)
-    !Arguments
-    real, intent(in)  :: T !< Potential temperature (C)
-    real, intent(in)  :: S !< Salinity (1e-3)
-    real, intent(in)  :: pressure !< Pressure (Pa)
-    real, intent(out) :: rho !< In situ density (kg/3)
-    real, intent(in)  :: Rho_T0_S0 !< Density at T=0, S=0 (kg/m3)
-    real, intent(in)  :: dRho_dT !< Derivative of density w.r.t. potential temperature (kg/m3/C)
-    real, intent(in)  :: dRho_dS !< Derivative of density w.r.t. salinity (1e3 kg/m3)
-    rho = Rho_T0_S0 + dRho_dT*T + dRho_dS*S
-  end subroutine calculate_density
-
 end subroutine find_basal_melt
+
+!> Calculates freezing point potential temperature of seawater using a linear relation
+!!
+!! This subroutine computes the freezing point potential temperature
+!! (in deg C) from salinity (in psu), and pressure (in Pa) using a simple
+!! linear expression, with coefficients passed in as arguments.
+!!
+!! Copied from subroutine calculate_TFreeze_linear_scalar (in MOM/equation_of_state)
+subroutine calculate_TFreeze(S, pres, T_Fr)
+  ! Arguments
+  real, intent(in) :: S !< Salinity (1e-3)
+  real, intent(in) :: pres !< Presure (Pa)
+  real, intent(out) :: T_Fr !< Freezing point (C)
+  ! Local variables
+  real, parameter :: dTFr_dp    = -7.53E-08    !DTFREEZE_DP in MOM_input
+  real, parameter :: dTFr_dS    = -0.0573      !DTFREEZE_DS in MOM_input
+  real, parameter :: TFr_S0_P0  =0.0832        !TFREEZE_S0_P0 in MOM_input
+  ! TFr_S0_P0 - The freezing point at S=0, p=0, in deg C.
+  ! dTFr_dS - The derivatives of freezing point with salinity, in deg C PSU-1.
+  ! dTFr_dp - The derivatives of freezing point with pressure, in deg C Pa-1.
+  T_Fr = (TFr_S0_P0 + dTFr_dS*S) + dTFr_dp*pres
+end subroutine calculate_TFreeze
+
+!> Calculates density of seawater using a linear equation of state
+!!
+!! This subroutine computes the density of sea water with a trivial
+!! linear equation of state (in kg/m^3) from salinity (sal in psu),
+!! potential temperature (T in deg C), and pressure in Pa.
+!!
+!! Copied from subroutine calculate_density_scalar_linear (in MOM/equation_of_state)
+subroutine calculate_density(T, S, pressure, rho, Rho_T0_S0, dRho_dT, dRho_dS)
+  !Arguments
+  real, intent(in)  :: T !< Potential temperature (C)
+  real, intent(in)  :: S !< Salinity (1e-3)
+  real, intent(in)  :: pressure !< Pressure (Pa)
+  real, intent(out) :: rho !< In situ density (kg/3)
+  real, intent(in)  :: Rho_T0_S0 !< Density at T=0, S=0 (kg/m3)
+  real, intent(in)  :: dRho_dT !< Derivative of density w.r.t. potential temperature (kg/m3/C)
+  real, intent(in)  :: dRho_dS !< Derivative of density w.r.t. salinity (1e3 kg/m3)
+  rho = Rho_T0_S0 + dRho_dT*T + dRho_dS*S
+end subroutine calculate_density
 
 !> Returns orientation of a berg determined by its bonds
 subroutine find_orientation_using_iceberg_bonds(grd, berg, orientation)
@@ -2737,9 +2735,9 @@ subroutine interp_flds(grd, i, j, xi, yj, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, 
   real :: cos_rot, sin_rot
 #ifdef USE_OLD_SSH_GRADIENT
   real :: dxm, dx0, dxp
+  real, parameter :: ssh_coast=0.00
 #endif
   real :: hxm, hxp
-  real, parameter :: ssh_coast=0.00
   integer :: stderrunit
   integer :: ii, jj
 
@@ -2844,52 +2842,50 @@ subroutine interp_flds(grd, i, j, xi, yj, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, 
 
   endif
 
-  contains
-
-  !> Returns zonal slope of sea-surface height across the east face of cell i,j
-  real function ddx_ssh(grd,i,j)
-    ! Arguments
-    type(icebergs_gridded), pointer :: grd !< Container for gridded fields
-    integer, intent(in) :: i !< i-index of cell
-    integer, intent(in) :: j !< j-index of cell
-    ! Local variables
-    real :: dxp,dx0
-    dxp=0.5*(grd%dx(i+1,j)+grd%dx(i+1,j-1))
-    dx0=0.5*(grd%dx(i,j)+grd%dx(i,j-1))
-    ddx_ssh=2.*(grd%ssh(i+1,j)-grd%ssh(i,j))/(dx0+dxp)*grd%msk(i+1,j)*grd%msk(i,j)
-  end function ddx_ssh
-
-  !> Returns meridional slope of sea-surface height across the northern face of cell i,j
-  real function ddy_ssh(grd,i,j)
-    ! Arguments
-    type(icebergs_gridded), pointer :: grd !< Container for gridded fields
-    integer, intent(in) :: i !< i-index of cell
-    integer, intent(in) :: j !< j-index of cell
-    ! Local variables
-    real :: dyp,dy0
-    dyp=0.5*(grd%dy(i,j+1)+grd%dy(i-1,j+1))
-    dy0=0.5*(grd%dy(i,j)+grd%dy(i-1,j))
-    ddy_ssh=2.*(grd%ssh(i,j+1)-grd%ssh(i,j))/(dy0+dyp)*grd%msk(i,j+1)*grd%msk(i,j)
-  end function ddy_ssh
-
-  ! Rotates vector (u,v) using rotation matrix with elements cos_rot and sin_rot
-  subroutine rotate(u, v, cos_rot, sin_rot)
-    ! Arguments
-    real, intent(inout) :: u !< x-component of vector
-    real, intent(inout) :: v !< y-component of vector
-    real, intent(in) :: cos_rot !< Cosine of rotation angle
-    real, intent(in) :: sin_rot !< Sine of rotation angle
-    ! Local variables
-    real :: u_old, v_old
-
-    u_old=u
-    v_old=v
-    u=cos_rot*u_old+sin_rot*v_old
-    v=cos_rot*v_old-sin_rot*u_old
-
-  end subroutine rotate
-
 end subroutine interp_flds
+
+!> Returns zonal slope of sea-surface height across the east face of cell i,j
+real function ddx_ssh(grd,i,j)
+  ! Arguments
+  type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+  integer, intent(in) :: i !< i-index of cell
+  integer, intent(in) :: j !< j-index of cell
+  ! Local variables
+  real :: dxp,dx0
+  dxp=0.5*(grd%dx(i+1,j)+grd%dx(i+1,j-1))
+  dx0=0.5*(grd%dx(i,j)+grd%dx(i,j-1))
+  ddx_ssh=2.*(grd%ssh(i+1,j)-grd%ssh(i,j))/(dx0+dxp)*grd%msk(i+1,j)*grd%msk(i,j)
+end function ddx_ssh
+
+!> Returns meridional slope of sea-surface height across the northern face of cell i,j
+real function ddy_ssh(grd,i,j)
+  ! Arguments
+  type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+  integer, intent(in) :: i !< i-index of cell
+  integer, intent(in) :: j !< j-index of cell
+  ! Local variables
+  real :: dyp,dy0
+  dyp=0.5*(grd%dy(i,j+1)+grd%dy(i-1,j+1))
+  dy0=0.5*(grd%dy(i,j)+grd%dy(i-1,j))
+  ddy_ssh=2.*(grd%ssh(i,j+1)-grd%ssh(i,j))/(dy0+dyp)*grd%msk(i,j+1)*grd%msk(i,j)
+end function ddy_ssh
+
+! Rotates vector (u,v) using rotation matrix with elements cos_rot and sin_rot
+subroutine rotate(u, v, cos_rot, sin_rot)
+  ! Arguments
+  real, intent(inout) :: u !< x-component of vector
+  real, intent(inout) :: v !< y-component of vector
+  real, intent(in) :: cos_rot !< Cosine of rotation angle
+  real, intent(in) :: sin_rot !< Sine of rotation angle
+  ! Local variables
+  real :: u_old, v_old
+
+  u_old=u
+  v_old=v
+  u=cos_rot*u_old+sin_rot*v_old
+  v=cos_rot*v_old-sin_rot*u_old
+
+end subroutine rotate
 
 !> Calculates bergs%grd%mass_on_ocean
 subroutine calculate_mass_on_ocean(bergs, with_diagnostics)
@@ -2931,46 +2927,44 @@ subroutine calculate_mass_on_ocean(bergs, with_diagnostics)
     enddo
   enddo ;enddo
 
-  contains
-
-  !> Projects additional diagnostics of bergs on to the grid
-  subroutine calculate_sum_over_bergs_diagnositcs(bergs, grd, berg, i, j)
-    ! Arguments
-    type(icebergs), pointer :: bergs !< Container for all types and memory
-    type(icebergs_gridded), pointer :: grd !< Container for gridded fields
-    type(iceberg), pointer :: berg !< An iceberg
-    integer, intent(in) :: i !< i-index of cell containing berg
-    integer, intent(in) :: j !< j-index of cell containing berg
-    ! Local variables
-    real ::  Abits, Lbits, Mbits
-
-    !Virtual area diagnostic
-    if (grd%id_virtual_area>0) then
-      if (bergs%bergy_bit_erosion_fraction>0.) then
-        Lbits=min(berg%length,berg%width,berg%thickness,40.) ! assume bergy bits are smallest dimension or 40 meters
-        Abits=(berg%mass_of_bits/bergs%rho_bergs)/Lbits ! Effective bottom area (assuming T=Lbits)
-      else
-        Abits=0.0
-      endif
-      grd%virtual_area(i,j)=grd%virtual_area(i,j)+(berg%width*berg%length+Abits)*berg%mass_scaling ! m^2
-    endif
-
-    !Mass diagnostic (also used in u_iceberg, v_iceberg
-    if ((grd%id_mass>0 ) .or. ((grd%id_u_iceberg>0) .or. (grd%id_v_iceberg>0)))   &
-         & grd%mass(i,j)=grd%mass(i,j)+berg%mass/grd%area(i,j)*berg%mass_scaling ! kg/m2
-
-    !Finding the average iceberg velocity in a grid cell (mass weighted)
-    if (grd%id_u_iceberg>0) &
-    grd%u_iceberg(i,j)=grd%u_iceberg(i,j)+((berg%mass/grd%area(i,j)*berg%mass_scaling)*berg%uvel) ! kg/m2
-    if (grd%id_v_iceberg>0) &
-    grd%v_iceberg(i,j)=grd%v_iceberg(i,j)+((berg%mass/grd%area(i,j)*berg%mass_scaling)*berg%vvel) ! kg/m2
-
-    !Mass of bergy bits
-    if (grd%id_bergy_mass>0 .or. bergs%add_weight_to_ocean)&
-         & grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+berg%mass_of_bits/grd%area(i,j)*berg%mass_scaling ! kg/m2
-  end subroutine calculate_sum_over_bergs_diagnositcs
-
 end subroutine calculate_mass_on_ocean
+
+!> Projects additional diagnostics of bergs on to the grid
+subroutine calculate_sum_over_bergs_diagnositcs(bergs, grd, berg, i, j)
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+  type(iceberg), pointer :: berg !< An iceberg
+  integer, intent(in) :: i !< i-index of cell containing berg
+  integer, intent(in) :: j !< j-index of cell containing berg
+  ! Local variables
+  real ::  Abits, Lbits, Mbits
+
+  !Virtual area diagnostic
+  if (grd%id_virtual_area>0) then
+    if (bergs%bergy_bit_erosion_fraction>0.) then
+      Lbits=min(berg%length,berg%width,berg%thickness,40.) ! assume bergy bits are smallest dimension or 40 meters
+      Abits=(berg%mass_of_bits/bergs%rho_bergs)/Lbits ! Effective bottom area (assuming T=Lbits)
+    else
+      Abits=0.0
+    endif
+    grd%virtual_area(i,j)=grd%virtual_area(i,j)+(berg%width*berg%length+Abits)*berg%mass_scaling ! m^2
+  endif
+
+  !Mass diagnostic (also used in u_iceberg, v_iceberg
+  if ((grd%id_mass>0 ) .or. ((grd%id_u_iceberg>0) .or. (grd%id_v_iceberg>0)))   &
+       & grd%mass(i,j)=grd%mass(i,j)+berg%mass/grd%area(i,j)*berg%mass_scaling ! kg/m2
+
+  !Finding the average iceberg velocity in a grid cell (mass weighted)
+  if (grd%id_u_iceberg>0) &
+  grd%u_iceberg(i,j)=grd%u_iceberg(i,j)+((berg%mass/grd%area(i,j)*berg%mass_scaling)*berg%uvel) ! kg/m2
+  if (grd%id_v_iceberg>0) &
+  grd%v_iceberg(i,j)=grd%v_iceberg(i,j)+((berg%mass/grd%area(i,j)*berg%mass_scaling)*berg%vvel) ! kg/m2
+
+  !Mass of bergy bits
+  if (grd%id_bergy_mass>0 .or. bergs%add_weight_to_ocean)&
+       & grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+berg%mass_of_bits/grd%area(i,j)*berg%mass_scaling ! kg/m2
+end subroutine calculate_sum_over_bergs_diagnositcs
 
 !> The main driver the steps updates icebergs
 subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh, sst, calving_hflx, cn, hi, &
@@ -3661,157 +3655,155 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
 
   call mpp_clock_end(bergs%clock)
 
-  contains
-
-  !> Prints summary of start and end states
-  subroutine report_state(budgetstr, budgetunits, startstr, startval, endstr, endval, delstr, nbergs)
-    ! Arguments
-    character*(*), intent(in) :: budgetstr !< Budget title
-    character*(*), intent(in) :: budgetunits !< Units of budgeted quantity
-    character*(*), intent(in) :: startstr !< Start label
-    real, intent(in) :: startval !< Start value for budget
-    character*(*), intent(in) :: endstr !< End label
-    real, intent(in) :: endval !< End value for budget
-    character*(*), intent(in) :: delstr !< Delta label
-    integer, intent(in), optional :: nbergs !< Number of bergs
-    ! Local variables
-    if (present(nbergs)) then
-      write(*,100) budgetstr//' state:', &
-                          startstr//' start',startval,budgetunits, &
-                          endstr//' end',endval,budgetunits, &
-                          'Delta '//delstr,endval-startval,budgetunits, &
-                          '# of bergs',nbergs
-    else
-      write(*,100) budgetstr//' state:', &
-                          startstr//' start',startval,budgetunits, &
-                          endstr//' end',endval,budgetunits, &
-                          delstr//'Delta',endval-startval,budgetunits
-    endif
-    100 format("diamonds: ",a19,3(a18,"=",es14.7,x,a2,:,","),a12,i8)
-  end subroutine report_state
-
-  !> Prints consistency summary of start and end states
-  subroutine report_consistant(budgetstr, budgetunits, startstr, startval, endstr, endval)
-    ! Arguments
-    character*(*), intent(in) :: budgetstr !< Budget title
-    character*(*), intent(in) :: budgetunits !< Units of budgeted quantity
-    character*(*), intent(in) :: startstr !< Start label
-    real, intent(in) :: startval !< Start value for budget
-    character*(*), intent(in) :: endstr !< End label
-    real, intent(in) :: endval !< End value for budget
-    ! Local variables
-    write(*,200) budgetstr//' check:', &
-                        startstr,startval,budgetunits, &
-                        endstr,endval,budgetunits, &
-                        'error',(endval-startval)/((endval+startval)+1e-30),'nd'
-    200 format("diamonds: ",a19,10(a18,"=",es14.7,x,a2,:,","))
-  end subroutine report_consistant
-
-  !> Prints a budget
-  subroutine report_budget(budgetstr, budgetunits, instr, inval, outstr, outval, delstr, startval, endval)
-    ! Arguments
-    character*(*), intent(in) :: budgetstr !< Budget title
-    character*(*), intent(in) :: budgetunits !< Units of budgeted quantity
-    character*(*), intent(in) :: instr !< Incoming label
-    real, intent(in) :: inval !< Incoming value
-    character*(*), intent(in) :: outstr !< Outgoing label
-    real, intent(in) :: outval !< Outgoing value
-    character*(*), intent(in) :: delstr !< Delta label
-    real, intent(in) :: startval !< Start value for budget
-    real, intent(in) :: endval !< End value for budget
-    ! Local variables
-    write(*,200) budgetstr//' budget:', &
-                        instr//' in',inval,budgetunits, &
-                        outstr//' out',outval,budgetunits, &
-                        'Delta '//delstr,inval-outval,budgetunits, &
-                        'error',((endval-startval)-(inval-outval))/max(1.e-30,max(abs(endval-startval),abs(inval-outval))),'nd'
-    200 format("diamonds: ",a19,3(a18,"=",es14.7,x,a2,:,","),a8,"=",es10.3,x,a2)
-  end subroutine report_budget
-
-  !> Prints summary of start and end states
-  subroutine report_istate(budgetstr, startstr, startval, endstr, endval, delstr)
-    ! Arguments
-    character*(*), intent(in) :: budgetstr !< Budget title
-    character*(*), intent(in) :: startstr !< Start label
-    integer, intent(in) :: startval !< Start value for budget
-    character*(*), intent(in) :: endstr !< End label
-    integer, intent(in) :: endval !< End value for budget
-    character*(*), intent(in) :: delstr !< Delta label
-    ! Local variables
-    write(*,100) budgetstr//' state:', &
-                          startstr//' start',startval, &
-                          endstr//' end',endval, &
-                          delstr//'Delta',endval-startval
-    100 format("diamonds: ",a19,3(a18,"=",i14,x,:,","))
-  end subroutine report_istate
-
-  !> Prints a budget
-  subroutine report_ibudget(budgetstr,instr,inval,outstr,outval,delstr,startval,endval)
-    ! Arguments
-    character*(*), intent(in) :: budgetstr !< Budget title
-    character*(*), intent(in) :: instr !< Incoming label
-    integer, intent(in) :: inval !< Incoming value
-    character*(*), intent(in) :: outstr !< Outgoing label
-    integer, intent(in) :: outval !< Outgoing value
-    character*(*), intent(in) :: delstr !< Delta label
-    integer, intent(in) :: startval !< Start value for budget
-    integer, intent(in) :: endval !< End value for budget
-    ! Local variables
-    write(*,200) budgetstr//' budget:', &
-                        instr//' in',inval, &
-                        outstr//' out',outval, &
-                        'Delta '//delstr,inval-outval, &
-                        'error',((endval-startval)-(inval-outval))
-    200 format("diamonds: ",a19,10(a18,"=",i14,x,:,","))
-  end subroutine report_ibudget
-
-  !> Time-filter calving and calving_hflx with a running mean.
-  !!
-  !! This subroutine takes in the new calving and calving_hflx, and uses them to time step a running-mean_calving value.
-  !! The time stepping uses a time scale tau. When tau is equal to zero, the
-  !! running mean is exactly equal to the new calving value.
-  subroutine get_running_mean_calving(bergs, calving, calving_hflx)
-    ! Arguments
-    type(icebergs), pointer :: bergs !< Container for all types and memory
-    real, dimension(:,:), intent(inout) :: calving !< Calving (kg/s)
-    real, dimension(:,:), intent(inout) :: calving_hflx !< Calving heat flux (W/m2)
-    ! Local variables
-    real :: alpha  !Parameter used for calving relaxation time stepping.  (0<=alpha<1)
-    real :: tau  !Relaxation timescale in seconds
-    real :: beta  ! = 1-alpha (0<=beta<1)
-
-    ! For the first time-step, initialize the running mean with the current data
-    if (.not. bergs%grd%rmean_calving_initialized) then
-      bergs%grd%rmean_calving(:,:)=calving(:,:)
-      bergs%grd%rmean_calving_initialized=.true.
-    endif
-    if (.not. bergs%grd%rmean_calving_hflx_initialized) then
-      bergs%grd%rmean_calving_hflx(:,:)=calving_hflx(:,:)
-      bergs%grd%rmean_calving_hflx_initialized=.true.
-    endif
-
-    !Applying "Newton cooling" with timescale tau, to smooth out the calving field.
-    tau=bergs%tau_calving/(365.*24*60*60) !Converting time scale from years to seconds
-    alpha=tau/(tau+bergs%dt)
-    if (alpha==0.) return ! Avoids unnecessary copying of arrays
-    if (alpha>0.5) then ! beta is small
-      beta=bergs%dt/(tau+bergs%dt)
-      alpha=1.-beta
-    else ! alpha is small
-      beta=1.-alpha
-    endif
-
-    ! For non-negative alpha and beta, these expressions for the running means are sign preserving
-    bergs%grd%rmean_calving(:,:)=beta*calving(:,:) + alpha*bergs%grd%rmean_calving(:,:)
-    bergs%grd%rmean_calving_hflx(:,:)=beta*calving_hflx(:,:) + alpha*bergs%grd%rmean_calving_hflx(:,:)
-
-    !Setting calving used by the iceberg model equal to the running mean
-    calving(:,:)=bergs%grd%rmean_calving(:,:)
-    calving_hflx(:,:)=bergs%grd%rmean_calving_hflx(:,:)
-
-  end subroutine get_running_mean_calving
-
 end subroutine icebergs_run
+
+!> Prints summary of start and end states
+subroutine report_state(budgetstr, budgetunits, startstr, startval, endstr, endval, delstr, nbergs)
+  ! Arguments
+  character*(*), intent(in) :: budgetstr !< Budget title
+  character*(*), intent(in) :: budgetunits !< Units of budgeted quantity
+  character*(*), intent(in) :: startstr !< Start label
+  real, intent(in) :: startval !< Start value for budget
+  character*(*), intent(in) :: endstr !< End label
+  real, intent(in) :: endval !< End value for budget
+  character*(*), intent(in) :: delstr !< Delta label
+  integer, intent(in), optional :: nbergs !< Number of bergs
+  ! Local variables
+  if (present(nbergs)) then
+    write(*,100) budgetstr//' state:', &
+                        startstr//' start',startval,budgetunits, &
+                        endstr//' end',endval,budgetunits, &
+                        'Delta '//delstr,endval-startval,budgetunits, &
+                        '# of bergs',nbergs
+  else
+    write(*,100) budgetstr//' state:', &
+                        startstr//' start',startval,budgetunits, &
+                        endstr//' end',endval,budgetunits, &
+                        delstr//'Delta',endval-startval,budgetunits
+  endif
+  100 format("diamonds: ",a19,3(a18,"=",es14.7,x,a2,:,","),a12,i8)
+end subroutine report_state
+
+!> Prints consistency summary of start and end states
+subroutine report_consistant(budgetstr, budgetunits, startstr, startval, endstr, endval)
+  ! Arguments
+  character*(*), intent(in) :: budgetstr !< Budget title
+  character*(*), intent(in) :: budgetunits !< Units of budgeted quantity
+  character*(*), intent(in) :: startstr !< Start label
+  real, intent(in) :: startval !< Start value for budget
+  character*(*), intent(in) :: endstr !< End label
+  real, intent(in) :: endval !< End value for budget
+  ! Local variables
+  write(*,200) budgetstr//' check:', &
+                      startstr,startval,budgetunits, &
+                      endstr,endval,budgetunits, &
+                      'error',(endval-startval)/((endval+startval)+1e-30),'nd'
+  200 format("diamonds: ",a19,10(a18,"=",es14.7,x,a2,:,","))
+end subroutine report_consistant
+
+!> Prints a budget
+subroutine report_budget(budgetstr, budgetunits, instr, inval, outstr, outval, delstr, startval, endval)
+  ! Arguments
+  character*(*), intent(in) :: budgetstr !< Budget title
+  character*(*), intent(in) :: budgetunits !< Units of budgeted quantity
+  character*(*), intent(in) :: instr !< Incoming label
+  real, intent(in) :: inval !< Incoming value
+  character*(*), intent(in) :: outstr !< Outgoing label
+  real, intent(in) :: outval !< Outgoing value
+  character*(*), intent(in) :: delstr !< Delta label
+  real, intent(in) :: startval !< Start value for budget
+  real, intent(in) :: endval !< End value for budget
+  ! Local variables
+  write(*,200) budgetstr//' budget:', &
+                      instr//' in',inval,budgetunits, &
+                      outstr//' out',outval,budgetunits, &
+                      'Delta '//delstr,inval-outval,budgetunits, &
+                      'error',((endval-startval)-(inval-outval))/max(1.e-30,max(abs(endval-startval),abs(inval-outval))),'nd'
+  200 format("diamonds: ",a19,3(a18,"=",es14.7,x,a2,:,","),a8,"=",es10.3,x,a2)
+end subroutine report_budget
+
+!> Prints summary of start and end states
+subroutine report_istate(budgetstr, startstr, startval, endstr, endval, delstr)
+  ! Arguments
+  character*(*), intent(in) :: budgetstr !< Budget title
+  character*(*), intent(in) :: startstr !< Start label
+  integer, intent(in) :: startval !< Start value for budget
+  character*(*), intent(in) :: endstr !< End label
+  integer, intent(in) :: endval !< End value for budget
+  character*(*), intent(in) :: delstr !< Delta label
+  ! Local variables
+  write(*,100) budgetstr//' state:', &
+                        startstr//' start',startval, &
+                        endstr//' end',endval, &
+                        delstr//'Delta',endval-startval
+  100 format("diamonds: ",a19,3(a18,"=",i14,x,:,","))
+end subroutine report_istate
+
+!> Prints a budget
+subroutine report_ibudget(budgetstr,instr,inval,outstr,outval,delstr,startval,endval)
+  ! Arguments
+  character*(*), intent(in) :: budgetstr !< Budget title
+  character*(*), intent(in) :: instr !< Incoming label
+  integer, intent(in) :: inval !< Incoming value
+  character*(*), intent(in) :: outstr !< Outgoing label
+  integer, intent(in) :: outval !< Outgoing value
+  character*(*), intent(in) :: delstr !< Delta label
+  integer, intent(in) :: startval !< Start value for budget
+  integer, intent(in) :: endval !< End value for budget
+  ! Local variables
+  write(*,200) budgetstr//' budget:', &
+                      instr//' in',inval, &
+                      outstr//' out',outval, &
+                      'Delta '//delstr,inval-outval, &
+                      'error',((endval-startval)-(inval-outval))
+  200 format("diamonds: ",a19,10(a18,"=",i14,x,:,","))
+end subroutine report_ibudget
+
+!> Time-filter calving and calving_hflx with a running mean.
+!!
+!! This subroutine takes in the new calving and calving_hflx, and uses them to time step a running-mean_calving value.
+!! The time stepping uses a time scale tau. When tau is equal to zero, the
+!! running mean is exactly equal to the new calving value.
+subroutine get_running_mean_calving(bergs, calving, calving_hflx)
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  real, dimension(:,:), intent(inout) :: calving !< Calving (kg/s)
+  real, dimension(:,:), intent(inout) :: calving_hflx !< Calving heat flux (W/m2)
+  ! Local variables
+  real :: alpha  !Parameter used for calving relaxation time stepping.  (0<=alpha<1)
+  real :: tau  !Relaxation timescale in seconds
+  real :: beta  ! = 1-alpha (0<=beta<1)
+
+  ! For the first time-step, initialize the running mean with the current data
+  if (.not. bergs%grd%rmean_calving_initialized) then
+    bergs%grd%rmean_calving(:,:)=calving(:,:)
+    bergs%grd%rmean_calving_initialized=.true.
+  endif
+  if (.not. bergs%grd%rmean_calving_hflx_initialized) then
+    bergs%grd%rmean_calving_hflx(:,:)=calving_hflx(:,:)
+    bergs%grd%rmean_calving_hflx_initialized=.true.
+  endif
+
+  !Applying "Newton cooling" with timescale tau, to smooth out the calving field.
+  tau=bergs%tau_calving/(365.*24*60*60) !Converting time scale from years to seconds
+  alpha=tau/(tau+bergs%dt)
+  if (alpha==0.) return ! Avoids unnecessary copying of arrays
+  if (alpha>0.5) then ! beta is small
+    beta=bergs%dt/(tau+bergs%dt)
+    alpha=1.-beta
+  else ! alpha is small
+    beta=1.-alpha
+  endif
+
+  ! For non-negative alpha and beta, these expressions for the running means are sign preserving
+  bergs%grd%rmean_calving(:,:)=beta*calving(:,:) + alpha*bergs%grd%rmean_calving(:,:)
+  bergs%grd%rmean_calving_hflx(:,:)=beta*calving_hflx(:,:) + alpha*bergs%grd%rmean_calving_hflx(:,:)
+
+  !Setting calving used by the iceberg model equal to the running mean
+  calving(:,:)=bergs%grd%rmean_calving(:,:)
+  calving_hflx(:,:)=bergs%grd%rmean_calving_hflx(:,:)
+
+end subroutine get_running_mean_calving
 
 !> Increments a gridded mass field with the mass of bergs (called from outside icebergs_run)
 !!
@@ -5224,9 +5216,9 @@ subroutine icebergs_end(bergs)
 
   if (mpp_pe()==mpp_root_pe()) write(*,'(a,i8)') 'diamonds: icebergs_end complete',mpp_pe()
 
-  contains
+end subroutine icebergs_end
 
-  subroutine dealloc_buffer(buff)
+subroutine dealloc_buffer(buff)
   ! Arguments
   type(buffer), pointer :: buff
   ! Local variables
@@ -5234,9 +5226,7 @@ subroutine icebergs_end(bergs)
       if (associated(buff%data)) deallocate(buff%data)
       deallocate(buff)
     endif
-  end subroutine dealloc_buffer
-
-end subroutine icebergs_end
+end subroutine dealloc_buffer
 
 !> Approximately convert a wind-stress into a velocity difference
 subroutine invert_tau_for_du(u, v)
