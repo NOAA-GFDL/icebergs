@@ -377,7 +377,7 @@ subroutine initialize_iceberg_bonds(bergs)
 
 end subroutine initialize_iceberg_bonds
 
-! Returns metric converting grid distances to meters
+!> Returns metric converting grid distances to meters
 subroutine convert_from_grid_to_meters(lat_ref, grid_is_latlon, dx_dlon, dy_dlat)
   ! Arguments
   real, intent(in) :: lat_ref !< Latitude at which to make metric conversion (degree N)
@@ -395,7 +395,7 @@ subroutine convert_from_grid_to_meters(lat_ref, grid_is_latlon, dx_dlon, dy_dlat
 
 end subroutine convert_from_grid_to_meters
 
-! Returns metric converting distance in meters to grid distance
+!> Returns metric converting distance in meters to grid distance
 subroutine  convert_from_meters_to_grid(lat_ref,grid_is_latlon ,dlon_dx,dlat_dy)
   ! Arguments
   real, intent(in) :: lat_ref !< Latitude at which to make metric conversion (degree N)
@@ -413,19 +413,19 @@ subroutine  convert_from_meters_to_grid(lat_ref,grid_is_latlon ,dlon_dx,dlat_dy)
 
 end subroutine convert_from_meters_to_grid
 
-!> Calculates interactive forcs between two bergs.
+!> Calculates interactions between a berg and all bergs in range
 subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
                              P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y)
   ! Arguments
   type(icebergs), pointer :: bergs !< Container for all types and memory
   type(iceberg), pointer :: berg !< Primary iceberg
   type(iceberg), pointer :: other_berg !< Berg that primary is interacting with
-  real, intent(in) :: u0
-  real, intent(in) :: v0
-  real, intent(in) :: u1
-  real, intent(in) :: v1
-  real, intent(out) :: IA_x
-  real, intent(out) :: IA_y
+  real, intent(in) :: u0 !< Zonal velocity of primary berg (m/s)
+  real, intent(in) :: v0 !< Meridional velocity of primary berg (m/s)
+  real, intent(in) :: u1 !< Zonal velocity of other berg (m/s)
+  real, intent(in) :: v1 !< Meridional velocity of other berg (m/s)
+  real, intent(out) :: IA_x !< Net zonal acceleration of berg due to interactions (m/s2)
+  real, intent(out) :: IA_y !< Net meridional acceleration of berg due to interactions (m/s2)
   real, intent(out) :: P_ia_11
   real, intent(out) :: P_ia_12
   real, intent(out) :: P_ia_22
@@ -447,17 +447,17 @@ subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
   P_ia_11=0. ; P_ia_12=0. ;  P_ia_21=0.;  P_ia_22=0.
   P_ia_times_u_x=0. ; P_ia_times_u_y=0.
 
-  bonded=.false. !Unbonded iceberg interactions
-  do grdj = berg%jne-1,berg%jne+1 ; do grdi = berg%ine-1,berg%ine+1  !Note: need  to make sure this is wide enough, but less than the halo width
+  bonded=.false. ! Unbonded iceberg interactions
+  do grdj = berg%jne-1,berg%jne+1 ; do grdi = berg%ine-1,berg%ine+1 ! Note: need to make sure this is wide enough, but less than the halo width
     other_berg=>bergs%list(grdi,grdj)%first
     do while (associated(other_berg)) ! loop over all other bergs
-      call calculate_force(bergs,berg,other_berg, IA_x, IA_y, u0, v0, u1, v1, &
+      call calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, &
                            P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y, bonded)
       other_berg=>other_berg%next
     enddo ! loop over all bergs
   enddo ; enddo
 
-  bonded=.true.  !Interactions due to iceberg bonds
+  bonded=.true. ! Interactions due to iceberg bonds
   if (iceberg_bonds_on) then ! MP1
     current_bond=>berg%first_bond
     do while (associated(current_bond)) ! loop over all bonds
@@ -465,7 +465,7 @@ subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
       if (.not. associated(other_berg)) then
         call error_mesg('diamonds,bond interactions', 'Trying to do Bond interactions with unassosiated berg!' ,FATAL)
       else
-        call calculate_force(bergs,berg,other_berg, IA_x, IA_y, u0, v0, u1, v1,  &
+        call calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1,  &
                              P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y,bonded)
       endif
       current_bond=>current_bond%next_bond
@@ -478,19 +478,29 @@ subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
 
   contains
 
+  !> Calculate interactive forces between two bergs
   subroutine calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, &
                              P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y, bonded)
     ! Arguments
     type(icebergs), pointer :: bergs !< Container for all types and memory
     type(iceberg), pointer :: berg !< Primary berg
     type(iceberg), pointer :: other_berg !< Berg that primary is interacting with
-    real, intent(inout) :: IA_x, IA_y
-    real, intent(in) :: u0, v0, u1, v1
-    real, intent(inout) :: P_ia_11, P_ia_12, P_ia_22, P_ia_21, P_ia_times_u_x, P_ia_times_u_y
+    real, intent(inout) :: IA_x !< Net zonal acceleration of berg due to interactions (m/s2)
+    real, intent(inout) :: IA_y !< Net meridional acceleration of berg due to interactions (m/s2)
+    real, intent(in) :: u0 !< Zonal velocity of primary berg (m/s)
+    real, intent(in) :: v0 !< Meridional velocity of primary berg (m/s)
+    real, intent(in) :: u1 !< Zonal velocity of other berg (m/s)
+    real, intent(in) :: v1 !< Meridional velocity of other berg (m/s)
+    real, intent(inout) :: P_ia_11
+    real, intent(inout) :: P_ia_12
+    real, intent(inout) :: P_ia_22
+    real, intent(inout) :: P_ia_21
+    real, intent(inout) :: P_ia_times_u_x
+    real, intent(inout) :: P_ia_times_u_y
     logical ,intent(in) :: bonded
     ! Local variables
-    real :: T1, L1, W1, lon1, lat1, x1, y1, R1, A1   !Current iceberg
-    real :: T2, L2, W2, lon2, lat2, x2, y2, R2, A2   !Other iceberg
+    real :: T1, L1, W1, lon1, lat1, x1, y1, R1, A1 ! Current iceberg
+    real :: T2, L2, W2, lon2, lat2, x2, y2, R2, A2 ! Other iceberg
     real :: dlon, dlat
     real :: r_dist_x, r_dist_y, r_dist, A_o, A_min, trapped, T_min
     real :: P_11, P_12, P_21, P_22
@@ -506,14 +516,14 @@ subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
     tangental_damping_coef=bergs%tangental_damping_coef
     critical_interaction_damping_on=bergs%critical_interaction_damping_on
 
-    !Using critical values for damping rather than manually setting the damping.
+    ! Using critical values for damping rather than manually setting the damping.
     if (critical_interaction_damping_on) then
-      radial_damping_coef=2.*sqrt(spring_coef)  ! Critical damping
-      tangental_damping_coef=(2.*sqrt(spring_coef))/4  ! Critical damping   (just a guess)
+      radial_damping_coef=2.*sqrt(spring_coef) ! Critical damping
+      tangental_damping_coef=(2.*sqrt(spring_coef))/4 ! Critical damping (just a guess)
     endif
 
     if (berg%iceberg_num .ne. other_berg%iceberg_num) then
-      !From Berg 1
+      ! From Berg 1
       L1=berg%length
       W1=berg%width
       T1=berg%thickness
@@ -522,7 +532,7 @@ subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
       lon1=berg%lon_old; lat1=berg%lat_old
       !call rotpos_to_tang(lon1,lat1,x1,y1)
 
-      !From Berg 1
+      ! From Berg 1
       L2=other_berg%length
       W2=other_berg%width
       T2=other_berg%thickness
@@ -537,8 +547,8 @@ subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
       dlon=lon1-lon2
       dlat=lat1-lat2
 
-      !Note that this is not the exact distance along a great circle.
-      !Approximation for small distances. Should be fine.
+      ! Note that this is not the exact distance along a great circle.
+      ! Approximation for small distances. Should be fine.
       !r_dist_x=x1-x2 ; r_dist_y=y1-y2
       !r_dist=sqrt( ((x1-x2)**2) + ((y1-y2)**2) )
       lat_ref=0.5*(lat1+lat2)
@@ -572,7 +582,7 @@ subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
       M_min=min(M1,M2)
       !Calculating spring force  (later this should only be done on the first time around)
       if ((r_dist>0.) .AND. ((r_dist< (R1+R2).AND. (.not. bonded)) .OR. ( (r_dist> (R1+R2)) .AND. (bonded) ) )) then
-        !Spring force
+        ! Spring force
         !accel_spring=spring_coef*(T_min/T1)*(A_o/A1) ! Old version dependent on area
         accel_spring=spring_coef*(M_min/M1)*(R1+R2-r_dist)
         IA_x=IA_x+(accel_spring*(r_dist_x/r_dist))
@@ -588,8 +598,8 @@ subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
           !endif
           !print *, 'in the loop1', spring_coef, (M_min/M1), accel_spring,(R1+R2-r_dist)
           !print *, 'in the loop2', IA_x, IA_y, R1, R2,r_dist, berg%iceberg_num,other_berg%iceberg_num
-          !Damping force:
-          !Paralel velocity
+          ! Damping force:
+          ! Paralel velocity
           P_11=(r_dist_x*r_dist_x)/(r_dist**2)
           P_12=(r_dist_x*r_dist_y)/(r_dist**2)
           P_21=(r_dist_x*r_dist_y)/(r_dist**2)
@@ -607,7 +617,7 @@ subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
           P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
           !print *, 'Paralel: ',berg%iceberg_num,  p_ia_coef, IA_x, P_ia_11, P_ia_21,P_ia_12, P_ia_22
 
-          !Normal velocities
+          ! Normal velocities
           P_11=1-P_11  ;  P_12=-P_12 ; P_21= -P_21 ;    P_22=1-P_22
           !p_ia_coef=tangental_damping_coef*(T_min/T1)*(A_min/A1)
           p_ia_coef=tangental_damping_coef*(M_min/M1)
@@ -630,13 +640,14 @@ subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
 
   end subroutine calculate_force
 
+  !> Calculates area of overlap between two circular bergs
   subroutine overlap_area(R1, R2, d, A, trapped)
     ! Arguments
-    real, intent(in) :: R1
-    real, intent(in) :: R2
-    real, intent(in) :: d
-    real, intent(out) :: A
-    real, intent(out) :: Trapped
+    real, intent(in) :: R1 !< Radius of berg 1 (m)
+    real, intent(in) :: R2 !< Radius of berg 2 (m)
+    real, intent(in) :: d !< Separation of berg centers (m)
+    real, intent(out) :: A !< Overlap area (m2)
+    real, intent(out) :: Trapped !< =1. if one berg is completely inside the other, =0. otherwise
     ! Local variables
     real :: R1_sq, R2_sq, d_sq
 
@@ -648,7 +659,7 @@ subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
     if (d>0.) then
       if (d<(R1+R2)) then
         if (d>abs(R1-R2)) then
-          A= (R1_sq*acos((d_sq+R1_sq-R2_sq)/(2.*d*R1)))  +  (R2_sq*acos((d_sq+R2_sq-R1_sq)/(2.*d*R2)))  - (0.5*sqrt((-d+R1+R2)*(d+R1-R2)*(d-R1+R2)*(d+R1+R2)))
+          A=(R1_sq*acos((d_sq+R1_sq-R2_sq)/(2.*d*R1))) + (R2_sq*acos((d_sq+R2_sq-R1_sq)/(2.*d*R2))) - (0.5*sqrt((-d+R1+R2)*(d+R1-R2)*(d-R1+R2)*(d+R1+R2)))
         else
           A=min(pi*R1_sq,pi*R2_sq)
           Trapped=1.
@@ -657,7 +668,7 @@ subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
         A=0.
       endif
     else
-      A=0.     ! No area of perfectly overlapping bergs (ie: a berg interacting with itself)
+      A=0. ! No area of perfectly overlapping bergs (ie: a berg interacting with itself)
     endif
 
    end subroutine overlap_area
@@ -763,7 +774,7 @@ subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, a
 
   ! Wave radiation
   uwave=ua-uo; vwave=va-vo  ! Use wind speed rel. to ocean for wave model (aja)?
-  wmod=uwave*uwave+vwave*vwave ! The wave amplitude and length depend on the wind speed relative to the ocean current;
+  wmod=uwave*uwave+vwave*vwave ! The wave amplitude and length depend on the wind speed relative to the ocean current
                                ! actually wmod is wmod**2 here.
   ampl=0.5*0.02025*wmod ! This is "a", the wave amplitude
   Lwavelength=0.32*wmod ! Surface wave length fitted to data in table at
@@ -1087,19 +1098,21 @@ subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, a
 
   !Used for testing the ocean response to fixed iceberg motion.
   if (bergs%override_iceberg_velocities) then
-    ax  = 0.0;  ay  = 0.0;
-    axn = 0.0;  ayn = 0.0;
-    bxn = 0.0;  byn = 0.0;
+    ax  = 0.0;  ay  = 0.0
+    axn = 0.0;  ayn = 0.0
+    bxn = 0.0;  byn = 0.0
   endif
 
   contains
 
-  subroutine dump_locfld(grd,i0,j0,A,lbl)
+  !> Print 3x3 cells from 2d array A
+  subroutine dump_locfld(grd, i0, j0, A, lbl)
     ! Arguments
-    type(icebergs_gridded), pointer :: grd
-    integer, intent(in) :: i0, j0
-    real, dimension(grd%isd:grd%ied,grd%jsd:grd%jed), intent(in) :: A
-    character(len=*) :: lbl
+    type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+    integer, intent(in) :: i0 !< i-index of center of 3x3 patch to print
+    integer, intent(in) :: j0 !< j-index of center of 3x3 patch to print
+    real, dimension(grd%isd:grd%ied,grd%jsd:grd%jed), intent(in) :: A !< Field to print
+    character(len=*) :: lbl !< Label to add to messages
     ! Local variables
     integer :: i, j, ii, jj
     real :: B(-1:1,-1:1), fac
@@ -1118,12 +1131,14 @@ subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, a
     enddo
   end subroutine dump_locfld
 
-  subroutine dump_locvel(grd,i0,j0,A,lbl)
+  !> Print 2x2 cells from 2d array A
+  subroutine dump_locvel(grd, i0, j0, A, lbl)
     ! Arguments
-    type(icebergs_gridded), pointer :: grd
-    integer, intent(in) :: i0, j0
-    real, dimension(grd%isd:grd%ied,grd%jsd:grd%jed), intent(in) :: A
-    character(len=*) :: lbl
+    type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+    integer, intent(in) :: i0 !< i-index of NE-cell of 2x2 patch to print
+    integer, intent(in) :: j0 !< j-index of NE-cell of 2x2 patch to print
+    real, dimension(grd%isd:grd%ied,grd%jsd:grd%jed), intent(in) :: A !< Field to print
+    character(len=*) :: lbl !< Label to add to messages
     ! Local variables
     integer :: i, j, ii, jj
     real :: B(-1:0,-1:0), fac
@@ -1533,7 +1548,7 @@ real :: tmp
   endif
 end subroutine create_gridded_icebergs_fields
 
-!> Calculates basl melt for given thermodynamic properties
+!> Calculates basal melt for given thermodynamic properties
 subroutine find_basal_melt(bergs, dvo, lat, salt, temp, Use_three_equation_model, thickness, basal_melt, iceberg_num)
   ! Arguments
   type(icebergs), pointer :: bergs !< Container for all types and memory
@@ -1829,65 +1844,62 @@ subroutine find_basal_melt(bergs, dvo, lat, salt, temp, Use_three_equation_model
 
 contains
 
+  !> Calculates freezing point potential temperature of seawater using a linear relation
+  !!
+  !! This subroutine computes the freezing point potential temperature
+  !! (in deg C) from salinity (in psu), and pressure (in Pa) using a simple
+  !! linear expression, with coefficients passed in as arguments.
+  !!
+  !! Copied from subroutine calculate_TFreeze_linear_scalar (in MOM/equation_of_state)
   subroutine calculate_TFreeze(S, pres, T_Fr)
-    !Arguments
-    real,    intent(in)  :: S, pres
-    real,    intent(out) :: T_Fr
+    ! Arguments
+    real, intent(in) :: S !< Salinity (1e-3)
+    real, intent(in) :: pres !< Presure (Pa)
+    real, intent(out) :: T_Fr !< Freezing point (C)
+    ! Local variables
     real, parameter :: dTFr_dp    = -7.53E-08    !DTFREEZE_DP in MOM_input
     real, parameter :: dTFr_dS    = -0.0573      !DTFREEZE_DS in MOM_input
     real, parameter :: TFr_S0_P0  =0.0832        !TFREEZE_S0_P0 in MOM_input
-    !    This subroutine computes the freezing point potential temparature
-    !  (in deg C) from salinity (in psu), and pressure (in Pa) using a simple
-    !  linear expression, with coefficients passed in as arguments.
-    !  Copied from subroutine calculate_TFreeze_linear_scalar (in MOM/equation_of_state)
-    !
-    ! Arguments: S - salinity in PSU.
-    !  (in)      pres - pressure in Pa.
-    !  (out)     T_Fr - Freezing point potential temperature in deg C.
-    !  (in)      TFr_S0_P0 - The freezing point at S=0, p=0, in deg C.
-    !  (in)      dTFr_dS - The derivatives of freezing point with salinity, in
-    !                      deg C PSU-1.
-    !  (in)      dTFr_dp - The derivatives of freezing point with pressure, in
-    !                      deg C Pa-1.
+    ! TFr_S0_P0 - The freezing point at S=0, p=0, in deg C.
+    ! dTFr_dS - The derivatives of freezing point with salinity, in deg C PSU-1.
+    ! dTFr_dp - The derivatives of freezing point with pressure, in deg C Pa-1.
     T_Fr = (TFr_S0_P0 + dTFr_dS*S) + dTFr_dp*pres
   end subroutine calculate_TFreeze
 
+  !> Calculates density of seawater using a linear equation of state
+  !!
+  !! This subroutine computes the density of sea water with a trivial
+  !! linear equation of state (in kg/m^3) from salinity (sal in psu),
+  !! potential temperature (T in deg C), and pressure in Pa.
+  !!
+  !! Copied from subroutine calculate_density_scalar_linear (in MOM/equation_of_state)
   subroutine calculate_density(T, S, pressure, rho, Rho_T0_S0, dRho_dT, dRho_dS)
     !Arguments
-    real,    intent(in)  :: T, S, pressure
-    real,    intent(out) :: rho
-    real,    intent(in)  :: Rho_T0_S0, dRho_dT, dRho_dS
-    ! *  This subroutine computes the density of sea water with a trivial  *
-    ! *  linear equation of state (in kg/m^3) from salinity (sal in psu),  *
-    ! *  potential temperature (T in deg C), and pressure in Pa.           *
-    !    Copied from subroutine calculate_density_scalar_linear (in MOM/equation_of_state)
-    ! *                                                                    *
-    ! * Arguments: T - potential temperature relative to the surface in C. *
-    ! *  (in)      S - salinity in PSU.                                    *
-    ! *  (in)      pressure - pressure in Pa.                              *
-    ! *  (out)     rho - in situ density in kg m-3.                        *
-    ! *  (in)      start - the starting point in the arrays.               *
-    ! *  (in)      npts - the number of values to calculate.               *
-    ! *  (in)      Rho_T0_S0 - The density at T=0, S=0, in kg m-3.         *
-    ! *  (in)      dRho_dT - The derivatives of density with temperature   *
-    ! *  (in)      dRho_dS - and salinity, in kg m-3 C-1 and kg m-3 psu-1. *
+    real, intent(in)  :: T !< Potential temperature (C)
+    real, intent(in)  :: S !< Salinity (1e-3)
+    real, intent(in)  :: pressure !< Pressure (Pa)
+    real, intent(out) :: rho !< In situ density (kg/3)
+    real, intent(in)  :: Rho_T0_S0 !< Density at T=0, S=0 (kg/m3)
+    real, intent(in)  :: dRho_dT !< Derivative of density w.r.t. potential temperature (kg/m3/C)
+    real, intent(in)  :: dRho_dS !< Derivative of density w.r.t. salinity (1e3 kg/m3)
     rho = Rho_T0_S0 + dRho_dT*T + dRho_dS*S
   end subroutine calculate_density
 
 end subroutine find_basal_melt
 
+!> Returns orientation of a berg determined by its bonds
 subroutine find_orientation_using_iceberg_bonds(grd, berg, orientation)
-! Arguments
-type(icebergs_gridded), pointer :: grd
-type(iceberg), pointer :: berg
-real, intent(inout) :: orientation
-! Local variables
-type(iceberg), pointer :: other_berg
-type(bond), pointer :: current_bond
-real :: angle, lat1,lat2,lon1,lon2,dlat,dlon
-real :: r_dist_x, r_dist_y
-real :: lat_ref, dx_dlon, dy_dlat
-real :: theta, bond_count, Average_angle
+  ! Arguments
+  type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+  type(iceberg), pointer :: berg !< Berg for which orientation is needed
+  real, intent(inout) :: orientation !< Angle of orientation (radians)
+  ! Local variables
+  type(iceberg), pointer :: other_berg
+  type(bond), pointer :: current_bond
+  real :: angle, lat1,lat2,lon1,lon2,dlat,dlon
+  real :: r_dist_x, r_dist_y
+  real :: lat_ref, dx_dlon, dy_dlat
+  real :: theta, bond_count, Average_angle
 
   bond_count=0.
   Average_angle=0.
@@ -1941,27 +1953,34 @@ real :: theta, bond_count, Average_angle
 
 end subroutine find_orientation_using_iceberg_bonds
 
+!> Spread mass of a berg around cells centered on i,j
 subroutine spread_mass_across_ocean_cells(bergs, berg, i, j, x, y, Mberg, Mbits, scaling, Area, Tn)
-! Arguments
-type(icebergs), pointer :: bergs !< Container for all types and memory
-type(icebergs_gridded), pointer :: grd
-type(iceberg), pointer :: berg
-integer, intent(in) :: i, j
-real, intent(in) :: x, y, Mberg, Mbits, scaling, Area
-real, intent(in) :: Tn
-! Local variables
-real :: xL, xC, xR, yD, yC, yU, Mass, L
-real :: yDxL, yDxC, yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR
-real :: S, H, origin_x, origin_y, x0, y0
-real :: Area_Q1,Area_Q2 , Area_Q3,Area_Q4, Area_hex
-real :: fraction_used !fraction of iceberg mass included (part of the mass near the boundary is discarded sometimes)
-real :: I_fraction_used !Inverse of fraction used
-real :: tol
-real :: Dn, Hocean
-real, parameter :: rho_seawater=1035.
-integer :: stderrunit
-logical :: debug
-real :: orientation, Mass_berg
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  type(iceberg), pointer :: berg !< Berg whose mass is being considered
+  integer, intent(in) :: i !< i-index of cell contained center of berg
+  integer, intent(in) :: j !< j-index of cell contained center of berg
+  real, intent(in) :: x !< Longitude of berg (degree E)
+  real, intent(in) :: y !< Latitude of berg (degree N)
+  real, intent(in) :: Mberg !< Mass of berg (kg)
+  real, intent(in) :: Mbits !< Mass of bergy bits (kg)
+  real, intent(in) :: scaling !< Multiplier to scale mass (nondim)
+  real, intent(in) :: Area !< Area of berg (m2)
+  real, intent(in) :: Tn !< Thickness of berg (m)
+  ! Local variables
+  type(icebergs_gridded), pointer :: grd
+  real :: xL, xC, xR, yD, yC, yU, Mass, L
+  real :: yDxL, yDxC, yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR
+  real :: S, H, origin_x, origin_y, x0, y0
+  real :: Area_Q1,Area_Q2 , Area_Q3,Area_Q4, Area_hex
+  real :: fraction_used !fraction of iceberg mass included (part of the mass near the boundary is discarded sometimes)
+  real :: I_fraction_used !Inverse of fraction used
+  real :: tol
+  real :: Dn, Hocean
+  real, parameter :: rho_seawater=1035.
+  integer :: stderrunit
+  logical :: debug
+  real :: orientation, Mass_berg
 
   ! Get the stderr unit number
   stderrunit = stderr()
@@ -1970,7 +1989,7 @@ real :: orientation, Mass_berg
   grd=>bergs%grd
   Mass_berg=Mberg
 
-  !Trimming icebergs to account for grounded fraction.
+  ! Trimming icebergs to account for grounded fraction.
   if (bergs%grounding_fraction>0.) then
     Hocean=bergs%grounding_fraction*(grd%ocean_depth(i,j)+grd%ssh(i,j))
     Dn=(bergs%rho_bergs/rho_seawater)*Tn ! re-calculate draught (keel depth)
@@ -1986,9 +2005,9 @@ real :: orientation, Mass_berg
   yDxL=0.  ; yDxC=0. ; yDxR=0. ; yCxL=0. ; yCxR=0.
   yUxL=0.  ; yUxC=0. ; yUxR=0. ; yCxC=1.
 
-  if (.not. bergs%hexagonal_icebergs) then  !Treat icebergs as rectangles of size L:  (this is the default)
+  if (.not. bergs%hexagonal_icebergs) then ! Treat icebergs as rectangles of size L: (this is the default)
 
-    !L is the non dimensional length of the iceberg [  L=(Area of berg/ Area of grid cell)^0.5  ] or something like that.
+    ! L is the non dimensional length of the iceberg [ L=(Area of berg/ Area of grid cell)^0.5 ] or something like that.
     if (grd%area(i,j)>0) then
       L=min( sqrt(Area / grd%area(i,j)),1.0)
     else
@@ -1996,7 +2015,7 @@ real :: orientation, Mass_berg
     endif
 
     if (bergs%use_old_spreading) then
-      !Old version before icebergs were given size L
+      ! Old version before icebergs were given size L
       xL=min(0.5, max(0., 0.5-x))
       xR=min(0.5, max(0., x-0.5))
       xC=max(0., 1.-(xL+xR))
@@ -2022,23 +2041,23 @@ real :: orientation, Mass_berg
     yUxR=yU*xR*grd%msk(i+1,j+1)
     yCxC=1.-( ((yDxL+yUxR)+(yDxR+yUxL)) + ((yCxL+yCxR)+(yDxC+yUxC)) )
 
-    fraction_used=1.  !rectangular bergs do share mass with boundaries (all mass is included in cells)
+    fraction_used=1. ! rectangular bergs do share mass with boundaries (all mass is included in cells)
 
-  else !Spread mass as if elements area hexagonal
+  else ! Spread mass as if elements area hexagonal
 
     orientation=bergs%initial_orientation
     if ((bergs%iceberg_bonds_on) .and. (bergs%rotate_icebergs_for_mass_spreading)) call find_orientation_using_iceberg_bonds(grd,berg,orientation)
 
     if (grd%area(i,j)>0) then
-      H = min(( (sqrt(Area/(2.*sqrt(3.)))  / sqrt(grd%area(i,j)))),1.) ;  !Non dimensionalize element length by grid area. (This gives the non-dim Apothen of the hexagon)
+      H=min(( (sqrt(Area/(2.*sqrt(3.))) / sqrt(grd%area(i,j)))),1.) ! Non-dimensionalize element length by grid area. (This gives the non-dim Apothem of the hexagon)
     else
-      H= (sqrt(3.)/2)*(0.49)  !Largest allowable H, since this makes S=0.49, and S has to be less than 0.5  (Not sure what the implications of this are)
+      H=(sqrt(3.)/2)*(0.49) ! Largest allowable H, since this makes S=0.49, and S has to be less than 0.5 (Not sure what the implications of this are)
     endif
     S=(2/sqrt(3.))*H !Side of the hexagon
 
     if (S>0.5) then
-      !The width of an iceberg should not be greater than half the gridcell, or else it can spread over 3 cells  (i.e. S must be less than 0.5 nondimensionally)
-      !print 'Elements must be smaller than a whole gridcell', 'i.e.: S= ' , S , '>=0.5'
+      ! The width of an iceberg should not be greater than half the grid cell, or else it can spread over 3 cells  (i.e. S must be less than 0.5 non-dimensionally)
+      !print 'Elements must be smaller than a whole grid cell', 'i.e.: S= ' , S , '>=0.5'
       call error_mesg('diamonds, hexagonal spreading', 'Diameter of the iceberg is larger than a grid cell. Use smaller icebergs', WARNING)
     endif
 
@@ -2125,15 +2144,25 @@ real :: orientation, Mass_berg
 
 end subroutine spread_mass_across_ocean_cells
 
-subroutine spread_variable_across_cells(grd, variable_on_ocean, Var,i,j, &
-           yDxL, yDxC,yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR,I_fraction_used)
+!> Distribute a quantity among nine cells on a grid centered at cell i,j
+subroutine spread_variable_across_cells(grd, variable_on_ocean, Var, i, j, &
+           yDxL, yDxC,yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR, I_fraction_used)
   ! Arguments
-  type(icebergs_gridded), pointer, intent(in) :: grd
-  real, dimension(grd%isd:grd%ied, grd%jsd:grd%jed, 9), intent(inout) :: variable_on_ocean
-  real, intent(in) :: Var !Variable to be spread accross cell
-  real, intent(in) :: yDxL, yDxC, yDxR, yCxL, yCxC, yCxR, yUxL, yUxC, yUxR !Weights
-  real, intent(in) :: I_fraction_used !Amount of iceberg used (inverse)
-  integer, intent(in) :: i, j
+  type(icebergs_gridded), pointer, intent(in) :: grd !< Container for gridded fields
+  real, dimension(grd%isd:grd%ied, grd%jsd:grd%jed, 9), intent(inout) :: variable_on_ocean !< Gridded field to augment
+  real, intent(in) :: Var !< Variable to be spread accross cell
+  real, intent(in) :: yDxL !< Weight for the cell at i-1,j-1
+  real, intent(in) :: yDxC !< Weight for the cell at i-1,j
+  real, intent(in) :: yDxR !< Weight for the cell at i-1,j+1
+  real, intent(in) :: yCxL !< Weight for the cell at i,j-1
+  real, intent(in) :: yCxC !< Weight for the cell at i,j
+  real, intent(in) :: yCxR !< Weight for the cell at i,j-1
+  real, intent(in) :: yUxL !< Weight for the cell at i+1,j-1
+  real, intent(in) :: yUxC !< Weight for the cell at i+1,j
+  real, intent(in) :: yUxR !< Weight for the cell at i+1,j+1
+  real, intent(in) :: I_fraction_used !< Amount of iceberg used (inverse)
+  integer, intent(in) :: i !< i-index of cell containing center of berg
+  integer, intent(in) :: j !< j-index of cell containing center of berg
 
   !Spreading the iceberg mass onto the ocean
   variable_on_ocean(i,j,1)=variable_on_ocean(i,j,1)+(yDxL*Var*I_fraction_used)
@@ -2148,23 +2177,37 @@ subroutine spread_variable_across_cells(grd, variable_on_ocean, Var,i,j, &
 
 end subroutine spread_variable_across_cells
 
+!> Returns area of a triangle
 real function Area_of_triangle(Ax, Ay, Bx, By, Cx, Cy)
-! Arguments
-real, intent(in) :: Ax,Ay,Bx,By,Cx,Cy
-  Area_of_triangle    =   abs(    0.5*((Ax*(By-Cy))+(Bx*(Cy-Ay))+(Cx*(Ay-By))) );
+  ! Arguments
+  real, intent(in) :: Ax !< x-position of corner A
+  real, intent(in) :: Ay !< y-position of corner A
+  real, intent(in) :: Bx !< x-position of corner B
+  real, intent(in) :: By !< y-position of corner B
+  real, intent(in) :: Cx !< x-position of corner C
+  real, intent(in) :: Cy !< y-position of corner C
+  Area_of_triangle    =   abs(    0.5*((Ax*(By-Cy))+(Bx*(Cy-Ay))+(Cx*(Ay-By))) )
 end function Area_of_triangle
 
+!> Returns x rounded of to sig_fig
+!! \todo What the heck is this for? -AJA
 real function roundoff(x,sig_fig)
-! Arguments
-real, intent(in) :: x
-integer, intent(in) :: sig_fig
+  ! Arguments
+  real, intent(in) :: x !< A quantity with 15 significant figures of useful information
+  integer, intent(in) :: sig_fig !< Number of significant figures to keep
   !roundoff=round(x*(10**(sig_fig))
-  roundoff=(FLOAT (INT(x * (10.**sig_fig) + 0.5)) / (10.**sig_fig))
+  roundoff=(FLOAT(INT(x * (10.**sig_fig) + 0.5)) / (10.**sig_fig))
 end function roundoff
 
+!> Returns true of a point is in or on the rectangle with opposite corners A and B
 logical function point_in_interval(Ax, Ay, Bx, By, px, py)
-! Arguments
-real, intent(in) :: Ax,Ay,Bx,By,px,py
+  ! Arguments
+  real, intent(in) :: Ax !< x-position of corner A
+  real, intent(in) :: Ay !< y-position of corner A
+  real, intent(in) :: Bx !< x-position of corner B
+  real, intent(in) :: By !< y-position of corner B
+  real, intent(in) :: px !< x-position of point
+  real, intent(in) :: py !< y-position of point
   point_in_interval=.False.
   if ((px <= max(Ax,Bx)) .and. (px >= min(Ax,Bx))) then
     if ((py <= max(Ay,By)) .and. (py >= min(Ay,By))) then
@@ -2173,17 +2216,24 @@ real, intent(in) :: Ax,Ay,Bx,By,px,py
   endif
 end function point_in_interval
 
-logical function point_is_on_the_line(Ax,Ay,Bx,By,qx,qy)
-! Arguments
-real, intent(in) :: Ax,Ay,Bx,By,qx,qy
-real :: tol, dxc,dyc,dxl,dyl,cross
-  !tol=1.e-12;
-  tol=0.0;
-  dxc = qx - Ax;
-  dyc = qy - Ay;
-  dxl = Bx - Ax;
-  dyl = By - Ay;
-  cross = dxc * dyl - dyc * dxl;
+!> Returns true if point q is on a line through points A and B
+logical function point_is_on_the_line(Ax, Ay, Bx, By, qx, qy)
+  ! Arguments
+  real, intent(in) :: Ax !< x-position of point A
+  real, intent(in) :: Ay !< y-position of point A
+  real, intent(in) :: Bx !< x-position of point B
+  real, intent(in) :: By !< y-position of point B
+  real, intent(in) :: qx !< x-position of point q
+  real, intent(in) :: qy !< y-position of point q
+  ! Local variables
+  real :: tol, dxc,dyc,dxl,dyl,cross
+  !tol=1.e-12
+  tol=0.0
+  dxc = qx - Ax
+  dyc = qy - Ay
+  dxl = Bx - Ax
+  dyl = By - Ay
+  cross = dxc * dyl - dyc * dxl
   if (abs(cross)<=tol) then
     point_is_on_the_line=.True.
   else
@@ -2191,23 +2241,32 @@ real :: tol, dxc,dyc,dxl,dyl,cross
   endif
 end function point_is_on_the_line
 
-logical function point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,qx,qy)
-!This function decides whether a point (qx,qy) is inside the triangle ABC.
-!There is also the option to include the boundary of the triangle.
-! Arguments
-real, intent(in) :: Ax,Ay,Bx,By,Cx,Cy,qx,qy
-! Local variables
-real :: l0,l1,l2,p0,p1,p2
-real :: v0x,v1x,v2x,v0y,v1y,v2y,dot00,dot01,dot02,dot11,dot12
+!> Returns True if a point q is inside a triangle ABC
+!!
+!! This function decides whether a point (qx,qy) is inside the triangle ABC.
+!! There is also the option to include the boundary of the triangle.
+logical function point_in_triangle(Ax, Ay, Bx, By, Cx, Cy, qx, qy)
+  ! Arguments
+  real, intent(in) :: Ax !< x-position of corner A
+  real, intent(in) :: Ay !< y-position of corner A
+  real, intent(in) :: Bx !< x-position of corner B
+  real, intent(in) :: By !< y-position of corner B
+  real, intent(in) :: Cx !< x-position of corner C
+  real, intent(in) :: Cy !< y-position of corner C
+  real, intent(in) :: qx !< x-position of point q
+  real, intent(in) :: qy !< y-position of point q
+  ! Local variables
+  real :: l0,l1,l2,p0,p1,p2
+  real :: v0x,v1x,v2x,v0y,v1y,v2y,dot00,dot01,dot02,dot11,dot12
 
   point_in_triangle = .False.
-  if ((Ax==qx .and. Ay==qy) .or. (Bx==qx .and. By==qy) .or. (Cx==qx .and. Cy==qy)) then  !Exclude the pathelogical case
+  if ((Ax==qx .and. Ay==qy) .or. (Bx==qx .and. By==qy) .or. (Cx==qx .and. Cy==qy)) then ! Exclude the pathelogical case
       point_in_triangle = .False.
   else
     if (((point_is_on_the_line(Ax,Ay,Bx,By,qx,qy) .or. (point_is_on_the_line(Ax,Ay,Cx,Cy,qx,qy))) .or. (point_is_on_the_line(Bx,By,Cx,Cy,qx,qy)))) then
       point_in_triangle = .False.
     else
-      !Compute point in triangle using Barycentric coordinates (the same as sum_sign_dot_prod routines)
+      ! Compute point in triangle using Barycentric coordinates (the same as sum_sign_dot_prod routines)
       l0=(qx-Ax)*(By-Ay)-(qy-Ay)*(Bx-Ax)
       l1=(qx-Bx)*(Cy-By)-(qy-By)*(Cx-Bx)
       l2=(qx-Cx)*(Ay-Cy)-(qy-Cy)*(Ax-Cx)
@@ -2221,56 +2280,74 @@ real :: v0x,v1x,v2x,v0y,v1y,v2y,dot00,dot01,dot02,dot11,dot12
   endif
 end function point_in_triangle
 
-subroutine Area_of_triangle_across_axes(Ax,Ay,Bx,By,Cx,Cy,axis1,Area_positive, Area_negative)  !You should change this name a little, so that it not similar the other routine.
-!This function calculates the area of a triangle on opposited sides of an axis when the triangle is split with two points on one side, and one point on the other.
-!In this fuction, A is the point on one side of the axis, and B,C are on the opposite sides
-! Arguments
-real , intent(in) :: Ax,Ay,Bx,By,Cx,Cy
-character , intent(in) :: axis1
-real, intent(out) :: Area_positive, Area_negative
-real :: pABx, pABy, pACx, pACy, A0
-real :: A_half_triangle, A_triangle
+!> Calculates the two areas of a triangle divided by an axis line
+!!
+!! This function calculates the area of a triangle on opposite sides of an axis when the
+!! triangle is split with two points on one side, and one point on the other.
+!! In this function, A is the point on one side of the axis, and B,C are on the opposite sides.
+!! \todo You should change this name a little, so that it not similar the other routine.
+subroutine Area_of_triangle_across_axes(Ax, Ay, Bx, By, Cx, Cy, axis1, Area_positive, Area_negative)
+  ! Arguments
+  real, intent(in) :: Ax !< x-position of corner A
+  real, intent(in) :: Ay !< y-position of corner A
+  real, intent(in) :: Bx !< x-position of corner B
+  real, intent(in) :: By !< y-position of corner B
+  real, intent(in) :: Cx !< x-position of corner C
+  real, intent(in) :: Cy !< y-position of corner C
+  character, intent(in) :: axis1 !< Either 'x' or 'y'
+  real, intent(out) :: Area_positive !< Area on negative side of axis line
+  real, intent(out) :: Area_negative !< Area on positive side of axis line
+  ! Local variables
+  real :: pABx, pABy, pACx, pACy, A0
+  real :: A_half_triangle, A_triangle
 
-  A_triangle=Area_of_triangle(Ax,Ay,Bx,By,Cx,Cy);
+  A_triangle=Area_of_triangle(Ax,Ay,Bx,By,Cx,Cy)
 
-  call intercept_of_a_line(Ax,Ay,Bx,By,axis1,pABx, pABy);
-  call intercept_of_a_line(Ax,Ay,Cx,Cy,axis1,pACx, pACy);
+  call intercept_of_a_line(Ax,Ay,Bx,By,axis1,pABx, pABy)
+  call intercept_of_a_line(Ax,Ay,Cx,Cy,axis1,pACx, pACy)
 
   if (axis1=='x')  A0=Ay; !Value used for if statements (deciding up/down vs left/right)
   if (axis1=='y')  A0=Ax; !Value used for if statements (deciding up/down vs left/right)
 
-  A_half_triangle=Area_of_triangle(Ax,Ay,pABx,pABy,pACx,pACy);
+  A_half_triangle=Area_of_triangle(Ax,Ay,pABx,pABy,pACx,pACy)
   if (A0>=0.) then
-    Area_positive= A_half_triangle;
+    Area_positive= A_half_triangle
     Area_negative= A_triangle-A_half_triangle
   else
-    Area_positive= A_triangle-A_half_triangle;
-    Area_negative= A_half_triangle;
+    Area_positive= A_triangle-A_half_triangle
+    Area_negative= A_half_triangle
   endif
 
 end subroutine Area_of_triangle_across_axes
 
-subroutine intercept_of_a_line(Ax,Ay,Bx,By,axes1,x0,y0)
-!This routine returns the position (x0,y0) at which a line AB intercepts the x or y axis
-!The value No_intercept_val is returned when the line does not intercept the axis
-!Arguments
-real, intent(in) :: Ax,Ay,Bx,By
-character, intent(in) ::axes1
-real, intent(out) :: x0,y0
-real :: No_intercept_val !Huge value used to make sure that the intercept is outside the triange in the parralel case.
+!> Returns the axis intercept of a line AB
+!!
+!! This routine returns the position (x0,y0) at which a line AB intercepts the x or y axis.
+!! The value No_intercept_val is returned when the line does not intercept the axis.
+subroutine intercept_of_a_line(Ax, Ay, Bx, By, axes1, x0, y0)
+  ! Arguments
+  real, intent(in) :: Ax !< x-position of corner A
+  real, intent(in) :: Ay !< y-position of corner A
+  real, intent(in) :: Bx !< x-position of corner B
+  real, intent(in) :: By !< y-position of corner B
+  character, intent(in) :: axes1 !< Either 'x' or 'y'
+  real, intent(out) :: x0 !< x-position of intercept
+  real, intent(out) :: y0 !< y-position of intercept
+  ! Local variables
+  real :: No_intercept_val ! Huge value used to make sure that the intercept is outside the triangle in the parallel case.
 
-  No_intercept_val=100000000000.; !Huge value used to make sure that the intercept is outside the triange in the parralel case.
+  No_intercept_val=100000000000. ! Huge value used to make sure that the intercept is outside the triangle in the parallel case.
   x0=No_intercept_val
   y0=No_intercept_val
 
-  if (axes1=='x') then  !x intercept
+  if (axes1=='x') then ! x intercept
     if (Ay.ne.By) then
       x0=Ax -(((Ax-Bx)/(Ay-By))*Ay)
       y0=0.
     endif
   endif
 
-  if (axes1=='y') then !y intercept
+  if (axes1=='y') then ! y intercept
     if (Ax.ne.Bx) then
       x0=0.
       y0=-(((Ay-By)/(Ax-Bx))*Ax)+Ay
@@ -2278,71 +2355,80 @@ real :: No_intercept_val !Huge value used to make sure that the intercept is out
   endif
 end subroutine intercept_of_a_line
 
-subroutine divding_triangle_across_axes(Ax,Ay,Bx,By,Cx,Cy,axes1,Area_positive, Area_negative)
-!This routine gives you the area of a triangle on opposite sides of the axis specified.
-!It also takes care of the special case where the triangle is totally on one side
-!This routine calls Area_of_triangle_across_axes to calculate the areas when the triangles are split.
-!Arguments
-real, intent(in) :: Ax,Ay,Bx,By,Cx,Cy
-character, intent(in) ::axes1
-real, intent(out) :: Area_positive, Area_negative
-real :: A0,B0,C0
-real A_triangle
+!> Calculates the area of a triangle on either side of an axis, if any.
+!!
+!! This routine gives you the area of a triangle on opposite sides of the axis specified.
+!! It also takes care of the special case where the triangle is totally on one side.
+!! This routine calls Area_of_triangle_across_axes to calculate the areas when the triangles are split.
+subroutine divding_triangle_across_axes(Ax, Ay, Bx, By, Cx, Cy, axes1, Area_positive, Area_negative)
+  ! Arguments
+  real, intent(in) :: Ax !< x-position of corner A
+  real, intent(in) :: Ay !< y-position of corner A
+  real, intent(in) :: Bx !< x-position of corner B
+  real, intent(in) :: By !< y-position of corner B
+  real, intent(in) :: Cx !< x-position of corner C
+  real, intent(in) :: Cy !< y-position of corner C
+  character, intent(in) :: axes1 !< Either 'x' or 'y'
+  real, intent(out) :: Area_positive !< Area on negative side of axis line
+  real, intent(out) :: Area_negative !< Area on positive side of axis line
+  ! Local variables
+  real :: A0,B0,C0
+  real A_triangle
 
-  if (axes1=='x') then  !Use the y-coordinates for if statements to see which side of the line you are on
+  if (axes1=='x') then ! Use the y-coordinates for if statements to see which side of the line you are on
     A0=Ay
     B0=By
     C0=Cy
   endif
-  if (axes1=='y') then  !Use the y-coordinates for if statements to see which side of the line you are on
+  if (axes1=='y') then ! Use the y-coordinates for if statements to see which side of the line you are on
     A0=Ax
     B0=Bx
     C0=Cx
   endif
 
-  A_triangle=Area_of_triangle(Ax,Ay,Bx,By,Cx,Cy);
-  if ((B0*C0)>0.) then !B and C are on the same side  (and non-zero)
-    if ((A0*B0).ge.0.) then !all three on the the same side (if it equals zero, then A0=0 and the otehrs are not)
+  A_triangle=Area_of_triangle(Ax,Ay,Bx,By,Cx,Cy)
+  if ((B0*C0)>0.) then ! B and C are on the same side  (and non-zero)
+    if ((A0*B0).ge.0.) then ! all three on the same side (if it equals zero, then A0=0 and the others are not)
       if ((A0>0.)  .or.  ((A0==0.) .and.  (B0>0.))) then
-        Area_positive= A_triangle;
-        Area_negative= 0.;
+        Area_positive= A_triangle
+        Area_negative= 0.
       else
-        Area_positive= 0.;
-        Area_negative= A_triangle;
+        Area_positive= 0.
+        Area_negative= A_triangle
       endif
     else  !A is on the opposite side to B and C
-      call Area_of_triangle_across_axes(Ax,Ay,Bx,By,Cx,Cy,axes1,Area_positive, Area_negative);
+      call Area_of_triangle_across_axes(Ax,Ay,Bx,By,Cx,Cy,axes1,Area_positive, Area_negative)
     endif
 
   elseif ((B0*C0)<0.) then !B and C are on the opposite sides
     if ((A0*B0).ge. 0.) then !C is all alone
-      call Area_of_triangle_across_axes(Cx,Cy,Bx,By,Ax,Ay,axes1,Area_positive, Area_negative);
+      call Area_of_triangle_across_axes(Cx,Cy,Bx,By,Ax,Ay,axes1,Area_positive, Area_negative)
     else !B is all alone
-      call Area_of_triangle_across_axes(Bx,By,Cx,Cy,Ax,Ay,axes1,Area_positive, Area_negative);
+      call Area_of_triangle_across_axes(Bx,By,Cx,Cy,Ax,Ay,axes1,Area_positive, Area_negative)
     endif
 
   else  !This is the case when either B or C is equal to zero (or both), A0 could be zero too.
     if (((A0.eq.0.) .and. (B0.eq.0.)) .and. (C0.eq.0.)) then
-      Area_positive= 0.;
-      Area_negative= 0.;
+      Area_positive= 0.
+      Area_negative= 0.
     elseif ((A0*B0<0.)  .or.  (A0*C0<0.)) then    !A, B are on opposite sides, and C is zero.  OR  A, C are on opposite sides, and B is zero.
-      call Area_of_triangle_across_axes(Ax,Ay,Bx,By,Cx,Cy,axes1,Area_positive, Area_negative);
+      call Area_of_triangle_across_axes(Ax,Ay,Bx,By,Cx,Cy,axes1,Area_positive, Area_negative)
     elseif (((A0*B0>0.) .or. (A0*C0>0.)) .or. (((abs(A0)>0.) .and. (B0==0.)) .and. (C0==0.))) then
       if (A0>0.) then
-        Area_positive= A_triangle;
-        Area_negative= 0.;
+        Area_positive= A_triangle
+        Area_negative= 0.
       else
-        Area_positive= 0.;
-        Area_negative= A_triangle;
+        Area_positive= 0.
+        Area_negative= A_triangle
       endif
 
     elseif (A0.eq. 0.) then   !(one of B,C is zero too)
       if ((B0>0.) .or. (C0>0.)) then
-        Area_positive= A_triangle;
-        Area_negative= 0.;
+        Area_positive= A_triangle
+        Area_negative= 0.
       elseif ((B0<0.) .or. (C0<0.)) then
-        Area_positive= 0.;
-        Area_negative= A_triangle;
+        Area_positive= 0.
+        Area_negative= A_triangle
       else
         call error_mesg('diamonds, iceberg_run', 'Logical error inside triangle dividing routine', FATAL)
       endif
@@ -2352,38 +2438,49 @@ real A_triangle
   endif
 end subroutine divding_triangle_across_axes
 
-
-subroutine Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy,Area_triangle, Area_Q1, Area_Q2 ,Area_Q3 ,Area_Q4)
-!This routine takes a triangle, and finds the intersection with the four quadrants
-!Arguments
-real, intent(in) :: Ax,Ay,Bx,By,Cx,Cy
-real, intent(out) :: Area_triangle, Area_Q1, Area_Q2 ,Area_Q3 ,Area_Q4
-real :: Area_Upper, Area_Lower, Area_Right, Area_Left
-real :: px, py , qx , qy
-real :: Area_key_quadrant,Error
-real :: tol
-integer :: Key_quadrant
-integer ::sig_fig
-integer :: stderrunit
+!> Areas of a triangle divided into quadrants
+!!
+!! This routine takes a triangle, and finds the intersection with the four quadrants.
+subroutine Triangle_divided_into_four_quadrants(Ax, Ay, Bx, By, Cx, Cy, Area_triangle, Area_Q1, Area_Q2 ,Area_Q3 ,Area_Q4)
+  ! Arguments
+  real, intent(in) :: Ax !< x-position of corner A
+  real, intent(in) :: Ay !< y-position of corner A
+  real, intent(in) :: Bx !< x-position of corner B
+  real, intent(in) :: By !< y-position of corner B
+  real, intent(in) :: Cx !< x-position of corner C
+  real, intent(in) :: Cy !< y-position of corner C
+  real, intent(out) :: Area_triangle !< Are of triangle
+  real, intent(out) :: Area_Q1 !< Are in quadrant 1
+  real, intent(out) :: Area_Q2 !< Are in quadrant 2
+  real, intent(out) :: Area_Q3 !< Are in quadrant 2
+  real, intent(out) :: Area_Q4 !< Are in quadrant 4
+  ! Local variables
+  real :: Area_Upper, Area_Lower, Area_Right, Area_Left
+  real :: px, py , qx , qy
+  real :: Area_key_quadrant,Error
+  real :: tol
+  integer :: Key_quadrant
+  integer ::sig_fig
+  integer :: stderrunit
 
   ! Get the stderr unit number
   stderrunit = stderr()
   tol=1.e-10
 
-  Area_triangle=Area_of_triangle(Ax,Ay,Bx,By,Cx,Cy);
+  Area_triangle=Area_of_triangle(Ax,Ay,Bx,By,Cx,Cy)
 
-  !Calculating area across axes
-  call divding_triangle_across_axes(Ax,Ay,Bx,By,Cx,Cy,'x',Area_Upper ,Area_Lower);
-  call divding_triangle_across_axes(Ax,Ay,Bx,By,Cx,Cy,'y',Area_Right ,Area_Left);
+  ! Calculating area across axes
+  call divding_triangle_across_axes(Ax,Ay,Bx,By,Cx,Cy,'x',Area_Upper ,Area_Lower)
+  call divding_triangle_across_axes(Ax,Ay,Bx,By,Cx,Cy,'y',Area_Right ,Area_Left)
 
-  !Decide if the origin is in the triangle. If so, then you have to divide the area 4 ways
-  !This is done by finding a quadrant where the intersection between the triangle and quadrant forms a new triangle
-  !(This occurs when on of the sides of the triangle  intersects both the x and y axis)
+  ! Decide if the origin is in the triangle. If so, then you have to divide the area 4 ways
+  ! This is done by finding a quadrant where the intersection between the triangle and quadrant forms a new triangle
+  ! (This occurs when on of the sides of the triangle  intersects both the x and y axis)
   if (point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,0.,0.)) then
-    !Find a line in the triangle that cuts both axes in/on the trianlge
+    ! Find a line in the triangle that cuts both axes in/on the triangle
     call intercept_of_a_line(Ax,Ay,Bx,By,'x',px,py); !x_intercept
     call intercept_of_a_line(Ax,Ay,Bx,By,'y',qx,qy); !y_intercept
-    !Note that the 1. here means that we include points on the boundary of the triange.
+    ! Note that the 1. here means that we include points on the boundary of the triangle.
     if (.not.((point_in_interval(Ax,Ay,Bx,By,px,py)) .and. (point_in_interval(Ax,Ay,Bx,By,qx,qy)))) then
       call intercept_of_a_line(Ax,Ay,Cx,Cy,'x',px,py); !x_intercept
       call intercept_of_a_line(Ax,Ay,Cx,Cy,'y',qx,qy); !y_intercept
@@ -2391,7 +2488,7 @@ integer :: stderrunit
         call intercept_of_a_line(Bx,By,Cx,Cy,'x',px,py); !x_intercept
         call intercept_of_a_line(Bx,By,Cx,Cy,'y',qx,qy); !y_intercept
         if (.not.((point_in_interval(Bx,By,Cx,Cy,px,py)) .and. (point_in_interval(Bx,By,Cx,Cy,qx,qy)))) then
-          !You should not get here, but there might be some bugs in the code to do with points exactly falling on axes.
+          ! You should not get here, but there might be some bugs in the code to do with points exactly falling on axes.
           !if (mpp_pe().eq.12) then
             write(stderrunit,*) 'diamonds,corners', Ax,Ay,Bx,By,Cx,Cy
           !endif
@@ -2400,14 +2497,14 @@ integer :: stderrunit
       endif
     endif
 
-    !Assigning quadrants. Key_quadrant is the quadrant with the baby triangle in it.
+    ! Assigning quadrants. Key_quadrant is the quadrant with the baby triangle in it.
     Area_key_quadrant=Area_of_triangle(px,py,qx,qy,0.,0.)
     if ((px.ge. 0.) .and. (qy.ge. 0.)) then  !First quadrant
-      Key_quadrant=1;
+      Key_quadrant=1
     elseif ((px.lt.0.) .and. (qy.ge. 0.)) then  !Second quadrant
       Key_quadrant=2
     elseif ((px.lt. 0.) .and. (qy.lt. 0.)) then !Third quadrant
-      Key_quadrant=3;
+      Key_quadrant=3
     elseif ((px.ge. 0.) .and. (qy.lt. 0.)) then !Forth quadrant
       Key_quadrant=4
     else  !
@@ -2415,54 +2512,53 @@ integer :: stderrunit
       write(stderrunit,*) 'diamonds, Triangle, px,qy', px,qy
     endif
 
-  else  !At least one quadrant is empty, and this can be used to find the areas in the other quadrant.  Assigning quadrants. Key_quadrant is the empty quadrant.
-    Area_key_quadrant=0;
+  else ! At least one quadrant is empty, and this can be used to find the areas in the other quadrant.  Assigning quadrants. Key_quadrant is the empty quadrant.
+    Area_key_quadrant=0
     if      ( (.not. ((((Ax>0.) .and. (Ay>0.)) .or. ((Bx>0.) .and. (By> 0.))) .or. ((Cx>0.) .and. (Cy> 0.)))) .and. ((Area_Upper+Area_Right).le.Area_triangle) ) then
-      !No points land in this quadrant and triangle does not cross the quadrant
-      Key_quadrant=1;
+      ! No points land in this quadrant and triangle does not cross the quadrant
+      Key_quadrant=1
     elseif  ( (.not. ((((Ax<0.) .and. (Ay>0)) .or. ((Bx<0.) .and. (By>0.))) .or. ((Cx<0.) .and. (Cy>0.)))) .and. ((Area_Upper+Area_Left).le. Area_triangle) ) then
       Key_quadrant=2
     elseif  ( (.not. ((((Ax<0.) .and. (Ay<0.)) .or. ((Bx<0.) .and. (By< 0.))) .or. ((Cx<0.) .and. (Cy< 0.)))) .and. ((Area_Lower+Area_Left) .le.Area_triangle) ) then
-      Key_quadrant=3;
+      Key_quadrant=3
     else
       Key_quadrant=4
     endif
   endif
 
-
-  !Assign values to quadrants
+  ! Assign values to quadrants
   if (Key_quadrant .eq. 1) then
-    Area_Q1=Area_key_quadrant;
-    Area_Q2=Area_Upper-Area_Q1;
-    Area_Q4=Area_Right-Area_Q1;
-    !Area_Q3=Area_Left-Area_Q2;   !These lines have been changes so that the sum of the 4 quadrants exactly matches the triangle area.
-    Area_Q3=Area_triangle-(Area_Q1+Area_Q2+Area_Q4);
+    Area_Q1=Area_key_quadrant
+    Area_Q2=Area_Upper-Area_Q1
+    Area_Q4=Area_Right-Area_Q1
+    !Area_Q3=Area_Left-Area_Q2 ! These lines have been changes so that the sum of the 4 quadrants exactly matches the triangle area.
+    Area_Q3=Area_triangle-(Area_Q1+Area_Q2+Area_Q4)
   elseif (Key_quadrant .eq. 2) then
-    Area_Q2=Area_key_quadrant;
-    Area_Q1=Area_Upper-Area_Q2;
-    Area_Q4=Area_Right-Area_Q1;
-    !Area_Q3=Area_Left-Area_Q2;
-    Area_Q3=Area_triangle-(Area_Q1+Area_Q2+Area_Q4);
+    Area_Q2=Area_key_quadrant
+    Area_Q1=Area_Upper-Area_Q2
+    Area_Q4=Area_Right-Area_Q1
+    !Area_Q3=Area_Left-Area_Q2
+    Area_Q3=Area_triangle-(Area_Q1+Area_Q2+Area_Q4)
   elseif (Key_quadrant==3) then
-    Area_Q3=Area_key_quadrant;
-    Area_Q2=Area_Left-Area_Q3;
-    Area_Q1=Area_Upper-Area_Q2;
-    !Area_Q4=Area_Right-Area_Q1;
-    Area_Q4=Area_triangle-(Area_Q1+Area_Q2+Area_Q3);
+    Area_Q3=Area_key_quadrant
+    Area_Q2=Area_Left-Area_Q3
+    Area_Q1=Area_Upper-Area_Q2
+    !Area_Q4=Area_Right-Area_Q1
+    Area_Q4=Area_triangle-(Area_Q1+Area_Q2+Area_Q3)
   elseif (Key_quadrant==4) then
-    Area_Q4=Area_key_quadrant;
-    Area_Q1=Area_Right-Area_Q4;
-    Area_Q2=Area_Upper-Area_Q1;
-    !Area_Q3=Area_Left-Area_Q2;
-    Area_Q3=Area_triangle-(Area_Q1+Area_Q2+Area_Q4);
+    Area_Q4=Area_key_quadrant
+    Area_Q1=Area_Right-Area_Q4
+    Area_Q2=Area_Upper-Area_Q1
+    !Area_Q3=Area_Left-Area_Q2
+    Area_Q3=Area_triangle-(Area_Q1+Area_Q2+Area_Q4)
   else
     call error_mesg('diamonds, iceberg_run', 'Logical error inside triangle into four quadrants. Should not get here.', FATAL)
   endif
 
-  Area_Q1=max(Area_Q1,0.);
-  Area_Q2=max(Area_Q2,0.);
-  Area_Q3=max(Area_Q3,0.);
-  Area_Q4=max(Area_Q4,0.);
+  Area_Q1=max(Area_Q1,0.)
+  Area_Q2=max(Area_Q2,0.)
+  Area_Q3=max(Area_Q3,0.)
+  Area_Q4=max(Area_Q4,0.)
 
 
   Error=abs(Area_Q1+Area_Q2+Area_Q3+Area_Q4-Area_triangle)
@@ -2482,29 +2578,44 @@ integer :: stderrunit
 
 end subroutine Triangle_divided_into_four_quadrants
 
-subroutine rotate_and_translate(px,py,theta,x0,y0)
-  !This function takes a point px,py, and rotates it clockwise around the origin by theta degrees, and then translates by (x0,y0)
+!> Rotates a point clockwise about origin and then translates by x0,y0
+subroutine rotate_and_translate(px, py, theta, x0, y0)
   ! Arguments
-  real, intent(in) :: x0,y0,theta
-  real, intent(inout) :: px,py
+  real, intent(in) :: x0 !< x-direction shift
+  real, intent(in) :: y0 !< y-direction shift
+  real, intent(in) :: theta !< Angle to rotate (degrees)
+  real, intent(inout) :: px !< x-coordinate of point
+  real, intent(inout) :: py !< y-coordinate of point
+  ! Local variables
   real :: px_temp,py_temp
 
-  !Rotation
+  ! Rotation
   px_temp = ( cos(theta*pi/180)*px) + (sin(theta*pi/180)*py)
   py_temp = (-sin(theta*pi/180)*px) + (cos(theta*pi/180)*py)
 
-  !Translation
+  ! Translation
   px= px_temp + x0
   py= py_temp + y0
 end subroutine rotate_and_translate
 
-subroutine Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex ,Area_Q1, Area_Q2, Area_Q3, Area_Q4)
-  !This subroutine divides a regular hexagon centered at x0,y0 with apothen H, and orientation theta into its intersection with the 4 quadrants
-  !Theta=0 assumes that the apothen points upwards. (also the rotation is not working yet)
-  !Script works by finding the corners of the 6 triangles, and then finding the intersection of each of these with each quadrant.
-  !Arguments
-  real, intent(in) :: x0,y0,H,theta
-  real, intent(out) :: Area_hex ,Area_Q1, Area_Q2, Area_Q3, Area_Q4
+!> Areas of a hexagon divided into quadrants
+!!
+!! This subroutine divides a regular hexagon centered at x0,y0 with apothem H, and orientation theta into its intersection with the 4 quadrants.
+!! Theta=0 assumes that the apothem points upwards.
+!! Routine works by finding the corners of the 6 triangles, and then finding the intersection of each of these with each quadrant.
+!! \todo (also the rotation is not working yet)
+subroutine Hexagon_into_quadrants_using_triangles(x0, y0, H, theta, Area_hex ,Area_Q1, Area_Q2, Area_Q3, Area_Q4)
+  ! Arguments
+  real, intent(in) :: x0 !< x-coordinate of center of hexagon
+  real, intent(in) :: y0 !< y-coordinate of center of hexagon
+  real, intent(in) :: H !< Apothem (inner radius of hexagon)
+  real, intent(in) :: theta !< Orientation angle of hexagon
+  real, intent(out) :: Area_hex !< Area of hexagon
+  real, intent(out) :: Area_Q1 !< Are in quadrant 1
+  real, intent(out) :: Area_Q2 !< Are in quadrant 2
+  real, intent(out) :: Area_Q3 !< Are in quadrant 2
+  real, intent(out) :: Area_Q4 !< Are in quadrant 4
+  ! Local variables
   real :: C1x, C2x, C3x, C4x, C5x, C6x
   real :: C1y, C2y, C3y, C4y, C5y, C6y
   real :: T12_Area, T12_Q1, T12_Q2, T12_Q3, T12_Q4
@@ -2521,10 +2632,10 @@ subroutine Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex ,Area_Q
   stderrunit = stderr()
   tol=1.e-10
 
-  !Length of side of Hexagon
+  ! Length of side of Hexagon
   S=(2/sqrt(3.))*H
 
-  !Finding positions of corners
+  ! Finding positions of corners
   C1x=S           ; C1y=0.  !Corner 1 (right)
   C2x=H/sqrt(3.)  ; C2y=H;  !Corner 2 (top right)
   C3x=-H/sqrt(3.) ; C3y=H;  !Corner 3 (top left)
@@ -2532,7 +2643,7 @@ subroutine Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex ,Area_Q
   C5x=-H/sqrt(3.) ; C5y=-H; !Corner 5 (bottom left)
   C6x=H/sqrt(3.)  ; C6y=-H; !Corner 6 (bottom right)
 
-  !Finding positions of corners
+  ! Finding positions of corners
   call rotate_and_translate(C1x,C1y,theta,x0,y0)
   call rotate_and_translate(C2x,C2y,theta,x0,y0)
   call rotate_and_translate(C3x,C3y,theta,x0,y0)
@@ -2540,7 +2651,7 @@ subroutine Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex ,Area_Q
   call rotate_and_translate(C5x,C5y,theta,x0,y0)
   call rotate_and_translate(C6x,C6y,theta,x0,y0)
 
-  !Area of Hexagon is the sum of the triangles
+  ! Area of Hexagon is the sum of the triangles
   call Triangle_divided_into_four_quadrants(x0,y0,C1x,C1y,C2x,C2y,T12_Area,T12_Q1,T12_Q2,T12_Q3,T12_Q4); !Triangle 012
   call Triangle_divided_into_four_quadrants(x0,y0,C2x,C2y,C3x,C3y,T23_Area,T23_Q1,T23_Q2,T23_Q3,T23_Q4); !Triangle 023
   call Triangle_divided_into_four_quadrants(x0,y0,C3x,C3y,C4x,C4y,T34_Area,T34_Q1,T34_Q2,T34_Q3,T34_Q4); !Triangle 034
@@ -2548,17 +2659,17 @@ subroutine Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex ,Area_Q
   call Triangle_divided_into_four_quadrants(x0,y0,C5x,C5y,C6x,C6y,T56_Area,T56_Q1,T56_Q2,T56_Q3,T56_Q4); !Triangle 056
   call Triangle_divided_into_four_quadrants(x0,y0,C6x,C6y,C1x,C1y,T61_Area,T61_Q1,T61_Q2,T61_Q3,T61_Q4); !Triangle 061
 
-  !Summing up the triangles
-  Area_hex=T12_Area+T23_Area+T34_Area+T45_Area+T56_Area+T61_Area;
-  Area_Q1=T12_Q1+T23_Q1+T34_Q1+T45_Q1+T56_Q1+T61_Q1;
-  Area_Q2=T12_Q2+T23_Q2+T34_Q2+T45_Q2+T56_Q2+T61_Q2;
-  Area_Q3=T12_Q3+T23_Q3+T34_Q3+T45_Q3+T56_Q3+T61_Q3;
-  Area_Q4=T12_Q4+T23_Q4+T34_Q4+T45_Q4+T56_Q4+T61_Q4;
+  ! Summing up the triangles
+  Area_hex=T12_Area+T23_Area+T34_Area+T45_Area+T56_Area+T61_Area
+  Area_Q1=T12_Q1+T23_Q1+T34_Q1+T45_Q1+T56_Q1+T61_Q1
+  Area_Q2=T12_Q2+T23_Q2+T34_Q2+T45_Q2+T56_Q2+T61_Q2
+  Area_Q3=T12_Q3+T23_Q3+T34_Q3+T45_Q3+T56_Q3+T61_Q3
+  Area_Q4=T12_Q4+T23_Q4+T34_Q4+T45_Q4+T56_Q4+T61_Q4
 
-  Area_Q1=max(Area_Q1,0.);
-  Area_Q2=max(Area_Q2,0.);
-  Area_Q3=max(Area_Q3,0.);
-  Area_Q4=max(Area_Q4,0.);
+  Area_Q1=max(Area_Q1,0.)
+  Area_Q2=max(Area_Q2,0.)
+  Area_Q3=max(Area_Q3,0.)
+  Area_Q4=max(Area_Q4,0.)
 
   Error=Area_hex-(Area_Q1+Area_Q2+Area_Q3+Area_Q4)
   if ((abs(Error)>tol))then
@@ -2584,7 +2695,7 @@ subroutine Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex ,Area_Q
     endif
   endif
 
-  !Adjust Areas so that the error is zero by subtracting the error from the largest sector.
+  ! Adjust Areas so that the error is zero by subtracting the error from the largest sector.
    if  (((Area_Q1>=Area_Q2) .and. (Area_Q1>=Area_Q3)) .and. (Area_Q1>=Area_Q4)) then
      Area_Q1=Area_Q1+Error
    elseif  (((Area_Q2>=Area_Q1) .and. (Area_Q2>=Area_Q3)) .and. (Area_Q2>=Area_Q4)) then
@@ -2604,20 +2715,33 @@ subroutine Hexagon_into_quadrants_using_triangles(x0,y0,H,theta,Area_hex ,Area_Q
 end subroutine Hexagon_into_quadrants_using_triangles
 
 subroutine interp_flds(grd, i, j, xi, yj, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, sss, cn, hi)
-! Arguments
-type(icebergs_gridded), pointer :: grd
-integer, intent(in) :: i, j
-real, intent(in) :: xi, yj
-real, intent(out) :: uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, sss, cn, hi
-! Local variables
-real :: cos_rot, sin_rot
+  ! Arguments
+  type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+  integer, intent(in) :: i !< i-index of cell in which to interpolate
+  integer, intent(in) :: j !< j-index of cell in which to interpolate
+  real, intent(in) :: xi !< Non-dimensional x-position within cell to interpolate to
+  real, intent(in) :: yj !< Non-dimensional y-position within cell to interpolate to
+  real, intent(out) :: uo !< Ocean zonal velocity at point xi,yj (m/s)
+  real, intent(out) :: vo !< Ocean meridional velocity at point xi,yj (m/s)
+  real, intent(out) :: ui !< Ice zonal velocity at point xi,yj (m/s)
+  real, intent(out) :: vi !< Ice meridional velocity at point xi,yj (m/s)
+  real, intent(out) :: ua !< Atmospheric zonal velocity at point xi,yj (m/s)
+  real, intent(out) :: va !< Atmospheric meridional velocity at point xi,yj (m/s)
+  real, intent(out) :: ssh_x !< Zonal slope of sea-surface height (nondim)
+  real, intent(out) :: ssh_y !< Meridional slope of sea-surface height (nondim)
+  real, intent(out) :: sst !< Sea-surface temperature (C)
+  real, intent(out) :: sss !< Sea-surface salinity (1e-3)
+  real, intent(out) :: cn !< Sea-ice concentration (nondim)
+  real, intent(out) :: hi !< Sea-ice thickness (m)
+  ! Local variables
+  real :: cos_rot, sin_rot
 #ifdef USE_OLD_SSH_GRADIENT
-real :: dxm, dx0, dxp
+  real :: dxm, dx0, dxp
 #endif
-real :: hxm, hxp
-real, parameter :: ssh_coast=0.00
-integer :: stderrunit
-integer :: ii, jj
+  real :: hxm, hxp
+  real, parameter :: ssh_coast=0.00
+  integer :: stderrunit
+  integer :: ii, jj
 
   ! Get the stderr unit number
   stderrunit = stderr()
@@ -2719,36 +2843,44 @@ integer :: ii, jj
     call error_mesg('diamonds, interp fields', 'field interpaolations has NaNs', FATAL)
 
   endif
+
   contains
 
+  !> Returns zonal slope of sea-surface height across the east face of cell i,j
   real function ddx_ssh(grd,i,j)
-  ! Arguments
-  type(icebergs_gridded), pointer :: grd
-  integer, intent(in) :: i, j
-  ! Local variables
-  real :: dxp,dx0
+    ! Arguments
+    type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+    integer, intent(in) :: i !< i-index of cell
+    integer, intent(in) :: j !< j-index of cell
+    ! Local variables
+    real :: dxp,dx0
     dxp=0.5*(grd%dx(i+1,j)+grd%dx(i+1,j-1))
     dx0=0.5*(grd%dx(i,j)+grd%dx(i,j-1))
     ddx_ssh=2.*(grd%ssh(i+1,j)-grd%ssh(i,j))/(dx0+dxp)*grd%msk(i+1,j)*grd%msk(i,j)
   end function ddx_ssh
 
+  !> Returns meridional slope of sea-surface height across the northern face of cell i,j
   real function ddy_ssh(grd,i,j)
-  ! Arguments
-  type(icebergs_gridded), pointer :: grd
-  integer, intent(in) :: i, j
-  ! Local variables
-  real :: dyp,dy0
+    ! Arguments
+    type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+    integer, intent(in) :: i !< i-index of cell
+    integer, intent(in) :: j !< j-index of cell
+    ! Local variables
+    real :: dyp,dy0
     dyp=0.5*(grd%dy(i,j+1)+grd%dy(i-1,j+1))
     dy0=0.5*(grd%dy(i,j)+grd%dy(i-1,j))
     ddy_ssh=2.*(grd%ssh(i,j+1)-grd%ssh(i,j))/(dy0+dyp)*grd%msk(i,j+1)*grd%msk(i,j)
   end function ddy_ssh
 
+  ! Rotates vector (u,v) using rotation matrix with elements cos_rot and sin_rot
   subroutine rotate(u, v, cos_rot, sin_rot)
-  ! Arguments
-  real, intent(inout) :: u, v
-  real, intent(in) :: cos_rot, sin_rot
-  ! Local variables
-  real :: u_old, v_old
+    ! Arguments
+    real, intent(inout) :: u !< x-component of vector
+    real, intent(inout) :: v !< y-component of vector
+    real, intent(in) :: cos_rot !< Cosine of rotation angle
+    real, intent(in) :: sin_rot !< Sine of rotation angle
+    ! Local variables
+    real :: u_old, v_old
 
     u_old=u
     v_old=v
@@ -2759,16 +2891,16 @@ integer :: ii, jj
 
 end subroutine interp_flds
 
-
+!> Calculates bergs%grd%mass_on_ocean
 subroutine calculate_mass_on_ocean(bergs, with_diagnostics)
-! Arguments
-type(icebergs), pointer :: bergs !< Container for all types and memory
-type(iceberg), pointer :: berg
-type(icebergs_gridded), pointer :: grd
-logical, intent(in) :: with_diagnostics
-! Local variables
-integer :: grdj, grdi
-integer :: j, i
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  logical, intent(in) :: with_diagnostics
+  ! Local variables
+  type(iceberg), pointer :: berg
+  type(icebergs_gridded), pointer :: grd
+  integer :: grdj, grdi
+  integer :: j, i
 
   ! For convenience
   grd=>bergs%grd
@@ -2801,66 +2933,82 @@ integer :: j, i
 
   contains
 
-  subroutine calculate_sum_over_bergs_diagnositcs(bergs,grd,berg,i,j)
-  ! Arguments
-  type(icebergs), pointer :: bergs !< Container for all types and memory
-  type(iceberg), pointer :: berg
-  type(icebergs_gridded), pointer :: grd
-  integer, intent(in) :: i, j
-  ! Local variables
-  real ::  Abits, Lbits, Mbits
+  !> Projects additional diagnostics of bergs on to the grid
+  subroutine calculate_sum_over_bergs_diagnositcs(bergs, grd, berg, i, j)
+    ! Arguments
+    type(icebergs), pointer :: bergs !< Container for all types and memory
+    type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+    type(iceberg), pointer :: berg !< An iceberg
+    integer, intent(in) :: i !< i-index of cell containing berg
+    integer, intent(in) :: j !< j-index of cell containing berg
+    ! Local variables
+    real ::  Abits, Lbits, Mbits
 
-   !Virtual area diagnostic
-   if (grd%id_virtual_area>0) then
-     if (bergs%bergy_bit_erosion_fraction>0.) then
-       Lbits=min(berg%length,berg%width,berg%thickness,40.) ! assume bergy bits are smallest dimension or 40 meters
-       Abits=(berg%mass_of_bits/bergs%rho_bergs)/Lbits ! Effective bottom area (assuming T=Lbits)
-     else
-       Abits=0.0
-     endif
-     grd%virtual_area(i,j)=grd%virtual_area(i,j)+(berg%width*berg%length+Abits)*berg%mass_scaling ! m^2
-   endif
+    !Virtual area diagnostic
+    if (grd%id_virtual_area>0) then
+      if (bergs%bergy_bit_erosion_fraction>0.) then
+        Lbits=min(berg%length,berg%width,berg%thickness,40.) ! assume bergy bits are smallest dimension or 40 meters
+        Abits=(berg%mass_of_bits/bergs%rho_bergs)/Lbits ! Effective bottom area (assuming T=Lbits)
+      else
+        Abits=0.0
+      endif
+      grd%virtual_area(i,j)=grd%virtual_area(i,j)+(berg%width*berg%length+Abits)*berg%mass_scaling ! m^2
+    endif
 
-   !Mass diagnostic (also used in u_iceberg, v_iceberg
-   if ((grd%id_mass>0 ) .or. ((grd%id_u_iceberg>0) .or. (grd%id_v_iceberg>0)))   &
-        & grd%mass(i,j)=grd%mass(i,j)+berg%mass/grd%area(i,j)*berg%mass_scaling ! kg/m2
+    !Mass diagnostic (also used in u_iceberg, v_iceberg
+    if ((grd%id_mass>0 ) .or. ((grd%id_u_iceberg>0) .or. (grd%id_v_iceberg>0)))   &
+         & grd%mass(i,j)=grd%mass(i,j)+berg%mass/grd%area(i,j)*berg%mass_scaling ! kg/m2
 
-   !Finding the average iceberg velocity in a grid cell (mass weighted)
-   if (grd%id_u_iceberg>0) &
-   grd%u_iceberg(i,j)=grd%u_iceberg(i,j)+((berg%mass/grd%area(i,j)*berg%mass_scaling)*berg%uvel) ! kg/m2
-   if (grd%id_v_iceberg>0) &
-   grd%v_iceberg(i,j)=grd%v_iceberg(i,j)+((berg%mass/grd%area(i,j)*berg%mass_scaling)*berg%vvel) ! kg/m2
+    !Finding the average iceberg velocity in a grid cell (mass weighted)
+    if (grd%id_u_iceberg>0) &
+    grd%u_iceberg(i,j)=grd%u_iceberg(i,j)+((berg%mass/grd%area(i,j)*berg%mass_scaling)*berg%uvel) ! kg/m2
+    if (grd%id_v_iceberg>0) &
+    grd%v_iceberg(i,j)=grd%v_iceberg(i,j)+((berg%mass/grd%area(i,j)*berg%mass_scaling)*berg%vvel) ! kg/m2
 
-   !Mass of bergy bits
-   if (grd%id_bergy_mass>0 .or. bergs%add_weight_to_ocean)&
-        & grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+berg%mass_of_bits/grd%area(i,j)*berg%mass_scaling ! kg/m2
- end subroutine calculate_sum_over_bergs_diagnositcs
+    !Mass of bergy bits
+    if (grd%id_bergy_mass>0 .or. bergs%add_weight_to_ocean)&
+         & grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+berg%mass_of_bits/grd%area(i,j)*berg%mass_scaling ! kg/m2
+  end subroutine calculate_sum_over_bergs_diagnositcs
 
 end subroutine calculate_mass_on_ocean
 
+!> The main driver the steps updates icebergs
 subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh, sst, calving_hflx, cn, hi, &
                         stagger, stress_stagger, sss, mass_berg, ustar_berg, area_berg)
-! Arguments
-type(icebergs), pointer :: bergs !< Container for all types and memory
-type(time_type), intent(in) :: time
-real, dimension(:,:), intent(inout) :: calving, calving_hflx
-real, dimension(:,:), intent(in) :: uo, vo, ui, vi, tauxa, tauya, ssh, sst, cn, hi
-integer,    optional, intent(in) :: stagger, stress_stagger
-real, dimension(:,:), optional, intent(in) :: sss
-real, dimension(:,:), optional, pointer ::  mass_berg, ustar_berg, area_berg
-! Local variables
-integer :: iyr, imon, iday, ihr, imin, isec, k
-type(icebergs_gridded), pointer :: grd
-logical :: lerr, sample_traj, write_traj, lbudget, lverbose, check_bond_quality
-real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass,grdd_spread_mass, grdd_spread_area
-real :: grdd_u_iceberg, grdd_v_iceberg, grdd_ustar_iceberg, grdd_spread_uvel, grdd_spread_vvel
-integer :: i, j, Iu, ju, iv, Jv, Iu_off, ju_off, iv_off, Jv_off
-real :: mask, max_SST
-real, dimension(:,:), allocatable :: uC_tmp, vC_tmp, uA_tmp, vA_tmp
-integer :: vel_stagger, str_stagger
-real, dimension(:,:), allocatable :: iCount
-integer :: nbonds
-integer :: stderrunit
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  type(time_type), intent(in) :: time !< Model time
+  real, dimension(:,:), intent(inout) :: calving !< Calving (kg/s). This field is updated with melt by bergs.
+  real, dimension(:,:), intent(inout) :: calving_hflx !< Calving heat flux (W/m2)
+  real, dimension(:,:), intent(in) :: uo !< Ocean zonal velocity (m/s)
+  real, dimension(:,:), intent(in) :: vo !< Ocean meridional velocity (m/s)
+  real, dimension(:,:), intent(in) :: ui !< Ice zonal velocity (m/s)
+  real, dimension(:,:), intent(in) :: vi !< Ice meridional velocity (m/s)
+  real, dimension(:,:), intent(in) :: tauxa !< Zonal wind stress (Pa)
+  real, dimension(:,:), intent(in) :: tauya !< Meridional wind stress (Pa)
+  real, dimension(:,:), intent(in) :: ssh !< Effective sea-surface height (m)
+  real, dimension(:,:), intent(in) :: sst !< Sea-surface temperature (C or K)
+  real, dimension(:,:), intent(in) :: cn !< Sea-ice concentration (nondim)
+  real, dimension(:,:), intent(in) :: hi !< Sea-ice thickness (m)
+  integer, optional, intent(in) :: stagger
+  integer, optional, intent(in) :: stress_stagger
+  real, dimension(:,:), optional, intent(in) :: sss !< Sea-surface salinity (1e-3)
+  real, dimension(:,:), optional, pointer :: mass_berg !< Mass of bergs (kg)
+  real, dimension(:,:), optional, pointer :: ustar_berg !< Friction velocity on base of bergs (m/s)
+  real, dimension(:,:), optional, pointer :: area_berg !< Area of bergs (m2)
+  ! Local variables
+  integer :: iyr, imon, iday, ihr, imin, isec, k
+  type(icebergs_gridded), pointer :: grd
+  logical :: lerr, sample_traj, write_traj, lbudget, lverbose, check_bond_quality
+  real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass,grdd_spread_mass, grdd_spread_area
+  real :: grdd_u_iceberg, grdd_v_iceberg, grdd_ustar_iceberg, grdd_spread_uvel, grdd_spread_vvel
+  integer :: i, j, Iu, ju, iv, Jv, Iu_off, ju_off, iv_off, Jv_off
+  real :: mask, max_SST
+  real, dimension(:,:), allocatable :: uC_tmp, vC_tmp, uA_tmp, vA_tmp
+  integer :: vel_stagger, str_stagger
+  real, dimension(:,:), allocatable :: iCount
+  integer :: nbonds
+  integer :: stderrunit
 
   ! Get the stderr unit number
   stderrunit = stderr()
@@ -3084,7 +3232,7 @@ integer :: stderrunit
   grd%hi(grd%isc-1:grd%iec+1,grd%jsc-1:grd%jec+1)=hi(:,:)
   call mpp_update_domains(grd%hi, grd%domain)
 
-  !Adding gridded salinity.
+  ! Adding gridded salinity.
   if (present(sss)) then
     grd%sss(grd%isc:grd%iec,grd%jsc:grd%jec)=sss(:,:)
   else
@@ -3094,9 +3242,9 @@ integer :: stderrunit
     endif
   endif
 
- !Make sure that gridded values agree with mask  (to get ride of NaN values)
+  ! Make sure that gridded values agree with mask  (to get ride of NaN values)
   do i=grd%isd,grd%ied ; do j=grd%jsd,grd%jed
-  !Initializing all gridded values to zero
+    ! Initializing all gridded values to zero
     if (grd%msk(i,j).lt. 0.5) then
       grd%ua(i,j) = 0.0 ;  grd%va(i,j) = 0.0
       grd%uo(i,j) = 0.0 ;  grd%vo(i,j) = 0.0
@@ -3169,7 +3317,7 @@ integer :: stderrunit
   if (debug) call checksum_gridded(bergs%grd, 's/r run after exchange')
   call mpp_clock_end(bergs%clock_com)
 
-  !Caculate mass on ocean before thermodynamics, to use in melt rate calculation
+  ! Calculate mass on ocean before thermodynamics, to use in melt rate calculation
   if (bergs%find_melt_using_spread_mass) then
     call calculate_mass_on_ocean(bergs, with_diagnostics=.false.)
     grd%spread_mass_old(:,:)=0.
@@ -3294,10 +3442,10 @@ integer :: stderrunit
 
   call mpp_clock_end(bergs%clock_dia)
 
-  !This is the point in the algorithem which determines which fields get passed to the ice model
-  !Return what ever calving we did not use and additional icebergs melt
+  ! This is the point in the algorithm which determines which fields get passed to the ice model
+  ! Return what ever calving we did not use and additional icebergs melt
 
-  !Making sure that spread_mass has the correct mass
+  ! Making sure that spread_mass has the correct mass
   !grd%spread_mass(:,:)=0.0
   !call icebergs_incr_mass(bergs, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec), within_iceberg_model=.True.)
 
@@ -3361,7 +3509,7 @@ integer :: stderrunit
     !bergs%u_iceberg_end=sum_mass(bergs) !Not sure what this is
     !bergs%v_iceberg_end=sum_mass(bergs) !Not sure what this is
     bergs%floating_heat_end=sum_heat(bergs)
-    grd%tmpc(:,:)=0.;
+    grd%tmpc(:,:)=0.
     !Finding spread mass
     call mpp_clock_end(bergs%clock); call mpp_clock_end(bergs%clock_dia) ! To enable calling of public s/r
     call sum_up_spread_fields(bergs, grd%tmpc, 'mass')
@@ -3515,135 +3663,171 @@ integer :: stderrunit
 
   contains
 
-  subroutine report_state(budgetstr,budgetunits,startstr,startval,endstr,endval,delstr,nbergs)
-  ! Arguments
-  character*(*), intent(in) :: budgetstr, budgetunits, startstr, endstr, delstr
-  real, intent(in) :: startval, endval
-  integer, intent(in), optional :: nbergs
-  ! Local variables
-  if (present(nbergs)) then
-    write(*,100) budgetstr//' state:', &
-                        startstr//' start',startval,budgetunits, &
-                        endstr//' end',endval,budgetunits, &
-                        'Delta '//delstr,endval-startval,budgetunits, &
-                        '# of bergs',nbergs
-  else
-    write(*,100) budgetstr//' state:', &
-                        startstr//' start',startval,budgetunits, &
-                        endstr//' end',endval,budgetunits, &
-                        delstr//'Delta',endval-startval,budgetunits
-  endif
-  100 format("diamonds: ",a19,3(a18,"=",es14.7,x,a2,:,","),a12,i8)
+  !> Prints summary of start and end states
+  subroutine report_state(budgetstr, budgetunits, startstr, startval, endstr, endval, delstr, nbergs)
+    ! Arguments
+    character*(*), intent(in) :: budgetstr !< Budget title
+    character*(*), intent(in) :: budgetunits !< Units of budgeted quantity
+    character*(*), intent(in) :: startstr !< Start label
+    real, intent(in) :: startval !< Start value for budget
+    character*(*), intent(in) :: endstr !< End label
+    real, intent(in) :: endval !< End value for budget
+    character*(*), intent(in) :: delstr !< Delta label
+    integer, intent(in), optional :: nbergs !< Number of bergs
+    ! Local variables
+    if (present(nbergs)) then
+      write(*,100) budgetstr//' state:', &
+                          startstr//' start',startval,budgetunits, &
+                          endstr//' end',endval,budgetunits, &
+                          'Delta '//delstr,endval-startval,budgetunits, &
+                          '# of bergs',nbergs
+    else
+      write(*,100) budgetstr//' state:', &
+                          startstr//' start',startval,budgetunits, &
+                          endstr//' end',endval,budgetunits, &
+                          delstr//'Delta',endval-startval,budgetunits
+    endif
+    100 format("diamonds: ",a19,3(a18,"=",es14.7,x,a2,:,","),a12,i8)
   end subroutine report_state
 
-  subroutine report_consistant(budgetstr,budgetunits,startstr,startval,endstr,endval)
-  ! Arguments
-  character*(*), intent(in) :: budgetstr, budgetunits, startstr, endstr
-  real, intent(in) :: startval, endval
-  ! Local variables
-  write(*,200) budgetstr//' check:', &
-                      startstr,startval,budgetunits, &
-                      endstr,endval,budgetunits, &
-                      'error',(endval-startval)/((endval+startval)+1e-30),'nd'
-  200 format("diamonds: ",a19,10(a18,"=",es14.7,x,a2,:,","))
+  !> Prints consistency summary of start and end states
+  subroutine report_consistant(budgetstr, budgetunits, startstr, startval, endstr, endval)
+    ! Arguments
+    character*(*), intent(in) :: budgetstr !< Budget title
+    character*(*), intent(in) :: budgetunits !< Units of budgeted quantity
+    character*(*), intent(in) :: startstr !< Start label
+    real, intent(in) :: startval !< Start value for budget
+    character*(*), intent(in) :: endstr !< End label
+    real, intent(in) :: endval !< End value for budget
+    ! Local variables
+    write(*,200) budgetstr//' check:', &
+                        startstr,startval,budgetunits, &
+                        endstr,endval,budgetunits, &
+                        'error',(endval-startval)/((endval+startval)+1e-30),'nd'
+    200 format("diamonds: ",a19,10(a18,"=",es14.7,x,a2,:,","))
   end subroutine report_consistant
 
-  subroutine report_budget(budgetstr,budgetunits,instr,inval,outstr,outval,delstr,startval,endval)
-  ! Arguments
-  character*(*), intent(in) :: budgetstr, budgetunits, instr, outstr, delstr
-  real, intent(in) :: inval, outval, startval, endval
-  ! Local variables
-  write(*,200) budgetstr//' budget:', &
-                      instr//' in',inval,budgetunits, &
-                      outstr//' out',outval,budgetunits, &
-                      'Delta '//delstr,inval-outval,budgetunits, &
-                      'error',((endval-startval)-(inval-outval))/max(1.e-30,max(abs(endval-startval),abs(inval-outval))),'nd'
-  200 format("diamonds: ",a19,3(a18,"=",es14.7,x,a2,:,","),a8,"=",es10.3,x,a2)
+  !> Prints a budget
+  subroutine report_budget(budgetstr, budgetunits, instr, inval, outstr, outval, delstr, startval, endval)
+    ! Arguments
+    character*(*), intent(in) :: budgetstr !< Budget title
+    character*(*), intent(in) :: budgetunits !< Units of budgeted quantity
+    character*(*), intent(in) :: instr !< Incoming label
+    real, intent(in) :: inval !< Incoming value
+    character*(*), intent(in) :: outstr !< Outgoing label
+    real, intent(in) :: outval !< Outgoing value
+    character*(*), intent(in) :: delstr !< Delta label
+    real, intent(in) :: startval !< Start value for budget
+    real, intent(in) :: endval !< End value for budget
+    ! Local variables
+    write(*,200) budgetstr//' budget:', &
+                        instr//' in',inval,budgetunits, &
+                        outstr//' out',outval,budgetunits, &
+                        'Delta '//delstr,inval-outval,budgetunits, &
+                        'error',((endval-startval)-(inval-outval))/max(1.e-30,max(abs(endval-startval),abs(inval-outval))),'nd'
+    200 format("diamonds: ",a19,3(a18,"=",es14.7,x,a2,:,","),a8,"=",es10.3,x,a2)
   end subroutine report_budget
 
-  subroutine report_istate(budgetstr,startstr,startval,endstr,endval,delstr)
-  ! Arguments
-  character*(*), intent(in) :: budgetstr, startstr, endstr, delstr
-  integer, intent(in) :: startval, endval
-  ! Local variables
-  write(*,100) budgetstr//' state:', &
-                        startstr//' start',startval, &
-                        endstr//' end',endval, &
-                        delstr//'Delta',endval-startval
-  100 format("diamonds: ",a19,3(a18,"=",i14,x,:,","))
+  !> Prints summary of start and end states
+  subroutine report_istate(budgetstr, startstr, startval, endstr, endval, delstr)
+    ! Arguments
+    character*(*), intent(in) :: budgetstr !< Budget title
+    character*(*), intent(in) :: startstr !< Start label
+    integer, intent(in) :: startval !< Start value for budget
+    character*(*), intent(in) :: endstr !< End label
+    integer, intent(in) :: endval !< End value for budget
+    character*(*), intent(in) :: delstr !< Delta label
+    ! Local variables
+    write(*,100) budgetstr//' state:', &
+                          startstr//' start',startval, &
+                          endstr//' end',endval, &
+                          delstr//'Delta',endval-startval
+    100 format("diamonds: ",a19,3(a18,"=",i14,x,:,","))
   end subroutine report_istate
 
+  !> Prints a budget
   subroutine report_ibudget(budgetstr,instr,inval,outstr,outval,delstr,startval,endval)
-  ! Arguments
-  character*(*), intent(in) :: budgetstr, instr, outstr, delstr
-  integer, intent(in) :: inval, outval, startval, endval
-  ! Local variables
-  write(*,200) budgetstr//' budget:', &
-                      instr//' in',inval, &
-                      outstr//' out',outval, &
-                      'Delta '//delstr,inval-outval, &
-                      'error',((endval-startval)-(inval-outval))
-  200 format("diamonds: ",a19,10(a18,"=",i14,x,:,","))
+    ! Arguments
+    character*(*), intent(in) :: budgetstr !< Budget title
+    character*(*), intent(in) :: instr !< Incoming label
+    integer, intent(in) :: inval !< Incoming value
+    character*(*), intent(in) :: outstr !< Outgoing label
+    integer, intent(in) :: outval !< Outgoing value
+    character*(*), intent(in) :: delstr !< Delta label
+    integer, intent(in) :: startval !< Start value for budget
+    integer, intent(in) :: endval !< End value for budget
+    ! Local variables
+    write(*,200) budgetstr//' budget:', &
+                        instr//' in',inval, &
+                        outstr//' out',outval, &
+                        'Delta '//delstr,inval-outval, &
+                        'error',((endval-startval)-(inval-outval))
+    200 format("diamonds: ",a19,10(a18,"=",i14,x,:,","))
   end subroutine report_ibudget
 
-  subroutine get_running_mean_calving(bergs,calving,calving_hflx)
-  ! Arguments
-  type(icebergs), pointer :: bergs !< Container for all types and memory
-  real, dimension(:,:), intent(inout) :: calving, calving_hflx
-  ! Local variables
-  real :: alpha  !Parameter used for calving relaxation time stepping.  (0<=alpha<1)
-  real :: tau  !Relaxation timescale in seconds
-  real :: beta  ! = 1-alpha (0<=beta<1)
-  !This subroutine takes in the new calving and calving_hflx, and uses them to time step a running-mean_calving value
-  !The time stepping uses a time scale tau. When tau is equal to zero, the
-  !running mean is exactly equal to the new calving value.
+  !> Time-filter calving and calving_hflx with a running mean.
+  !!
+  !! This subroutine takes in the new calving and calving_hflx, and uses them to time step a running-mean_calving value.
+  !! The time stepping uses a time scale tau. When tau is equal to zero, the
+  !! running mean is exactly equal to the new calving value.
+  subroutine get_running_mean_calving(bergs, calving, calving_hflx)
+    ! Arguments
+    type(icebergs), pointer :: bergs !< Container for all types and memory
+    real, dimension(:,:), intent(inout) :: calving !< Calving (kg/s)
+    real, dimension(:,:), intent(inout) :: calving_hflx !< Calving heat flux (W/m2)
+    ! Local variables
+    real :: alpha  !Parameter used for calving relaxation time stepping.  (0<=alpha<1)
+    real :: tau  !Relaxation timescale in seconds
+    real :: beta  ! = 1-alpha (0<=beta<1)
 
-  ! For the first time-step, initialize the running mean with the current data
-  if (.not. bergs%grd%rmean_calving_initialized) then
-    bergs%grd%rmean_calving(:,:)=calving(:,:)
-    bergs%grd%rmean_calving_initialized=.true.
-  endif
-  if (.not. bergs%grd%rmean_calving_hflx_initialized) then
-    bergs%grd%rmean_calving_hflx(:,:)=calving_hflx(:,:)
-    bergs%grd%rmean_calving_hflx_initialized=.true.
-  endif
+    ! For the first time-step, initialize the running mean with the current data
+    if (.not. bergs%grd%rmean_calving_initialized) then
+      bergs%grd%rmean_calving(:,:)=calving(:,:)
+      bergs%grd%rmean_calving_initialized=.true.
+    endif
+    if (.not. bergs%grd%rmean_calving_hflx_initialized) then
+      bergs%grd%rmean_calving_hflx(:,:)=calving_hflx(:,:)
+      bergs%grd%rmean_calving_hflx_initialized=.true.
+    endif
 
-  !Applying "Newton cooling" with timescale tau, to smooth out the calving field.
-  tau=bergs%tau_calving/(365.*24*60*60) !Converting time scale from years to seconds
-  alpha=tau/(tau+bergs%dt)
-  if (alpha==0.) return ! Avoids unnecessary copying of arrays
-  if (alpha>0.5) then ! beta is small
-    beta=bergs%dt/(tau+bergs%dt)
-    alpha=1.-beta
-  else ! alpha is small
-    beta=1.-alpha
-  endif
+    !Applying "Newton cooling" with timescale tau, to smooth out the calving field.
+    tau=bergs%tau_calving/(365.*24*60*60) !Converting time scale from years to seconds
+    alpha=tau/(tau+bergs%dt)
+    if (alpha==0.) return ! Avoids unnecessary copying of arrays
+    if (alpha>0.5) then ! beta is small
+      beta=bergs%dt/(tau+bergs%dt)
+      alpha=1.-beta
+    else ! alpha is small
+      beta=1.-alpha
+    endif
 
-  ! For non-negative alpha and beta, these expressions for the running means are sign preserving
-  bergs%grd%rmean_calving(:,:)=beta*calving(:,:) + alpha*bergs%grd%rmean_calving(:,:)
-  bergs%grd%rmean_calving_hflx(:,:)=beta*calving_hflx(:,:) + alpha*bergs%grd%rmean_calving_hflx(:,:)
+    ! For non-negative alpha and beta, these expressions for the running means are sign preserving
+    bergs%grd%rmean_calving(:,:)=beta*calving(:,:) + alpha*bergs%grd%rmean_calving(:,:)
+    bergs%grd%rmean_calving_hflx(:,:)=beta*calving_hflx(:,:) + alpha*bergs%grd%rmean_calving_hflx(:,:)
 
-  !Setting calving used by the iceberg model equal to the running mean
-  calving(:,:)=bergs%grd%rmean_calving(:,:)
-  calving_hflx(:,:)=bergs%grd%rmean_calving_hflx(:,:)
+    !Setting calving used by the iceberg model equal to the running mean
+    calving(:,:)=bergs%grd%rmean_calving(:,:)
+    calving_hflx(:,:)=bergs%grd%rmean_calving_hflx(:,:)
 
   end subroutine get_running_mean_calving
 
 end subroutine icebergs_run
 
+!> Increments a gridded mass field with the mass of bergs (called from outside icebergs_run)
+!!
+!! This routine is called from SIS, (and older versions of SIS2), but not within
+!! the iceberg model. The routine adds the spread iceberg mass to mass provided
+!! the add weight to ocean flag is on, and passive mode is off. It also appears to
+!! play some role in diagnostics
 subroutine icebergs_incr_mass(bergs, mass, Time)
-! Arguments
-type(icebergs), pointer :: bergs !< Container for all types and memory
-type(time_type), intent(in), optional :: Time
-type(icebergs_gridded), pointer :: grd
-integer :: i, j
-logical :: lerr
-real, dimension(bergs%grd%isc:bergs%grd%iec,bergs%grd%jsc:bergs%grd%jec), intent(inout) :: mass
-
-!This routine is called from SIS, (and older versions of SIS2), but not within
-!the iceberg model. The routine adds the spread iceberg mass to mass provided
-!the add weight to ocean flag is on, and passive mode is off. It also appears to
-!play some role in diagnostics
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  real, dimension(bergs%grd%isc:bergs%grd%iec,bergs%grd%jsc:bergs%grd%jec), intent(inout) :: mass !< Mass field to increment
+  type(time_type), intent(in), optional :: Time !< Model time
+  ! Local variables
+  type(icebergs_gridded), pointer :: grd
+  integer :: i, j
+  logical :: lerr
 
   if (.not. associated(bergs)) return
   if (.not. bergs%add_weight_to_ocean) return
@@ -4595,7 +4779,7 @@ end subroutine rotvec_from_tang
 
 subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, bounced, error, iceberg_num)
 ! Arguments
-type(icebergs_gridded), pointer :: grd
+type(icebergs_gridded), pointer :: grd !< Container for gridded fields
 real, intent(inout) :: lon, lat, uvel, vvel, xi, yj
 integer, intent(inout) :: i,j
 integer, intent(in) :: iceberg_num
