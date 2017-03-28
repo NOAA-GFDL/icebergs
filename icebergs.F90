@@ -70,9 +70,9 @@ real, parameter :: Cd_iv=0.9 !< (Vertical) Drag coefficient between bergs and se
 !TOM> no horizontal drag for sea ice! real, parameter :: Cd_ih=0.0012 !< (Horizontal) Drag coefficient between bergs and sea-ice (?)
 
 #ifdef _FILE_VERSION
-  character(len=128) :: version = _FILE_VERSION
+character(len=128) :: version = _FILE_VERSION !< Version of file
 #else
-  character(len=128) :: version = 'unknown'
+character(len=128) :: version = 'unknown' !< Version of file
 #endif
 
 contains
@@ -3849,18 +3849,19 @@ subroutine icebergs_incr_mass(bergs, mass, Time)
 
 end subroutine icebergs_incr_mass
 
+!> Sums up a berg property into a gridded field
 subroutine sum_up_spread_fields(bergs, field, field_name)
-! Arguments
-type(icebergs), pointer :: bergs !< Container for all types and memory
-real, dimension(bergs%grd%isc:bergs%grd%iec,bergs%grd%jsc:bergs%grd%jec), intent(out) :: field
-character(len=4), intent(in) :: field_name
-! Local variables
-integer :: i, j
-type(icebergs_gridded), pointer :: grd
-real :: dmda
-logical :: lerr
-real, dimension(bergs%grd%isd:bergs%grd%ied, bergs%grd%jsd:bergs%grd%jed,9) :: var_on_ocean   !Variable being spread onto the ocean  (mass, area, Uvel, Vvel)
-integer :: stderrunit
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  real, dimension(bergs%grd%isc:bergs%grd%iec,bergs%grd%jsc:bergs%grd%jec), intent(out) :: field !< Gridded field
+  character(len=4), intent(in) :: field_name !< Name of field to grid
+  ! Local variables
+  integer :: i, j
+  type(icebergs_gridded), pointer :: grd
+  real :: dmda
+  logical :: lerr
+  real, dimension(bergs%grd%isd:bergs%grd%ied, bergs%grd%jsd:bergs%grd%jed,9) :: var_on_ocean   !Variable being spread onto the ocean  (mass, area, Uvel, Vvel)
+  integer :: stderrunit
 
   ! Get the stderr unit number
   stderrunit = stderr()
@@ -3924,17 +3925,16 @@ integer :: stderrunit
  endif
 end subroutine sum_up_spread_fields
 
-! ##############################################################################
-
+!> Adds calving (from driver) to the coastal "buckets"
 subroutine accumulate_calving(bergs)
-! Arguments
-type(icebergs), pointer :: bergs !< Container for all types and memory
-! Local variables
-type(icebergs_gridded), pointer :: grd
-real :: remaining_dist, net_calving_used
-integer :: k, i, j
-logical, save :: first_call=.true.
-integer :: stderrunit
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  ! Local variables
+  type(icebergs_gridded), pointer :: grd
+  real :: remaining_dist, net_calving_used
+  integer :: k, i, j
+  logical, save :: first_call=.true.
+  integer :: stderrunit
 
   ! Get the stderr unit number
   stderrunit = stderr()
@@ -3986,19 +3986,18 @@ integer :: stderrunit
 
 end subroutine accumulate_calving
 
-! ##############################################################################
-
+!> Generate icebergs from overflowing "buckets"
 subroutine calve_icebergs(bergs)
-! Arguments
-type(icebergs), pointer :: bergs !< Container for all types and memory
-! Local variables
-type(icebergs_gridded), pointer :: grd
-integer :: i,j,k,icnt,icntmax
-integer :: iNg, jNg  !Total number of points gloablly in i and j direction
-type(iceberg) :: newberg
-logical :: lret
-real :: xi, yj, ddt, calving_to_bergs, calved_to_berg, heat_to_bergs, heat_to_berg
-integer :: stderrunit
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  ! Local variables
+  type(icebergs_gridded), pointer :: grd
+  integer :: i,j,k,icnt,icntmax
+  integer :: iNg, jNg ! Total number of points globally in i and j direction
+  type(iceberg) :: newberg
+  logical :: lret
+  real :: xi, yj, ddt, calving_to_bergs, calved_to_berg, heat_to_bergs, heat_to_berg
+  integer :: stderrunit
 
   ! Get the stderr unit number
   stderrunit = stderr()
@@ -4088,19 +4087,20 @@ integer :: stderrunit
 
 end subroutine calve_icebergs
 
+!> Evolves icebergs forward by updating velocity and position with a time-stepping scheme
 subroutine evolve_icebergs(bergs)
-! Arguments
-type(icebergs), pointer :: bergs !< Container for all types and memory
-! Local variables
-type(icebergs_gridded), pointer :: grd
-type(iceberg), pointer :: berg
-real :: uveln, vveln, lonn, latn
-real :: axn, ayn, bxn, byn                                           ! Added by Alon - explicit and implicit accelations from the previous step
-real :: xi, yj
-integer :: i, j
-integer :: grdi, grdj
-integer :: stderrunit
-logical :: bounced, interactive_icebergs_on, Runge_not_Verlet
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  ! Local variables
+  type(icebergs_gridded), pointer :: grd
+  type(iceberg), pointer :: berg
+  real :: uveln, vveln, lonn, latn
+  real :: axn, ayn, bxn, byn          ! Added by Alon - explicit and implicit accelerations from the previous step
+  real :: xi, yj
+  integer :: i, j
+  integer :: grdi, grdj
+  integer :: stderrunit
+  logical :: bounced, interactive_icebergs_on, Runge_not_Verlet
 
   ! Get the stderr unit number
   stderrunit = stderr()
@@ -4110,7 +4110,6 @@ logical :: bounced, interactive_icebergs_on, Runge_not_Verlet
 
   interactive_icebergs_on=bergs%interactive_icebergs_on
   Runge_not_Verlet=bergs%Runge_not_Verlet
-
 
   do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
     berg=>bergs%list(grdi,grdj)%first
@@ -4162,7 +4161,7 @@ logical :: bounced, interactive_icebergs_on, Runge_not_Verlet
           berg%ine=i     ;   berg%jne=j
           berg%xi=xi     ;   berg%yj=yj
         else
-          if (.not. interactive_icebergs_on)  call update_verlet_position(bergs,berg)
+          if (.not. interactive_icebergs_on) call update_verlet_position(bergs,berg)
         endif
 
         !call interp_flds(grd, i, j, xi, yj, berg%uo, berg%vo, berg%ui, berg%vi, berg%ua, berg%va, berg%ssh_x, berg%ssh_y, berg%sst)
@@ -4179,7 +4178,7 @@ logical :: bounced, interactive_icebergs_on, Runge_not_Verlet
       berg=>bergs%list(grdi,grdj)%first
       do while (associated(berg)) ! loop over all bergs
         if (berg%static_berg .lt. 0.5) then  !Only allow non-static icebergs to evolve
-         if (.not. Runge_not_Verlet)  call update_verlet_position(bergs,berg)
+         if (.not. Runge_not_Verlet) call update_verlet_position(bergs,berg)
 
          !Updating old velocities (for use in iceberg interactions)
           berg%uvel_old=berg%uvel
@@ -4192,28 +4191,33 @@ logical :: bounced, interactive_icebergs_on, Runge_not_Verlet
     enddo ; enddo
   endif
 
-!contains
 end subroutine evolve_icebergs
 
+!> Calculate explicit and implicit accelerations, and new velocity, using the Verlet method
 subroutine verlet_stepping(bergs,berg, axn, ayn, bxn, byn, uveln, vveln)
-type(icebergs), pointer :: bergs !< Container for all types and memory
-type(iceberg), pointer, intent(inout) :: berg
-type(icebergs_gridded), pointer :: grd
-! Local variables
-real, intent(out) :: axn, ayn, bxn, byn, uveln, vveln
-real :: lonn, latn
-real :: uvel1, vvel1,  uvel2, vvel2, uvel3, vvel3
-real :: ax1, ay1
-real :: x1,  y1, xddot1, yddot1, xi, yj
-real :: xdot3, ydot3
-real :: xdotn, ydotn
-real :: dt, dt_2, dt_6, dydl
-real :: orientation
-logical :: bounced, on_tangential_plane, error_flag
-integer :: i, j
-integer :: stderrunit
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  type(iceberg), pointer, intent(inout) :: berg !< Iceberg
+  real, intent(out) :: axn !< Explicit zonal acceleration (m/s2)
+  real, intent(out) :: ayn !< Explicit meridional acceleration (m/s2)
+  real, intent(out) :: bxn !< Implicit zonal acceleration (m/s2)
+  real, intent(out) :: byn !< Implicit meridional acceleration (m/s2)
+  real, intent(out) :: uveln !< New zonal velocity (m/s)
+  real, intent(out) :: vveln !< New meridional velocity (m/s)
+  ! Local variables
+  type(icebergs_gridded), pointer :: grd
+  real :: lonn, latn
+  real :: uvel1, vvel1,  uvel2, vvel2, uvel3, vvel3
+  real :: ax1, ay1
+  real :: x1,  y1, xddot1, yddot1, xi, yj
+  real :: xdot3, ydot3
+  real :: xdotn, ydotn
+  real :: dt, dt_2, dt_6, dydl
+  real :: orientation
+  logical :: bounced, on_tangential_plane, error_flag
+  integer :: i, j
+  integer :: stderrunit
 
-  !Initialize variables
+  ! Initialize variables
 
   ! In this scheme a_n and b_n are saved from the previous timestep, giving the explicit and implicit parts of the acceleration, and a_np1, b_np1 are for the next time step
   ! Note that ax1=a_np1/2 +b_np1, as calculated by the acceleration subrouting
@@ -4245,15 +4249,15 @@ integer :: stderrunit
   uvel3=uvel1+(dt_2*axn)                  !Alon
   vvel3=vvel1+(dt_2*ayn)                  !Alon
 
-  !Note, the mass scaling is equal to 1 (rather than 0.25 as in RK), since
-  !this is only called once in Verlet stepping.
+  ! Note, the mass scaling is equal to 1 (rather than 0.25 as in RK), since
+  ! this is only called once in Verlet stepping.
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
     call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 1.0*berg%mass_scaling,berg%length*berg%width, berg%thickness)
 
   ! Calling the acceleration   (note that the velocity is converted to u_star inside the accel script)
   call accel(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, ax1, ay1, axn, ayn, bxn, byn) !axn, ayn, bxn, byn - Added by Alon
 
-  !Solving for the new velocity
+  ! Solving for the new velocity
   on_tangential_plane=.false.
   if ((berg%lat>89.) .and. (bergs%grd%grid_is_latlon)) on_tangential_plane=.true.
   if (on_tangential_plane) then
@@ -4312,25 +4316,38 @@ integer :: stderrunit
 
 end subroutine verlet_stepping
 
-subroutine Runge_Kutta_stepping(bergs, berg, axn, ayn, bxn, byn, uveln, vveln,lonn, latn, i, j, xi, yj)
-type(icebergs), pointer :: bergs !< Container for all types and memory
-type(iceberg), pointer, intent(inout) :: berg
-type(icebergs_gridded), pointer :: grd
-real , intent(out) :: axn, ayn, bxn, byn, uveln, vveln,lonn, latn, xi, yj
-integer, intent(out) :: i, j
-real :: uvel1, vvel1, lon1, lat1, u1, v1, dxdl1, ax1, ay1, axn1, ayn1
-real :: uvel2, vvel2, lon2, lat2, u2, v2, dxdl2, ax2, ay2, axn2, ayn2
-real :: uvel3, vvel3, lon3, lat3, u3, v3, dxdl3, ax3, ay3, axn3, ayn3
-real :: uvel4, vvel4, lon4, lat4, u4, v4, dxdl4, ax4, ay4, axn4, ayn4
-real :: x1, xdot1, xddot1, y1, ydot1, yddot1, xddot1n, yddot1n
-real :: x2, xdot2, xddot2, y2, ydot2, yddot2, xddot2n, yddot2n
-real :: x3, xdot3, xddot3, y3, ydot3, yddot3, xddot3n, yddot3n
-real :: x4, xdot4, xddot4, y4, ydot4, yddot4, xddot4n, yddot4n
-real :: xn, xdotn, xddotn, yn, ydotn, yddotn, xddotnn, yddotnn
-real :: dt, dt_2, dt_6, dydl
-integer :: i1,j1,i2,j2,i3,j3,i4,j4
-integer :: stderrunit
-logical :: bounced, on_tangential_plane, error_flag
+!> Calculate explicit and implicit accelerations, new velocity, and new position, using the fourth order Runge-Kutta  method
+subroutine Runge_Kutta_stepping(bergs, berg, axn, ayn, bxn, byn, uveln, vveln, lonn, latn, i, j, xi, yj)
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  type(iceberg), pointer, intent(inout) :: berg !< Iceberg
+  real, intent(out) :: axn !< Explicit zonal acceleration (m/s2)
+  real, intent(out) :: ayn !< Explicit meridional acceleration (m/s2)
+  real, intent(out) :: bxn !< Implicit zonal acceleration (m/s2)
+  real, intent(out) :: byn !< Implicit meridional acceleration (m/s2)
+  real, intent(out) :: uveln !< New zonal velocity (m/s)
+  real, intent(out) :: vveln !< New meridional velocity (m/s)
+  real, intent(out) :: lonn !< New longitude (degree E)
+  real, intent(out) :: latn !< New latitude (degree N)
+  integer, intent(out) :: i !< New i-index of containing cell
+  integer, intent(out) :: j !< New i-index of containing cell
+  real, intent(out) :: xi !< New non-dimensional x-position
+  real, intent(out) :: yj !< New non-dimensional y-position
+  ! Local variables
+  type(icebergs_gridded), pointer :: grd
+  real :: uvel1, vvel1, lon1, lat1, u1, v1, dxdl1, ax1, ay1, axn1, ayn1
+  real :: uvel2, vvel2, lon2, lat2, u2, v2, dxdl2, ax2, ay2, axn2, ayn2
+  real :: uvel3, vvel3, lon3, lat3, u3, v3, dxdl3, ax3, ay3, axn3, ayn3
+  real :: uvel4, vvel4, lon4, lat4, u4, v4, dxdl4, ax4, ay4, axn4, ayn4
+  real :: x1, xdot1, xddot1, y1, ydot1, yddot1, xddot1n, yddot1n
+  real :: x2, xdot2, xddot2, y2, ydot2, yddot2, xddot2n, yddot2n
+  real :: x3, xdot3, xddot3, y3, ydot3, yddot3, xddot3n, yddot3n
+  real :: x4, xdot4, xddot4, y4, ydot4, yddot4, xddot4n, yddot4n
+  real :: xn, xdotn, xddotn, yn, ydotn, yddotn, xddotnn, yddotnn
+  real :: dt, dt_2, dt_6, dydl
+  integer :: i1,j1,i2,j2,i3,j3,i4,j4
+  integer :: stderrunit
+  logical :: bounced, on_tangential_plane, error_flag
   ! 4th order Runge-Kutta to solve:
   !    d/dt X = V,  d/dt V = A
   ! with I.C.'s:
@@ -4648,25 +4665,26 @@ logical :: bounced, on_tangential_plane, error_flag
   endif
 end subroutine Runge_Kutta_stepping
 
-!#######################################################################
-!MP6
-subroutine update_verlet_position(bergs,berg)
-type(icebergs), intent(in), pointer :: bergs
-type(iceberg), intent(in), pointer :: berg
-type(icebergs_gridded), pointer :: grd
-!Local variable
-real :: lonn, latn
-real :: xi, yj
-real :: uvel3, vvel3
-real :: lon1, lat1, dxdl1, dydl
-real :: uvel1, vvel1, uvel2, vvel2
-real :: axn, ayn, bxn, byn
-real :: xdot2, ydot2
-real :: u2, v2, x1, y1, xn, yn
-real :: dx, dt, dt_2
-integer :: i, j
-logical :: on_tangential_plane, error_flag, bounced
-integer :: stderrunit
+!> Updates a bergs position using the Verlet algorithm
+!!
+!! \todo The intent(in) are not consistent with usage, or are not even needed.
+subroutine update_verlet_position(bergs, berg)
+  type(icebergs), intent(in), pointer :: bergs !< Container for all types and memory
+  type(iceberg), intent(in), pointer :: berg !< Iceberg
+  !Local variable
+  type(icebergs_gridded), pointer :: grd
+  real :: lonn, latn
+  real :: xi, yj
+  real :: uvel3, vvel3
+  real :: lon1, lat1, dxdl1, dydl
+  real :: uvel1, vvel1, uvel2, vvel2
+  real :: axn, ayn, bxn, byn
+  real :: xdot2, ydot2
+  real :: u2, v2, x1, y1, xn, yn
+  real :: dx, dt, dt_2
+  integer :: i, j
+  logical :: on_tangential_plane, error_flag, bounced
+  integer :: stderrunit
 
   ! Get the stderr unit number
   stderrunit = stderr()
@@ -4732,12 +4750,13 @@ integer :: stderrunit
 
 end subroutine update_verlet_position
 
-!#######################################################################
-
+!> Calculate longitude-latitude from tangent plane coordinates
 subroutine rotpos_from_tang(x, y, lon, lat)
   ! Arguments
-  real, intent(in) :: x, y
-  real, intent(out) :: lon, lat
+  real, intent(in) :: x !< x-coordinate in tangent plane
+  real, intent(in) :: y !< y-coordinate in tangent plane
+  real, intent(out) :: lon !< Longitude (degree E)
+  real, intent(out) :: lat !< Latitude (degree N)
   ! Local variables
   real :: r
 
@@ -4747,10 +4766,14 @@ subroutine rotpos_from_tang(x, y, lon, lat)
 
 end subroutine rotpos_from_tang
 
+!> Calculates tangent plane velocity from velocity in velocity oriented in geographic coordinates
 subroutine rotvec_to_tang(lon, uvel, vvel, xdot, ydot)
   ! Arguments
-  real, intent(in) :: lon, uvel, vvel
-  real, intent(out) :: xdot, ydot
+  real, intent(in) :: lon !< Longitude (degree E)
+  real, intent(in) :: uvel !< Zonal velocity (m/s)
+  real, intent(in) :: vvel !< Meridional velocity (m/s)
+  real, intent(out) :: xdot !< x-component of velocity in tangent plane (m/s)
+  real, intent(out) :: ydot !< y-component of velocity in tangent plane (m/s)
   ! Local variables
   real :: clon,slon
 
@@ -4761,10 +4784,14 @@ subroutine rotvec_to_tang(lon, uvel, vvel, xdot, ydot)
 
 end subroutine rotvec_to_tang
 
+!> Calculate velocity oriented in geographic coordinates from tangent plane velocity
 subroutine rotvec_from_tang(lon, xdot, ydot, uvel, vvel)
   ! Arguments
-  real, intent(in) :: lon, xdot, ydot
-  real, intent(out) :: uvel, vvel
+  real, intent(in) :: lon !< Longitude (degree E)
+  real, intent(in) :: xdot !< x-component of velocity in tangent plane (m/s)
+  real, intent(in) :: ydot !< y-component of velocity in tangent plane (m/s)
+  real, intent(out) :: uvel !< Zonal velocity (m/s)
+  real, intent(out) :: vvel !< Meridional velocity (m/s)
   ! Local variables
   real :: clon,slon
 
@@ -4775,22 +4802,28 @@ subroutine rotvec_from_tang(lon, xdot, ydot, uvel, vvel)
 
 end subroutine rotvec_from_tang
 
-! ##############################################################################
-
+!> Moves berg's cell indexes,(i,j), checking for collisional with coasts
 subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, bounced, error, iceberg_num)
-! Arguments
-type(icebergs_gridded), pointer :: grd !< Container for gridded fields
-real, intent(inout) :: lon, lat, uvel, vvel, xi, yj
-integer, intent(inout) :: i,j
-integer, intent(in) :: iceberg_num
-logical, intent(out) :: bounced, error
-! Local variables
-logical lret, lpos
-real, parameter :: posn_eps=0.05
-integer :: icount, i0, j0, inm, jnm
-real :: xi0, yj0, lon0, lat0
-integer :: stderrunit
-logical :: point_in_cell_using_xi_yj
+  ! Arguments
+  type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+  real, intent(inout) :: lon !< Longitude (degree E)
+  real, intent(inout) :: lat !< Latitude (degree N)
+  real, intent(inout) :: uvel !< Zonal velocity (m/s)
+  real, intent(inout) :: vvel !< Meridional velocity (m/s)
+  real, intent(inout) :: xi !< Non-dimension x-position within cell
+  real, intent(inout) :: yj !< Non-dimension y-position within cell
+  integer, intent(inout) :: i !< i-index of cell
+  integer, intent(inout) :: j !< j-index of cell
+  logical, intent(out) :: bounced !< True if berg collided with coast
+  logical, intent(out) :: error !< True if adjustments could not be made consistently
+  integer, intent(in) :: iceberg_num !< Berg identifier
+  ! Local variables
+  logical lret, lpos
+  real, parameter :: posn_eps=0.05
+  integer :: icount, i0, j0, inm, jnm
+  real :: xi0, yj0, lon0, lat0
+  integer :: stderrunit
+  logical :: point_in_cell_using_xi_yj
 
   ! Get the stderr unit number
   stderrunit = stderr()
@@ -5016,15 +5049,14 @@ logical :: point_in_cell_using_xi_yj
   endif
  end subroutine adjust_index_and_ground
 
-!end subroutine evolve_icebergs
-
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
+!> Calculate longitude-latitude from tangent plane coordinates
 subroutine rotpos_to_tang(lon, lat, x, y, iceberg_num_in)
   ! Arguments
-  real, intent(in) :: lon, lat
-  real, intent(out) :: x, y
-  integer, intent(in) , optional :: iceberg_num_in
+  real, intent(in) :: lon !< Longitude (degree E)
+  real, intent(in) :: lat !< Latitude (degree N)
+  real, intent(out) :: x !< x-coordinate in tangent plane
+  real, intent(out) :: y !< y-coordinate in tangent plane
+  integer, intent(in), optional :: iceberg_num_in !< Berg identifier
   ! Local variables
   real :: r,colat,clon,slon
   integer :: stderrunit, iceberg_num
@@ -5053,18 +5085,17 @@ subroutine rotpos_to_tang(lon, lat, x, y, iceberg_num_in)
 
 end subroutine rotpos_to_tang
 
-! ##############################################################################
-
+!> Calculate stocks of water and heat
 subroutine icebergs_stock_pe(bergs, index, value)
-! Modules
-use stock_constants_mod, only : ISTOCK_WATER, ISTOCK_HEAT
-! Arguments
-type(icebergs), pointer :: bergs !< Container for all types and memory
-integer, intent(in) :: index
-real, intent(out) :: value
-! Local variables
-type(icebergs_gridded), pointer :: grd
-real :: berg_mass, stored_mass
+  ! Modules
+  use stock_constants_mod, only : ISTOCK_WATER, ISTOCK_HEAT
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  integer, intent(in) :: index !< =ISTOCK_WATER or ISTOCK_HEAT
+  real, intent(out) :: value !< Amount of ice or water
+  ! Local variables
+  type(icebergs_gridded), pointer :: grd
+  real :: berg_mass, stored_mass
 
   ! For convenience
   grd=>bergs%grd
@@ -5088,12 +5119,11 @@ real :: berg_mass, stored_mass
 
 end subroutine icebergs_stock_pe
 
-! ##############################################################################
-
+!> Write restart files
 subroutine icebergs_save_restart(bergs)
-! Arguments
-type(icebergs), pointer :: bergs !< Container for all types and memory
-! Local variables
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  ! Local variables
 
   if (.not.associated(bergs)) return
 
@@ -5104,13 +5134,12 @@ type(icebergs), pointer :: bergs !< Container for all types and memory
 
 end subroutine icebergs_save_restart
 
-! ##############################################################################
-
+!> Deallocate all memory and disassociated pointer
 subroutine icebergs_end(bergs)
-! Arguments
-type(icebergs), pointer :: bergs !< Container for all types and memory
-! Local variables
-type(iceberg), pointer :: this, next
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  ! Local variables
+  type(iceberg), pointer :: this, next
 
   if (.not.associated(bergs)) return
 
@@ -5209,14 +5238,14 @@ type(iceberg), pointer :: this, next
 
 end subroutine icebergs_end
 
-! ##############################################################################
-
-subroutine invert_tau_for_du(u,v)
-! Arguments
-real, dimension(:,:),intent(inout) :: u, v
-! Local variables
-integer :: i, j
-real :: cd, cddvmod, tau2
+!> Approximately convert a wind-stress into a velocity difference
+subroutine invert_tau_for_du(u, v)
+  ! Arguments
+  real, dimension(:,:), intent(inout) :: u !< On entry, zonal wind stress (Pa). On exit, zonal velocity difference (m/s).
+  real, dimension(:,:), intent(inout) :: v !< On entry, meridional wind stress (Pa). On exit, meridional velocity difference (m/s).
+  ! Local variables
+  integer :: i, j
+  real :: cd, cddvmod, tau2
 
   cd=0.0015
 
@@ -5235,7 +5264,5 @@ real :: cd, cddvmod, tau2
   enddo
 
 end subroutine invert_tau_for_du
-
-! ##############################################################################
 
 end module

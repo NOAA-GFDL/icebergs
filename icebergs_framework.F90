@@ -461,7 +461,7 @@ integer, intent(in) :: axes(2) !< Diagnostic axes
 integer, intent(in) :: dom_x_flags !< Domain flags in i-direction
 integer, intent(in) :: dom_y_flags !< Domain flags in j-direction
 real, intent(in) :: dt !< Time-step (s)
-type (time_type), intent(in) :: Time ! Current model time
+type (time_type), intent(in) :: Time !< Current model time
 real, dimension(:,:), intent(in) :: ice_lon !< Longitude of cell corners using NE convention (degree E)
 real, dimension(:,:), intent(in) :: ice_lat !< Latitude of cell corners using NE conventino (degree N)
 real, dimension(:,:), intent(in) :: ice_wet !< Wet/dry mask (1 is wet, 0 is dry) of cell centers
