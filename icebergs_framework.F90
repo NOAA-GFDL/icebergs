@@ -78,6 +78,7 @@ public monitor_a_berg
 public is_point_within_xi_yj_bounds
 public test_check_for_duplicate_ids_in_list
 public check_for_duplicates_in_parallel
+public split_id, id_from_2_ints, generate_id
 
 !> Container for gridded fields
 type :: icebergs_gridded
@@ -254,6 +255,7 @@ type :: iceberg
   real :: static_berg  ! Equal to 1 for icebergs which are static (not allowed to move). Might be extended to grounding later.
   integer :: start_year !< Year that berg was created (years)
   integer :: iceberg_num !< Iceberg identifier
+  integer(kind=8) :: id !< Iceberg identifier
   integer :: ine !< Nearest i-index in NE direction (for convenience)
   integer :: jne !< Nearest j-index in NE direction (for convenience)
   real :: xi !< Non-dimensional x-coordinate within current cell (0..1)
@@ -281,6 +283,7 @@ type :: bond
   type(bond), pointer :: next_bond=>null() !< Next link in list
   type(iceberg), pointer :: other_berg=>null()
   integer :: other_berg_num
+  integer(kind=8) :: other_id !< ID of other berg
   integer :: other_berg_ine
   integer :: other_berg_jne
 end type bond
@@ -2286,6 +2289,29 @@ integer :: grdi_inner, grdj_inner
   endif
 
 end subroutine check_for_duplicates
+
+!> Generate an iceberg id from a counter at calving-location and the calving location itself.
+!! Note that this updates grd%iceberg_counter_grd.
+!!
+!! \todo If we initialized grd%iceberg_counter_grd to 0 when the model is first run we could move
+!! this increment line to before the id generation and then the counter would be an actual count.
+integer(kind=8) function generate_id(grd, i, j)
+  type(icebergs_gridded), pointer    :: grd !< Container for gridded fields
+  integer,                intent(in) :: i   !< i-index of calving location
+  integer,                intent(in) :: j   !< j-index of calving location
+  ! Local variables
+  integer :: ij ! Hash of i,j
+  integer :: iNg ! Total number of points globally in i direction
+
+  iNg=(grd%ieg-grd%isg+1)
+  ! ij is unique number for each grid cell (32-bit integers allow for ~1/100th degree global resolution)
+  ij = i + (iNg*(j-1))
+  ! Generate a 64-bit id
+  generate_id = id_from_2_ints( grd%iceberg_counter_grd(i,j), ij )
+  ! Increment counter in calving cell
+  grd%iceberg_counter_grd(i,j) = grd%iceberg_counter_grd(i,j) + 1
+
+end function generate_id
 
 !> Prints a particular berg's vitals
 !!
