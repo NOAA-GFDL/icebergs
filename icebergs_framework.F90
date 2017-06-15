@@ -1108,7 +1108,7 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
   endif
 
   if (do_unit_tests) then
-   if (unitTests(bergs)) call error_mesg('diamonds, icebergs_init', 'Unit tests failed!', FATAL)
+   if (unit_tests(bergs)) call error_mesg('diamonds, icebergs_init', 'Unit tests failed!', FATAL)
   endif
 
  !write(stderrunit,*) 'diamonds: done'
@@ -4452,26 +4452,59 @@ integer :: stderrunit
 
 end subroutine print_fld
 
+!> Combine a counter and i,j hash into an id
+integer(kind=8) function id_from_2_ints(counter, ijhash)
+  integer, intent(in) :: counter !< The counter value assigned at calving
+  integer, intent(in) :: ijhash  !< A hash of i,j calving location
+
+  id_from_2_ints = int(counter,8) * (2**32) + int(ijhash,8)
+
+end function id_from_2_ints
+
+!> Split an iceberg ID into two parts
+subroutine split_id(id, counter, ijhash)
+  integer(kind=8), intent(in)  :: id      !< A unique id assigned when a berg is created
+  integer,         intent(out) :: counter !< The counter value assigned at calving
+  integer,         intent(out) :: ijhash  !< A hash of i,j calving location
+  ! Local variables
+  integer(kind=8) :: i8
+
+  counter = ishft(id,-32)
+  !counter = i8
+  ijhash = int(id,4)
+
+end subroutine split_id
+
 !> Invoke some unit tests
-logical function unitTests(bergs)
+logical function unit_tests(bergs)
   type(icebergs), pointer :: bergs !< Container for all types and memory
   ! Local variables
   type(icebergs_gridded), pointer :: grd
-  integer :: stderrunit,i,j
+  integer :: stderrunit,i,j,c1,c2
+  integer(kind=8) :: id
 
   ! This function returns True is a unit test fails
-  unitTests=.false.
+  unit_tests=.false.
   ! For convenience
   grd=>bergs%grd
   stderrunit=stderr()
 
   i=grd%isc; j=grd%jsc
-  call localTest( unitTests, bilin(grd, grd%lon, i, j, 0., 1.), grd%lon(i-1,j) )
-  call localTest( unitTests, bilin(grd, grd%lon, i, j, 1., 1.), grd%lon(i,j) )
-  call localTest( unitTests, bilin(grd, grd%lat, i, j, 1., 0.), grd%lat(i,j-1) )
-  call localTest( unitTests, bilin(grd, grd%lat, i, j, 1., 1.), grd%lat(i,j) )
+  call localTest( unit_tests, bilin(grd, grd%lon, i, j, 0., 1.), grd%lon(i-1,j) )
+  call localTest( unit_tests, bilin(grd, grd%lon, i, j, 1., 1.), grd%lon(i,j) )
+  call localTest( unit_tests, bilin(grd, grd%lat, i, j, 1., 0.), grd%lat(i,j-1) )
+  call localTest( unit_tests, bilin(grd, grd%lat, i, j, 1., 1.), grd%lat(i,j) )
 
-end function unitTests
+  ! Test 64-bit ID conversion
+  i = 1440*1080 ; c1 = 2**30 + 2**4 + 1
+  id = id_from_2_ints(c1, i)
+  call split_id(id,c2,j)
+  if (j /= i .or. c2 /= c1) then
+    write(0,*) 'i,c in:',i,c1,' id=',id,' i,c out:',j,c2
+    unit_tests=.true.
+  endif
+
+end function unit_tests
 
 !> Checks answer to right answer and prints results if different
 subroutine localTest(unit_test, answer, rightAnswer)
