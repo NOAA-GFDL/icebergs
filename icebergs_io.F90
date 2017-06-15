@@ -40,6 +40,7 @@ use ice_bergs_framework, only: verbose, really_debug, debug, restart_input_dir,m
 use ice_bergs_framework, only: ignore_ij_restart, use_slow_find,generate_test_icebergs,print_berg
 use ice_bergs_framework, only: force_all_pes_traj
 use ice_bergs_framework, only: check_for_duplicates_in_parallel
+use ice_bergs_framework, only: split_id, id_from_2_ints, generate_id
 
 implicit none ; private
 
@@ -560,7 +561,7 @@ integer :: stderrunit, iNg, jNg, i, j
         localberg%iceberg_num=get_int(ncid, iceberg_numid, k)
       else
         localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
-        grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
+        localberg%id = generate_id(grd, i, j)
       endif
       localberg%start_day=get_double(ncid, start_dayid, k)
       localberg%start_mass=get_double(ncid, start_massid, k)
@@ -677,25 +678,25 @@ integer :: iyr, imon, iday, ihr, imin, isec
       localberg%uvel=1.
       localberg%vvel=0.
       localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
-      grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
+      localberg%id = generate_id(grd, i, j)
       call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
       !Berg B
       localberg%uvel=-1.
       localberg%vvel=0.
       localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
-      grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
+      localberg%id = generate_id(grd, i, j)
       call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
       !Berg C
       localberg%uvel=0.
       localberg%vvel=1.
       localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
-      grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
+      localberg%id = generate_id(grd, i, j)
       call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
       !Berg D
       localberg%uvel=0.
       localberg%vvel=-1.
       localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
-      grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
+      localberg%id = generate_id(grd, i, j)
       call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
     endif
   enddo; enddo
@@ -892,7 +893,7 @@ integer, allocatable, dimension(:) :: ine,       &
       if (bergs%grd%area(localberg%ine,localberg%jne) .ne. 0)  then
         if (iceberg_num(k)==-1) then ! If using an old_restart then iceberg_num needs to be generated
           localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(localberg%ine,localberg%jne))+(localberg%ine+(iNg*(localberg%jne-1)))
-          grd%iceberg_counter_grd(localberg%ine,localberg%jne)=grd%iceberg_counter_grd(localberg%ine,localberg%jne)+1
+          localberg%id = generate_id(grd, localberg%ine, localberg%jne)
         endif
         call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg)
       else
@@ -1058,22 +1059,22 @@ logical :: lres
       !Berg A
       call loc_set_berg_pos(grd, 0.9, 0.5, 1., 0., localberg)
       localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
-      grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
+      localberg%id = generate_id(grd, i, j)
       call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
       !Berg B
       call loc_set_berg_pos(grd, 0.1, 0.5, -1., 0., localberg)
       localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
-      grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
+      localberg%id = generate_id(grd, i, j)
       call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
       !Berg C
       call loc_set_berg_pos(grd, 0.5, 0.9, 0., 1., localberg)
       localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
-      grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
+      localberg%id = generate_id(grd, i, j)
       call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
       !Berg D
       call loc_set_berg_pos(grd, 0.5, 0.1, 0., -1., localberg)
       localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
-      grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
+      localberg%id = generate_id(grd, i, j)
       call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
     endif
   enddo; enddo

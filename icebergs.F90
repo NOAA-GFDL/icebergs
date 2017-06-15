@@ -43,6 +43,7 @@ use ice_bergs_framework, only: orig_read  ! Remove when backward compatibility n
 use ice_bergs_framework, only: monitor_a_berg
 use ice_bergs_framework, only: is_point_within_xi_yj_bounds
 use ice_bergs_framework, only: test_check_for_duplicate_ids_in_list
+use ice_bergs_framework, only: generate_id
 
 use ice_bergs_io,        only: ice_bergs_io_init,write_restart,write_trajectory
 use ice_bergs_io,        only: read_restart_bergs,read_restart_bergs_orig,read_restart_calving
@@ -4044,6 +4045,7 @@ subroutine calve_icebergs(bergs)
           newberg%start_lat=newberg%lat
           newberg%start_year=bergs%current_year
           newberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i+(iNg*(j-1)))  ! unique number for each iceberg
+          newberg%id = generate_id(grd, i, j)
           newberg%start_day=bergs%current_yearday+ddt/86400.
           newberg%start_mass=bergs%initial_mass(k)
           newberg%mass_scaling=bergs%mass_scaling(k)
@@ -4065,7 +4067,6 @@ subroutine calve_icebergs(bergs)
           icnt=icnt+1
           bergs%nbergs_calved=bergs%nbergs_calved+1
           bergs%nbergs_calved_by_class(k)=bergs%nbergs_calved_by_class(k)+1
-          grd%iceberg_counter_grd(i,j)=grd%iceberg_counter_grd(i,j)+1
         enddo
         icntmax=max(icntmax,icnt)
       enddo
