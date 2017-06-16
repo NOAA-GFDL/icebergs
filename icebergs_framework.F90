@@ -2114,93 +2114,98 @@ end subroutine increase_ibuffer
 
 !> Packs a trajectory entry into a buffer
 subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj)
-! Arguments
-type(xyt), pointer :: traj !< Trajectory entry to pack
-type(buffer), pointer :: buff !< Buffer to pack entry into
-integer, intent(in) :: n !< Position in buffer to place entry
-logical, intent(in) :: save_short_traj !< If true, only use a subset of trajectory data
+  ! Arguments
+  type(xyt), pointer :: traj !< Trajectory entry to pack
+  type(buffer), pointer :: buff !< Buffer to pack entry into
+  integer, intent(in) :: n !< Position in buffer to place entry
+  logical, intent(in) :: save_short_traj !< If true, only use a subset of trajectory data
+  ! Local variables
+  integer :: counter ! Position in stack
 
   if (.not.associated(buff)) call increase_ibuffer(buff,n,buffer_width_traj)
   if (n>buff%size) call increase_ibuffer(buff,n,buffer_width_traj)
 
-  buff%data(1,n)=traj%lon
-  buff%data(2,n)=traj%lat
-  buff%data(3,n)=float(traj%year)
-  buff%data(4,n)=traj%day
-  buff%data(5,n)=float(traj%iceberg_num)
+  counter = 0
+  call push_buffer_value(buff%data(:,n),counter,traj%lon)
+  call push_buffer_value(buff%data(:,n),counter,traj%lat)
+  call push_buffer_value(buff%data(:,n),counter,traj%year)
+  call push_buffer_value(buff%data(:,n),counter,traj%day)
+  call push_buffer_value(buff%data(:,n),counter,traj%iceberg_num)
   if (.not. save_short_traj) then
-    buff%data(6,n)=traj%uvel
-    buff%data(7,n)=traj%vvel
-    buff%data(8,n)=traj%mass
-    buff%data(9,n)=traj%mass_of_bits
-    buff%data(10,n)=traj%heat_density
-    buff%data(11,n)=traj%thickness
-    buff%data(12,n)=traj%width
-    buff%data(13,n)=traj%length
-    buff%data(14,n)=traj%uo
-    buff%data(15,n)=traj%vo
-    buff%data(16,n)=traj%ui
-    buff%data(17,n)=traj%vi
-    buff%data(18,n)=traj%ua
-    buff%data(19,n)=traj%va
-    buff%data(20,n)=traj%ssh_x
-    buff%data(21,n)=traj%ssh_y
-    buff%data(22,n)=traj%sst
-    buff%data(23,n)=traj%cn
-    buff%data(24,n)=traj%hi
-    buff%data(25,n)=traj%axn !Alon
-    buff%data(26,n)=traj%ayn !Alon
-    buff%data(27,n)=traj%bxn !Alon
-    buff%data(28,n)=traj%byn !Alon
-    buff%data(29,n)=traj%halo_berg !Alon
-    buff%data(30,n)=traj%static_berg !Alon
-    buff%data(31,n)=traj%sss
+    call push_buffer_value(buff%data(:,n),counter,traj%uvel)
+    call push_buffer_value(buff%data(:,n),counter,traj%vvel)
+    call push_buffer_value(buff%data(:,n),counter,traj%mass)
+    call push_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
+    call push_buffer_value(buff%data(:,n),counter,traj%heat_density)
+    call push_buffer_value(buff%data(:,n),counter,traj%thickness)
+    call push_buffer_value(buff%data(:,n),counter,traj%width)
+    call push_buffer_value(buff%data(:,n),counter,traj%length)
+    call push_buffer_value(buff%data(:,n),counter,traj%uo)
+    call push_buffer_value(buff%data(:,n),counter,traj%vo)
+    call push_buffer_value(buff%data(:,n),counter,traj%ui)
+    call push_buffer_value(buff%data(:,n),counter,traj%vi)
+    call push_buffer_value(buff%data(:,n),counter,traj%ua)
+    call push_buffer_value(buff%data(:,n),counter,traj%va)
+    call push_buffer_value(buff%data(:,n),counter,traj%ssh_x)
+    call push_buffer_value(buff%data(:,n),counter,traj%ssh_y)
+    call push_buffer_value(buff%data(:,n),counter,traj%sst)
+    call push_buffer_value(buff%data(:,n),counter,traj%cn)
+    call push_buffer_value(buff%data(:,n),counter,traj%hi)
+    call push_buffer_value(buff%data(:,n),counter,traj%axn)
+    call push_buffer_value(buff%data(:,n),counter,traj%ayn)
+    call push_buffer_value(buff%data(:,n),counter,traj%bxn)
+    call push_buffer_value(buff%data(:,n),counter,traj%byn)
+    call push_buffer_value(buff%data(:,n),counter,traj%halo_berg)
+    call push_buffer_value(buff%data(:,n),counter,traj%static_berg)
+    call push_buffer_value(buff%data(:,n),counter,traj%sss)
   endif
 
 end subroutine pack_traj_into_buffer2
 
 !> Unpacks a trajectory entry from a buffer
 subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj)
-! Arguments
-type(xyt), pointer :: first !< Trajectory list
-type(buffer), pointer :: buff !< Buffer from which to unpack
-integer, intent(in) :: n !< Position in buffer to unpack
-logical, intent(in) :: save_short_traj !< If true, only use a subset of trajectory data
-! Local variables
-type(xyt) :: traj
+  ! Arguments
+  type(xyt), pointer :: first !< Trajectory list
+  type(buffer), pointer :: buff !< Buffer from which to unpack
+  integer, intent(in) :: n !< Position in buffer to unpack
+  logical, intent(in) :: save_short_traj !< If true, only use a subset of trajectory data
+  ! Local variables
+  type(xyt) :: traj
+  integer :: counter ! Position in stack
 
-  traj%lon=buff%data(1,n)
-  traj%lat=buff%data(2,n)
-  traj%year=nint(buff%data(3,n))
-  traj%day=buff%data(4,n)
-  traj%iceberg_num=nint(buff%data(5,n))
+  counter = 0
+  call pull_buffer_value(buff%data(:,n),counter,traj%lon)
+  call pull_buffer_value(buff%data(:,n),counter,traj%lat)
+  call pull_buffer_value(buff%data(:,n),counter,traj%year)
+  call pull_buffer_value(buff%data(:,n),counter,traj%day)
+  call pull_buffer_value(buff%data(:,n),counter,traj%iceberg_num)
   if (.not. save_short_traj) then
-    traj%uvel=buff%data(6,n)
-    traj%vvel=buff%data(7,n)
-    traj%mass=buff%data(8,n)
-    traj%mass_of_bits=buff%data(9,n)
-    traj%heat_density=buff%data(10,n)
-    traj%thickness=buff%data(11,n)
-    traj%width=buff%data(12,n)
-    traj%length=buff%data(13,n)
-    traj%uo=buff%data(14,n)
-    traj%vo=buff%data(15,n)
-    traj%ui=buff%data(16,n)
-    traj%vi=buff%data(17,n)
-    traj%ua=buff%data(18,n)
-    traj%va=buff%data(19,n)
-    traj%ssh_x=buff%data(20,n)
-    traj%ssh_y=buff%data(21,n)
-    traj%sst=buff%data(22,n)
-    traj%cn=buff%data(23,n)
-    traj%hi=buff%data(24,n)
-    traj%axn=buff%data(25,n) !Alon
-    traj%ayn=buff%data(26,n) !Alon
-    traj%bxn=buff%data(27,n) !Alon
-    traj%byn=buff%data(28,n) !Alon
-    traj%halo_berg=buff%data(29,n) !Alon
-    traj%static_berg=buff%data(30,n) !Alon
-    traj%sss=buff%data(31,n)
+    call pull_buffer_value(buff%data(:,n),counter,traj%uvel)
+    call pull_buffer_value(buff%data(:,n),counter,traj%vvel)
+    call pull_buffer_value(buff%data(:,n),counter,traj%mass)
+    call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
+    call pull_buffer_value(buff%data(:,n),counter,traj%heat_density)
+    call pull_buffer_value(buff%data(:,n),counter,traj%thickness)
+    call pull_buffer_value(buff%data(:,n),counter,traj%width)
+    call pull_buffer_value(buff%data(:,n),counter,traj%length)
+    call pull_buffer_value(buff%data(:,n),counter,traj%uo)
+    call pull_buffer_value(buff%data(:,n),counter,traj%vo)
+    call pull_buffer_value(buff%data(:,n),counter,traj%ui)
+    call pull_buffer_value(buff%data(:,n),counter,traj%vi)
+    call pull_buffer_value(buff%data(:,n),counter,traj%ua)
+    call pull_buffer_value(buff%data(:,n),counter,traj%va)
+    call pull_buffer_value(buff%data(:,n),counter,traj%ssh_x)
+    call pull_buffer_value(buff%data(:,n),counter,traj%ssh_y)
+    call pull_buffer_value(buff%data(:,n),counter,traj%sst)
+    call pull_buffer_value(buff%data(:,n),counter,traj%cn)
+    call pull_buffer_value(buff%data(:,n),counter,traj%hi)
+    call pull_buffer_value(buff%data(:,n),counter,traj%axn)
+    call pull_buffer_value(buff%data(:,n),counter,traj%ayn)
+    call pull_buffer_value(buff%data(:,n),counter,traj%bxn)
+    call pull_buffer_value(buff%data(:,n),counter,traj%byn)
+    call pull_buffer_value(buff%data(:,n),counter,traj%halo_berg)
+    call pull_buffer_value(buff%data(:,n),counter,traj%static_berg)
+    call pull_buffer_value(buff%data(:,n),counter,traj%sss)
   endif
   call append_posn(first, traj)
 
