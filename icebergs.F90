@@ -473,7 +473,7 @@ subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
     enddo
   endif
 
-  !print *,'IA_x=',IA_x,'IA_y',IA_y, berg%iceberg_num
+  !print *,'IA_x=',IA_x,'IA_y',IA_y, berg%id
   !print *,'P_ia_11',P_ia_11,'P_ia_12',P_ia_12, 'P_ia_21',P_ia_21,'P_ia_22', P_ia_22
   !print *, 'P_ia_times_u_x', P_ia_times_u_x, 'P_ia_times_u_y', P_ia_times_u_y
 
@@ -570,7 +570,7 @@ subroutine calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, 
     ! if (berg%iceberg_num .eq. 1) then
     !   print *, 'Comparing longitudes: ', lon1, lon2, r_dist_x, dlon
     !   print *, 'Comparing latitudes: ', lat1, lat2, r_dist_y, dlat
-    !   print *, 'Outside, iceberg_num, r_dist', berg%iceberg_num, r_dist,bonded
+    !   print *, 'Outside, id, r_dist', berg%id, r_dist,bonded
     !   print *, 'Halo_status', berg%halo_berg,other_berg%halo_berg
     ! endif
     ! print *, 'outside the loop',R1, R2,r_dist, bonded
@@ -595,10 +595,10 @@ subroutine calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, 
         !MP1
         !if (berg%iceberg_num .eq. 1) then
         !  !print *,  '************************************************************'
-        !  print *, 'INSIDE, r_dist', berg%iceberg_num, other_berg%iceberg_num, r_dist, bonded
+        !  print *, 'INSIDE, r_dist', berg%id, other_berg%id, r_dist, bonded
         !endif
         !print *, 'in the loop1', spring_coef, (M_min/M1), accel_spring,(R1+R2-r_dist)
-        !print *, 'in the loop2', IA_x, IA_y, R1, R2,r_dist, berg%iceberg_num,other_berg%iceberg_num
+        !print *, 'in the loop2', IA_x, IA_y, R1, R2,r_dist, berg%id,other_berg%id
         ! Damping force:
         ! Paralel velocity
         P_11=(r_dist_x*r_dist_x)/(r_dist**2)
@@ -616,7 +616,7 @@ subroutine calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, 
         P_ia_22=P_ia_22+p_ia_coef*P_22
         P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
         P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
-        !print *, 'Paralel: ',berg%iceberg_num,  p_ia_coef, IA_x, P_ia_11, P_ia_21,P_ia_12, P_ia_22
+        !print *, 'Paralel: ',berg%id,  p_ia_coef, IA_x, P_ia_11, P_ia_21,P_ia_12, P_ia_22
 
         ! Normal velocities
         P_11=1-P_11  ;  P_12=-P_12 ; P_21= -P_21 ;    P_22=1-P_22
@@ -630,7 +630,7 @@ subroutine calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, 
         P_ia_22=P_ia_22+p_ia_coef*P_22
         P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
         P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
-        !print *, 'Perp: ',berg%iceberg_num,  p_ia_coef, IA_x, P_ia_11, P_ia_21,P_ia_12, P_ia_22
+        !print *, 'Perp: ',berg%id,  p_ia_coef, IA_x, P_ia_11, P_ia_21,P_ia_12, P_ia_22
         !print *, 'P_11',P_11
         !print *, 'P_21',P_21
         !print *, 'P_12',P_12
@@ -887,7 +887,7 @@ subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, a
       RHS_x=RHS_x - (((P_ia_11*uvel)+(P_ia_12*vvel))-P_ia_times_u_x)
       RHS_y=RHS_y - (((P_ia_21*uvel)+(P_ia_22*vvel))-P_ia_times_u_y)
     endif
-    !print *,'Before calculation:', berg%iceberg_num, IA_x, IA_y, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y
+    !print *,'Before calculation:', berg%id, IA_x, IA_y, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y
   endif
 
   ! Solve for implicit accelerations
@@ -938,7 +938,7 @@ subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, a
 !MP4
   !    if (berg%iceberg_num .eq. 1) then
   !      print *, '***************************************************'
-  !      print *,'Iceberg_num, itloop', berg%iceberg_num, itloop
+  !      print *,'id, itloop', berg%id, itloop
   !      print *, 'P matrix:', P_ia_11, P_ia_12,P_ia_21,P_ia_22,P_ia_times_u_x, P_ia_times_u_x
   !      print *,'A_matrix', A11, A12, A21, A22
   !      print *,'IA_x IA_y', IA_x, IA_y
@@ -985,7 +985,7 @@ subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, a
           bergs%nspeeding_tickets=bergs%nspeeding_tickets+1
         else
           call error_mesg('diamonds, Speeding icebergs', 'Faster than the CFL!', WARNING)
-          write(stderrunit,*) 'diamonds, Speeding berg1! =',mpp_pe(), berg%iceberg_num
+          write(stderrunit,*) 'diamonds, Speeding berg1! =',mpp_pe(), berg%id
           write(stderrunit,*) 'diamonds, Speeding berg2, speed =',speed, loc_dx/dt
           write(stderrunit,*) 'diamonds, Speeding berg3, lat, lon =',lat,xi,yj
         endif
@@ -1012,7 +1012,7 @@ subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, a
     write(stderrunit,200) mpp_pe(),'Starting pars:', &
       'yr0=',berg%start_year, 'day0=',berg%start_day, &
       'lon0=',berg%start_lon, 'lat0=',berg%start_lat, 'mass0=',berg%start_mass, &
-      'sclng=',berg%mass_scaling, 'num0=',berg%iceberg_num
+      'sclng=',berg%mass_scaling, 'id0=',berg%id
     write(stderrunit,100) mpp_pe(),'Geometry:', &
       'M=',M, 'T=',T, 'D=',D, 'F=',F, 'W=',W, 'L=',L
     write(stderrunit,100) mpp_pe(),'delta U:', &
@@ -1790,7 +1790,7 @@ subroutine find_basal_melt(bergs, dvo, lat, salt, temp, Use_three_equation_model
         if (Sb_max_set .and. (Sbdry > Sb_max)) then
           if (debug) then
             call error_mesg('diamonds,Find basal melt', 'shelf_calc_flux: Irregular iteration for Sbdry (max).' ,WARNING)
-            print *, 'Sbdry error: iceberg_num,dvo,temp,salt,lat,thickness :',iceberg_num,dvo,temp,salt,lat,thickness
+            print *, 'Sbdry error: id,dvo,temp,salt,lat,thickness :',iceberg_num,dvo,temp,salt,lat,thickness
           endif
           out_of_bounds=.true.
           exit
@@ -1800,7 +1800,7 @@ subroutine find_basal_melt(bergs, dvo, lat, salt, temp, Use_three_equation_model
         if (Sb_min_set .and. (Sbdry < Sb_min)) then
           if (debug) then
             call error_mesg('diamonds,Find basal melt', 'shelf_calc_flux: Irregular iteration for Sbdry (min).' ,WARNING)
-            print *, 'Sbdry error: iceberg_num,dvo,temp,salt,lat,thickness :',iceberg_num,dvo,temp,salt,lat,thickness
+            print *, 'Sbdry error: id,dvo,temp,salt,lat,thickness :',iceberg_num,dvo,temp,salt,lat,thickness
           endif
           out_of_bounds=.true.
           exit
@@ -1911,7 +1911,7 @@ subroutine find_orientation_using_iceberg_bonds(grd, berg, orientation)
       other_berg=>current_bond%other_berg
       if (.not. associated(other_berg)) then !good place for debugging
         !One valid option: current iceberg is on the edge of halo, with other berg on the next pe (not influencing mass spreading)
-        !print *, 'Iceberg bond details:',berg%iceberg_num, current_bond%other_berg_num,berg%halo_berg, mpp_pe()
+        !print *, 'Iceberg bond details:',berg%id, current_bond%other_berg_num,berg%halo_berg, mpp_pe()
         !print *, 'Iceberg bond details2:',berg%ine, berg%jne, current_bond%other_berg_ine, current_bond%other_berg_jne
         !print *, 'Iceberg isd,ied,jsd,jed:',grd%isd, grd%ied, grd%jsd, grd%jed
         !print *, 'Iceberg isc,iec,jsc,jec:',grd%isc, grd%iec, grd%jsc, grd%jec
@@ -4282,7 +4282,7 @@ subroutine verlet_stepping(bergs,berg, axn, ayn, bxn, byn, uveln, vveln)
     write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: latn=',latn,berg%lat
     write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: u3,un,u0=',uvel3,uveln,berg%uvel
     write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: v3,vn,v0=',vvel3,vveln,berg%vvel
-    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: iceberg_num=',berg%iceberg_num
+    write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: id=',berg%id
     write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ax1=',&
          & dt*ax1
     write(stderrunit,'(a,6es9.3)') 'diamonds, evolve_iceberg: dt* ay1=',&
@@ -4730,7 +4730,7 @@ subroutine update_verlet_position(bergs, berg)
   call adjust_index_and_ground(grd, lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)  !Alon:"unclear which velocity to use here?"
 
   !if (bounced) then
-  !  print *, 'you have been bounce: big time!',mpp_pe(),berg%iceberg_num,lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag
+  !  print *, 'you have been bounce: big time!',mpp_pe(),berg%id,lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag
   !  berg%axn=0.0  ;  berg%ayn=0.0
   !  berg%bxn=0.0  ;  berg%byn=0.0
   !  berg%uvel=0.0 ;  berg%vvel=0.0

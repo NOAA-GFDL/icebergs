@@ -1248,7 +1248,7 @@ logical :: halo_debugging
     do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
       this=>bergs%list(grdi,grdj)%first
       do while (associated(this))
-          write(stderrunit,*) 'A', this%iceberg_num, mpp_pe(), this%halo_berg, grdi, grdj
+          write(stderrunit,*) 'A', this%id, mpp_pe(), this%halo_berg, grdi, grdj
         this=>this%next
       enddo
     enddo; enddo
@@ -1281,7 +1281,7 @@ logical :: halo_debugging
     do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
       this=>bergs%list(grdi,grdj)%first
         do while (associated(this))
-        write(stderrunit,*) 'B', this%iceberg_num, mpp_pe(), this%halo_berg, grdi, grdj
+        write(stderrunit,*) 'B', this%id, mpp_pe(), this%halo_berg, grdi, grdj
       this=>this%next
       enddo
     enddo; enddo
@@ -1301,7 +1301,7 @@ logical :: halo_debugging
   do grdj = grd%jsc,grd%jec ; do grdi = grd%iec-halo_width+2,grd%iec
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
-    !write(stderrunit,*)  'sending east', this%iceberg_num, this%ine, this%jne, mpp_pe()
+    !write(stderrunit,*)  'sending east', this%id, this%ine, this%jne, mpp_pe()
       kick_the_bucket=>this
       this=>this%next
       nbergs_to_send_e=nbergs_to_send_e+1
@@ -1484,7 +1484,7 @@ logical :: halo_debugging
     do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
       this=>bergs%list(grdi,grdj)%first
       do while (associated(this))
-        write(stderrunit,*)  'C', this%iceberg_num, mpp_pe(), this%halo_berg,  grdi, grdj
+        write(stderrunit,*)  'C', this%id, mpp_pe(), this%halo_berg,  grdi, grdj
         this=>this%next
       enddo
     enddo; enddo
@@ -1942,11 +1942,11 @@ stderrunit = stderr()
   do while (associated(current_bond)) !Looping over bonds
     other_berg=>current_bond%other_berg
     if (associated(other_berg)) then
-      !write(stderrunit,*) , 'Other berg', berg%iceberg_num, other_berg%iceberg_num, mpp_pe()
+      !write(stderrunit,*) , 'Other berg', berg%id, other_berg%id, mpp_pe()
       matching_bond=>other_berg%first_bond
       do while (associated(matching_bond))  ! Looping over possible matching bonds in other_berg
         if (matching_bond%other_berg_num .eq. berg%iceberg_num) then
-          !write(stderrunit,*) , 'Clearing', berg%iceberg_num, matching_bond%other_berg_num,other_berg%iceberg_num, mpp_pe()
+          !write(stderrunit,*) , 'Clearing', berg%id, matching_bond%other_berg_num,other_berg%id, mpp_pe()
           matching_bond%other_berg=>null()
           matching_bond=>null()
         else
@@ -2702,31 +2702,31 @@ integer, optional, intent(in) :: jl !< j-index of cell berg should be in
 ! Local variables
 
   write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,a,2f10.4,i5,f7.2,es12.4,f5.1)') &
-    label, 'pe=(', mpp_pe(), ') #=', berg%iceberg_num, ' start lon,lat,yr,day,mass,hb=', &
+    label, 'pe=(', mpp_pe(), ') #=', berg%id, ' start lon,lat,yr,day,mass,hb=', &
     berg%start_lon, berg%start_lat, berg%start_year, berg%start_day, berg%start_mass, berg%halo_berg
   if (present(il).and.present(jl)) then
     write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,a,2i5)') &
-      label, 'pe=(', mpp_pe(), ') #=', berg%iceberg_num, ' List i,j=',il,jl
+      label, 'pe=(', mpp_pe(), ') #=', berg%id, ' List i,j=',il,jl
   endif
   write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,a,2i5,a,2l2)') &
-    label, 'pe=(', mpp_pe(), ') #=', berg%iceberg_num, &
+    label, 'pe=(', mpp_pe(), ') #=', berg%id, &
     ' i,j=', berg%ine, berg%jne, &
     ' p,n=', associated(berg%prev), associated(berg%next)
   write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,3(a,2f14.8))') &
-    label, 'pe=(', mpp_pe(), ') #=', berg%iceberg_num, &
+    label, 'pe=(', mpp_pe(), ') #=', berg%id, &
     ' xi,yj=', berg%xi, berg%yj, &
     ' lon,lat=', berg%lon, berg%lat, &
     ' lon_old,lat_old=', berg%lon_old, berg%lat_old
   write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,2(a,2f14.8))') &
-    label, 'pe=(', mpp_pe(), ') #=', berg%iceberg_num, &
+    label, 'pe=(', mpp_pe(), ') #=', berg%id, &
     ' u,v=', berg%uvel, berg%vvel, &
     ' uvel_old,vvel_old=', berg%uvel_old, berg%vvel_old
   write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,2(a,2f14.8))') &
-    label, 'pe=(', mpp_pe(), ') #=', berg%iceberg_num, &
+    label, 'pe=(', mpp_pe(), ') #=', berg%id, &
     ' axn,ayn=', berg%axn, berg%ayn, &
     ' bxn,byn=', berg%bxn, berg%byn
   write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,3(a,2f14.8))') &
-    label, 'pe=(', mpp_pe(), ') #=', berg%iceberg_num, &
+    label, 'pe=(', mpp_pe(), ') #=', berg%id, &
     ' uo,vo=', berg%uo, berg%vo, &
     ' ua,va=', berg%ua, berg%va, &
     ' ui,vi=', berg%ui, berg%vi
@@ -2860,16 +2860,16 @@ type(bond) , pointer :: current_bond
     do while (associated(berg)) ! loop over all bergs
       current_bond=>berg%first_bond
       do while (associated(current_bond)) ! loop over all bonds
-        print *, 'Show Bond1 :', berg%iceberg_num, current_bond%other_berg_num, current_bond%other_berg_ine, current_bond%other_berg_jne,  mpp_pe()
-        !print *, 'Current:', berg%iceberg_num, berg%ine, berg%jne,berg%halo_berg, mpp_pe()
+        print *, 'Show Bond1 :', berg%id, current_bond%other_berg_num, current_bond%other_berg_ine, current_bond%other_berg_jne,  mpp_pe()
+        !print *, 'Current:', berg%id, berg%ine, berg%jne,berg%halo_berg, mpp_pe()
         if  (associated(current_bond%other_berg)) then
           if (current_bond%other_berg%iceberg_num .ne. current_bond%other_berg_num) then
-            print *, 'Bond matching', berg%iceberg_num,current_bond%other_berg%iceberg_num, current_bond%other_berg_num,&
+            print *, 'Bond matching', berg%id,current_bond%other_berg%id, current_bond%other_berg_num,&
             berg%halo_berg,current_bond%other_berg%halo_berg ,mpp_pe()
             call error_mesg('diamonds, show all bonds:', 'The bonds are not matching properly!', FATAL)
           endif
         else
-            print *, 'This bond has an non-assosiated other berg :', berg%iceberg_num, current_bond%other_berg_num,&
+            print *, 'This bond has an non-assosiated other berg :', berg%id, current_bond%other_berg_num,&
             current_bond%other_berg_ine, current_bond%other_berg_jne, berg%halo_berg,  mpp_pe()
         endif
         current_bond=>current_bond%next_bond
@@ -2943,12 +2943,12 @@ bond_matched=.false.
           if (.not.bond_matched) then
             if (berg%halo_berg .lt. 0.5) then
               missing_bond=.true.
-              print * ,'non-halo berg unmatched: ', berg%iceberg_num, mpp_pe(), current_bond%other_berg_num, current_bond%other_berg_ine
+              print * ,'non-halo berg unmatched: ', berg%id, mpp_pe(), current_bond%other_berg_num, current_bond%other_berg_ine
               call error_mesg('diamonds, connect_all_bonds', 'A non-halo bond is missing!!!', FATAL)
             else  ! This is not a problem if the partner berg is not yet in the halo
               !if (  (current_bond%other_berg_ine .gt.grd%isd-1) .and. (current_bond%other_berg_ine .lt.grd%ied+1) &
                 !.and.  (current_bond%other_berg_jne .gt.grd%jsd-1) .and. (current_bond%other_berg_jne .lt.grd%jed+1) ) then
-                !print * ,'halo berg unmatched: ',mpp_pe(),  berg%iceberg_num, current_bond%other_berg_num, current_bond%other_berg_ine,current_bond%other_berg_jne
+                !print * ,'halo berg unmatched: ',mpp_pe(),  berg%id, current_bond%other_berg_num, current_bond%other_berg_ine,current_bond%other_berg_jne
                 !call error_mesg('diamonds, connect_all_bonds', 'A halo bond is missing!!!', WARNING)
               !endif
             endif
@@ -3005,7 +3005,7 @@ integer :: stderrunit
         number_of_bonds=number_of_bonds+1
 
         ! ##### Beginning Quality Check on Bonds ######
-        !      print *, 'Quality check', mpp_pe(), berg%iceberg_num
+        !      print *, 'Quality check', mpp_pe(), berg%id
         if (quality_check) then
           num_unmatched_bonds=0
           num_unassosiated_bond_pairs=0
@@ -3027,13 +3027,13 @@ integer :: stderrunit
             enddo  ! End of loop over the other berg's bonds.
 
             if (bond_is_good) then
-              if (debug) write(stderrunit,*) 'Perfect quality Bond:', berg%iceberg_num, current_bond%other_berg_num
+              if (debug) write(stderrunit,*) 'Perfect quality Bond:', berg%id, current_bond%other_berg_num
             else
-              if (debug) write(stderrunit,*) 'Non-matching bond...:', berg%iceberg_num, current_bond%other_berg_num
+              if (debug) write(stderrunit,*) 'Non-matching bond...:', berg%id, current_bond%other_berg_num
               num_unmatched_bonds=num_unmatched_bonds+1
             endif
           else
-            if (debug) write(stderrunit,*) 'Opposite berg is not assosiated:', berg%iceberg_num, current_bond%other_berg%iceberg_num
+            if (debug) write(stderrunit,*) 'Opposite berg is not assosiated:', berg%id, current_bond%other_berg%id
             num_unassosiated_bond_pairs=0
           endif
         endif
