@@ -801,7 +801,7 @@ integer, allocatable, dimension(:) :: ine,       &
      allocate(iceberg_num(nbergs_in_file))
   endif
 
-  if (found_restart) then
+  if (found_restart .and. nbergs_in_file > 0) then
      call read_unlimited_axis(filename,'lon',lon,domain=grd%domain)
      call read_unlimited_axis(filename,'lat',lat,domain=grd%domain)
      call read_unlimited_axis(filename,'uvel',uvel,domain=grd%domain)
