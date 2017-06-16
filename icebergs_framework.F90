@@ -429,6 +429,16 @@ character(len=128) :: version = _FILE_VERSION !< Version of file
 character(len=128) :: version = 'unknown' !< Version of file
 #endif
 
+!> Set a value in the buffer at position (counter,n) after incrementing counter
+interface push_buffer_value
+  module procedure push_buffer_rvalue, push_buffer_ivalue
+end interface
+
+!> Get a value in the buffer at position (counter,n) after incrementing counter
+interface pull_buffer_value
+  module procedure pull_buffer_rvalue, pull_buffer_ivalue
+end interface
+
 contains
 
 !> Initializes parallel framework
@@ -1813,47 +1823,47 @@ type(bond), pointer :: current_bond
   if (.not.associated(buff)) call increase_ibuffer(buff,n,buffer_width)
   if (n>buff%size) call increase_ibuffer(buff,n,buffer_width)
 
-  buff%data(1,n)=berg%lon
-  buff%data(2,n)=berg%lat
-  buff%data(3,n)=berg%uvel
-  buff%data(4,n)=berg%vvel
-  buff%data(5,n)=berg%xi
-  buff%data(6,n)=berg%yj
-  buff%data(7,n)=berg%start_lon
-  buff%data(8,n)=berg%start_lat
-  buff%data(9,n)=float(berg%start_year)
-  buff%data(10,n)=berg%start_day
-  buff%data(11,n)=berg%start_mass
-  buff%data(12,n)=berg%mass
-  buff%data(13,n)=berg%thickness
-  buff%data(14,n)=berg%width
-  buff%data(15,n)=berg%length
-  buff%data(16,n)=berg%mass_scaling
-  buff%data(17,n)=berg%mass_of_bits
-  buff%data(18,n)=berg%heat_density
-  buff%data(19,n)=berg%ine
-  buff%data(20,n)=berg%jne
-  buff%data(21,n)=berg%axn  !Alon
-  buff%data(22,n)=berg%ayn  !Alon
-  buff%data(23,n)=berg%bxn  !Alon
-  buff%data(24,n)=berg%byn  !Alon
-  buff%data(25,n)=float(berg%iceberg_num)
-  buff%data(26,n)=berg%halo_berg
-  buff%data(27,n)=berg%static_berg
+  counter = 0
+  call push_buffer_value(buff%data(:,n), counter, berg%lon)
+  call push_buffer_value(buff%data(:,n), counter, berg%lat)
+  call push_buffer_value(buff%data(:,n), counter, berg%uvel)
+  call push_buffer_value(buff%data(:,n), counter, berg%vvel)
+  call push_buffer_value(buff%data(:,n), counter, berg%xi)
+  call push_buffer_value(buff%data(:,n), counter, berg%yj)
+  call push_buffer_value(buff%data(:,n), counter, berg%start_lon)
+  call push_buffer_value(buff%data(:,n), counter, berg%start_lat)
+  call push_buffer_value(buff%data(:,n), counter, berg%start_year)
+  call push_buffer_value(buff%data(:,n), counter, berg%start_day)
+  call push_buffer_value(buff%data(:,n), counter, berg%start_mass)
+  call push_buffer_value(buff%data(:,n), counter, berg%mass)
+  call push_buffer_value(buff%data(:,n), counter, berg%thickness)
+  call push_buffer_value(buff%data(:,n), counter, berg%width)
+  call push_buffer_value(buff%data(:,n), counter, berg%length)
+  call push_buffer_value(buff%data(:,n), counter, berg%mass_scaling)
+  call push_buffer_value(buff%data(:,n), counter, berg%mass_of_bits)
+  call push_buffer_value(buff%data(:,n), counter, berg%heat_density)
+  call push_buffer_value(buff%data(:,n), counter, berg%ine)
+  call push_buffer_value(buff%data(:,n), counter, berg%jne)
+  call push_buffer_value(buff%data(:,n), counter, berg%axn)
+  call push_buffer_value(buff%data(:,n), counter, berg%ayn)
+  call push_buffer_value(buff%data(:,n), counter, berg%bxn)
+  call push_buffer_value(buff%data(:,n), counter, berg%byn)
+  call push_buffer_value(buff%data(:,n), counter, berg%iceberg_num)
+  call push_buffer_value(buff%data(:,n), counter, berg%halo_berg)
+  call push_buffer_value(buff%data(:,n), counter, berg%static_berg)
 
   if (max_bonds .gt. 0) then
-    counter=27 !how many data points being passed so far (must match above)
     current_bond=>berg%first_bond
     do k = 1,max_bonds
       if (associated(current_bond)) then
-        buff%data(counter+(3*(k-1)+1),n)=float(current_bond%other_berg_num)
-        buff%data(counter+(3*(k-1)+2),n)=float(current_bond%other_berg_ine)
-        buff%data(counter+(3*(k-1)+3),n)=float(current_bond%other_berg_jne)
+        call push_buffer_value(buff%data(:,n), counter, current_bond%other_berg_num)
+        call push_buffer_value(buff%data(:,n), counter, current_bond%other_berg_ine)
+        call push_buffer_value(buff%data(:,n), counter, current_bond%other_berg_jne)
         current_bond=>current_bond%next_bond
       else
-        buff%data(counter+(3*(k-1)+1),n)=0.
-        buff%data(counter+(3*(k-1)+2),n)=0.
-        buff%data(counter+(3*(k-1)+3),n)=0.
+        call push_buffer_value(buff%data(:,n), counter, 0)
+        call push_buffer_value(buff%data(:,n), counter, 0)
+        call push_buffer_value(buff%data(:,n), counter, 0)
       endif
     enddo
   endif
@@ -1864,6 +1874,50 @@ type(bond), pointer :: current_bond
   !endif
 
 end subroutine pack_berg_into_buffer2
+
+!> Set a real value in the buffer at position (counter) after incrementing counter
+subroutine push_buffer_rvalue(vbuf, counter, val)
+  real, dimension(:), intent(inout) :: vbuf    !< Buffer vector to push value into
+  integer,            intent(inout) :: counter !< Position to increment
+  real,               intent(in)    :: val     !< Value to place in buffer
+
+  counter = counter + 1
+  vbuf(counter) = val
+
+end subroutine push_buffer_rvalue
+
+!> Set an integer value in the buffer at position (counter) after incrementing counter
+subroutine push_buffer_ivalue(vbuf, counter, val)
+  real, dimension(:), intent(inout) :: vbuf    !< Buffer vector to push value into
+  integer,            intent(inout) :: counter !< Position to increment
+  integer,            intent(in)    :: val     !< Value to place in buffer
+
+  counter = counter + 1
+  vbuf(counter) = float(val)
+
+end subroutine push_buffer_ivalue
+
+!> Get a real value from the buffer at position (counter) after incrementing counter
+subroutine pull_buffer_rvalue(vbuf, counter, val)
+  real, dimension(:), intent(in)    :: vbuf    !< Buffer vector to pull value from
+  integer,            intent(inout) :: counter !< Position to increment
+  real,               intent(out)   :: val     !< Value to get from buffer
+
+  counter = counter + 1
+  val = vbuf(counter)
+
+end subroutine pull_buffer_rvalue
+
+!> Get an integer value from the buffer at position (counter) after incrementing counter
+subroutine pull_buffer_ivalue(vbuf, counter, val)
+  real, dimension(:), intent(in)    :: vbuf    !< Buffer vector to pull value from
+  integer,            intent(inout) :: counter !< Position to increment
+  integer,            intent(out)   :: val     !< Value to get from buffer
+
+  counter = counter + 1
+  val = nint(vbuf(counter))
+
+end subroutine pull_buffer_ivalue
 
 subroutine clear_berg_from_partners_bonds(berg)
 ! Arguments
@@ -1931,33 +1985,34 @@ logical :: quick
   force_app = .false.
   if(present(force_append)) force_app = force_append
 
-  localberg%lon=buff%data(1,n)
-  localberg%lat=buff%data(2,n)
-  localberg%uvel=buff%data(3,n)
-  localberg%vvel=buff%data(4,n)
-  localberg%xi=buff%data(5,n)
-  localberg%yj=buff%data(6,n)
-  localberg%start_lon=buff%data(7,n)
-  localberg%start_lat=buff%data(8,n)
-  localberg%start_year=nint(buff%data(9,n))
-  localberg%start_day=buff%data(10,n)
-  localberg%start_mass=buff%data(11,n)
-  localberg%mass=buff%data(12,n)
-  localberg%thickness=buff%data(13,n)
-  localberg%width=buff%data(14,n)
-  localberg%length=buff%data(15,n)
-  localberg%mass_scaling=buff%data(16,n)
-  localberg%mass_of_bits=buff%data(17,n)
-  localberg%heat_density=buff%data(18,n)
-
-  localberg%axn=buff%data(21,n)
-  localberg%ayn=buff%data(22,n)
-  localberg%bxn=buff%data(23,n)
-  localberg%byn=buff%data(24,n)
-  localberg%iceberg_num=nint(buff%data(25,n))
-  localberg%halo_berg=buff%data(26,n)
-  localberg%static_berg=buff%data(27,n)
-  counter=27 !how many data points being passed so far (must match largest number directly above)
+  counter = 0
+  call pull_buffer_value(buff%data(:,n), counter, localberg%lon)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%lat)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%uvel)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%vvel)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%xi)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%yj)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%start_lon)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%start_lat)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%start_year)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%start_day)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%start_mass)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%mass)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%thickness)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%width)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%length)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%mass_scaling)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%mass_of_bits)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%heat_density)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%ine)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%jne)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%axn)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%ayn)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%bxn)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%byn)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%iceberg_num)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%halo_berg)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%static_berg)
 
   !These quantities no longer need to be passed between processors
   localberg%uvel_old=localberg%uvel
@@ -1967,10 +2022,7 @@ logical :: quick
 
   ! force_app=.true.
   if(force_app) then !force append with origin ine,jne (for I/O)
-
-    localberg%ine=buff%data(19,n)
-    localberg%jne=buff%data(20,n)
-    call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg,quick,this)
+    call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg, quick, this)
   else
     lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
     if (lres) then
@@ -2006,9 +2058,9 @@ logical :: quick
   this%first_bond=>null()
   if (max_bonds .gt. 0) then
     do k = 1,max_bonds
-      other_berg_num=nint(buff%data(counter+(3*(k-1)+1),n))
-      other_berg_ine=nint(buff%data(counter+(3*(k-1)+2),n))
-      other_berg_jne=nint(buff%data(counter+(3*(k-1)+3),n))
+      call pull_buffer_value(buff%data(:,n), counter, other_berg_num)
+      call pull_buffer_value(buff%data(:,n), counter, other_berg_ine)
+      call pull_buffer_value(buff%data(:,n), counter, other_berg_jne)
       if (other_berg_num .gt. 0.5) then
         call form_a_bond(this, other_berg_num, other_berg_ine, other_berg_jne)
       endif
