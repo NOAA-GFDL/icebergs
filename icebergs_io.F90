@@ -26,7 +26,6 @@ use fms_mod,    only : clock_flag_default
 use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 
 use ice_bergs_framework, only: icebergs_gridded, xyt, iceberg, icebergs, buffer, bond
-use ice_bergs_framework, only: pack_berg_into_buffer2,unpack_berg_from_buffer2
 use ice_bergs_framework, only: pack_traj_into_buffer2,unpack_traj_from_buffer2
 use ice_bergs_framework, only: find_cell,find_cell_by_search,count_bergs,is_point_in_cell,pos_within_cell,append_posn
 use ice_bergs_framework, only: count_bonds, form_a_bond, find_individual_iceberg

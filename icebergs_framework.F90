@@ -59,7 +59,6 @@ public icebergs_gridded, xyt, iceberg, icebergs, buffer, bond
 public ice_bergs_framework_init
 public send_bergs_to_other_pes
 public update_halo_icebergs
-public pack_berg_into_buffer2, unpack_berg_from_buffer2
 public pack_traj_into_buffer2, unpack_traj_from_buffer2
 public increase_ibuffer
 public add_new_berg_to_list, count_out_of_order, check_for_duplicates
