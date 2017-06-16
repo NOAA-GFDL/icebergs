@@ -366,7 +366,7 @@ subroutine initialize_iceberg_bonds(bergs)
             r_dist=sqrt( (r_dist_x**2) + (r_dist_y**2) )
 
             !if (r_dist.gt.1000.) then  ! If the bergs are close together, then form a bond
-              call form_a_bond(berg, other_berg%iceberg_num, other_berg%ine, other_berg%jne, other_berg)
+              call form_a_bond(berg, other_berg%iceberg_num, other_berg%id, other_berg%ine, other_berg%jne, other_berg)
             !endif
           endif
           other_berg=>other_berg%next
@@ -5055,7 +5055,7 @@ subroutine rotpos_to_tang(lon, lat, x, y, iceberg_num_in)
   integer :: stderrunit, iceberg_num
 
   stderrunit = stderr()
-  iceberg_num=000
+  iceberg_num=0
   if (present(iceberg_num_in)) then
         iceberg_num=iceberg_num_in
   endif

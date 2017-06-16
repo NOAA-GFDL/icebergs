@@ -39,7 +39,7 @@ use ice_bergs_framework, only: verbose, really_debug, debug, restart_input_dir,m
 use ice_bergs_framework, only: ignore_ij_restart, use_slow_find,generate_test_icebergs,print_berg
 use ice_bergs_framework, only: force_all_pes_traj
 use ice_bergs_framework, only: check_for_duplicates_in_parallel
-use ice_bergs_framework, only: split_id, id_from_2_ints, generate_id
+use ice_bergs_framework, only: split_id, id_from_2_ints, generate_id, convert_old_id
 
 implicit none ; private
 
@@ -558,6 +558,7 @@ integer :: stderrunit, iNg, jNg, i, j
       localberg%start_year=get_int(ncid, start_yearid, k)
       if (iceberg_numid>0) then
         localberg%iceberg_num=get_int(ncid, iceberg_numid, k)
+        localberg%id = convert_old_id(grd, localberg%iceberg_num)
       else
         localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
         localberg%id = generate_id(grd, i, j)
@@ -876,6 +877,7 @@ integer, allocatable, dimension(:) :: ine,       &
       localberg%start_lat=start_lat(k)
       localberg%start_year=start_year(k)
       localberg%iceberg_num=iceberg_num(k)
+      localberg%id=convert_old_id(grd, localberg%iceberg_num)
       localberg%start_day=start_day(k)
       localberg%start_mass=start_mass(k)
       localberg%mass_scaling=mass_scaling(k)
@@ -1152,6 +1154,7 @@ integer, allocatable, dimension(:) :: first_berg_num,   &
                                       first_berg_ine,   &
                                       other_berg_jne,   &
                                       other_berg_ine
+integer(kind=8) :: id
 !integer, allocatable, dimension(:,:) :: iceberg_counter_grd
 
   ! Get the stderr unit number
@@ -1284,7 +1287,8 @@ integer, allocatable, dimension(:) :: first_berg_num,   &
         if (first_berg_found) then
           number_partial_bonds=number_partial_bonds+1
           if (second_berg_found) then
-            call form_a_bond(first_berg, other_berg_num(k), other_berg_ine(k), other_berg_jne(k),  second_berg)
+            id = convert_old_id(grd, other_berg_num(k))
+            call form_a_bond(first_berg, other_berg_num(k), id, other_berg_ine(k), other_berg_jne(k),  second_berg)
             number_perfect_bonds=number_perfect_bonds+1
 
             !Counting number of bonds where the first bond is in the computational domain

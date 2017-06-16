@@ -77,7 +77,7 @@ public monitor_a_berg
 public is_point_within_xi_yj_bounds
 public test_check_for_duplicate_ids_in_list
 public check_for_duplicates_in_parallel
-public split_id, id_from_2_ints, generate_id
+public split_id, id_from_2_ints, generate_id, convert_old_id
 
 !> Container for gridded fields
 type :: icebergs_gridded
@@ -219,6 +219,7 @@ type :: xyt
   real :: heat_density !< Heat density of berg (???)
   integer :: year !< Year of this record (years)
   integer :: iceberg_num !< Iceberg identifier
+  integer(kind=8) :: id !< Iceberg identifier
   type(xyt), pointer :: next=>null() !< Next link in list
 end type xyt
 
@@ -1814,7 +1815,7 @@ integer, intent(in) :: n !< Position in buffer to place berg
 integer, optional :: max_bonds_in !< <undocumented>
 !integer, intent(in) :: max_bonds  ! Change this later
 ! Local variables
-integer :: counter, k, max_bonds
+integer :: counter, k, max_bonds, id_cnt, id_ij
 type(bond), pointer :: current_bond
 
   max_bonds=0
@@ -1851,16 +1852,24 @@ type(bond), pointer :: current_bond
   call push_buffer_value(buff%data(:,n), counter, berg%iceberg_num)
   call push_buffer_value(buff%data(:,n), counter, berg%halo_berg)
   call push_buffer_value(buff%data(:,n), counter, berg%static_berg)
+  call split_id(berg%id, id_cnt, id_ij)
+  call push_buffer_value(buff%data(:,n), counter, id_cnt)
+  call push_buffer_value(buff%data(:,n), counter, id_ij)
 
   if (max_bonds .gt. 0) then
     current_bond=>berg%first_bond
     do k = 1,max_bonds
       if (associated(current_bond)) then
         call push_buffer_value(buff%data(:,n), counter, current_bond%other_berg_num)
+        call split_id(current_bond%other_id, id_cnt, id_ij)
+        call push_buffer_value(buff%data(:,n), counter, id_cnt)
+        call push_buffer_value(buff%data(:,n), counter, id_ij)
         call push_buffer_value(buff%data(:,n), counter, current_bond%other_berg_ine)
         call push_buffer_value(buff%data(:,n), counter, current_bond%other_berg_jne)
         current_bond=>current_bond%next_bond
       else
+        call push_buffer_value(buff%data(:,n), counter, 0)
+        call push_buffer_value(buff%data(:,n), counter, 0)
         call push_buffer_value(buff%data(:,n), counter, 0)
         call push_buffer_value(buff%data(:,n), counter, 0)
         call push_buffer_value(buff%data(:,n), counter, 0)
@@ -1970,7 +1979,8 @@ logical :: lres
 type(iceberg) :: localberg
 type(iceberg), pointer :: this
 integer :: other_berg_num, other_berg_ine, other_berg_jne
-integer :: counter, k, max_bonds
+integer :: counter, k, max_bonds, id_cnt, id_ij
+integer(kind=8) :: id
 integer :: stderrunit
 logical :: force_app
 logical :: quick
@@ -2013,6 +2023,9 @@ logical :: quick
   call pull_buffer_value(buff%data(:,n), counter, localberg%iceberg_num)
   call pull_buffer_value(buff%data(:,n), counter, localberg%halo_berg)
   call pull_buffer_value(buff%data(:,n), counter, localberg%static_berg)
+  call pull_buffer_value(buff%data(:,n), counter, id_cnt)
+  call pull_buffer_value(buff%data(:,n), counter, id_ij)
+  localberg%id = id_from_2_ints(id_cnt, id_ij)
 
   !These quantities no longer need to be passed between processors
   localberg%uvel_old=localberg%uvel
@@ -2059,10 +2072,13 @@ logical :: quick
   if (max_bonds .gt. 0) then
     do k = 1,max_bonds
       call pull_buffer_value(buff%data(:,n), counter, other_berg_num)
+      call pull_buffer_value(buff%data(:,n), counter, id_cnt)
+      call pull_buffer_value(buff%data(:,n), counter, id_ij)
+      id = id_from_2_ints(id_cnt, id_ij)
       call pull_buffer_value(buff%data(:,n), counter, other_berg_ine)
       call pull_buffer_value(buff%data(:,n), counter, other_berg_jne)
       if (other_berg_num .gt. 0.5) then
-        call form_a_bond(this, other_berg_num, other_berg_ine, other_berg_jne)
+        call form_a_bond(this, other_berg_num, id, other_berg_ine, other_berg_jne)
       endif
     enddo
   endif
@@ -2741,12 +2757,13 @@ integer :: grdi, grdj
 
 end subroutine print_bergs
 
-subroutine form_a_bond(berg, other_berg_num, other_berg_ine, other_berg_jne, other_berg)
+subroutine form_a_bond(berg, other_berg_num, other_id, other_berg_ine, other_berg_jne, other_berg)
 ! Arguments
 type(iceberg), pointer :: berg
 type(iceberg), optional,  pointer :: other_berg
 type(bond) , pointer :: new_bond, first_bond
 integer, intent(in) :: other_berg_num
+integer(kind=8), intent(in) :: other_id
 integer, optional  :: other_berg_ine, other_berg_jne
 integer :: stderrunit
 
@@ -2759,6 +2776,7 @@ if (berg%iceberg_num .ne. other_berg_num) then
   ! Step 1: Create a new bond
   allocate(new_bond)
   new_bond%other_berg_num=other_berg_num
+  new_bond%other_id=other_id
   if(present(other_berg)) then
     new_bond%other_berg=>other_berg
     new_bond%other_berg_ine=other_berg%ine
@@ -3120,6 +3138,7 @@ integer :: grdi, grdj
       posn%year=bergs%current_year
       posn%day=bergs%current_yearday
       posn%iceberg_num=posn%iceberg_num
+      posn%id=posn%id
       if (.not. bergs%save_short_traj) then !Not totally sure that this is correct
         posn%uvel=this%uvel
         posn%vvel=this%vvel
@@ -3220,6 +3239,7 @@ type(xyt) :: vals
   vals%lat=berg%start_lat
   vals%year=berg%start_year
   vals%iceberg_num=berg%iceberg_num
+  vals%id=berg%id
   vals%day=berg%start_day
   vals%mass=berg%start_mass
   call push_posn(berg%trajectory, vals)
