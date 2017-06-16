@@ -2352,17 +2352,62 @@ integer(kind=8) function generate_id(grd, i, j)
   integer,                intent(in) :: j   !< j-index of calving location
   ! Local variables
   integer :: ij ! Hash of i,j
-  integer :: iNg ! Total number of points globally in i direction
 
-  iNg=(grd%ieg-grd%isg+1)
   ! ij is unique number for each grid cell (32-bit integers allow for ~1/100th degree global resolution)
-  ij = i + (iNg*(j-1))
+  ij = ij_component_of_id(grd, i, j)
   ! Generate a 64-bit id
   generate_id = id_from_2_ints( grd%iceberg_counter_grd(i,j), ij )
   ! Increment counter in calving cell
   grd%iceberg_counter_grd(i,j) = grd%iceberg_counter_grd(i,j) + 1
 
 end function generate_id
+
+!> Convert an old 32-bit id to a 64-bit id
+integer(kind=8) function convert_old_id(grd, old_id)
+  type(icebergs_gridded), pointer    :: grd    !< Container for gridded fields
+  integer,                intent(in) :: old_id !< 32-bit iceberg id
+  ! Local variables
+  integer :: cnt ! Counter component
+  integer :: ij ! Hash of i,j
+  integer :: i,j ! Cell indexes
+  integer :: iNg, jNg, ncells ! Shape and size of the global grid
+
+  ! Number cells in the grid
+  iNg = grd%ieg - grd%isg + 1
+  jNg = grd%jeg - grd%jsg + 1
+  ncells = iNg * jNg
+
+  ! cnt is the cell-based counter
+  cnt = old_id / ncells
+  ! ij is the has of i,j
+  ij = mod( old_id, ncells )
+
+  ! i,j should be the cells the berg was calved in
+  j = ij / iNg
+  i = mod( ij, iNg )
+
+  ij = ij_component_of_id(grd, i, j)
+  convert_old_id = id_from_2_ints( cnt, ij )
+
+end function convert_old_id
+
+!> Calculate the location-derived component of an iceberg id which is a hash of the i,j-indexes for the cell
+integer function ij_component_of_id(grd, i, j)
+  type(icebergs_gridded), pointer    :: grd !< Container for gridded fields
+  integer,                intent(in) :: i   !< i-index of calving location
+  integer,                intent(in) :: j   !< j-index of calving location
+  ! Local variables
+  integer :: ij ! Hash of i,j
+  integer :: iNg ! Zonal size of the global grid
+
+  ! Using the current grid shape maximizes the numbers of IDs that can be represented
+  ! allowing up to 30-minute uniform global resolution, or potentially finer if non-uniform. 
+  iNg = grd%ieg - grd%isg + 1
+
+  ! ij_component_of_id is unique number for each grid cell (32-bit integers allow for ~1/100th degree global resolution)
+  ij_component_of_id = i + ( iNg * ( j - 1 ) )
+
+end function ij_component_of_id
 
 !> Prints a particular berg's vitals
 !!
