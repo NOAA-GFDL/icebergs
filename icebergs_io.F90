@@ -142,6 +142,8 @@ real, allocatable, dimension(:) :: lon,          &
 integer, allocatable, dimension(:) :: ine,              &
                                       jne,              &
                                       iceberg_num,      &
+                                      id_cnt,           &
+                                      id_ij,            &
                                       start_year,       &
                                       first_id_cnt,     &
                                       other_id_cnt,     &
@@ -197,6 +199,8 @@ integer :: grdi, grdj
    allocate(jne(nbergs))
    allocate(start_year(nbergs))
    allocate(iceberg_num(nbergs))
+   allocate(id_cnt(nbergs))
+   allocate(id_ij(nbergs))
 
 
   call get_instance_filename("icebergs.res.nc", filename)
@@ -233,6 +237,10 @@ integer :: grdi, grdj
                                             longname='calendar year of calving event', units='years')
   id = register_restart_field(bergs_restart,filename,'iceberg_num',iceberg_num, &
                                             longname='identification of the iceberg', units='dimensionless')
+  id = register_restart_field(bergs_restart,filename,'id_cnt',id_cnt, &
+                                            longname='counter component of iceberg id', units='dimensionless')
+  id = register_restart_field(bergs_restart,filename,'id_ij',id_ij, &
+                                            longname='position component of iceberg id', units='dimensionless')
   id = register_restart_field(bergs_restart,filename,'start_day',start_day, &
                                             longname='year day of calving event',units='days')
   id = register_restart_field(bergs_restart,filename,'start_mass',start_mass, &
@@ -277,6 +285,7 @@ integer :: grdi, grdj
       start_mass(i) = this%start_mass; mass_scaling(i) = this%mass_scaling
       static_berg(i) = this%static_berg
       iceberg_num(i) = this%iceberg_num
+      call split_id(this%id, id_cnt(i), id_ij(i))
       mass_of_bits(i) = this%mass_of_bits; heat_density(i) = this%heat_density
       this=>this%next
     enddo
@@ -312,6 +321,8 @@ integer :: grdi, grdj
              ine,       &
              jne,       &
              iceberg_num,       &
+             id_cnt,    &
+             id_ij,     &
              start_year )
 
   call nullify_domain()
