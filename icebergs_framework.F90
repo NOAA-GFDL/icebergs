@@ -18,10 +18,8 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 
 implicit none ; private
 
-integer :: buffer_width=27 !Changed from 20 to 28 by Alon
-integer :: buffer_width_traj=31  !Changed from 23 by Alon
-!integer, parameter :: buffer_width=26 !Changed from 20 to 26 by Alon
-!integer, parameter :: buffer_width_traj=29  !Changed from 23 by Alon
+integer :: buffer_width=29 ! This should be a parameter
+integer :: buffer_width_traj=32 ! This should be a parameter
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 
 !Local Vars
@@ -218,8 +216,7 @@ type :: xyt
   real :: mass_of_bits !< Mass of bergy bits (kg)
   real :: heat_density !< Heat density of berg (???)
   integer :: year !< Year of this record (years)
-  integer :: iceberg_num !< Iceberg identifier
-  integer(kind=8) :: id !< Iceberg identifier
+  integer(kind=8) :: id = -1 !< Iceberg identifier
   type(xyt), pointer :: next=>null() !< Next link in list
 end type xyt
 
@@ -282,7 +279,6 @@ type :: bond
   type(bond), pointer :: prev_bond=>null() !< Previous link in list
   type(bond), pointer :: next_bond=>null() !< Next link in list
   type(iceberg), pointer :: other_berg=>null()
-  integer :: other_berg_num
   integer(kind=8) :: other_id !< ID of other berg
   integer :: other_berg_ine
   integer :: other_berg_jne
@@ -364,7 +360,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   logical :: Static_icebergs=.False. !< True= icebergs do no move
   logical :: only_interactive_forces=.False. !< Icebergs only feel interactive forces, and not ocean, wind...
   logical :: halo_debugging=.False. !< Use for debugging halos (remove when its working)
-  logical :: save_short_traj=.True. !< True saves only lon,lat,time,iceberg_num in iceberg_trajectory.nc
+  logical :: save_short_traj=.True. !< True saves only lon,lat,time,id in iceberg_trajectory.nc
   logical :: ignore_traj=.False. !< If true, then model does not write trajectory data at all
   logical :: iceberg_bonds_on=.False. !< True=Allow icebergs to have bonds, False=don't allow.
   logical :: manually_initialize_bonds=.False. !< True= Bonds are initialize manually.
@@ -373,7 +369,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   logical :: critical_interaction_damping_on=.true. !< Sets the damping on relative iceberg velocity to critical value - Added by Alon
   logical :: use_old_spreading=.true. !< If true, spreads iceberg mass as if the berg is one grid cell wide
   logical :: read_ocean_depth_from_file=.false. !< If true, ocean depth is read from a file.
-  integer :: debug_iceberg_with_id = -1 !< If positive, monitors a berg with this id
+  integer(kind=8) :: debug_iceberg_with_id = -1 !< If positive, monitors a berg with this id
 
   real :: speed_limit=0. !< CFL speed limit for a berg [m/s]
   real :: tau_calving=0. !< Time scale for smoothing out calving field (years)
@@ -544,7 +540,7 @@ logical :: ignore_missing_restart_bergs=.False. ! True Allows the model to ignor
 logical :: Static_icebergs=.False. ! True= icebergs do no move
 logical :: only_interactive_forces=.False. ! Icebergs only feel interactive forces, and not ocean, wind...
 logical :: halo_debugging=.False. ! Use for debugging halos (remove when its working)
-logical :: save_short_traj=.True. ! True saves only lon,lat,time,iceberg_num in iceberg_trajectory.nc
+logical :: save_short_traj=.True. ! True saves only lon,lat,time,id in iceberg_trajectory.nc
 logical :: ignore_traj=.False. ! If true, then model does not traj trajectory data at all
 logical :: iceberg_bonds_on=.False. ! True=Allow icebergs to have bonds, False=don't allow.
 logical :: manually_initialize_bonds=.False. ! True= Bonds are initialize manually.
@@ -560,7 +556,7 @@ real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10,
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim) ,
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
 real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
-integer :: debug_iceberg_with_id = -1 ! If positive, monitors a berg with this id
+integer(kind=8) :: debug_iceberg_with_id = -1 ! If positive, monitors a berg with this id
 
 namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,Static_icebergs,  &
          distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef, radial_damping_coef, tangental_damping_coef, only_interactive_forces, &
@@ -917,9 +913,9 @@ endif
 if (.not. iceberg_bonds_on) then
    max_bonds=0
 else
-  buffer_width=buffer_width+(max_bonds*3) ! Increase buffer width to include bonds being passed between processors
+  buffer_width=buffer_width+(max_bonds*4) ! Increase buffer width to include bonds being passed between processors
 endif
-if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffer used for abrevated traj
+if (save_short_traj) buffer_width_traj=6 ! This is the length of the short buffer used for abrevated traj
 if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files should be ignored
 
 
@@ -1860,7 +1856,6 @@ type(bond), pointer :: current_bond
     current_bond=>berg%first_bond
     do k = 1,max_bonds
       if (associated(current_bond)) then
-        call push_buffer_value(buff%data(:,n), counter, current_bond%other_berg_num)
         call split_id(current_bond%other_id, id_cnt, id_ij)
         call push_buffer_value(buff%data(:,n), counter, id_cnt)
         call push_buffer_value(buff%data(:,n), counter, id_ij)
@@ -1868,7 +1863,6 @@ type(bond), pointer :: current_bond
         call push_buffer_value(buff%data(:,n), counter, current_bond%other_berg_jne)
         current_bond=>current_bond%next_bond
       else
-        call push_buffer_value(buff%data(:,n), counter, 0)
         call push_buffer_value(buff%data(:,n), counter, 0)
         call push_buffer_value(buff%data(:,n), counter, 0)
         call push_buffer_value(buff%data(:,n), counter, 0)
@@ -1891,6 +1885,7 @@ subroutine push_buffer_rvalue(vbuf, counter, val)
   real,               intent(in)    :: val     !< Value to place in buffer
 
   counter = counter + 1
+  if (counter > size(vbuf)) stop 'OOB in push_buffer_rvalue'
   vbuf(counter) = val
 
 end subroutine push_buffer_rvalue
@@ -1902,6 +1897,7 @@ subroutine push_buffer_ivalue(vbuf, counter, val)
   integer,            intent(in)    :: val     !< Value to place in buffer
 
   counter = counter + 1
+  if (counter > size(vbuf)) stop 'OOB in push_buffer_ivalue'
   vbuf(counter) = float(val)
 
 end subroutine push_buffer_ivalue
@@ -1913,6 +1909,7 @@ subroutine pull_buffer_rvalue(vbuf, counter, val)
   real,               intent(out)   :: val     !< Value to get from buffer
 
   counter = counter + 1
+  if (counter > size(vbuf)) stop 'OOB in pull_buffer_rvalue'
   val = vbuf(counter)
 
 end subroutine pull_buffer_rvalue
@@ -1924,6 +1921,7 @@ subroutine pull_buffer_ivalue(vbuf, counter, val)
   integer,            intent(out)   :: val     !< Value to get from buffer
 
   counter = counter + 1
+  if (counter > size(vbuf)) stop 'OOB in pull_buffer_ivalue'
   val = nint(vbuf(counter))
 
 end subroutine pull_buffer_ivalue
@@ -1945,8 +1943,8 @@ stderrunit = stderr()
       !write(stderrunit,*) , 'Other berg', berg%id, other_berg%id, mpp_pe()
       matching_bond=>other_berg%first_bond
       do while (associated(matching_bond))  ! Looping over possible matching bonds in other_berg
-        if (matching_bond%other_berg_num .eq. berg%iceberg_num) then
-          !write(stderrunit,*) , 'Clearing', berg%id, matching_bond%other_berg_num,other_berg%id, mpp_pe()
+        if (matching_bond%other_id .eq. berg%id) then
+          !write(stderrunit,*) , 'Clearing', berg%id, matching_bond%other_id,other_berg%id, mpp_pe()
           matching_bond%other_berg=>null()
           matching_bond=>null()
         else
@@ -2071,14 +2069,13 @@ logical :: quick
   this%first_bond=>null()
   if (max_bonds .gt. 0) then
     do k = 1,max_bonds
-      call pull_buffer_value(buff%data(:,n), counter, other_berg_num)
       call pull_buffer_value(buff%data(:,n), counter, id_cnt)
       call pull_buffer_value(buff%data(:,n), counter, id_ij)
       id = id_from_2_ints(id_cnt, id_ij)
       call pull_buffer_value(buff%data(:,n), counter, other_berg_ine)
       call pull_buffer_value(buff%data(:,n), counter, other_berg_jne)
-      if (other_berg_num .gt. 0.5) then
-        call form_a_bond(this, other_berg_num, id, other_berg_ine, other_berg_jne)
+      if (id_ij > 0) then
+        call form_a_bond(this, id, other_berg_ine, other_berg_jne)
       endif
     enddo
   endif
@@ -2137,6 +2134,7 @@ subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj)
   logical, intent(in) :: save_short_traj !< If true, only use a subset of trajectory data
   ! Local variables
   integer :: counter ! Position in stack
+  integer :: cnt, ij
 
   if (.not.associated(buff)) call increase_ibuffer(buff,n,buffer_width_traj)
   if (n>buff%size) call increase_ibuffer(buff,n,buffer_width_traj)
@@ -2146,7 +2144,9 @@ subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj)
   call push_buffer_value(buff%data(:,n),counter,traj%lat)
   call push_buffer_value(buff%data(:,n),counter,traj%year)
   call push_buffer_value(buff%data(:,n),counter,traj%day)
-  call push_buffer_value(buff%data(:,n),counter,traj%iceberg_num)
+  call split_id(traj%id, cnt, ij)
+  call push_buffer_value(buff%data(:,n),counter,cnt)
+  call push_buffer_value(buff%data(:,n),counter,ij)
   if (.not. save_short_traj) then
     call push_buffer_value(buff%data(:,n),counter,traj%uvel)
     call push_buffer_value(buff%data(:,n),counter,traj%vvel)
@@ -2188,13 +2188,16 @@ subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj)
   ! Local variables
   type(xyt) :: traj
   integer :: counter ! Position in stack
+  integer :: cnt, ij
 
   counter = 0
   call pull_buffer_value(buff%data(:,n),counter,traj%lon)
   call pull_buffer_value(buff%data(:,n),counter,traj%lat)
   call pull_buffer_value(buff%data(:,n),counter,traj%year)
   call pull_buffer_value(buff%data(:,n),counter,traj%day)
-  call pull_buffer_value(buff%data(:,n),counter,traj%iceberg_num)
+  call pull_buffer_value(buff%data(:,n),counter,cnt)
+  call pull_buffer_value(buff%data(:,n),counter,ij)
+  traj%id = id_from_2_ints(cnt, ij)
   if (.not. save_short_traj) then
     call pull_buffer_value(buff%data(:,n),counter,traj%uvel)
     call pull_buffer_value(buff%data(:,n),counter,traj%vvel)
@@ -2449,7 +2452,7 @@ integer :: stderrunit
   do grdj = bergs%grd%jsd,bergs%grd%jed ; do grdi = bergs%grd%isd,bergs%grd%ied
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
-      if (this%iceberg_num == bergs%debug_iceberg_with_id) then
+      if (this%id == bergs%debug_iceberg_with_id) then
         call print_berg(stderrunit, this, 'MONITOR: '//label, grdi, grdj)
       endif
       this=>this%next
@@ -2512,7 +2515,7 @@ end subroutine insert_berg_into_list
 !> Returns True when berg1 and berg2 are in sorted order
 !! \todo inorder() should use the iceberg identifier for efficiency and simplicity
 !! instead of dates and properties
-logical function inorder(berg1, berg2)  !MP Alon - Change to include iceberg_num
+logical function inorder(berg1, berg2)  !MP Alon - Change to use iceberg id
 ! Arguments
 type(iceberg), pointer :: berg1 !< An iceberg
 type(iceberg), pointer :: berg2 !< An iceberg
@@ -2757,25 +2760,23 @@ integer :: grdi, grdj
 
 end subroutine print_bergs
 
-subroutine form_a_bond(berg, other_berg_num, other_id, other_berg_ine, other_berg_jne, other_berg)
+subroutine form_a_bond(berg, other_id, other_berg_ine, other_berg_jne, other_berg)
 ! Arguments
 type(iceberg), pointer :: berg
 type(iceberg), optional,  pointer :: other_berg
 type(bond) , pointer :: new_bond, first_bond
-integer, intent(in) :: other_berg_num
 integer(kind=8), intent(in) :: other_id
 integer, optional  :: other_berg_ine, other_berg_jne
 integer :: stderrunit
 
  stderrunit = stderr()
 
-if (berg%iceberg_num .ne. other_berg_num) then
+if (berg%id .ne. other_id) then
 
- !write (stderrunit,*) , 'Forming a bond!!!', mpp_pe(), berg%iceberg_num, other_berg_num, berg%halo_berg, berg%ine, berg%jne
+ !write (stderrunit,*) , 'Forming a bond!!!', mpp_pe(), berg%id, other_id, berg%halo_berg, berg%ine, berg%jne
 
   ! Step 1: Create a new bond
   allocate(new_bond)
-  new_bond%other_berg_num=other_berg_num
   new_bond%other_id=other_id
   if(present(other_berg)) then
     new_bond%other_berg=>other_berg
@@ -2860,16 +2861,16 @@ type(bond) , pointer :: current_bond
     do while (associated(berg)) ! loop over all bergs
       current_bond=>berg%first_bond
       do while (associated(current_bond)) ! loop over all bonds
-        print *, 'Show Bond1 :', berg%id, current_bond%other_berg_num, current_bond%other_berg_ine, current_bond%other_berg_jne,  mpp_pe()
+        print *, 'Show Bond1 :', berg%id, current_bond%other_id, current_bond%other_berg_ine, current_bond%other_berg_jne,  mpp_pe()
         !print *, 'Current:', berg%id, berg%ine, berg%jne,berg%halo_berg, mpp_pe()
         if  (associated(current_bond%other_berg)) then
-          if (current_bond%other_berg%iceberg_num .ne. current_bond%other_berg_num) then
-            print *, 'Bond matching', berg%id,current_bond%other_berg%id, current_bond%other_berg_num,&
+          if (current_bond%other_berg%id .ne. current_bond%other_id) then
+            print *, 'Bond matching', berg%id,current_bond%other_berg%id, current_bond%other_id,&
             berg%halo_berg,current_bond%other_berg%halo_berg ,mpp_pe()
             call error_mesg('diamonds, show all bonds:', 'The bonds are not matching properly!', FATAL)
           endif
         else
-            print *, 'This bond has an non-assosiated other berg :', berg%id, current_bond%other_berg_num,&
+            print *, 'This bond has an non-assosiated other berg :', berg%id, current_bond%other_id,&
             current_bond%other_berg_ine, current_bond%other_berg_jne, berg%halo_berg,  mpp_pe()
         endif
         current_bond=>current_bond%next_bond
@@ -2910,7 +2911,7 @@ bond_matched=.false.
           if ( (i.gt. grd%isd-1) .and. (i .lt. grd%ied+1) .and. (j .gt. grd%jsd-1) .and. (j .lt. grd%jed+1)) then
             other_berg=>bergs%list(i,j)%first
             do while (associated(other_berg)) ! loop over all other bergs
-              if (other_berg%iceberg_num .eq. current_bond%other_berg_num) then
+              if (other_berg%id .eq. current_bond%other_id) then
                 current_bond%other_berg=>other_berg
                 other_berg=>null()
                 bond_matched=.true.
@@ -2928,7 +2929,7 @@ bond_matched=.false.
                 .and. ((grdi_inner .ne. i) .or. (grdj_inner .ne. j)) ) then
                   other_berg=>bergs%list(grdi_inner,grdj_inner)%first
                   do while (associated(other_berg)) ! loop over all other bergs
-                    if (other_berg%iceberg_num .eq. current_bond%other_berg_num) then
+                    if (other_berg%id .eq. current_bond%other_id) then
                       current_bond%other_berg=>other_berg
                       other_berg=>null()
                       bond_matched=.true.
@@ -2943,12 +2944,12 @@ bond_matched=.false.
           if (.not.bond_matched) then
             if (berg%halo_berg .lt. 0.5) then
               missing_bond=.true.
-              print * ,'non-halo berg unmatched: ', berg%id, mpp_pe(), current_bond%other_berg_num, current_bond%other_berg_ine
+              print * ,'non-halo berg unmatched: ', berg%id, mpp_pe(), current_bond%other_id, current_bond%other_berg_ine
               call error_mesg('diamonds, connect_all_bonds', 'A non-halo bond is missing!!!', FATAL)
             else  ! This is not a problem if the partner berg is not yet in the halo
               !if (  (current_bond%other_berg_ine .gt.grd%isd-1) .and. (current_bond%other_berg_ine .lt.grd%ied+1) &
                 !.and.  (current_bond%other_berg_jne .gt.grd%jsd-1) .and. (current_bond%other_berg_jne .lt.grd%jed+1) ) then
-                !print * ,'halo berg unmatched: ',mpp_pe(),  berg%id, current_bond%other_berg_num, current_bond%other_berg_ine,current_bond%other_berg_jne
+                !print * ,'halo berg unmatched: ',mpp_pe(),  berg%id, current_bond%other_id, current_bond%other_berg_ine,current_bond%other_berg_jne
                 !call error_mesg('diamonds, connect_all_bonds', 'A halo bond is missing!!!', WARNING)
               !endif
             endif
@@ -3015,7 +3016,7 @@ integer :: stderrunit
             other_berg_bond=>other_berg%first_bond
             do while (associated(other_berg_bond))  !loops over the icebergs in the other icebergs bond list
               if (associated(other_berg_bond%other_berg)) then
-                if (other_berg_bond%other_berg%iceberg_num .eq.berg%iceberg_num) then
+                if (other_berg_bond%other_berg%id .eq.berg%id) then
                   bond_is_good=.True.  !Bond_is_good becomes true when the corresponding bond is found
                 endif
               endif
@@ -3027,9 +3028,9 @@ integer :: stderrunit
             enddo  ! End of loop over the other berg's bonds.
 
             if (bond_is_good) then
-              if (debug) write(stderrunit,*) 'Perfect quality Bond:', berg%id, current_bond%other_berg_num
+              if (debug) write(stderrunit,*) 'Perfect quality Bond:', berg%id, current_bond%other_id
             else
-              if (debug) write(stderrunit,*) 'Non-matching bond...:', berg%id, current_bond%other_berg_num
+              if (debug) write(stderrunit,*) 'Non-matching bond...:', berg%id, current_bond%other_id
               num_unmatched_bonds=num_unmatched_bonds+1
             endif
           else
@@ -3137,8 +3138,7 @@ integer :: grdi, grdj
       posn%lat=this%lat
       posn%year=bergs%current_year
       posn%day=bergs%current_yearday
-      posn%iceberg_num=posn%iceberg_num
-      posn%id=posn%id
+      posn%id=this%id
       if (.not. bergs%save_short_traj) then !Not totally sure that this is correct
         posn%uvel=this%uvel
         posn%vvel=this%vvel
@@ -3233,22 +3233,6 @@ type(xyt) :: vals
 
   ! If the trajectory is empty, ignore it
   if (.not.associated(berg%trajectory)) return
-
-  ! Push identifying info into first posn (note reverse order due to stack)
-  vals%lon=berg%start_lon
-  vals%lat=berg%start_lat
-  vals%year=berg%start_year
-  vals%iceberg_num=berg%iceberg_num
-  vals%id=berg%id
-  vals%day=berg%start_day
-  vals%mass=berg%start_mass
-  call push_posn(berg%trajectory, vals)
-  vals%lon=0.
-  vals%lat=99.
-  vals%year=0
-  vals%day=0.
-  vals%mass=berg%mass_scaling
-  call push_posn(berg%trajectory, vals)
 
   ! Find end of berg trajectory and point it to start of existing trajectories
   next=>berg%trajectory
@@ -3492,10 +3476,10 @@ logical function find_cell_loc(grd, x, y, is, ie, js, je, w, oi, oj)
 end function find_cell_loc
 
 !> Returns the i,j of cell containing an iceberg with the given identifier
-subroutine find_individual_iceberg(bergs, iceberg_num, ine, jne, berg_found, search_data_domain)
+subroutine find_individual_iceberg(bergs, id, ine, jne, berg_found, search_data_domain)
 ! Arguments
 type(icebergs), pointer :: bergs !< Container for all types and memory
-integer, intent(in) :: iceberg_num !< Berg identifier
+integer(kind=8), intent(in) :: id !< Berg identifier
 integer, intent(out) :: ine !< i-index of cell containing berg
 integer, intent(out) :: jne !< j-index of cell containing berg
 logical, intent(in) :: search_data_domain !< If true, search halos too
@@ -3524,7 +3508,7 @@ jne=999
     !do grdj = bergs%grd%jsd,bergs%grd%jed ; do grdi = bergs%grd%isd,bergs%grd%ied
       this=>bergs%list(grdi,grdj)%first
       do while (associated(this))
-        if (iceberg_num .eq. this%iceberg_num) then
+        if (id .eq. this%id) then
           ine=this%ine
           jne=this%jne
           berg_found=1.0
@@ -4501,8 +4485,8 @@ integer function berg_chksum(berg)
 ! Arguments
 type(iceberg), pointer :: berg !< An iceberg
 ! Local variables
-real :: rtmp(38) !Changed from 28 to 34 by Alon
-integer :: itmp(38+4), i8=0, ichk1, ichk2, ichk3 !Changed from 28 to 34 by Alon
+real :: rtmp(36)
+integer :: itmp(36+8), i8=0, ichk1, ichk2, ichk3
 integer :: i
 
   rtmp(:)=0.
@@ -4541,16 +4525,17 @@ integer :: i
   rtmp(34)=berg%vvel_old
   rtmp(35)=berg%lat_old
   rtmp(36)=berg%lon_old
+  itmp(1:36)=transfer(rtmp,i8)
   itmp(37)=berg%halo_berg
   itmp(38)=berg%static_berg
-  itmp(1:38)=transfer(rtmp,i8)
   itmp(39)=berg%start_year
   itmp(40)=berg%ine
   itmp(41)=berg%jne
   itmp(42)=berg%iceberg_num
+  call split_id( berg%id, itmp(43), itmp(44) )
 
   ichk1=0; ichk2=0; ichk3=0
-  do i=1,38+4
+  do i=1,36+8
    ichk1=ichk1+itmp(i)
    ichk2=ichk2+itmp(i)*i
    ichk3=ichk3+itmp(i)*i*i
@@ -4675,7 +4660,7 @@ subroutine check_for_duplicates_in_parallel(bergs)
   type(icebergs_gridded), pointer :: grd
   type(iceberg), pointer :: this
   integer :: stderrunit, i, j, k, nbergs, nbergs_total
-  integer, dimension(:), allocatable :: ids ! List of ids of all bergs on this processor
+  integer(kind=8), dimension(:), allocatable :: ids ! List of ids of all bergs on this processor
 
   stderrunit=stderr()
   grd=>bergs%grd
@@ -4691,7 +4676,7 @@ subroutine check_for_duplicates_in_parallel(bergs)
       this=>bergs%list(i,j)%first
       do while (associated(this))
         k = k + 1
-        ids(k) = this%iceberg_num
+        ids(k) = this%id
         this=>this%next
       enddo
     enddo ; enddo
@@ -4708,11 +4693,12 @@ end subroutine check_for_duplicates_in_parallel
 !> Returns error count of duplicates of integer values in a distributed list
 integer function check_for_duplicate_ids_in_list(nbergs, ids, verbose)
   ! Arguments
-  integer,               intent(in)    :: nbergs !< Length of ids
-  integer, dimension(:), intent(inout) :: ids !< List of ids
-  logical,               intent(in)    :: verbose !< True if messages should be written
+  integer,                       intent(in)    :: nbergs !< Length of ids
+  integer(kind=8), dimension(:), intent(inout) :: ids !< List of ids
+  logical,                       intent(in)    :: verbose !< True if messages should be written
   ! Local variables
-  integer :: stderrunit, i, j, k, l, nbergs_total, ii, lowest_id, nonexistent_id
+  integer :: stderrunit, i, j, k, nbergs_total, ii
+  integer(kind=8) :: lowest_id, nonexistent_id, id, lid
   logical :: have_berg
 
   stderrunit=stderr()
@@ -4723,7 +4709,7 @@ integer function check_for_duplicate_ids_in_list(nbergs, ids, verbose)
   lowest_id = 0
   if (nbergs>0) lowest_id = minval(ids)
   call mpp_min(lowest_id)
-  i = lowest_id
+  id = lowest_id
   nonexistent_id = lowest_id - 1
   if (nonexistent_id >= lowest_id) then
     write(stderrunit,*) 'Underflow in iceberg ids!',nonexistent_id,lowest_id,mpp_pe()
@@ -4733,9 +4719,9 @@ integer function check_for_duplicate_ids_in_list(nbergs, ids, verbose)
     do i = j+1, nbergs
       if (ids(j) < ids(i)) then
         ! Swap
-        k = ids(i)
+        id = ids(i)
         ids(i) = ids(j)
-        ids(j) = k
+        ids(j) = id
       endif
     enddo
   enddo
@@ -4752,15 +4738,15 @@ integer function check_for_duplicate_ids_in_list(nbergs, ids, verbose)
   do k = 1, nbergs_total
     ! Set i to first id in my list
     if (j <= nbergs) then
-      i = ids(j)
+      id = ids(j)
       have_berg = .true.
     else
-      i = nonexistent_id
+      id = nonexistent_id
       have_berg = .false.
     endif
-    l = i
-    call mpp_max(l)
-    if (have_berg .and. i == l) then
+    lid = id
+    call mpp_max(lid)
+    if (have_berg .and. id == lid) then
       ii = 1 ! This berg is mine
       j = j + 1
     else
@@ -4768,10 +4754,10 @@ integer function check_for_duplicate_ids_in_list(nbergs, ids, verbose)
     endif
     call mpp_sum(ii)
     if (ii > 1) then
-      if (verbose) write(stderrunit,*) 'Duplicated berg across PEs with id=',i,l,' seen',ii,' times pe=',mpp_pe(),k,j,nbergs
+      if (verbose) write(stderrunit,*) 'Duplicated berg across PEs with id=',id,lid,' seen',ii,' times pe=',mpp_pe(),k,j,nbergs
       check_for_duplicate_ids_in_list = check_for_duplicate_ids_in_list + 1
     elseif (ii == 0) then
-      if (verbose) write(stderrunit,*) 'Berg not accounted for on all PEs with id=',i,l,' seen',ii,' times pe=',mpp_pe(),k,j,nbergs
+      if (verbose) write(stderrunit,*) 'Berg not accounted for on all PEs with id=',id,lid,' seen',ii,' times pe=',mpp_pe(),k,j,nbergs
     endif
   enddo
 
@@ -4781,7 +4767,7 @@ end function check_for_duplicate_ids_in_list
 subroutine test_check_for_duplicate_ids_in_list()
   ! Local variables
   integer :: k
-  integer, dimension(:), allocatable :: ids
+  integer(kind=8), dimension(:), allocatable :: ids
   integer :: error_count
 
   allocate(ids(5))

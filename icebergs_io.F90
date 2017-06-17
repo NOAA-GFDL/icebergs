@@ -143,8 +143,10 @@ integer, allocatable, dimension(:) :: ine,              &
                                       jne,              &
                                       iceberg_num,      &
                                       start_year,       &
-                                      first_berg_num,   &
-                                      other_berg_num,   &
+                                      first_id_cnt,     &
+                                      other_id_cnt,     &
+                                      first_id_ij,      &
+                                      other_id_ij,      &
                                       first_berg_jne,         &
                                       first_berg_ine,         &
                                       other_berg_jne,         &
@@ -322,8 +324,10 @@ integer :: grdi, grdj
     check_bond_quality=.true.
     call count_bonds(bergs, nbonds,check_bond_quality)
 
-  allocate(first_berg_num(nbonds))
-  allocate(other_berg_num(nbonds))
+  allocate(first_id_cnt(nbonds))
+  allocate(other_id_cnt(nbonds))
+  allocate(first_id_ij(nbonds))
+  allocate(other_id_ij(nbonds))
   allocate(first_berg_ine(nbonds))
   allocate(first_berg_jne(nbonds))
   allocate(other_berg_ine(nbonds))
@@ -340,10 +344,12 @@ integer :: grdi, grdj
 
   id = register_restart_field(bergs_bond_restart,filename_bonds,'first_berg_ine',first_berg_ine,longname='iceberg ine of first berg in bond',units='dimensionless')
   id = register_restart_field(bergs_bond_restart,filename_bonds,'first_berg_jne',first_berg_jne,longname='iceberg jne of first berg in bond',units='dimensionless')
-  id = register_restart_field(bergs_bond_restart,filename_bonds,'first_berg_num',first_berg_num,longname='iceberg id first berg in bond',units='dimensionless')
+  id = register_restart_field(bergs_bond_restart,filename_bonds,'first_id_cnt',first_id_cnt,longname='counter component of iceberg id first berg in bond',units='dimensionless')
+  id = register_restart_field(bergs_bond_restart,filename_bonds,'first_id_ij',first_id_ij,longname='position component of iceberg id first berg in bond',units='dimensionless')
   id = register_restart_field(bergs_bond_restart,filename_bonds,'other_berg_ine',other_berg_ine,longname='iceberg ine of second berg in bond',units='dimensionless')
   id = register_restart_field(bergs_bond_restart,filename_bonds,'other_berg_jne',other_berg_jne,longname='iceberg jne of second berg in bond',units='dimensionless')
-  id = register_restart_field(bergs_bond_restart,filename_bonds,'other_berg_num',other_berg_num,longname='iceberg id second berg in bond',units='dimensionless')
+  id = register_restart_field(bergs_bond_restart,filename_bonds,'other_id_cnt',other_id_cnt,longname='counter component of iceberg id second berg in bond',units='dimensionless')
+  id = register_restart_field(bergs_bond_restart,filename_bonds,'other_id_ij',other_id_ij,longname='position component of iceberg id second berg in bond',units='dimensionless')
 
 
   ! Write variables
@@ -357,8 +363,8 @@ integer :: grdi, grdj
         i = i + 1
         first_berg_ine(i)=this%ine
         first_berg_jne(i)=this%jne
-        first_berg_num(i)= this%iceberg_num
-        other_berg_num(i)=current_bond%other_berg_num
+        call split_id( this%id, first_id_cnt(i), first_id_ij(i) )
+        call split_id( current_bond%other_id, other_id_cnt(i), other_id_ij(i) )
         other_berg_ine(i)=current_bond%other_berg%ine
         other_berg_jne(i)=current_bond%other_berg%jne
 
@@ -372,9 +378,10 @@ integer :: grdi, grdj
   call free_restart_type(bergs_bond_restart)
 
 
-  deallocate(                 &
-             first_berg_num,  &
-             other_berg_num, &
+  deallocate(first_id_cnt,          &
+             other_id_cnt,          &
+             first_id_ij,           &
+             other_id_ij,           &
              first_berg_ine,        &
              first_berg_jne,        &
              other_berg_ine,        &
@@ -437,6 +444,7 @@ type(icebergs_gridded), pointer :: grd
 type(iceberg) :: localberg ! NOT a pointer but an actual local variable
 integer :: stderrunit, iNg, jNg, i, j
 
+stop 'Obsolete!'
   ! Get the stderr unit number
   stderrunit=stderr()
 
@@ -899,7 +907,7 @@ integer, allocatable, dimension(:) :: ine,       &
         call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg)
       else
         if (mpp_pe().eq.mpp_root_pe()) then
-          print * , 'Grounded iceberg: ', lat(k),lon(k), iceberg_num(k)
+          print * , 'Grounded iceberg: ', lat(k),lon(k), localberg%id
           call error_mesg('diamonds, read_restart_bergs', 'Iceberg not added because it is grounded', WARNING)
         endif
        endif
@@ -1148,13 +1156,13 @@ integer :: all_pe_number_perfect_bonds_with_first_on_pe
 integer :: ine, jne
 logical :: search_data_domain
 real :: berg_found, berg_found_all_pe
-integer, allocatable, dimension(:) :: first_berg_num,   &
-                                      other_berg_num,   &
+integer, allocatable, dimension(:) :: id_cnt, id_ij,    &
                                       first_berg_jne,   &
                                       first_berg_ine,   &
                                       other_berg_jne,   &
                                       other_berg_ine
-integer(kind=8) :: id
+integer(kind=8), allocatable, dimension(:) :: first_id,   &
+                                              other_id
 !integer, allocatable, dimension(:,:) :: iceberg_counter_grd
 
   ! Get the stderr unit number
@@ -1182,16 +1190,27 @@ integer(kind=8) :: id
 
   if (nbonds_in_file .gt. 0) then
 
-    allocate(first_berg_num(nbonds_in_file))
-    allocate(other_berg_num(nbonds_in_file))
+    allocate(first_id(nbonds_in_file))
+    allocate(other_id(nbonds_in_file))
+    allocate(id_cnt(nbonds_in_file))
+    allocate(id_ij(nbonds_in_file))
     allocate(first_berg_jne(nbonds_in_file))
     allocate(first_berg_ine(nbonds_in_file))
     allocate(other_berg_ine(nbonds_in_file))
     allocate(other_berg_jne(nbonds_in_file))
 
 
-    call read_unlimited_axis(filename,'first_berg_num',first_berg_num,domain=grd%domain)
-    call read_unlimited_axis(filename,'other_berg_num',other_berg_num,domain=grd%domain)
+    call read_unlimited_axis(filename,'first_id_cnt',id_cnt,domain=grd%domain)
+    call read_unlimited_axis(filename,'first_id_ij',id_ij,domain=grd%domain)
+    do k=1, nbonds_in_file
+      first_id(k) = id_from_2_ints( id_cnt(k), id_ij(k) )
+    enddo
+    call read_unlimited_axis(filename,'other_id_cnt',id_cnt,domain=grd%domain)
+    call read_unlimited_axis(filename,'other_id_ij',id_ij,domain=grd%domain)
+    do k=1, nbonds_in_file
+      other_id(k) = id_from_2_ints( id_cnt(k), id_ij(k) )
+    enddo
+    deallocate(id_cnt, id_ij)
     call read_unlimited_axis(filename,'first_berg_jne',first_berg_jne,domain=grd%domain)
     call read_unlimited_axis(filename,'first_berg_ine',first_berg_ine,domain=grd%domain)
     call read_unlimited_axis(filename,'other_berg_jne',other_berg_jne,domain=grd%domain)
@@ -1209,21 +1228,21 @@ integer(kind=8) :: id
        if (ignore_ij_restart) then
          !Finding first iceberg in bond
          ine=999 ; jne=999 ; berg_found=0.0 ; search_data_domain=.true.
-         call find_individual_iceberg(bergs,first_berg_num(k), ine, jne,berg_found,search_data_domain)
+         call find_individual_iceberg(bergs,first_id(k), ine, jne,berg_found,search_data_domain)
          berg_found_all_pe=berg_found
          call mpp_sum(berg_found_all_pe)
          if (berg_found_all_pe .gt. 0.5) then
              first_berg_ine(k)=ine
              first_berg_jne(k)=jne
          else
-           print * , 'First bond berg not located: ', first_berg_num(k),berg_found, mpp_pe(),ine, jne
+           print * , 'First bond berg not located: ', first_id(k),berg_found, mpp_pe(),ine, jne
            call error_mesg('read_restart_bonds_bergs_new', 'First iceberg in bond not found on any pe', FATAL)
          endif
          !else
 
          !Finding other iceberg other iceberg
          ine=999 ; jne=999 ; berg_found=0.0 ; search_data_domain =.true.
-         call find_individual_iceberg(bergs,other_berg_num(k), ine, jne, berg_found,search_data_domain)
+         call find_individual_iceberg(bergs,other_id(k), ine, jne, berg_found,search_data_domain)
          berg_found_all_pe=berg_found
          call mpp_sum(berg_found_all_pe)
          if (berg_found_all_pe .gt. 0.5) then
@@ -1237,7 +1256,7 @@ integer(kind=8) :: id
           call error_mesg('read_restart_bonds_bergs_new', 'Other iceberg in bond not found on any pe', FATAL)
          endif
          if (berg_found_all_pe .lt. 0.5) then
-                 print * , 'First bond berg not located: ', other_berg_num(k),berg_found, mpp_pe(),ine, jne
+                 print * , 'First bond berg not located: ', other_id(k),berg_found, mpp_pe(),ine, jne
              call error_mesg('read_restart_bonds_bergs_new', 'First bond iceberg not located', FATAL)
          endif
        endif
@@ -1252,10 +1271,10 @@ integer(kind=8) :: id
         first_berg=>null()
         this=>bergs%list(first_berg_ine(k),first_berg_jne(k))%first
         do while(associated(this))
-          if (this%iceberg_num == first_berg_num(k)) then
+          if (this%id == first_id(k)) then
             first_berg_found=.true.
             first_berg=>this
-            !if (first_berg%halo_berg.gt.0.5) print *, 'bonding halo berg:', first_berg_num(k),  first_berg_ine(k),first_berg_jne(k) ,grd%isc, grd%iec, mpp_pe()
+            !if (first_berg%halo_berg.gt.0.5) print *, 'bonding halo berg:', first_id(k),  first_berg_ine(k),first_berg_jne(k) ,grd%isc, grd%iec, mpp_pe()
             this=>null()
           else
             this=>this%next
@@ -1274,7 +1293,7 @@ integer(kind=8) :: id
           second_berg=>null()
           this=>bergs%list(other_berg_ine(k),other_berg_jne(k))%first
           do while(associated(this))
-            if (this%iceberg_num == other_berg_num(k)) then
+            if (this%id == other_id(k)) then
               second_berg_found=.true.
               second_berg=>this
               this=>null()
@@ -1287,8 +1306,7 @@ integer(kind=8) :: id
         if (first_berg_found) then
           number_partial_bonds=number_partial_bonds+1
           if (second_berg_found) then
-            id = convert_old_id(grd, other_berg_num(k))
-            call form_a_bond(first_berg, other_berg_num(k), id, other_berg_ine(k), other_berg_jne(k),  second_berg)
+            call form_a_bond(first_berg, other_id(k), other_berg_ine(k), other_berg_jne(k),  second_berg)
             number_perfect_bonds=number_perfect_bonds+1
 
             !Counting number of bonds where the first bond is in the computational domain
@@ -1298,8 +1316,8 @@ integer(kind=8) :: id
             endif
 
           else
-            !print *, 'Forming a bond of the second type', mpp_pe(), first_berg_num(k),  other_berg_num(k)
-            !call form_a_bond(first_berg, other_berg_num(k),other_berg_ine(k),other_berg_jne(k))
+            !print *, 'Forming a bond of the second type', mpp_pe(), first_id(k),  other_id(k)
+            !call form_a_bond(first_berg, other_id(k), other_berg_ine(k),other_berg_jne(k))
           endif
         else
           write(stderrunit,*) 'diamonds, bond read restart : ','Not enough partial bonds formed', k, mpp_pe(), nbonds_in_file
@@ -1340,8 +1358,6 @@ integer(kind=8) :: id
     endif
 
     deallocate(               &
-            first_berg_num,   &
-            other_berg_num,  &
             first_berg_ine,   &
             first_berg_jne,   &
             other_berg_ine,  &
@@ -1493,14 +1509,14 @@ type(xyt), pointer :: trajectory !< An iceberg trajectory
 logical, intent(in) :: save_short_traj !< If true, record less data
 ! Local variables
 integer :: iret, ncid, i_dim, i
-integer :: lonid, latid, yearid, dayid, uvelid, vvelid, iceberg_numid
+integer :: lonid, latid, yearid, dayid, uvelid, vvelid, idcntid, idijid
 integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid, sssid
 integer :: cnid, hiid
 integer :: mid, did, wid, lid, mbid, hdid
 character(len=37) :: filename
 character(len=7) :: pe_name
 type(xyt), pointer :: this, next
-integer :: stderrunit
+integer :: stderrunit, cnt, ij
 !I/O vars
 type(xyt), pointer :: traj4io=>null()
 integer :: ntrajs_sent_io,ntrajs_rcvd_io
@@ -1612,7 +1628,8 @@ logical :: io_is_in_append_mode
       latid = inq_varid(ncid, 'lat')
       yearid = inq_varid(ncid, 'year')
       dayid = inq_varid(ncid, 'day')
-      iceberg_numid = inq_varid(ncid, 'iceberg_num')
+      idcntid = inq_varid(ncid, 'id_cnt')
+      idijid = inq_varid(ncid, 'id_ij')
       if (.not.save_short_traj) then
         uvelid = inq_varid(ncid, 'uvel')
         vvelid = inq_varid(ncid, 'vvel')
@@ -1645,7 +1662,8 @@ logical :: io_is_in_append_mode
       latid = def_var(ncid, 'lat', NF_DOUBLE, i_dim)
       yearid = def_var(ncid, 'year', NF_INT, i_dim)
       dayid = def_var(ncid, 'day', NF_DOUBLE, i_dim)
-      iceberg_numid = def_var(ncid, 'iceberg_num', NF_INT, i_dim)
+      idcntid = def_var(ncid, 'id_cnt', NF_INT, i_dim)
+      idijid = def_var(ncid, 'id_ij', NF_INT, i_dim)
       if (.not. save_short_traj) then
         uvelid = def_var(ncid, 'uvel', NF_DOUBLE, i_dim)
         vvelid = def_var(ncid, 'vvel', NF_DOUBLE, i_dim)
@@ -1680,8 +1698,10 @@ logical :: io_is_in_append_mode
       call put_att(ncid, yearid, 'units', 'years')
       call put_att(ncid, dayid, 'long_name', 'year day')
       call put_att(ncid, dayid, 'units', 'days')
-      call put_att(ncid, iceberg_numid, 'long_name', 'iceberg id number')
-      call put_att(ncid, iceberg_numid, 'units', 'dimensionless')
+      call put_att(ncid, idcntid, 'long_name', 'counter component of iceberg id')
+      call put_att(ncid, idcntid, 'units', 'dimensionless')
+      call put_att(ncid, idijid, 'long_name', 'position component of iceberg id')
+      call put_att(ncid, idijid, 'units', 'dimensionless')
 
       if (.not. save_short_traj) then
         call put_att(ncid, uvelid, 'long_name', 'zonal spped')
@@ -1744,7 +1764,9 @@ logical :: io_is_in_append_mode
       call put_double(ncid, latid, i, this%lat)
       call put_int(ncid, yearid, i, this%year)
       call put_double(ncid, dayid, i, this%day)
-      call put_int(ncid, iceberg_numid, i, this%iceberg_num)
+      call split_id(this%id, cnt, ij)
+      call put_int(ncid, idcntid, i, cnt)
+      call put_int(ncid, idijid, i, ij)
       if (.not. save_short_traj) then
         call put_double(ncid, uvelid, i, this%uvel)
         call put_double(ncid, vvelid, i, this%vvel)
@@ -1823,8 +1845,7 @@ integer :: stderrunit
 
   iret = nf_def_var(ncid, var, ntype, 1, idim, def_var)
   if (iret .ne. NF_NOERR) then
-    write(stderrunit,*) 'diamonds, def_var: nf_def_var failed for ',trim(var)
-    call error_mesg('diamonds, def_var', 'netcdf function returned a failure!', FATAL)
+    call error_mesg('diamonds, def_var', nf_strerror(iret), FATAL)
   endif
 
 end function def_var

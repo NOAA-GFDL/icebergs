@@ -175,17 +175,17 @@ subroutine basal_melt_test(bergs)
   type(icebergs), pointer :: bergs !< Container for all types and memory
   ! Local variables
   real :: dvo,lat,salt,temp, basal_melt, thickness
-  integer :: iceberg_num
+  integer(kind=8) :: id
   logical :: Use_three_equation_model
 
   if (mpp_pe() .eq. mpp_root_pe() ) print *, 'Begining Basal Melting Unit Test'
-  dvo=0.2 ;lat=0.0 ; salt=35.0 ; temp=2.0 ;thickness=100.; iceberg_num=0
+  dvo=0.2 ;lat=0.0 ; salt=35.0 ; temp=2.0 ;thickness=100.; id=0
   Use_three_equation_model=.False.
-  call find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thickness,basal_melt,iceberg_num)
+  call find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thickness,basal_melt,id)
   if (mpp_pe() .eq. mpp_root_pe()) print *, 'Two equation model basal_melt =',basal_melt
 
   Use_three_equation_model=.True.
-  call find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thickness,basal_melt,iceberg_num)
+  call find_basal_melt(bergs,dvo,lat,salt,temp,Use_three_equation_model,thickness,basal_melt,id)
    if (mpp_pe() .eq. mpp_root_pe()) print *, 'Three equation model basal_melt =',basal_melt
 
 end subroutine basal_melt_test
@@ -351,7 +351,7 @@ subroutine initialize_iceberg_bonds(bergs)
         other_berg=>bergs%list(grdi_inner,grdj_inner)%first
         do while (associated(other_berg)) ! loop over all other bergs
 
-          if (berg%iceberg_num .ne. other_berg%iceberg_num) then
+          if (berg%id .ne. other_berg%id) then
             lon2=other_berg%lon; lat2=other_berg%lat
             !call rotpos_to_tang(lon2,lat2,x2,y2) !Is this correct? Shouldn't it only be on tangent plane?
             !r_dist_x=x1-x2 ; r_dist_y=y1-y2
@@ -366,7 +366,7 @@ subroutine initialize_iceberg_bonds(bergs)
             r_dist=sqrt( (r_dist_x**2) + (r_dist_y**2) )
 
             !if (r_dist.gt.1000.) then  ! If the bergs are close together, then form a bond
-              call form_a_bond(berg, other_berg%iceberg_num, other_berg%id, other_berg%ine, other_berg%jne, other_berg)
+              call form_a_bond(berg, other_berg%id, other_berg%ine, other_berg%jne, other_berg)
             !endif
           endif
           other_berg=>other_berg%next
@@ -523,7 +523,7 @@ subroutine calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, 
     tangental_damping_coef=(2.*sqrt(spring_coef))/4 ! Critical damping (just a guess)
   endif
 
-  if (berg%iceberg_num .ne. other_berg%iceberg_num) then
+  if (berg%id .ne. other_berg%id) then
     ! From Berg 1
     L1=berg%length
     W1=berg%width
@@ -567,7 +567,7 @@ subroutine calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, 
       R2=sqrt(A2/pi) ! Interaction radius of the other iceberg
     endif
     !!!!!!!!!!!!!!!!!!!!!!!!!!!debugging!!!!!!!!!!!!!!!!!!!!!!!!!!MP1
-    ! if (berg%iceberg_num .eq. 1) then
+    ! if (berg%id .eq. 1) then
     !   print *, 'Comparing longitudes: ', lon1, lon2, r_dist_x, dlon
     !   print *, 'Comparing latitudes: ', lat1, lat2, r_dist_y, dlat
     !   print *, 'Outside, id, r_dist', berg%id, r_dist,bonded
@@ -593,7 +593,7 @@ subroutine calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, 
       if (r_dist < 5*(R1+R2)) then
 
         !MP1
-        !if (berg%iceberg_num .eq. 1) then
+        !if (berg%id .eq. 1) then
         !  !print *,  '************************************************************'
         !  print *, 'INSIDE, r_dist', berg%id, other_berg%id, r_dist, bonded
         !endif
@@ -936,7 +936,7 @@ subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, a
     uveln=u_star+dt*ax        ! Alon
     vveln=v_star+dt*ay        ! Alon
 !MP4
-  !    if (berg%iceberg_num .eq. 1) then
+  !    if (berg%id .eq. 1) then
   !      print *, '***************************************************'
   !      print *,'id, itloop', berg%id, itloop
   !      print *, 'P matrix:', P_ia_11, P_ia_12,P_ia_21,P_ia_22,P_ia_times_u_x, P_ia_times_u_x
@@ -1224,7 +1224,7 @@ subroutine thermodynamics(bergs)
       !For icebergs acting as ice shelves
       if ((bergs%melt_icebergs_as_ice_shelf) .or.(bergs%use_mixed_melting))  then
         if (.not. bergs%use_mixed_layer_salinity_for_thermo)  SSS=35.0
-        call find_basal_melt(bergs,dvo,this%lat,SSS,SST,bergs%Use_three_equation_model,T,Ms,this%iceberg_num)
+        call find_basal_melt(bergs,dvo,this%lat,SSS,SST,bergs%Use_three_equation_model,T,Ms,this%id)
         Ms=max(Ms,0.) !No refreezing allowed for now
         !Set melt to zero if ocean is too thin.
         if ((bergs%melt_cutoff >=0.) .and. (bergs%apply_thickness_cutoff_to_bergs_melt)) then
@@ -1550,7 +1550,7 @@ real :: tmp
 end subroutine create_gridded_icebergs_fields
 
 !> Calculates basal melt for given thermodynamic properties
-subroutine find_basal_melt(bergs, dvo, lat, salt, temp, Use_three_equation_model, thickness, basal_melt, iceberg_num)
+subroutine find_basal_melt(bergs, dvo, lat, salt, temp, Use_three_equation_model, thickness, basal_melt, id)
   ! Arguments
   type(icebergs), pointer :: bergs !< Container for all types and memory
   real, intent(in) :: dvo !< Speed of iceberg relative to ocean mixed layer
@@ -1560,7 +1560,7 @@ subroutine find_basal_melt(bergs, dvo, lat, salt, temp, Use_three_equation_model
   logical, intent(in) :: Use_three_equation_model !< True uses the 3 equation model, False uses the 2 equation model.
   real, intent(in) :: thickness !< Ice thickness - needed to work out the pressure below the ice
   real, intent(out) :: basal_melt !< Melt rate underneath the icebergs
-  integer, intent(in) :: iceberg_num !< Iceberg number, used for debugging (error messages)
+  integer(kind=8), intent(in) :: id !< Iceberg id, used for debugging (error messages)
   ! Local variables
   real :: ustar, f_cori, absf,tfreeze
   real :: Hml !Mixed layer depth
@@ -1790,7 +1790,7 @@ subroutine find_basal_melt(bergs, dvo, lat, salt, temp, Use_three_equation_model
         if (Sb_max_set .and. (Sbdry > Sb_max)) then
           if (debug) then
             call error_mesg('diamonds,Find basal melt', 'shelf_calc_flux: Irregular iteration for Sbdry (max).' ,WARNING)
-            print *, 'Sbdry error: id,dvo,temp,salt,lat,thickness :',iceberg_num,dvo,temp,salt,lat,thickness
+            print *, 'Sbdry error: id,dvo,temp,salt,lat,thickness :',id,dvo,temp,salt,lat,thickness
           endif
           out_of_bounds=.true.
           exit
@@ -1800,7 +1800,7 @@ subroutine find_basal_melt(bergs, dvo, lat, salt, temp, Use_three_equation_model
         if (Sb_min_set .and. (Sbdry < Sb_min)) then
           if (debug) then
             call error_mesg('diamonds,Find basal melt', 'shelf_calc_flux: Irregular iteration for Sbdry (min).' ,WARNING)
-            print *, 'Sbdry error: id,dvo,temp,salt,lat,thickness :',iceberg_num,dvo,temp,salt,lat,thickness
+            print *, 'Sbdry error: id,dvo,temp,salt,lat,thickness :',id,dvo,temp,salt,lat,thickness
           endif
           out_of_bounds=.true.
           exit
@@ -1911,7 +1911,7 @@ subroutine find_orientation_using_iceberg_bonds(grd, berg, orientation)
       other_berg=>current_bond%other_berg
       if (.not. associated(other_berg)) then !good place for debugging
         !One valid option: current iceberg is on the edge of halo, with other berg on the next pe (not influencing mass spreading)
-        !print *, 'Iceberg bond details:',berg%id, current_bond%other_berg_num,berg%halo_berg, mpp_pe()
+        !print *, 'Iceberg bond details:',berg%id, current_bond%other_id,berg%halo_berg, mpp_pe()
         !print *, 'Iceberg bond details2:',berg%ine, berg%jne, current_bond%other_berg_ine, current_bond%other_berg_jne
         !print *, 'Iceberg isd,ied,jsd,jed:',grd%isd, grd%ied, grd%jsd, grd%jed
         !print *, 'Iceberg isc,iec,jsc,jec:',grd%isc, grd%iec, grd%jsc, grd%jec
@@ -4262,7 +4262,7 @@ subroutine verlet_stepping(bergs,berg, axn, ayn, bxn, byn, uveln, vveln)
     uveln=uvel3+(dt*ax1); vveln=vvel3+(dt*ay1)    !Alon , we call it uvel3, vvel3 until it is put into lat/long co-ordinates, where it becomes uveln, vveln
   endif
 
-  !if (berg%iceberg_num .eq. 1) print *, 'New velocity: ', uveln, vveln
+  !if (berg%id .eq. 1) print *, 'New velocity: ', uveln, vveln
 
 
   !!!!!!!!!!!!!!! Debugging  !!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -4408,7 +4408,7 @@ subroutine Runge_Kutta_stepping(bergs, berg, axn, ayn, bxn, byn, uveln, vveln, l
     uvel2=uvel1+dt_2*ax1; vvel2=vvel1+dt_2*ay1
   endif
   i=i1;j=j1;xi=berg%xi;yj=berg%yj
-  call adjust_index_and_ground(grd, lon2, lat2, uvel2, vvel2, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)
+  call adjust_index_and_ground(grd, lon2, lat2, uvel2, vvel2, i, j, xi, yj, bounced, error_flag, berg%id)
   i2=i; j2=j
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
     call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
@@ -4465,7 +4465,7 @@ subroutine Runge_Kutta_stepping(bergs, berg, axn, ayn, bxn, byn, uveln, vveln, l
     uvel3=uvel1+dt_2*ax2; vvel3=vvel1+dt_2*ay2
   endif
   i=i1;j=j1;xi=berg%xi;yj=berg%yj
-  call adjust_index_and_ground(grd, lon3, lat3, uvel3, vvel3, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)
+  call adjust_index_and_ground(grd, lon3, lat3, uvel3, vvel3, i, j, xi, yj, bounced, error_flag, berg%id)
   i3=i; j3=j
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
     call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
@@ -4524,7 +4524,7 @@ subroutine Runge_Kutta_stepping(bergs, berg, axn, ayn, bxn, byn, uveln, vveln, l
     uvel4=uvel1+dt*ax3; vvel4=vvel1+dt*ay3
   endif
   i=i1;j=j1;xi=berg%xi;yj=berg%yj
-  call adjust_index_and_ground(grd, lon4, lat4, uvel4, vvel4, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)
+  call adjust_index_and_ground(grd, lon4, lat4, uvel4, vvel4, i, j, xi, yj, bounced, error_flag, berg%id)
   i4=i; j4=j
   ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon4,lat4,x4,y4)
   if (.not.error_flag) then
@@ -4596,7 +4596,7 @@ subroutine Runge_Kutta_stepping(bergs, berg, axn, ayn, bxn, byn, uveln, vveln, l
   endif
 
   i=i1;j=j1;xi=berg%xi;yj=berg%yj
-  call adjust_index_and_ground(grd, lonn, latn, uveln, vveln, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)
+  call adjust_index_and_ground(grd, lonn, latn, uveln, vveln, i, j, xi, yj, bounced, error_flag, berg%id)
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
     call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
 
@@ -4693,7 +4693,7 @@ subroutine update_verlet_position(bergs, berg)
   if ((berg%lat>89.) .and. (grd%grid_is_latlon)) on_tangential_plane=.true.
 
   lon1=berg%lon; lat1=berg%lat
-  if (on_tangential_plane) call rotpos_to_tang(lon1,lat1,x1,y1,berg%iceberg_num)
+  if (on_tangential_plane) call rotpos_to_tang(lon1,lat1,x1,y1,berg%id)
   !dxdl1=r180_pi/(Rearth*cos(lat1*pi_180))
   !dydl=r180_pi/Rearth
   call  convert_from_meters_to_grid(lat1,grd%grid_is_latlon ,dxdl1,dydl)
@@ -4727,7 +4727,7 @@ subroutine update_verlet_position(bergs, berg)
   ! Adjusting mass...
   !MP3
   i=berg%ine;  j=berg%jne;  xi = berg%xi;  yj = berg%yj
-  call adjust_index_and_ground(grd, lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag, berg%iceberg_num)  !Alon:"unclear which velocity to use here?"
+  call adjust_index_and_ground(grd, lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag, berg%id)  !Alon:"unclear which velocity to use here?"
 
   !if (bounced) then
   !  print *, 'you have been bounce: big time!',mpp_pe(),berg%id,lonn, latn, uvel3, vvel3, i, j, xi, yj, bounced, error_flag
@@ -4796,7 +4796,7 @@ subroutine rotvec_from_tang(lon, xdot, ydot, uvel, vvel)
 end subroutine rotvec_from_tang
 
 !> Moves berg's cell indexes,(i,j), checking for collisional with coasts
-subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, bounced, error, iceberg_num)
+subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, bounced, error, id)
   ! Arguments
   type(icebergs_gridded), pointer :: grd !< Container for gridded fields
   real, intent(inout) :: lon !< Longitude (degree E)
@@ -4809,7 +4809,7 @@ subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, boun
   integer, intent(inout) :: j !< j-index of cell
   logical, intent(out) :: bounced !< True if berg collided with coast
   logical, intent(out) :: error !< True if adjustments could not be made consistently
-  integer, intent(in) :: iceberg_num !< Berg identifier
+  integer(kind=8), intent(in) :: id !< Berg identifier
   ! Local variables
   logical lret, lpos
   real, parameter :: posn_eps=0.05
@@ -5013,7 +5013,7 @@ subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, boun
         yj=(yj-0.5)*(1.-posn_eps)+0.5
       endif
       call error_mesg('diamonds, adjust', 'Berg did not move or bounce during iterations AND was not in cell. Adjusting!', WARNING)
-      write(stderrunit,*) 'diamonds, adjust: The adjusting iceberg is: ', iceberg_num,  mpp_pe()
+      write(stderrunit,*) 'diamonds, adjust: The adjusting iceberg is: ', id,  mpp_pe()
       write(stderrunit,*) 'diamonds, adjust: The adjusting lon,lat,u,v: ', lon, lat, uvel, vvel
       write(stderrunit,*) 'diamonds, adjust: The adjusting xi,ji: ', xi, yj
       lret=pos_within_cell(grd, lon, lat, inm, jnm, xi, yj,explain=.true.)
@@ -5037,31 +5037,31 @@ subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, boun
     write(0,*) 'grd%msk(i0, j0)=', grd%msk(i0,j0)
     write(0,*) 'lon0, lat0,=', lon0,lat0
     write(0,*) 'i,j,lon, lat,grd%msk(i,j)=', i,j,lon,lat,grd%msk(i,j)
-    write(stderrunit,*) 'diamonds, adjust: Should not get here! Berg is not in cell after adjustment', iceberg_num, mpp_pe()
+    write(stderrunit,*) 'diamonds, adjust: Should not get here! Berg is not in cell after adjustment', id, mpp_pe()
     if (debug) error=.true.
   endif
  end subroutine adjust_index_and_ground
 
 !> Calculate longitude-latitude from tangent plane coordinates
-subroutine rotpos_to_tang(lon, lat, x, y, iceberg_num_in)
+subroutine rotpos_to_tang(lon, lat, x, y, id_in)
   ! Arguments
   real, intent(in) :: lon !< Longitude (degree E)
   real, intent(in) :: lat !< Latitude (degree N)
   real, intent(out) :: x !< x-coordinate in tangent plane
   real, intent(out) :: y !< y-coordinate in tangent plane
-  integer, intent(in), optional :: iceberg_num_in !< Berg identifier
+  integer(kind=8), intent(in), optional :: id_in !< Berg identifier
   ! Local variables
   real :: r,colat,clon,slon
-  integer :: stderrunit, iceberg_num
+  integer :: stderrunit, id
 
   stderrunit = stderr()
-  iceberg_num=0
-  if (present(iceberg_num_in)) then
-        iceberg_num=iceberg_num_in
+  id=0
+  if (present(id_in)) then
+        id=id_in
   endif
 
   if (lat>90.) then
-      write(stderrunit,*) 'diamonds, rotpos_to_tang: lat>90 already!',lat, lon, iceberg_num
+      write(stderrunit,*) 'diamonds, rotpos_to_tang: lat>90 already!',lat, lon, id
       call error_mesg('diamonds, rotpos_to_tang','Something went very wrong!',FATAL)
   endif
   if (lat==90.) then
