@@ -45,8 +45,8 @@ use ice_bergs_framework, only: is_point_within_xi_yj_bounds
 use ice_bergs_framework, only: test_check_for_duplicate_ids_in_list
 use ice_bergs_framework, only: generate_id
 
-use ice_bergs_io,        only: ice_bergs_io_init,write_restart,write_trajectory
-use ice_bergs_io,        only: read_restart_bergs,read_restart_bergs_orig,read_restart_calving
+use ice_bergs_io,        only: ice_bergs_io_init, write_restart, write_trajectory
+use ice_bergs_io,        only: read_restart_bergs, read_restart_calving
 use ice_bergs_io,        only: read_restart_bonds
 use ice_bergs_io,        only: read_ocean_depth
 
@@ -126,10 +126,10 @@ subroutine icebergs_init(bergs, &
   call mpp_clock_begin(bergs%clock_ior)
   call ice_bergs_io_init(bergs,io_layout)
   call read_restart_calving(bergs)  !This is moved to before restart_bergs (by Alon) so that generate icebergs can have the correct counter
-  if(orig_read) then
-     call read_restart_bergs_orig(bergs,Time)
+  if (orig_read) then
+    call error_mesg('diamonds, icebergs_init: ', 'Parameter "orig_read" is no longer supported!', FATAL)
   else
-     call read_restart_bergs(bergs,Time)
+    call read_restart_bergs(bergs,Time)
   endif
   call bergs_chksum(bergs, 'read_restart bergs')
   if (fix_restart_dates) call offset_berg_dates(bergs,Time)
