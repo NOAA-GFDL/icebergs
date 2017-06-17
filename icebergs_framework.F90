@@ -4604,7 +4604,7 @@ integer(kind=8) function id_from_2_ints(counter, ijhash)
   integer, intent(in) :: counter !< The counter value assigned at calving
   integer, intent(in) :: ijhash  !< A hash of i,j calving location
 
-  id_from_2_ints = int(counter,8) * (2**32) + int(ijhash,8)
+  id_from_2_ints = int(counter,8) * (int(2,8)**32) + int(ijhash,8)
 
 end function id_from_2_ints
 
