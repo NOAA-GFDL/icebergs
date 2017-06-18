@@ -39,7 +39,7 @@ use ice_bergs_framework, only: verbose, really_debug, debug, restart_input_dir,m
 use ice_bergs_framework, only: ignore_ij_restart, use_slow_find,generate_test_icebergs,print_berg
 use ice_bergs_framework, only: force_all_pes_traj
 use ice_bergs_framework, only: check_for_duplicates_in_parallel
-use ice_bergs_framework, only: split_id, id_from_2_ints, generate_id, convert_old_id
+use ice_bergs_framework, only: split_id, id_from_2_ints, generate_id
 
 implicit none ; private
 
@@ -141,7 +141,6 @@ real, allocatable, dimension(:) :: lon,          &
 
 integer, allocatable, dimension(:) :: ine,              &
                                       jne,              &
-                                      iceberg_num,      &
                                       id_cnt,           &
                                       id_ij,            &
                                       start_year,       &
@@ -198,7 +197,6 @@ integer :: grdi, grdj
    allocate(ine(nbergs))
    allocate(jne(nbergs))
    allocate(start_year(nbergs))
-   allocate(iceberg_num(nbergs))
    allocate(id_cnt(nbergs))
    allocate(id_ij(nbergs))
 
@@ -235,8 +233,6 @@ integer :: grdi, grdj
                                             longname='latitude of calving location',units='degrees_N')
   id = register_restart_field(bergs_restart,filename,'start_year',start_year, &
                                             longname='calendar year of calving event', units='years')
-  id = register_restart_field(bergs_restart,filename,'iceberg_num',iceberg_num, &
-                                            longname='identification of the iceberg', units='dimensionless')
   id = register_restart_field(bergs_restart,filename,'id_cnt',id_cnt, &
                                             longname='counter component of iceberg id', units='dimensionless')
   id = register_restart_field(bergs_restart,filename,'id_ij',id_ij, &
@@ -284,7 +280,6 @@ integer :: grdi, grdj
       start_year(i) = this%start_year; start_day(i) = this%start_day
       start_mass(i) = this%start_mass; mass_scaling(i) = this%mass_scaling
       static_berg(i) = this%static_berg
-      iceberg_num(i) = this%iceberg_num
       call split_id(this%id, id_cnt(i), id_ij(i))
       mass_of_bits(i) = this%mass_of_bits; heat_density(i) = this%heat_density
       this=>this%next
@@ -314,13 +309,12 @@ integer :: grdi, grdj
              start_mass,   &
              mass_scaling, &
              mass_of_bits, &
-             static_berg,    &
+             static_berg,  &
              heat_density )
 
   deallocate(           &
              ine,       &
              jne,       &
-             iceberg_num,       &
              id_cnt,    &
              id_ij,     &
              start_year )
@@ -454,7 +448,7 @@ type(icebergs), pointer :: bergs !< Icebergs container
 type(time_type), intent(in) :: Time !< Model time
 ! Local variables
 integer :: k, siz(4), nbergs_in_file, nbergs_read
-logical :: lres, found_restart, found
+logical :: lres, found_restart, found, replace_iceberg_num
 logical :: explain
 logical :: multiPErestart  ! Not needed with new restart read; currently kept for compatibility
 real :: lon0, lon1, lat0, lat1
@@ -462,7 +456,7 @@ real :: pos_is_good, pos_is_good_all_pe
 character(len=33) :: filename, filename_base
 type(icebergs_gridded), pointer :: grd
 type(iceberg) :: localberg ! NOT a pointer but an actual local variable
-integer :: stderrunit, iNg, jNg, i, j
+integer :: stderrunit, i, j, cnt, ij
 
 real, allocatable, dimension(:) :: lon,          &
                                    lat,          &
@@ -482,11 +476,13 @@ real, allocatable, dimension(:) :: lon,          &
                                    start_mass,   &
                                    mass_scaling, &
                                    mass_of_bits, &
-                                   static_berg,    &
+                                   static_berg,  &
                                    heat_density
-integer, allocatable, dimension(:) :: ine,       &
-                                      jne,       &
-                                      iceberg_num,       &
+integer, allocatable, dimension(:) :: ine,        &
+                                      jne,        &
+                                      iceberg_num,&
+                                      id_cnt,     &
+                                      id_ij,      &
                                       start_year
 
 !integer, allocatable, dimension(:,:) :: iceberg_counter_grd
@@ -496,8 +492,6 @@ integer, allocatable, dimension(:) :: ine,       &
 
   ! For convenience
   grd=>bergs%grd
-  iNg=(grd%ieg-grd%isg+1) ! Total number of points globally in i direction
-  jNg=(grd%jeg-grd%jsg+1) ! Total number of points globally in j direction
 
   ! Zero out nbergs_in_file
   nbergs_in_file = 0
@@ -505,7 +499,6 @@ integer, allocatable, dimension(:) :: ine,       &
   filename_base=trim(restart_input_dir)//'icebergs.res.nc'
 
   found_restart = find_restart_file(filename_base, filename, multiPErestart, io_tile_id(1))
-  call error_mesg('read_restart_bergs_new', 'Using new icebergs restart read', NOTE)
 
   if (found_restart) then
      filename = filename_base
@@ -514,6 +507,7 @@ integer, allocatable, dimension(:) :: ine,       &
   endif
 
   if(nbergs_in_file > 0) then
+     replace_iceberg_num = field_exist(filename, 'iceberg_num') ! True if using 32-bit iceberg_num in restart file
      allocate(lon(nbergs_in_file))
      allocate(lat(nbergs_in_file))
      allocate(uvel(nbergs_in_file))
@@ -537,7 +531,13 @@ integer, allocatable, dimension(:) :: ine,       &
      allocate(ine(nbergs_in_file))
      allocate(jne(nbergs_in_file))
      allocate(start_year(nbergs_in_file))
-     allocate(iceberg_num(nbergs_in_file))
+     if (replace_iceberg_num) then
+       call error_mesg('read_restart_bergs', "Calculating new iceberg ID's", WARNING)
+       allocate(iceberg_num(nbergs_in_file))
+     else
+       allocate(id_cnt(nbergs_in_file))
+       allocate(id_ij(nbergs_in_file))
+     endif
   endif
 
   if (found_restart .and. nbergs_in_file > 0) then
@@ -563,7 +563,12 @@ integer, allocatable, dimension(:) :: ine,       &
      call read_unlimited_axis(filename,'ine',ine,domain=grd%domain)
      call read_unlimited_axis(filename,'jne',jne,domain=grd%domain)
      call read_unlimited_axis(filename,'start_year',start_year,domain=grd%domain)
-     call read_int_vector(filename,'iceberg_num',iceberg_num,grd%domain,value_if_not_in_file=-1)
+     if (replace_iceberg_num) then
+       call read_int_vector(filename,'iceberg_num',iceberg_num,grd%domain,value_if_not_in_file=-1)
+     else
+       call read_int_vector(filename,'id_cnt',id_cnt,grd%domain)
+       call read_int_vector(filename,'id_ij',id_ij,grd%domain)
+     endif
      call read_real_vector(filename,'static_berg',static_berg,grd%domain,value_if_not_in_file=0.)
   endif
 
@@ -615,8 +620,11 @@ integer, allocatable, dimension(:) :: ine,       &
       localberg%start_lon=start_lon(k)
       localberg%start_lat=start_lat(k)
       localberg%start_year=start_year(k)
-      localberg%iceberg_num=iceberg_num(k)
-      localberg%id=convert_old_id(grd, localberg%iceberg_num)
+      if (replace_iceberg_num) then
+        localberg%id = generate_id(grd, localberg%ine, localberg%jne)
+      else
+        localberg%id=id_from_2_ints(id_cnt(k), id_ij(k))
+      endif
       localberg%start_day=start_day(k)
       localberg%start_mass=start_mass(k)
       localberg%mass_scaling=mass_scaling(k)
@@ -631,10 +639,6 @@ integer, allocatable, dimension(:) :: ine,       &
       !call add_new_berg_to_list(bergs%first, localberg, quick=.true.)
 
       if (bergs%grd%area(localberg%ine,localberg%jne) .ne. 0)  then
-        if (iceberg_num(k)==-1) then ! If using an old_restart then iceberg_num needs to be generated
-          localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(localberg%ine,localberg%jne))+(localberg%ine+(iNg*(localberg%jne-1)))
-          localberg%id = generate_id(grd, localberg%ine, localberg%jne)
-        endif
         call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg)
       else
         if (mpp_pe().eq.mpp_root_pe()) then
@@ -674,8 +678,14 @@ integer, allocatable, dimension(:) :: ine,       &
     deallocate(              &
                ine,          &
                jne,          &
-               iceberg_num,  &
                start_year )
+
+    if (replace_iceberg_num) then
+      deallocate(iceberg_num)
+    else
+      deallocate(id_cnt)
+      deallocate(id_ij)
+    endif
 
     ! This block only works for IO_LAYOUT=1,1 or 0,0 but not for arbitrary layouts.
     ! I'm commenting this out until we find a way to implement the same sorts of checks
@@ -752,15 +762,12 @@ type(time_type), intent(in) :: Time !< Model time
 ! Local variables
 type(icebergs_gridded), pointer :: grd
 integer :: i,j
-integer :: iNg, jNg  !Total number of points gloablly in i and j direction
 type(iceberg) :: localberg ! NOT a pointer but an actual local variable
 integer :: iyr, imon, iday, ihr, imin, isec
 logical :: lres
 
   ! For convenience
   grd=>bergs%grd
-  iNg=(grd%ieg-grd%isg+1) ! Total number of points globally in i direction
-  jNg=(grd%jeg-grd%jsg+1) ! Total number of points globally in j direction
 
   call get_date(Time, iyr, imon, iday, ihr, imin, isec)
 
@@ -798,22 +805,18 @@ logical :: lres
 
       !Berg A
       call loc_set_berg_pos(grd, 0.9, 0.5, 1., 0., localberg)
-      localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
       localberg%id = generate_id(grd, i, j)
       call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
       !Berg B
       call loc_set_berg_pos(grd, 0.1, 0.5, -1., 0., localberg)
-      localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
       localberg%id = generate_id(grd, i, j)
       call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
       !Berg C
       call loc_set_berg_pos(grd, 0.5, 0.9, 0., 1., localberg)
-      localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
       localberg%id = generate_id(grd, i, j)
       call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
       !Berg D
       call loc_set_berg_pos(grd, 0.5, 0.1, 0., -1., localberg)
-      localberg%iceberg_num=((iNg*jNg)*grd%iceberg_counter_grd(i,j))+(i +(iNg*(j-1)))  ! unique number for each iceberg
       localberg%id = generate_id(grd, i, j)
       call add_new_berg_to_list(bergs%list(i,j)%first, localberg)
     endif
