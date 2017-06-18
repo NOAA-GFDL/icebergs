@@ -75,7 +75,7 @@ public monitor_a_berg
 public is_point_within_xi_yj_bounds
 public test_check_for_duplicate_ids_in_list
 public check_for_duplicates_in_parallel
-public split_id, id_from_2_ints, generate_id, convert_old_id
+public split_id, id_from_2_ints, generate_id, cij_from_old_id, convert_old_id
 
 !> Container for gridded fields
 type :: icebergs_gridded
@@ -2394,6 +2394,22 @@ integer(kind=8) function convert_old_id(grd, old_id)
   integer :: cnt ! Counter component
   integer :: ij ! Hash of i,j
   integer :: i,j ! Cell indexes
+
+  call cij_from_old_id(grd, old_id, cnt, i, j)
+  ij = ij_component_of_id(grd, i, j)
+  convert_old_id = id_from_2_ints( cnt, ij )
+
+end function convert_old_id
+
+!> Recover i,j an old 32-bit id
+subroutine cij_from_old_id(grd, old_id, cnt, i, j)
+  type(icebergs_gridded), pointer     :: grd    !< Container for gridded fields
+  integer,                intent(in)  :: old_id !< 32-bit iceberg id
+  integer,                intent(out) :: cnt    !< Counter component of old id
+  integer,                intent(out) :: i      !< i-index of calving cell
+  integer,                intent(out) :: j      !< j-index of calving cell
+  ! Local variables
+  integer :: ij ! Hash of i,j
   integer :: iNg, jNg, ncells ! Shape and size of the global grid
 
   ! Number cells in the grid
@@ -2410,10 +2426,7 @@ integer(kind=8) function convert_old_id(grd, old_id)
   j = ij / iNg
   i = mod( ij, iNg )
 
-  ij = ij_component_of_id(grd, i, j)
-  convert_old_id = id_from_2_ints( cnt, ij )
-
-end function convert_old_id
+end subroutine cij_from_old_id
 
 !> Calculate the location-derived component of an iceberg id which is a hash of the i,j-indexes for the cell
 integer function ij_component_of_id(grd, i, j)

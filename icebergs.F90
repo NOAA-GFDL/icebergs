@@ -125,7 +125,7 @@ subroutine icebergs_init(bergs, &
 
   call mpp_clock_begin(bergs%clock_ior)
   call ice_bergs_io_init(bergs,io_layout)
-  call read_restart_calving(bergs)  !This is moved to before restart_bergs (by Alon) so that generate icebergs can have the correct counter
+  call read_restart_calving(bergs)
   if (orig_read) then
     call error_mesg('diamonds, icebergs_init: ', 'Parameter "orig_read" is no longer supported!', FATAL)
   else
@@ -133,7 +133,6 @@ subroutine icebergs_init(bergs, &
   endif
   call bergs_chksum(bergs, 'read_restart bergs')
   if (fix_restart_dates) call offset_berg_dates(bergs,Time)
-  !call read_restart_calving(bergs)
   call mpp_clock_end(bergs%clock_ior)
 
   if (really_debug) call print_bergs(stderrunit,bergs,'icebergs_init, initial status')
