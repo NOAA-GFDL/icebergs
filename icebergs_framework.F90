@@ -18,7 +18,7 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 
 implicit none ; private
 
-integer :: buffer_width=29 ! This should be a parameter
+integer :: buffer_width=28 ! This should be a parameter
 integer :: buffer_width_traj=32 ! This should be a parameter
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 
@@ -251,7 +251,6 @@ type :: iceberg
   real :: halo_berg  ! Equal to zero for bergs on computational domain, and =1 for bergs on the halo
   real :: static_berg  ! Equal to 1 for icebergs which are static (not allowed to move). Might be extended to grounding later.
   integer :: start_year !< Year that berg was created (years)
-  integer :: iceberg_num !< Iceberg identifier
   integer(kind=8) :: id !< Iceberg identifier
   integer :: ine !< Nearest i-index in NE direction (for convenience)
   integer :: jne !< Nearest j-index in NE direction (for convenience)
@@ -1845,7 +1844,6 @@ type(bond), pointer :: current_bond
   call push_buffer_value(buff%data(:,n), counter, berg%ayn)
   call push_buffer_value(buff%data(:,n), counter, berg%bxn)
   call push_buffer_value(buff%data(:,n), counter, berg%byn)
-  call push_buffer_value(buff%data(:,n), counter, berg%iceberg_num)
   call push_buffer_value(buff%data(:,n), counter, berg%halo_berg)
   call push_buffer_value(buff%data(:,n), counter, berg%static_berg)
   call split_id(berg%id, id_cnt, id_ij)
@@ -1976,7 +1974,7 @@ integer, optional :: max_bonds_in !< <undocumented>
 logical :: lres
 type(iceberg) :: localberg
 type(iceberg), pointer :: this
-integer :: other_berg_num, other_berg_ine, other_berg_jne
+integer :: other_berg_ine, other_berg_jne
 integer :: counter, k, max_bonds, id_cnt, id_ij
 integer(kind=8) :: id
 integer :: stderrunit
@@ -2018,7 +2016,6 @@ logical :: quick
   call pull_buffer_value(buff%data(:,n), counter, localberg%ayn)
   call pull_buffer_value(buff%data(:,n), counter, localberg%bxn)
   call pull_buffer_value(buff%data(:,n), counter, localberg%byn)
-  call pull_buffer_value(buff%data(:,n), counter, localberg%iceberg_num)
   call pull_buffer_value(buff%data(:,n), counter, localberg%halo_berg)
   call pull_buffer_value(buff%data(:,n), counter, localberg%static_berg)
   call pull_buffer_value(buff%data(:,n), counter, id_cnt)
@@ -4499,7 +4496,7 @@ integer function berg_chksum(berg)
 type(iceberg), pointer :: berg !< An iceberg
 ! Local variables
 real :: rtmp(36)
-integer :: itmp(36+8), i8=0, ichk1, ichk2, ichk3
+integer :: itmp(36+7), i8=0, ichk1, ichk2, ichk3
 integer :: i
 
   rtmp(:)=0.
@@ -4544,11 +4541,10 @@ integer :: i
   itmp(39)=berg%start_year
   itmp(40)=berg%ine
   itmp(41)=berg%jne
-  itmp(42)=berg%iceberg_num
-  call split_id( berg%id, itmp(43), itmp(44) )
+  call split_id( berg%id, itmp(42), itmp(43) )
 
   ichk1=0; ichk2=0; ichk3=0
-  do i=1,36+8
+  do i=1,36+7
    ichk1=ichk1+itmp(i)
    ichk2=ichk2+itmp(i)*i
    ichk3=ichk3+itmp(i)*i*i
