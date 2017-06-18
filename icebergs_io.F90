@@ -1157,7 +1157,7 @@ type(randomNumberStream) :: rns
     else
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
      'diamonds, read_restart_calving: iceberg_counter_grd WAS NOT FOUND in the file. Setting to 0.'
-      grd%iceberg_counter_grd(:,:)=1
+      grd%iceberg_counter_grd(:,:) = 0
     endif
     bergs%restarted=.true.
   else

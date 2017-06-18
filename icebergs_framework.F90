@@ -715,7 +715,7 @@ real :: Total_mass  !Added by Alon
   allocate( bergs%nbergs_calved_by_class(nclasses) ); bergs%nbergs_calved_by_class(:)=0
   allocate( grd%parity_x(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_x(:,:)=1.
   allocate( grd%parity_y(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_y(:,:)=1.
-  allocate( grd%iceberg_counter_grd(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%iceberg_counter_grd(:,:)=1
+  allocate( grd%iceberg_counter_grd(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%iceberg_counter_grd(:,:)=0
 
  !write(stderrunit,*) 'diamonds: copying grid'
   ! Copy data declared on ice model computational domain
@@ -2377,12 +2377,12 @@ integer(kind=8) function generate_id(grd, i, j)
   ! Local variables
   integer :: ij ! Hash of i,j
 
+  ! Increment counter in calving cell
+  grd%iceberg_counter_grd(i,j) = grd%iceberg_counter_grd(i,j) + 1
   ! ij is unique number for each grid cell (32-bit integers allow for ~1/100th degree global resolution)
   ij = ij_component_of_id(grd, i, j)
   ! Generate a 64-bit id
   generate_id = id_from_2_ints( grd%iceberg_counter_grd(i,j), ij )
-  ! Increment counter in calving cell
-  grd%iceberg_counter_grd(i,j) = grd%iceberg_counter_grd(i,j) + 1
 
 end function generate_id
 
