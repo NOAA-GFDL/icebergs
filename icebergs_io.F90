@@ -504,9 +504,7 @@ integer, allocatable, dimension(:) :: ine,        &
      filename = filename_base
      call get_field_size(filename,'i',siz, field_found=found, domain=bergs%grd%domain)
      nbergs_in_file = siz(1)
-  endif
 
-  if(nbergs_in_file > 0) then
      replace_iceberg_num = field_exist(filename, 'iceberg_num') ! True if using 32-bit iceberg_num in restart file
      allocate(lon(nbergs_in_file))
      allocate(lat(nbergs_in_file))
@@ -538,9 +536,7 @@ integer, allocatable, dimension(:) :: ine,        &
        allocate(id_cnt(nbergs_in_file))
        allocate(id_ij(nbergs_in_file))
      endif
-  endif
 
-  if (found_restart .and. nbergs_in_file > 0) then
      call read_unlimited_axis(filename,'lon',lon,domain=grd%domain)
      call read_unlimited_axis(filename,'lat',lat,domain=grd%domain)
      call read_unlimited_axis(filename,'uvel',uvel,domain=grd%domain)
@@ -653,9 +649,8 @@ integer, allocatable, dimension(:) :: ine,        &
     endif
   enddo
 
-  if(nbergs_in_file > 0) then
-    deallocate(              &
-               lon,          &
+  if (found_restart) then
+    deallocate(lon,          &
                lat,          &
                uvel,         &
                vvel,         &
@@ -674,8 +669,7 @@ integer, allocatable, dimension(:) :: ine,        &
                mass_scaling, &
                mass_of_bits, &
                static_berg,  &
-               heat_density )
-    deallocate(              &
+               heat_density, &
                ine,          &
                jne,          &
                start_year )
