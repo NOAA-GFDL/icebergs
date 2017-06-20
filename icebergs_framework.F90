@@ -18,10 +18,8 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 
 implicit none ; private
 
-integer :: buffer_width=27 !Changed from 20 to 28 by Alon
-integer :: buffer_width_traj=31  !Changed from 23 by Alon
-!integer, parameter :: buffer_width=26 !Changed from 20 to 26 by Alon
-!integer, parameter :: buffer_width_traj=29  !Changed from 23 by Alon
+integer :: buffer_width=28 ! This should be a parameter
+integer :: buffer_width_traj=32 ! This should be a parameter
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 
 !Local Vars
@@ -59,7 +57,6 @@ public icebergs_gridded, xyt, iceberg, icebergs, buffer, bond
 public ice_bergs_framework_init
 public send_bergs_to_other_pes
 public update_halo_icebergs
-public pack_berg_into_buffer2, unpack_berg_from_buffer2
 public pack_traj_into_buffer2, unpack_traj_from_buffer2
 public increase_ibuffer
 public add_new_berg_to_list, count_out_of_order, check_for_duplicates
@@ -78,6 +75,7 @@ public monitor_a_berg
 public is_point_within_xi_yj_bounds
 public test_check_for_duplicate_ids_in_list
 public check_for_duplicates_in_parallel
+public split_id, id_from_2_ints, generate_id, cij_from_old_id, convert_old_id
 
 !> Container for gridded fields
 type :: icebergs_gridded
@@ -218,7 +216,7 @@ type :: xyt
   real :: mass_of_bits !< Mass of bergy bits (kg)
   real :: heat_density !< Heat density of berg (???)
   integer :: year !< Year of this record (years)
-  integer :: iceberg_num !< Iceberg identifier
+  integer(kind=8) :: id = -1 !< Iceberg identifier
   type(xyt), pointer :: next=>null() !< Next link in list
 end type xyt
 
@@ -253,7 +251,7 @@ type :: iceberg
   real :: halo_berg  ! Equal to zero for bergs on computational domain, and =1 for bergs on the halo
   real :: static_berg  ! Equal to 1 for icebergs which are static (not allowed to move). Might be extended to grounding later.
   integer :: start_year !< Year that berg was created (years)
-  integer :: iceberg_num !< Iceberg identifier
+  integer(kind=8) :: id !< Iceberg identifier
   integer :: ine !< Nearest i-index in NE direction (for convenience)
   integer :: jne !< Nearest j-index in NE direction (for convenience)
   real :: xi !< Non-dimensional x-coordinate within current cell (0..1)
@@ -280,7 +278,7 @@ type :: bond
   type(bond), pointer :: prev_bond=>null() !< Previous link in list
   type(bond), pointer :: next_bond=>null() !< Next link in list
   type(iceberg), pointer :: other_berg=>null()
-  integer :: other_berg_num
+  integer(kind=8) :: other_id !< ID of other berg
   integer :: other_berg_ine
   integer :: other_berg_jne
 end type bond
@@ -361,7 +359,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   logical :: Static_icebergs=.False. !< True= icebergs do no move
   logical :: only_interactive_forces=.False. !< Icebergs only feel interactive forces, and not ocean, wind...
   logical :: halo_debugging=.False. !< Use for debugging halos (remove when its working)
-  logical :: save_short_traj=.True. !< True saves only lon,lat,time,iceberg_num in iceberg_trajectory.nc
+  logical :: save_short_traj=.True. !< True saves only lon,lat,time,id in iceberg_trajectory.nc
   logical :: ignore_traj=.False. !< If true, then model does not write trajectory data at all
   logical :: iceberg_bonds_on=.False. !< True=Allow icebergs to have bonds, False=don't allow.
   logical :: manually_initialize_bonds=.False. !< True= Bonds are initialize manually.
@@ -370,7 +368,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   logical :: critical_interaction_damping_on=.true. !< Sets the damping on relative iceberg velocity to critical value - Added by Alon
   logical :: use_old_spreading=.true. !< If true, spreads iceberg mass as if the berg is one grid cell wide
   logical :: read_ocean_depth_from_file=.false. !< If true, ocean depth is read from a file.
-  integer :: debug_iceberg_with_id = -1 !< If positive, monitors a berg with this id
+  integer(kind=8) :: debug_iceberg_with_id = -1 !< If positive, monitors a berg with this id
 
   real :: speed_limit=0. !< CFL speed limit for a berg [m/s]
   real :: tau_calving=0. !< Time scale for smoothing out calving field (years)
@@ -426,6 +424,16 @@ character(len=128) :: version = _FILE_VERSION !< Version of file
 #else
 character(len=128) :: version = 'unknown' !< Version of file
 #endif
+
+!> Set a value in the buffer at position (counter,n) after incrementing counter
+interface push_buffer_value
+  module procedure push_buffer_rvalue, push_buffer_ivalue
+end interface
+
+!> Get a value in the buffer at position (counter,n) after incrementing counter
+interface pull_buffer_value
+  module procedure pull_buffer_rvalue, pull_buffer_ivalue
+end interface
 
 contains
 
@@ -531,7 +539,7 @@ logical :: ignore_missing_restart_bergs=.False. ! True Allows the model to ignor
 logical :: Static_icebergs=.False. ! True= icebergs do no move
 logical :: only_interactive_forces=.False. ! Icebergs only feel interactive forces, and not ocean, wind...
 logical :: halo_debugging=.False. ! Use for debugging halos (remove when its working)
-logical :: save_short_traj=.True. ! True saves only lon,lat,time,iceberg_num in iceberg_trajectory.nc
+logical :: save_short_traj=.True. ! True saves only lon,lat,time,id in iceberg_trajectory.nc
 logical :: ignore_traj=.False. ! If true, then model does not traj trajectory data at all
 logical :: iceberg_bonds_on=.False. ! True=Allow icebergs to have bonds, False=don't allow.
 logical :: manually_initialize_bonds=.False. ! True= Bonds are initialize manually.
@@ -547,7 +555,7 @@ real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10,
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim) ,
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
 real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
-integer :: debug_iceberg_with_id = -1 ! If positive, monitors a berg with this id
+integer(kind=8) :: debug_iceberg_with_id = -1 ! If positive, monitors a berg with this id
 
 namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,Static_icebergs,  &
          distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef, radial_damping_coef, tangental_damping_coef, only_interactive_forces, &
@@ -706,7 +714,7 @@ real :: Total_mass  !Added by Alon
   allocate( bergs%nbergs_calved_by_class(nclasses) ); bergs%nbergs_calved_by_class(:)=0
   allocate( grd%parity_x(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_x(:,:)=1.
   allocate( grd%parity_y(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_y(:,:)=1.
-  allocate( grd%iceberg_counter_grd(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%iceberg_counter_grd(:,:)=1
+  allocate( grd%iceberg_counter_grd(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%iceberg_counter_grd(:,:)=0
 
  !write(stderrunit,*) 'diamonds: copying grid'
   ! Copy data declared on ice model computational domain
@@ -904,9 +912,9 @@ endif
 if (.not. iceberg_bonds_on) then
    max_bonds=0
 else
-  buffer_width=buffer_width+(max_bonds*3) ! Increase buffer width to include bonds being passed between processors
+  buffer_width=buffer_width+(max_bonds*4) ! Increase buffer width to include bonds being passed between processors
 endif
-if (save_short_traj) buffer_width_traj=5 ! This is the length of the short buffer used for abrevated traj
+if (save_short_traj) buffer_width_traj=6 ! This is the length of the short buffer used for abrevated traj
 if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files should be ignored
 
 
@@ -1108,7 +1116,7 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
   endif
 
   if (do_unit_tests) then
-   if (unitTests(bergs)) call error_mesg('diamonds, icebergs_init', 'Unit tests failed!', FATAL)
+   if (unit_tests(bergs)) call error_mesg('diamonds, icebergs_init', 'Unit tests failed!', FATAL)
   endif
 
  !write(stderrunit,*) 'diamonds: done'
@@ -1235,7 +1243,7 @@ logical :: halo_debugging
     do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
       this=>bergs%list(grdi,grdj)%first
       do while (associated(this))
-          write(stderrunit,*) 'A', this%iceberg_num, mpp_pe(), this%halo_berg, grdi, grdj
+          write(stderrunit,*) 'A', this%id, mpp_pe(), this%halo_berg, grdi, grdj
         this=>this%next
       enddo
     enddo; enddo
@@ -1268,7 +1276,7 @@ logical :: halo_debugging
     do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
       this=>bergs%list(grdi,grdj)%first
         do while (associated(this))
-        write(stderrunit,*) 'B', this%iceberg_num, mpp_pe(), this%halo_berg, grdi, grdj
+        write(stderrunit,*) 'B', this%id, mpp_pe(), this%halo_berg, grdi, grdj
       this=>this%next
       enddo
     enddo; enddo
@@ -1288,7 +1296,7 @@ logical :: halo_debugging
   do grdj = grd%jsc,grd%jec ; do grdi = grd%iec-halo_width+2,grd%iec
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
-    !write(stderrunit,*)  'sending east', this%iceberg_num, this%ine, this%jne, mpp_pe()
+    !write(stderrunit,*)  'sending east', this%id, this%ine, this%jne, mpp_pe()
       kick_the_bucket=>this
       this=>this%next
       nbergs_to_send_e=nbergs_to_send_e+1
@@ -1471,7 +1479,7 @@ logical :: halo_debugging
     do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
       this=>bergs%list(grdi,grdj)%first
       do while (associated(this))
-        write(stderrunit,*)  'C', this%iceberg_num, mpp_pe(), this%halo_berg,  grdi, grdj
+        write(stderrunit,*)  'C', this%id, mpp_pe(), this%halo_berg,  grdi, grdj
         this=>this%next
       enddo
     enddo; enddo
@@ -1802,7 +1810,7 @@ integer, intent(in) :: n !< Position in buffer to place berg
 integer, optional :: max_bonds_in !< <undocumented>
 !integer, intent(in) :: max_bonds  ! Change this later
 ! Local variables
-integer :: counter, k, max_bonds
+integer :: counter, k, max_bonds, id_cnt, id_ij
 type(bond), pointer :: current_bond
 
   max_bonds=0
@@ -1811,47 +1819,52 @@ type(bond), pointer :: current_bond
   if (.not.associated(buff)) call increase_ibuffer(buff,n,buffer_width)
   if (n>buff%size) call increase_ibuffer(buff,n,buffer_width)
 
-  buff%data(1,n)=berg%lon
-  buff%data(2,n)=berg%lat
-  buff%data(3,n)=berg%uvel
-  buff%data(4,n)=berg%vvel
-  buff%data(5,n)=berg%xi
-  buff%data(6,n)=berg%yj
-  buff%data(7,n)=berg%start_lon
-  buff%data(8,n)=berg%start_lat
-  buff%data(9,n)=float(berg%start_year)
-  buff%data(10,n)=berg%start_day
-  buff%data(11,n)=berg%start_mass
-  buff%data(12,n)=berg%mass
-  buff%data(13,n)=berg%thickness
-  buff%data(14,n)=berg%width
-  buff%data(15,n)=berg%length
-  buff%data(16,n)=berg%mass_scaling
-  buff%data(17,n)=berg%mass_of_bits
-  buff%data(18,n)=berg%heat_density
-  buff%data(19,n)=berg%ine
-  buff%data(20,n)=berg%jne
-  buff%data(21,n)=berg%axn  !Alon
-  buff%data(22,n)=berg%ayn  !Alon
-  buff%data(23,n)=berg%bxn  !Alon
-  buff%data(24,n)=berg%byn  !Alon
-  buff%data(25,n)=float(berg%iceberg_num)
-  buff%data(26,n)=berg%halo_berg
-  buff%data(27,n)=berg%static_berg
+  counter = 0
+  call push_buffer_value(buff%data(:,n), counter, berg%lon)
+  call push_buffer_value(buff%data(:,n), counter, berg%lat)
+  call push_buffer_value(buff%data(:,n), counter, berg%uvel)
+  call push_buffer_value(buff%data(:,n), counter, berg%vvel)
+  call push_buffer_value(buff%data(:,n), counter, berg%xi)
+  call push_buffer_value(buff%data(:,n), counter, berg%yj)
+  call push_buffer_value(buff%data(:,n), counter, berg%start_lon)
+  call push_buffer_value(buff%data(:,n), counter, berg%start_lat)
+  call push_buffer_value(buff%data(:,n), counter, berg%start_year)
+  call push_buffer_value(buff%data(:,n), counter, berg%start_day)
+  call push_buffer_value(buff%data(:,n), counter, berg%start_mass)
+  call push_buffer_value(buff%data(:,n), counter, berg%mass)
+  call push_buffer_value(buff%data(:,n), counter, berg%thickness)
+  call push_buffer_value(buff%data(:,n), counter, berg%width)
+  call push_buffer_value(buff%data(:,n), counter, berg%length)
+  call push_buffer_value(buff%data(:,n), counter, berg%mass_scaling)
+  call push_buffer_value(buff%data(:,n), counter, berg%mass_of_bits)
+  call push_buffer_value(buff%data(:,n), counter, berg%heat_density)
+  call push_buffer_value(buff%data(:,n), counter, berg%ine)
+  call push_buffer_value(buff%data(:,n), counter, berg%jne)
+  call push_buffer_value(buff%data(:,n), counter, berg%axn)
+  call push_buffer_value(buff%data(:,n), counter, berg%ayn)
+  call push_buffer_value(buff%data(:,n), counter, berg%bxn)
+  call push_buffer_value(buff%data(:,n), counter, berg%byn)
+  call push_buffer_value(buff%data(:,n), counter, berg%halo_berg)
+  call push_buffer_value(buff%data(:,n), counter, berg%static_berg)
+  call split_id(berg%id, id_cnt, id_ij)
+  call push_buffer_value(buff%data(:,n), counter, id_cnt)
+  call push_buffer_value(buff%data(:,n), counter, id_ij)
 
   if (max_bonds .gt. 0) then
-    counter=27 !how many data points being passed so far (must match above)
     current_bond=>berg%first_bond
     do k = 1,max_bonds
       if (associated(current_bond)) then
-        buff%data(counter+(3*(k-1)+1),n)=float(current_bond%other_berg_num)
-        buff%data(counter+(3*(k-1)+2),n)=float(current_bond%other_berg_ine)
-        buff%data(counter+(3*(k-1)+3),n)=float(current_bond%other_berg_jne)
+        call split_id(current_bond%other_id, id_cnt, id_ij)
+        call push_buffer_value(buff%data(:,n), counter, id_cnt)
+        call push_buffer_value(buff%data(:,n), counter, id_ij)
+        call push_buffer_value(buff%data(:,n), counter, current_bond%other_berg_ine)
+        call push_buffer_value(buff%data(:,n), counter, current_bond%other_berg_jne)
         current_bond=>current_bond%next_bond
       else
-        buff%data(counter+(3*(k-1)+1),n)=0.
-        buff%data(counter+(3*(k-1)+2),n)=0.
-        buff%data(counter+(3*(k-1)+3),n)=0.
+        call push_buffer_value(buff%data(:,n), counter, 0)
+        call push_buffer_value(buff%data(:,n), counter, 0)
+        call push_buffer_value(buff%data(:,n), counter, 0)
+        call push_buffer_value(buff%data(:,n), counter, 0)
       endif
     enddo
   endif
@@ -1862,6 +1875,54 @@ type(bond), pointer :: current_bond
   !endif
 
 end subroutine pack_berg_into_buffer2
+
+!> Set a real value in the buffer at position (counter) after incrementing counter
+subroutine push_buffer_rvalue(vbuf, counter, val)
+  real, dimension(:), intent(inout) :: vbuf    !< Buffer vector to push value into
+  integer,            intent(inout) :: counter !< Position to increment
+  real,               intent(in)    :: val     !< Value to place in buffer
+
+  counter = counter + 1
+  if (counter > size(vbuf)) stop 'OOB in push_buffer_rvalue'
+  vbuf(counter) = val
+
+end subroutine push_buffer_rvalue
+
+!> Set an integer value in the buffer at position (counter) after incrementing counter
+subroutine push_buffer_ivalue(vbuf, counter, val)
+  real, dimension(:), intent(inout) :: vbuf    !< Buffer vector to push value into
+  integer,            intent(inout) :: counter !< Position to increment
+  integer,            intent(in)    :: val     !< Value to place in buffer
+
+  counter = counter + 1
+  if (counter > size(vbuf)) stop 'OOB in push_buffer_ivalue'
+  vbuf(counter) = float(val)
+
+end subroutine push_buffer_ivalue
+
+!> Get a real value from the buffer at position (counter) after incrementing counter
+subroutine pull_buffer_rvalue(vbuf, counter, val)
+  real, dimension(:), intent(in)    :: vbuf    !< Buffer vector to pull value from
+  integer,            intent(inout) :: counter !< Position to increment
+  real,               intent(out)   :: val     !< Value to get from buffer
+
+  counter = counter + 1
+  if (counter > size(vbuf)) stop 'OOB in pull_buffer_rvalue'
+  val = vbuf(counter)
+
+end subroutine pull_buffer_rvalue
+
+!> Get an integer value from the buffer at position (counter) after incrementing counter
+subroutine pull_buffer_ivalue(vbuf, counter, val)
+  real, dimension(:), intent(in)    :: vbuf    !< Buffer vector to pull value from
+  integer,            intent(inout) :: counter !< Position to increment
+  integer,            intent(out)   :: val     !< Value to get from buffer
+
+  counter = counter + 1
+  if (counter > size(vbuf)) stop 'OOB in pull_buffer_ivalue'
+  val = nint(vbuf(counter))
+
+end subroutine pull_buffer_ivalue
 
 subroutine clear_berg_from_partners_bonds(berg)
 ! Arguments
@@ -1877,11 +1938,11 @@ stderrunit = stderr()
   do while (associated(current_bond)) !Looping over bonds
     other_berg=>current_bond%other_berg
     if (associated(other_berg)) then
-      !write(stderrunit,*) , 'Other berg', berg%iceberg_num, other_berg%iceberg_num, mpp_pe()
+      !write(stderrunit,*) , 'Other berg', berg%id, other_berg%id, mpp_pe()
       matching_bond=>other_berg%first_bond
       do while (associated(matching_bond))  ! Looping over possible matching bonds in other_berg
-        if (matching_bond%other_berg_num .eq. berg%iceberg_num) then
-          !write(stderrunit,*) , 'Clearing', berg%iceberg_num, matching_bond%other_berg_num,other_berg%iceberg_num, mpp_pe()
+        if (matching_bond%other_id .eq. berg%id) then
+          !write(stderrunit,*) , 'Clearing', berg%id, matching_bond%other_id,other_berg%id, mpp_pe()
           matching_bond%other_berg=>null()
           matching_bond=>null()
         else
@@ -1913,8 +1974,9 @@ integer, optional :: max_bonds_in !< <undocumented>
 logical :: lres
 type(iceberg) :: localberg
 type(iceberg), pointer :: this
-integer :: other_berg_num, other_berg_ine, other_berg_jne
-integer :: counter, k, max_bonds
+integer :: other_berg_ine, other_berg_jne
+integer :: counter, k, max_bonds, id_cnt, id_ij
+integer(kind=8) :: id
 integer :: stderrunit
 logical :: force_app
 logical :: quick
@@ -1929,33 +1991,36 @@ logical :: quick
   force_app = .false.
   if(present(force_append)) force_app = force_append
 
-  localberg%lon=buff%data(1,n)
-  localberg%lat=buff%data(2,n)
-  localberg%uvel=buff%data(3,n)
-  localberg%vvel=buff%data(4,n)
-  localberg%xi=buff%data(5,n)
-  localberg%yj=buff%data(6,n)
-  localberg%start_lon=buff%data(7,n)
-  localberg%start_lat=buff%data(8,n)
-  localberg%start_year=nint(buff%data(9,n))
-  localberg%start_day=buff%data(10,n)
-  localberg%start_mass=buff%data(11,n)
-  localberg%mass=buff%data(12,n)
-  localberg%thickness=buff%data(13,n)
-  localberg%width=buff%data(14,n)
-  localberg%length=buff%data(15,n)
-  localberg%mass_scaling=buff%data(16,n)
-  localberg%mass_of_bits=buff%data(17,n)
-  localberg%heat_density=buff%data(18,n)
-
-  localberg%axn=buff%data(21,n)
-  localberg%ayn=buff%data(22,n)
-  localberg%bxn=buff%data(23,n)
-  localberg%byn=buff%data(24,n)
-  localberg%iceberg_num=nint(buff%data(25,n))
-  localberg%halo_berg=buff%data(26,n)
-  localberg%static_berg=buff%data(27,n)
-  counter=27 !how many data points being passed so far (must match largest number directly above)
+  counter = 0
+  call pull_buffer_value(buff%data(:,n), counter, localberg%lon)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%lat)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%uvel)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%vvel)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%xi)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%yj)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%start_lon)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%start_lat)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%start_year)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%start_day)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%start_mass)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%mass)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%thickness)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%width)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%length)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%mass_scaling)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%mass_of_bits)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%heat_density)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%ine)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%jne)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%axn)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%ayn)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%bxn)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%byn)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%halo_berg)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%static_berg)
+  call pull_buffer_value(buff%data(:,n), counter, id_cnt)
+  call pull_buffer_value(buff%data(:,n), counter, id_ij)
+  localberg%id = id_from_2_ints(id_cnt, id_ij)
 
   !These quantities no longer need to be passed between processors
   localberg%uvel_old=localberg%uvel
@@ -1965,10 +2030,7 @@ logical :: quick
 
   ! force_app=.true.
   if(force_app) then !force append with origin ine,jne (for I/O)
-
-    localberg%ine=buff%data(19,n)
-    localberg%jne=buff%data(20,n)
-    call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg,quick,this)
+    call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg, quick, this)
   else
     lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
     if (lres) then
@@ -2004,11 +2066,13 @@ logical :: quick
   this%first_bond=>null()
   if (max_bonds .gt. 0) then
     do k = 1,max_bonds
-      other_berg_num=nint(buff%data(counter+(3*(k-1)+1),n))
-      other_berg_ine=nint(buff%data(counter+(3*(k-1)+2),n))
-      other_berg_jne=nint(buff%data(counter+(3*(k-1)+3),n))
-      if (other_berg_num .gt. 0.5) then
-        call form_a_bond(this, other_berg_num, other_berg_ine, other_berg_jne)
+      call pull_buffer_value(buff%data(:,n), counter, id_cnt)
+      call pull_buffer_value(buff%data(:,n), counter, id_ij)
+      id = id_from_2_ints(id_cnt, id_ij)
+      call pull_buffer_value(buff%data(:,n), counter, other_berg_ine)
+      call pull_buffer_value(buff%data(:,n), counter, other_berg_jne)
+      if (id_ij > 0) then
+        call form_a_bond(this, id, other_berg_ine, other_berg_jne)
       endif
     enddo
   endif
@@ -2060,93 +2124,104 @@ end subroutine increase_ibuffer
 
 !> Packs a trajectory entry into a buffer
 subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj)
-! Arguments
-type(xyt), pointer :: traj !< Trajectory entry to pack
-type(buffer), pointer :: buff !< Buffer to pack entry into
-integer, intent(in) :: n !< Position in buffer to place entry
-logical, intent(in) :: save_short_traj !< If true, only use a subset of trajectory data
+  ! Arguments
+  type(xyt), pointer :: traj !< Trajectory entry to pack
+  type(buffer), pointer :: buff !< Buffer to pack entry into
+  integer, intent(in) :: n !< Position in buffer to place entry
+  logical, intent(in) :: save_short_traj !< If true, only use a subset of trajectory data
+  ! Local variables
+  integer :: counter ! Position in stack
+  integer :: cnt, ij
 
   if (.not.associated(buff)) call increase_ibuffer(buff,n,buffer_width_traj)
   if (n>buff%size) call increase_ibuffer(buff,n,buffer_width_traj)
 
-  buff%data(1,n)=traj%lon
-  buff%data(2,n)=traj%lat
-  buff%data(3,n)=float(traj%year)
-  buff%data(4,n)=traj%day
-  buff%data(5,n)=float(traj%iceberg_num)
+  counter = 0
+  call push_buffer_value(buff%data(:,n),counter,traj%lon)
+  call push_buffer_value(buff%data(:,n),counter,traj%lat)
+  call push_buffer_value(buff%data(:,n),counter,traj%year)
+  call push_buffer_value(buff%data(:,n),counter,traj%day)
+  call split_id(traj%id, cnt, ij)
+  call push_buffer_value(buff%data(:,n),counter,cnt)
+  call push_buffer_value(buff%data(:,n),counter,ij)
   if (.not. save_short_traj) then
-    buff%data(6,n)=traj%uvel
-    buff%data(7,n)=traj%vvel
-    buff%data(8,n)=traj%mass
-    buff%data(9,n)=traj%mass_of_bits
-    buff%data(10,n)=traj%heat_density
-    buff%data(11,n)=traj%thickness
-    buff%data(12,n)=traj%width
-    buff%data(13,n)=traj%length
-    buff%data(14,n)=traj%uo
-    buff%data(15,n)=traj%vo
-    buff%data(16,n)=traj%ui
-    buff%data(17,n)=traj%vi
-    buff%data(18,n)=traj%ua
-    buff%data(19,n)=traj%va
-    buff%data(20,n)=traj%ssh_x
-    buff%data(21,n)=traj%ssh_y
-    buff%data(22,n)=traj%sst
-    buff%data(23,n)=traj%cn
-    buff%data(24,n)=traj%hi
-    buff%data(25,n)=traj%axn !Alon
-    buff%data(26,n)=traj%ayn !Alon
-    buff%data(27,n)=traj%bxn !Alon
-    buff%data(28,n)=traj%byn !Alon
-    buff%data(29,n)=traj%halo_berg !Alon
-    buff%data(30,n)=traj%static_berg !Alon
-    buff%data(31,n)=traj%sss
+    call push_buffer_value(buff%data(:,n),counter,traj%uvel)
+    call push_buffer_value(buff%data(:,n),counter,traj%vvel)
+    call push_buffer_value(buff%data(:,n),counter,traj%mass)
+    call push_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
+    call push_buffer_value(buff%data(:,n),counter,traj%heat_density)
+    call push_buffer_value(buff%data(:,n),counter,traj%thickness)
+    call push_buffer_value(buff%data(:,n),counter,traj%width)
+    call push_buffer_value(buff%data(:,n),counter,traj%length)
+    call push_buffer_value(buff%data(:,n),counter,traj%uo)
+    call push_buffer_value(buff%data(:,n),counter,traj%vo)
+    call push_buffer_value(buff%data(:,n),counter,traj%ui)
+    call push_buffer_value(buff%data(:,n),counter,traj%vi)
+    call push_buffer_value(buff%data(:,n),counter,traj%ua)
+    call push_buffer_value(buff%data(:,n),counter,traj%va)
+    call push_buffer_value(buff%data(:,n),counter,traj%ssh_x)
+    call push_buffer_value(buff%data(:,n),counter,traj%ssh_y)
+    call push_buffer_value(buff%data(:,n),counter,traj%sst)
+    call push_buffer_value(buff%data(:,n),counter,traj%cn)
+    call push_buffer_value(buff%data(:,n),counter,traj%hi)
+    call push_buffer_value(buff%data(:,n),counter,traj%axn)
+    call push_buffer_value(buff%data(:,n),counter,traj%ayn)
+    call push_buffer_value(buff%data(:,n),counter,traj%bxn)
+    call push_buffer_value(buff%data(:,n),counter,traj%byn)
+    call push_buffer_value(buff%data(:,n),counter,traj%halo_berg)
+    call push_buffer_value(buff%data(:,n),counter,traj%static_berg)
+    call push_buffer_value(buff%data(:,n),counter,traj%sss)
   endif
 
 end subroutine pack_traj_into_buffer2
 
 !> Unpacks a trajectory entry from a buffer
 subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj)
-! Arguments
-type(xyt), pointer :: first !< Trajectory list
-type(buffer), pointer :: buff !< Buffer from which to unpack
-integer, intent(in) :: n !< Position in buffer to unpack
-logical, intent(in) :: save_short_traj !< If true, only use a subset of trajectory data
-! Local variables
-type(xyt) :: traj
+  ! Arguments
+  type(xyt), pointer :: first !< Trajectory list
+  type(buffer), pointer :: buff !< Buffer from which to unpack
+  integer, intent(in) :: n !< Position in buffer to unpack
+  logical, intent(in) :: save_short_traj !< If true, only use a subset of trajectory data
+  ! Local variables
+  type(xyt) :: traj
+  integer :: counter ! Position in stack
+  integer :: cnt, ij
 
-  traj%lon=buff%data(1,n)
-  traj%lat=buff%data(2,n)
-  traj%year=nint(buff%data(3,n))
-  traj%day=buff%data(4,n)
-  traj%iceberg_num=nint(buff%data(5,n))
+  counter = 0
+  call pull_buffer_value(buff%data(:,n),counter,traj%lon)
+  call pull_buffer_value(buff%data(:,n),counter,traj%lat)
+  call pull_buffer_value(buff%data(:,n),counter,traj%year)
+  call pull_buffer_value(buff%data(:,n),counter,traj%day)
+  call pull_buffer_value(buff%data(:,n),counter,cnt)
+  call pull_buffer_value(buff%data(:,n),counter,ij)
+  traj%id = id_from_2_ints(cnt, ij)
   if (.not. save_short_traj) then
-    traj%uvel=buff%data(6,n)
-    traj%vvel=buff%data(7,n)
-    traj%mass=buff%data(8,n)
-    traj%mass_of_bits=buff%data(9,n)
-    traj%heat_density=buff%data(10,n)
-    traj%thickness=buff%data(11,n)
-    traj%width=buff%data(12,n)
-    traj%length=buff%data(13,n)
-    traj%uo=buff%data(14,n)
-    traj%vo=buff%data(15,n)
-    traj%ui=buff%data(16,n)
-    traj%vi=buff%data(17,n)
-    traj%ua=buff%data(18,n)
-    traj%va=buff%data(19,n)
-    traj%ssh_x=buff%data(20,n)
-    traj%ssh_y=buff%data(21,n)
-    traj%sst=buff%data(22,n)
-    traj%cn=buff%data(23,n)
-    traj%hi=buff%data(24,n)
-    traj%axn=buff%data(25,n) !Alon
-    traj%ayn=buff%data(26,n) !Alon
-    traj%bxn=buff%data(27,n) !Alon
-    traj%byn=buff%data(28,n) !Alon
-    traj%halo_berg=buff%data(29,n) !Alon
-    traj%static_berg=buff%data(30,n) !Alon
-    traj%sss=buff%data(31,n)
+    call pull_buffer_value(buff%data(:,n),counter,traj%uvel)
+    call pull_buffer_value(buff%data(:,n),counter,traj%vvel)
+    call pull_buffer_value(buff%data(:,n),counter,traj%mass)
+    call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
+    call pull_buffer_value(buff%data(:,n),counter,traj%heat_density)
+    call pull_buffer_value(buff%data(:,n),counter,traj%thickness)
+    call pull_buffer_value(buff%data(:,n),counter,traj%width)
+    call pull_buffer_value(buff%data(:,n),counter,traj%length)
+    call pull_buffer_value(buff%data(:,n),counter,traj%uo)
+    call pull_buffer_value(buff%data(:,n),counter,traj%vo)
+    call pull_buffer_value(buff%data(:,n),counter,traj%ui)
+    call pull_buffer_value(buff%data(:,n),counter,traj%vi)
+    call pull_buffer_value(buff%data(:,n),counter,traj%ua)
+    call pull_buffer_value(buff%data(:,n),counter,traj%va)
+    call pull_buffer_value(buff%data(:,n),counter,traj%ssh_x)
+    call pull_buffer_value(buff%data(:,n),counter,traj%ssh_y)
+    call pull_buffer_value(buff%data(:,n),counter,traj%sst)
+    call pull_buffer_value(buff%data(:,n),counter,traj%cn)
+    call pull_buffer_value(buff%data(:,n),counter,traj%hi)
+    call pull_buffer_value(buff%data(:,n),counter,traj%axn)
+    call pull_buffer_value(buff%data(:,n),counter,traj%ayn)
+    call pull_buffer_value(buff%data(:,n),counter,traj%bxn)
+    call pull_buffer_value(buff%data(:,n),counter,traj%byn)
+    call pull_buffer_value(buff%data(:,n),counter,traj%halo_berg)
+    call pull_buffer_value(buff%data(:,n),counter,traj%static_berg)
+    call pull_buffer_value(buff%data(:,n),counter,traj%sss)
   endif
   call append_posn(first, traj)
 
@@ -2287,6 +2362,87 @@ integer :: grdi_inner, grdj_inner
 
 end subroutine check_for_duplicates
 
+!> Generate an iceberg id from a counter at calving-location and the calving location itself.
+!! Note that this updates grd%iceberg_counter_grd.
+!!
+!! \todo If we initialized grd%iceberg_counter_grd to 0 when the model is first run we could move
+!! this increment line to before the id generation and then the counter would be an actual count.
+integer(kind=8) function generate_id(grd, i, j)
+  type(icebergs_gridded), pointer    :: grd !< Container for gridded fields
+  integer,                intent(in) :: i   !< i-index of calving location
+  integer,                intent(in) :: j   !< j-index of calving location
+  ! Local variables
+  integer :: ij ! Hash of i,j
+
+  ! Increment counter in calving cell
+  grd%iceberg_counter_grd(i,j) = grd%iceberg_counter_grd(i,j) + 1
+  ! ij is unique number for each grid cell (32-bit integers allow for ~1/100th degree global resolution)
+  ij = ij_component_of_id(grd, i, j)
+  ! Generate a 64-bit id
+  generate_id = id_from_2_ints( grd%iceberg_counter_grd(i,j), ij )
+
+end function generate_id
+
+!> Convert an old 32-bit id to a 64-bit id
+integer(kind=8) function convert_old_id(grd, old_id)
+  type(icebergs_gridded), pointer    :: grd    !< Container for gridded fields
+  integer,                intent(in) :: old_id !< 32-bit iceberg id
+  ! Local variables
+  integer :: cnt ! Counter component
+  integer :: ij ! Hash of i,j
+  integer :: i,j ! Cell indexes
+
+  call cij_from_old_id(grd, old_id, cnt, i, j)
+  ij = ij_component_of_id(grd, i, j)
+  convert_old_id = id_from_2_ints( cnt, ij )
+
+end function convert_old_id
+
+!> Recover i,j an old 32-bit id
+subroutine cij_from_old_id(grd, old_id, cnt, i, j)
+  type(icebergs_gridded), pointer     :: grd    !< Container for gridded fields
+  integer,                intent(in)  :: old_id !< 32-bit iceberg id
+  integer,                intent(out) :: cnt    !< Counter component of old id
+  integer,                intent(out) :: i      !< i-index of calving cell
+  integer,                intent(out) :: j      !< j-index of calving cell
+  ! Local variables
+  integer :: ij ! Hash of i,j
+  integer :: iNg, jNg, ncells ! Shape and size of the global grid
+
+  ! Number cells in the grid
+  iNg = grd%ieg - grd%isg + 1
+  jNg = grd%jeg - grd%jsg + 1
+  ncells = iNg * jNg
+
+  ! cnt is the cell-based counter
+  cnt = old_id / ncells
+  ! ij is the has of i,j
+  ij = mod( old_id, ncells )
+
+  ! i,j should be the cells the berg was calved in
+  j = ij / iNg
+  i = mod( ij, iNg )
+
+end subroutine cij_from_old_id
+
+!> Calculate the location-derived component of an iceberg id which is a hash of the i,j-indexes for the cell
+integer function ij_component_of_id(grd, i, j)
+  type(icebergs_gridded), pointer    :: grd !< Container for gridded fields
+  integer,                intent(in) :: i   !< i-index of calving location
+  integer,                intent(in) :: j   !< j-index of calving location
+  ! Local variables
+  integer :: ij ! Hash of i,j
+  integer :: iNg ! Zonal size of the global grid
+
+  ! Using the current grid shape maximizes the numbers of IDs that can be represented
+  ! allowing up to 30-minute uniform global resolution, or potentially finer if non-uniform. 
+  iNg = grd%ieg - grd%isg + 1
+
+  ! ij_component_of_id is unique number for each grid cell (32-bit integers allow for ~1/100th degree global resolution)
+  ij_component_of_id = i + ( iNg * ( j - 1 ) )
+
+end function ij_component_of_id
+
 !> Prints a particular berg's vitals
 !!
 !! All lists are scanned and if a berg has the identifier equal to
@@ -2306,7 +2462,7 @@ integer :: stderrunit
   do grdj = bergs%grd%jsd,bergs%grd%jed ; do grdi = bergs%grd%isd,bergs%grd%ied
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
-      if (this%iceberg_num == bergs%debug_iceberg_with_id) then
+      if (this%id == bergs%debug_iceberg_with_id) then
         call print_berg(stderrunit, this, 'MONITOR: '//label, grdi, grdj)
       endif
       this=>this%next
@@ -2369,7 +2525,7 @@ end subroutine insert_berg_into_list
 !> Returns True when berg1 and berg2 are in sorted order
 !! \todo inorder() should use the iceberg identifier for efficiency and simplicity
 !! instead of dates and properties
-logical function inorder(berg1, berg2)  !MP Alon - Change to include iceberg_num
+logical function inorder(berg1, berg2)  !MP Alon - Change to use iceberg id
 ! Arguments
 type(iceberg), pointer :: berg1 !< An iceberg
 type(iceberg), pointer :: berg2 !< An iceberg
@@ -2559,31 +2715,31 @@ integer, optional, intent(in) :: jl !< j-index of cell berg should be in
 ! Local variables
 
   write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,a,2f10.4,i5,f7.2,es12.4,f5.1)') &
-    label, 'pe=(', mpp_pe(), ') #=', berg%iceberg_num, ' start lon,lat,yr,day,mass,hb=', &
+    label, 'pe=(', mpp_pe(), ') #=', berg%id, ' start lon,lat,yr,day,mass,hb=', &
     berg%start_lon, berg%start_lat, berg%start_year, berg%start_day, berg%start_mass, berg%halo_berg
   if (present(il).and.present(jl)) then
     write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,a,2i5)') &
-      label, 'pe=(', mpp_pe(), ') #=', berg%iceberg_num, ' List i,j=',il,jl
+      label, 'pe=(', mpp_pe(), ') #=', berg%id, ' List i,j=',il,jl
   endif
   write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,a,2i5,a,2l2)') &
-    label, 'pe=(', mpp_pe(), ') #=', berg%iceberg_num, &
+    label, 'pe=(', mpp_pe(), ') #=', berg%id, &
     ' i,j=', berg%ine, berg%jne, &
     ' p,n=', associated(berg%prev), associated(berg%next)
   write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,3(a,2f14.8))') &
-    label, 'pe=(', mpp_pe(), ') #=', berg%iceberg_num, &
+    label, 'pe=(', mpp_pe(), ') #=', berg%id, &
     ' xi,yj=', berg%xi, berg%yj, &
     ' lon,lat=', berg%lon, berg%lat, &
     ' lon_old,lat_old=', berg%lon_old, berg%lat_old
   write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,2(a,2f14.8))') &
-    label, 'pe=(', mpp_pe(), ') #=', berg%iceberg_num, &
+    label, 'pe=(', mpp_pe(), ') #=', berg%id, &
     ' u,v=', berg%uvel, berg%vvel, &
     ' uvel_old,vvel_old=', berg%uvel_old, berg%vvel_old
   write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,2(a,2f14.8))') &
-    label, 'pe=(', mpp_pe(), ') #=', berg%iceberg_num, &
+    label, 'pe=(', mpp_pe(), ') #=', berg%id, &
     ' axn,ayn=', berg%axn, berg%ayn, &
     ' bxn,byn=', berg%bxn, berg%byn
   write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,3(a,2f14.8))') &
-    label, 'pe=(', mpp_pe(), ') #=', berg%iceberg_num, &
+    label, 'pe=(', mpp_pe(), ') #=', berg%id, &
     ' uo,vo=', berg%uo, berg%vo, &
     ' ua,va=', berg%ua, berg%va, &
     ' ui,vi=', berg%ui, berg%vi
@@ -2614,24 +2770,24 @@ integer :: grdi, grdj
 
 end subroutine print_bergs
 
-subroutine form_a_bond(berg, other_berg_num, other_berg_ine, other_berg_jne, other_berg)
+subroutine form_a_bond(berg, other_id, other_berg_ine, other_berg_jne, other_berg)
 ! Arguments
 type(iceberg), pointer :: berg
 type(iceberg), optional,  pointer :: other_berg
 type(bond) , pointer :: new_bond, first_bond
-integer, intent(in) :: other_berg_num
+integer(kind=8), intent(in) :: other_id
 integer, optional  :: other_berg_ine, other_berg_jne
 integer :: stderrunit
 
  stderrunit = stderr()
 
-if (berg%iceberg_num .ne. other_berg_num) then
+if (berg%id .ne. other_id) then
 
- !write (stderrunit,*) , 'Forming a bond!!!', mpp_pe(), berg%iceberg_num, other_berg_num, berg%halo_berg, berg%ine, berg%jne
+ !write (stderrunit,*) , 'Forming a bond!!!', mpp_pe(), berg%id, other_id, berg%halo_berg, berg%ine, berg%jne
 
   ! Step 1: Create a new bond
   allocate(new_bond)
-  new_bond%other_berg_num=other_berg_num
+  new_bond%other_id=other_id
   if(present(other_berg)) then
     new_bond%other_berg=>other_berg
     new_bond%other_berg_ine=other_berg%ine
@@ -2715,16 +2871,16 @@ type(bond) , pointer :: current_bond
     do while (associated(berg)) ! loop over all bergs
       current_bond=>berg%first_bond
       do while (associated(current_bond)) ! loop over all bonds
-        print *, 'Show Bond1 :', berg%iceberg_num, current_bond%other_berg_num, current_bond%other_berg_ine, current_bond%other_berg_jne,  mpp_pe()
-        !print *, 'Current:', berg%iceberg_num, berg%ine, berg%jne,berg%halo_berg, mpp_pe()
+        print *, 'Show Bond1 :', berg%id, current_bond%other_id, current_bond%other_berg_ine, current_bond%other_berg_jne,  mpp_pe()
+        !print *, 'Current:', berg%id, berg%ine, berg%jne,berg%halo_berg, mpp_pe()
         if  (associated(current_bond%other_berg)) then
-          if (current_bond%other_berg%iceberg_num .ne. current_bond%other_berg_num) then
-            print *, 'Bond matching', berg%iceberg_num,current_bond%other_berg%iceberg_num, current_bond%other_berg_num,&
+          if (current_bond%other_berg%id .ne. current_bond%other_id) then
+            print *, 'Bond matching', berg%id,current_bond%other_berg%id, current_bond%other_id,&
             berg%halo_berg,current_bond%other_berg%halo_berg ,mpp_pe()
             call error_mesg('diamonds, show all bonds:', 'The bonds are not matching properly!', FATAL)
           endif
         else
-            print *, 'This bond has an non-assosiated other berg :', berg%iceberg_num, current_bond%other_berg_num,&
+            print *, 'This bond has an non-assosiated other berg :', berg%id, current_bond%other_id,&
             current_bond%other_berg_ine, current_bond%other_berg_jne, berg%halo_berg,  mpp_pe()
         endif
         current_bond=>current_bond%next_bond
@@ -2765,7 +2921,7 @@ bond_matched=.false.
           if ( (i.gt. grd%isd-1) .and. (i .lt. grd%ied+1) .and. (j .gt. grd%jsd-1) .and. (j .lt. grd%jed+1)) then
             other_berg=>bergs%list(i,j)%first
             do while (associated(other_berg)) ! loop over all other bergs
-              if (other_berg%iceberg_num .eq. current_bond%other_berg_num) then
+              if (other_berg%id .eq. current_bond%other_id) then
                 current_bond%other_berg=>other_berg
                 other_berg=>null()
                 bond_matched=.true.
@@ -2783,7 +2939,7 @@ bond_matched=.false.
                 .and. ((grdi_inner .ne. i) .or. (grdj_inner .ne. j)) ) then
                   other_berg=>bergs%list(grdi_inner,grdj_inner)%first
                   do while (associated(other_berg)) ! loop over all other bergs
-                    if (other_berg%iceberg_num .eq. current_bond%other_berg_num) then
+                    if (other_berg%id .eq. current_bond%other_id) then
                       current_bond%other_berg=>other_berg
                       other_berg=>null()
                       bond_matched=.true.
@@ -2798,12 +2954,12 @@ bond_matched=.false.
           if (.not.bond_matched) then
             if (berg%halo_berg .lt. 0.5) then
               missing_bond=.true.
-              print * ,'non-halo berg unmatched: ', berg%iceberg_num, mpp_pe(), current_bond%other_berg_num, current_bond%other_berg_ine
+              print * ,'non-halo berg unmatched: ', berg%id, mpp_pe(), current_bond%other_id, current_bond%other_berg_ine
               call error_mesg('diamonds, connect_all_bonds', 'A non-halo bond is missing!!!', FATAL)
             else  ! This is not a problem if the partner berg is not yet in the halo
               !if (  (current_bond%other_berg_ine .gt.grd%isd-1) .and. (current_bond%other_berg_ine .lt.grd%ied+1) &
                 !.and.  (current_bond%other_berg_jne .gt.grd%jsd-1) .and. (current_bond%other_berg_jne .lt.grd%jed+1) ) then
-                !print * ,'halo berg unmatched: ',mpp_pe(),  berg%iceberg_num, current_bond%other_berg_num, current_bond%other_berg_ine,current_bond%other_berg_jne
+                !print * ,'halo berg unmatched: ',mpp_pe(),  berg%id, current_bond%other_id, current_bond%other_berg_ine,current_bond%other_berg_jne
                 !call error_mesg('diamonds, connect_all_bonds', 'A halo bond is missing!!!', WARNING)
               !endif
             endif
@@ -2860,7 +3016,7 @@ integer :: stderrunit
         number_of_bonds=number_of_bonds+1
 
         ! ##### Beginning Quality Check on Bonds ######
-        !      print *, 'Quality check', mpp_pe(), berg%iceberg_num
+        !      print *, 'Quality check', mpp_pe(), berg%id
         if (quality_check) then
           num_unmatched_bonds=0
           num_unassosiated_bond_pairs=0
@@ -2870,7 +3026,7 @@ integer :: stderrunit
             other_berg_bond=>other_berg%first_bond
             do while (associated(other_berg_bond))  !loops over the icebergs in the other icebergs bond list
               if (associated(other_berg_bond%other_berg)) then
-                if (other_berg_bond%other_berg%iceberg_num .eq.berg%iceberg_num) then
+                if (other_berg_bond%other_berg%id .eq.berg%id) then
                   bond_is_good=.True.  !Bond_is_good becomes true when the corresponding bond is found
                 endif
               endif
@@ -2882,13 +3038,13 @@ integer :: stderrunit
             enddo  ! End of loop over the other berg's bonds.
 
             if (bond_is_good) then
-              if (debug) write(stderrunit,*) 'Perfect quality Bond:', berg%iceberg_num, current_bond%other_berg_num
+              if (debug) write(stderrunit,*) 'Perfect quality Bond:', berg%id, current_bond%other_id
             else
-              if (debug) write(stderrunit,*) 'Non-matching bond...:', berg%iceberg_num, current_bond%other_berg_num
+              if (debug) write(stderrunit,*) 'Non-matching bond...:', berg%id, current_bond%other_id
               num_unmatched_bonds=num_unmatched_bonds+1
             endif
           else
-            if (debug) write(stderrunit,*) 'Opposite berg is not assosiated:', berg%iceberg_num, current_bond%other_berg%iceberg_num
+            if (debug) write(stderrunit,*) 'Opposite berg is not assosiated:', berg%id, current_bond%other_berg%id
             num_unassosiated_bond_pairs=0
           endif
         endif
@@ -2992,7 +3148,7 @@ integer :: grdi, grdj
       posn%lat=this%lat
       posn%year=bergs%current_year
       posn%day=bergs%current_yearday
-      posn%iceberg_num=posn%iceberg_num
+      posn%id=this%id
       if (.not. bergs%save_short_traj) then !Not totally sure that this is correct
         posn%uvel=this%uvel
         posn%vvel=this%vvel
@@ -3087,21 +3243,6 @@ type(xyt) :: vals
 
   ! If the trajectory is empty, ignore it
   if (.not.associated(berg%trajectory)) return
-
-  ! Push identifying info into first posn (note reverse order due to stack)
-  vals%lon=berg%start_lon
-  vals%lat=berg%start_lat
-  vals%year=berg%start_year
-  vals%iceberg_num=berg%iceberg_num
-  vals%day=berg%start_day
-  vals%mass=berg%start_mass
-  call push_posn(berg%trajectory, vals)
-  vals%lon=0.
-  vals%lat=99.
-  vals%year=0
-  vals%day=0.
-  vals%mass=berg%mass_scaling
-  call push_posn(berg%trajectory, vals)
 
   ! Find end of berg trajectory and point it to start of existing trajectories
   next=>berg%trajectory
@@ -3345,10 +3486,10 @@ logical function find_cell_loc(grd, x, y, is, ie, js, je, w, oi, oj)
 end function find_cell_loc
 
 !> Returns the i,j of cell containing an iceberg with the given identifier
-subroutine find_individual_iceberg(bergs, iceberg_num, ine, jne, berg_found, search_data_domain)
+subroutine find_individual_iceberg(bergs, id, ine, jne, berg_found, search_data_domain)
 ! Arguments
 type(icebergs), pointer :: bergs !< Container for all types and memory
-integer, intent(in) :: iceberg_num !< Berg identifier
+integer(kind=8), intent(in) :: id !< Berg identifier
 integer, intent(out) :: ine !< i-index of cell containing berg
 integer, intent(out) :: jne !< j-index of cell containing berg
 logical, intent(in) :: search_data_domain !< If true, search halos too
@@ -3377,7 +3518,7 @@ jne=999
     !do grdj = bergs%grd%jsd,bergs%grd%jed ; do grdi = bergs%grd%isd,bergs%grd%ied
       this=>bergs%list(grdi,grdj)%first
       do while (associated(this))
-        if (iceberg_num .eq. this%iceberg_num) then
+        if (id .eq. this%id) then
           ine=this%ine
           jne=this%jne
           berg_found=1.0
@@ -4354,8 +4495,8 @@ integer function berg_chksum(berg)
 ! Arguments
 type(iceberg), pointer :: berg !< An iceberg
 ! Local variables
-real :: rtmp(38) !Changed from 28 to 34 by Alon
-integer :: itmp(38+4), i8=0, ichk1, ichk2, ichk3 !Changed from 28 to 34 by Alon
+real :: rtmp(36)
+integer :: itmp(36+7), i8=0, ichk1, ichk2, ichk3
 integer :: i
 
   rtmp(:)=0.
@@ -4394,16 +4535,16 @@ integer :: i
   rtmp(34)=berg%vvel_old
   rtmp(35)=berg%lat_old
   rtmp(36)=berg%lon_old
+  itmp(1:36)=transfer(rtmp,i8)
   itmp(37)=berg%halo_berg
   itmp(38)=berg%static_berg
-  itmp(1:38)=transfer(rtmp,i8)
   itmp(39)=berg%start_year
   itmp(40)=berg%ine
   itmp(41)=berg%jne
-  itmp(42)=berg%iceberg_num
+  call split_id( berg%id, itmp(42), itmp(43) )
 
   ichk1=0; ichk2=0; ichk3=0
-  do i=1,38+4
+  do i=1,36+7
    ichk1=ichk1+itmp(i)
    ichk2=ichk2+itmp(i)*i
    ichk3=ichk3+itmp(i)*i*i
@@ -4452,26 +4593,59 @@ integer :: stderrunit
 
 end subroutine print_fld
 
+!> Combine a counter and i,j hash into an id
+integer(kind=8) function id_from_2_ints(counter, ijhash)
+  integer, intent(in) :: counter !< The counter value assigned at calving
+  integer, intent(in) :: ijhash  !< A hash of i,j calving location
+
+  id_from_2_ints = int(counter,8) * (int(2,8)**32) + int(ijhash,8)
+
+end function id_from_2_ints
+
+!> Split an iceberg ID into two parts
+subroutine split_id(id, counter, ijhash)
+  integer(kind=8), intent(in)  :: id      !< A unique id assigned when a berg is created
+  integer,         intent(out) :: counter !< The counter value assigned at calving
+  integer,         intent(out) :: ijhash  !< A hash of i,j calving location
+  ! Local variables
+  integer(kind=8) :: i8
+
+  counter = ishft(id,-32)
+  !counter = i8
+  ijhash = int(id,4)
+
+end subroutine split_id
+
 !> Invoke some unit tests
-logical function unitTests(bergs)
+logical function unit_tests(bergs)
   type(icebergs), pointer :: bergs !< Container for all types and memory
   ! Local variables
   type(icebergs_gridded), pointer :: grd
-  integer :: stderrunit,i,j
+  integer :: stderrunit,i,j,c1,c2
+  integer(kind=8) :: id
 
   ! This function returns True is a unit test fails
-  unitTests=.false.
+  unit_tests=.false.
   ! For convenience
   grd=>bergs%grd
   stderrunit=stderr()
 
   i=grd%isc; j=grd%jsc
-  call localTest( unitTests, bilin(grd, grd%lon, i, j, 0., 1.), grd%lon(i-1,j) )
-  call localTest( unitTests, bilin(grd, grd%lon, i, j, 1., 1.), grd%lon(i,j) )
-  call localTest( unitTests, bilin(grd, grd%lat, i, j, 1., 0.), grd%lat(i,j-1) )
-  call localTest( unitTests, bilin(grd, grd%lat, i, j, 1., 1.), grd%lat(i,j) )
+  call localTest( unit_tests, bilin(grd, grd%lon, i, j, 0., 1.), grd%lon(i-1,j) )
+  call localTest( unit_tests, bilin(grd, grd%lon, i, j, 1., 1.), grd%lon(i,j) )
+  call localTest( unit_tests, bilin(grd, grd%lat, i, j, 1., 0.), grd%lat(i,j-1) )
+  call localTest( unit_tests, bilin(grd, grd%lat, i, j, 1., 1.), grd%lat(i,j) )
 
-end function unitTests
+  ! Test 64-bit ID conversion
+  i = 1440*1080 ; c1 = 2**30 + 2**4 + 1
+  id = id_from_2_ints(c1, i)
+  call split_id(id,c2,j)
+  if (j /= i .or. c2 /= c1) then
+    write(0,*) 'i,c in:',i,c1,' id=',id,' i,c out:',j,c2
+    unit_tests=.true.
+  endif
+
+end function unit_tests
 
 !> Checks answer to right answer and prints results if different
 subroutine localTest(unit_test, answer, rightAnswer)
@@ -4495,7 +4669,7 @@ subroutine check_for_duplicates_in_parallel(bergs)
   type(icebergs_gridded), pointer :: grd
   type(iceberg), pointer :: this
   integer :: stderrunit, i, j, k, nbergs, nbergs_total
-  integer, dimension(:), allocatable :: ids ! List of ids of all bergs on this processor
+  integer(kind=8), dimension(:), allocatable :: ids ! List of ids of all bergs on this processor
 
   stderrunit=stderr()
   grd=>bergs%grd
@@ -4511,7 +4685,7 @@ subroutine check_for_duplicates_in_parallel(bergs)
       this=>bergs%list(i,j)%first
       do while (associated(this))
         k = k + 1
-        ids(k) = this%iceberg_num
+        ids(k) = this%id
         this=>this%next
       enddo
     enddo ; enddo
@@ -4528,11 +4702,12 @@ end subroutine check_for_duplicates_in_parallel
 !> Returns error count of duplicates of integer values in a distributed list
 integer function check_for_duplicate_ids_in_list(nbergs, ids, verbose)
   ! Arguments
-  integer,               intent(in)    :: nbergs !< Length of ids
-  integer, dimension(:), intent(inout) :: ids !< List of ids
-  logical,               intent(in)    :: verbose !< True if messages should be written
+  integer,                       intent(in)    :: nbergs !< Length of ids
+  integer(kind=8), dimension(:), intent(inout) :: ids !< List of ids
+  logical,                       intent(in)    :: verbose !< True if messages should be written
   ! Local variables
-  integer :: stderrunit, i, j, k, l, nbergs_total, ii, lowest_id, nonexistent_id
+  integer :: stderrunit, i, j, k, nbergs_total, ii
+  integer(kind=8) :: lowest_id, nonexistent_id, id, lid
   logical :: have_berg
 
   stderrunit=stderr()
@@ -4543,7 +4718,7 @@ integer function check_for_duplicate_ids_in_list(nbergs, ids, verbose)
   lowest_id = 0
   if (nbergs>0) lowest_id = minval(ids)
   call mpp_min(lowest_id)
-  i = lowest_id
+  id = lowest_id
   nonexistent_id = lowest_id - 1
   if (nonexistent_id >= lowest_id) then
     write(stderrunit,*) 'Underflow in iceberg ids!',nonexistent_id,lowest_id,mpp_pe()
@@ -4553,9 +4728,9 @@ integer function check_for_duplicate_ids_in_list(nbergs, ids, verbose)
     do i = j+1, nbergs
       if (ids(j) < ids(i)) then
         ! Swap
-        k = ids(i)
+        id = ids(i)
         ids(i) = ids(j)
-        ids(j) = k
+        ids(j) = id
       endif
     enddo
   enddo
@@ -4572,15 +4747,15 @@ integer function check_for_duplicate_ids_in_list(nbergs, ids, verbose)
   do k = 1, nbergs_total
     ! Set i to first id in my list
     if (j <= nbergs) then
-      i = ids(j)
+      id = ids(j)
       have_berg = .true.
     else
-      i = nonexistent_id
+      id = nonexistent_id
       have_berg = .false.
     endif
-    l = i
-    call mpp_max(l)
-    if (have_berg .and. i == l) then
+    lid = id
+    call mpp_max(lid)
+    if (have_berg .and. id == lid) then
       ii = 1 ! This berg is mine
       j = j + 1
     else
@@ -4588,10 +4763,10 @@ integer function check_for_duplicate_ids_in_list(nbergs, ids, verbose)
     endif
     call mpp_sum(ii)
     if (ii > 1) then
-      if (verbose) write(stderrunit,*) 'Duplicated berg across PEs with id=',i,l,' seen',ii,' times pe=',mpp_pe(),k,j,nbergs
+      if (verbose) write(stderrunit,*) 'Duplicated berg across PEs with id=',id,lid,' seen',ii,' times pe=',mpp_pe(),k,j,nbergs
       check_for_duplicate_ids_in_list = check_for_duplicate_ids_in_list + 1
     elseif (ii == 0) then
-      if (verbose) write(stderrunit,*) 'Berg not accounted for on all PEs with id=',i,l,' seen',ii,' times pe=',mpp_pe(),k,j,nbergs
+      if (verbose) write(stderrunit,*) 'Berg not accounted for on all PEs with id=',id,lid,' seen',ii,' times pe=',mpp_pe(),k,j,nbergs
     endif
   enddo
 
@@ -4601,7 +4776,7 @@ end function check_for_duplicate_ids_in_list
 subroutine test_check_for_duplicate_ids_in_list()
   ! Local variables
   integer :: k
-  integer, dimension(:), allocatable :: ids
+  integer(kind=8), dimension(:), allocatable :: ids
   integer :: error_count
 
   allocate(ids(5))
