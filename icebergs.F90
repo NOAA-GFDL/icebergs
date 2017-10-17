@@ -2754,6 +2754,17 @@ subroutine interp_flds(grd, i, j, xi, yj, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, 
   ua=bilin(grd, grd%ua, i, j, xi, yj)
   va=bilin(grd, grd%va, i, j, xi, yj)
 
+  ! The following block accelerates a berg away from coastlines towards open water
+  ! which is a bias needed to avoid piling up in coarse resolution models
+  if (grd%coastal_drift > 0.) then
+    ! If a cell to the west is land (msk=0), accelerate to the east, and vice versa.
+    uo = uo + grd%coastal_drift * ( grd%msk(i+1,j) - grd%msk(i-1,j) ) * grd%msk(i,j)
+    ui = ui + grd%coastal_drift * ( grd%msk(i+1,j) - grd%msk(i-1,j) ) * grd%msk(i,j)
+    ! If a cell to the south is land (msk=0), accelerate to the north, and vice versa.
+    vo = vo + grd%coastal_drift * ( grd%msk(i,j+1) - grd%msk(i,j-1) ) * grd%msk(i,j)
+    vi = vi + grd%coastal_drift * ( grd%msk(i,j+1) - grd%msk(i,j-1) ) * grd%msk(i,j)
+  endif
+
   if (ua.ne.ua) then
     if (mpp_pe().eq.9) then
       write(stderrunit,'(a3,32i7)') 'ua',(ii,ii=grd%isd,grd%ied)
