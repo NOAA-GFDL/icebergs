@@ -160,6 +160,8 @@ type :: icebergs_gridded
   integer, dimension(:,:), pointer :: iceberg_counter_grd=>null() !< Counts icebergs created for naming purposes
   logical :: rmean_calving_initialized = .false. !< True if rmean_calving(:,:) has been filled with meaningful data
   logical :: rmean_calving_hflx_initialized = .false. !< True if rmean_calving_hflx(:,:) has been filled with meaningful data
+  real :: coastal_drift=0. ! A velocity added to ocean currents to cause bergs to drift away from land cells
+  real :: tidal_drift=0. ! Amplitude of a stochastic tidal velocity added to ocean currents to cause bergs to drift randomly
   !>@{
   !! Diagnostic handle
   integer :: id_uo=-1, id_vo=-1, id_calving=-1, id_stored_ice=-1, id_accum=-1, id_unused=-1, id_floating_melt=-1
@@ -515,6 +517,8 @@ real :: speed_limit=0. ! CFL speed limit for a berg
 real :: tau_calving=0. ! Time scale for smoothing out calving field (years)
 real :: tip_parameter=0. ! Parameter to override iceberg rolling critical ratio (use zero to get parameter directly from ice and seawater densities
 real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
+real :: coastal_drift=0. ! A velocity added to ocean currents to cause bergs to drift away from land cells
+real :: tidal_drift=0. ! Amplitude of a stochastic tidal velocity added to ocean currents to cause bergs to drift randomly
 logical :: Runge_not_Verlet=.True. ! True=Runge Kutta, False=Verlet.
 logical :: use_mixed_melting=.False. ! If true, then the melt is determined partly using 3 eq model partly using iceberg parameterizations (according to iceberg bond number)
 logical :: apply_thickness_cutoff_to_gridded_melt=.False. ! Prevents melt for ocean thickness below melt_cuttoff (applied to gridded melt fields)
@@ -567,7 +571,7 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          grid_is_regular,override_iceberg_velocities,u_override,v_override,add_iceberg_thickness_to_SSH,Iceberg_melt_without_decay,melt_icebergs_as_ice_shelf, &
          Use_three_equation_model,find_melt_using_spread_mass,use_mixed_layer_salinity_for_thermo,utide_icebergs,ustar_icebergs_bg,cdrag_icebergs, pass_fields_to_ocean_model, &
          const_gamma, Gamma_T_3EQ, ignore_traj, debug_iceberg_with_id,use_updated_rolling_scheme, tip_parameter, read_old_restarts, tau_calving, read_ocean_depth_from_file, melt_cutoff,&
-         apply_thickness_cutoff_to_gridded_melt, apply_thickness_cutoff_to_bergs_melt,use_mixed_melting
+         apply_thickness_cutoff_to_gridded_melt, apply_thickness_cutoff_to_bergs_melt, use_mixed_melting, coastal_drift, tidal_drift
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -994,6 +998,8 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
   allocate( bergs%initial_length(nclasses) )
   bergs%initial_width(:)=sqrt(initial_mass(:)/(LoW_ratio*rho_bergs*initial_thickness(:)))
   bergs%initial_length(:)=LoW_ratio*bergs%initial_width(:)
+  grd%coastal_drift = coastal_drift
+  grd%tidal_drift = tidal_drift
 
   if (read_old_restarts) call error_mesg('diamonds, ice_bergs_framework_init', 'Setting "read_old_restarts=.true." is obsolete and does nothing!', WARNING)
 
