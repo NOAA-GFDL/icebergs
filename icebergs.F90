@@ -5161,16 +5161,17 @@ subroutine icebergs_stock_pe(bergs, index, value)
 end subroutine icebergs_stock_pe
 
 !> Write restart files
-subroutine icebergs_save_restart(bergs)
+subroutine icebergs_save_restart(bergs, time_stamp)
   ! Arguments
   type(icebergs), pointer :: bergs !< Container for all types and memory
+  character(len=*),    intent(in), optional :: time_stamp !< Timestamp for restart file
   ! Local variables
 
   if (.not.associated(bergs)) return
 
   call mpp_clock_begin(bergs%clock_iow)
   call bergs_chksum(bergs, 'write_restart bergs')
-  call write_restart(bergs)
+  call write_restart(bergs, time_stamp)
   call mpp_clock_end(bergs%clock_iow)
 
 end subroutine icebergs_save_restart
