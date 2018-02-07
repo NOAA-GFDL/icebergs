@@ -101,9 +101,11 @@ integer :: stdlogunit, stderrunit
 end subroutine ice_bergs_io_init
 
 !> Write an iceberg restart file
-subroutine write_restart(bergs)
+subroutine write_restart(bergs, time_stamp)
 ! Arguments
 type(icebergs), pointer :: bergs !< Icebergs container
+character(len=*), intent(in), optional :: time_stamp !< Timestamp for restart file
+
 ! Local variables
 type(bond), pointer :: current_bond
 integer :: i,j,id
@@ -287,7 +289,7 @@ integer :: grdi, grdj
   enddo ; enddo
 
 
-  call save_restart(bergs_restart)
+  call save_restart(bergs_restart, time_stamp)
   call free_restart_type(bergs_restart)
 
   deallocate(              &
