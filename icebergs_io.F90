@@ -399,23 +399,6 @@ integer :: grdi, grdj
   call nullify_domain()
   endif
 
-!  ! Write stored ice
-!  filename='RESTART/calving.res.nc'
-!  if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stderrunit,'(2a)') 'diamonds, write_restart: writing ',filename
-!
-!  call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'write stored_ice')
-!  call write_data(filename, 'stored_ice', bergs%grd%stored_ice, bergs%grd%domain)
-!  call grd_chksum2(bergs%grd, bergs%grd%stored_heat, 'write stored_heat')
-!  call write_data(filename, 'stored_heat', bergs%grd%stored_heat, bergs%grd%domain)
-!  !call grd_chksum2(bergs%grd, bergs%grd%iceberg_counter_grd, 'write iceberg_counter_grd')
-!  call write_data(filename, 'iceberg_counter_grd', bergs%grd%iceberg_counter_grd, bergs%grd%domain)
-!  if (bergs%tau_calving>0.) then
-!    call grd_chksum2(bergs%grd, bergs%grd%rmean_calving, 'write mean calving')
-!    call write_data(filename, 'rmean_calving', bergs%grd%rmean_calving, bergs%grd%domain)
-!    call grd_chksum2(bergs%grd, bergs%grd%rmean_calving_hflx, 'write mean calving_hflx')
-!    call write_data(filename, 'rmean_calving_hflx', bergs%grd%rmean_calving_hflx, bergs%grd%domain)
-!  endif
-
   ! Write stored ice
   filename='calving.res.nc'
   if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stderrunit,'(2a)') 'diamonds, write_restart: writing ',filename
