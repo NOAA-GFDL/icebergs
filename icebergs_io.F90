@@ -116,6 +116,7 @@ integer :: stderrunit
 !I/O vars
 type(restart_file_type) :: bergs_restart
 type(restart_file_type) :: bergs_bond_restart
+type(restart_file_type) :: calving_restart
 integer :: nbergs, nbonds
 integer :: n_static_bergs
 logical :: check_bond_quality
@@ -381,7 +382,7 @@ integer :: grdi, grdj
     enddo!End of loop over bergs
   enddo; enddo !End of loop over grid
 
-  call save_restart(bergs_bond_restart)
+  call save_restart(bergs_bond_restart, time_stamp)
   call free_restart_type(bergs_bond_restart)
 
 
@@ -398,22 +399,44 @@ integer :: grdi, grdj
   call nullify_domain()
   endif
 
-  ! Write stored ice
-  filename='RESTART/calving.res.nc'
-  if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stderrunit,'(2a)') 'diamonds, write_restart: writing ',filename
+!  ! Write stored ice
+!  filename='RESTART/calving.res.nc'
+!  if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stderrunit,'(2a)') 'diamonds, write_restart: writing ',filename
+!
+!  call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'write stored_ice')
+!  call write_data(filename, 'stored_ice', bergs%grd%stored_ice, bergs%grd%domain)
+!  call grd_chksum2(bergs%grd, bergs%grd%stored_heat, 'write stored_heat')
+!  call write_data(filename, 'stored_heat', bergs%grd%stored_heat, bergs%grd%domain)
+!  !call grd_chksum2(bergs%grd, bergs%grd%iceberg_counter_grd, 'write iceberg_counter_grd')
+!  call write_data(filename, 'iceberg_counter_grd', bergs%grd%iceberg_counter_grd, bergs%grd%domain)
+!  if (bergs%tau_calving>0.) then
+!    call grd_chksum2(bergs%grd, bergs%grd%rmean_calving, 'write mean calving')
+!    call write_data(filename, 'rmean_calving', bergs%grd%rmean_calving, bergs%grd%domain)
+!    call grd_chksum2(bergs%grd, bergs%grd%rmean_calving_hflx, 'write mean calving_hflx')
+!    call write_data(filename, 'rmean_calving_hflx', bergs%grd%rmean_calving_hflx, bergs%grd%domain)
+!  endif
 
+  ! Write stored ice
+  filename='calving.res.nc'
+  if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stderrunit,'(2a)') 'diamonds, write_restart: writing ',filename
   call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'write stored_ice')
-  call write_data(filename, 'stored_ice', bergs%grd%stored_ice, bergs%grd%domain)
   call grd_chksum2(bergs%grd, bergs%grd%stored_heat, 'write stored_heat')
-  call write_data(filename, 'stored_heat', bergs%grd%stored_heat, bergs%grd%domain)
-  !call grd_chksum2(bergs%grd, bergs%grd%iceberg_counter_grd, 'write iceberg_counter_grd')
-  call write_data(filename, 'iceberg_counter_grd', bergs%grd%iceberg_counter_grd, bergs%grd%domain)
   if (bergs%tau_calving>0.) then
     call grd_chksum2(bergs%grd, bergs%grd%rmean_calving, 'write mean calving')
-    call write_data(filename, 'rmean_calving', bergs%grd%rmean_calving, bergs%grd%domain)
     call grd_chksum2(bergs%grd, bergs%grd%rmean_calving_hflx, 'write mean calving_hflx')
-    call write_data(filename, 'rmean_calving_hflx', bergs%grd%rmean_calving_hflx, bergs%grd%domain)
   endif
+
+  call set_domain(bergs%grd%domain)
+  id = register_restart_field(calving_restart,filename,'stored_ice',bergs%grd%stored_ice,longname='STORED_ICE',units='none')
+  id = register_restart_field(calving_restart,filename,'stored_heat',bergs%grd%stored_heat,longname='STORED_HEAT',units='none')
+  id = register_restart_field(calving_restart,filename,'iceberg_counter_grd',bergs%grd%iceberg_counter_grd,longname='ICEBERG_COUNTER_GRD',units='none')
+  if (bergs%tau_calving>0.) then
+    id = register_restart_field(calving_restart,filename,'rmean_calving',bergs%grd%rmean_calving,longname='RMEAN_CALVING',units='none')
+    id = register_restart_field(calving_restart,filename,'rmean_calving_hflx',bergs%grd%rmean_calving_hflx,longname='RMEAN_CALVING_HFLX',units='none')
+  endif
+
+  call save_restart(calving_restart, time_stamp)
+  call free_restart_type(calving_restart)
 
 end subroutine write_restart
 
@@ -1217,11 +1240,11 @@ character(len=37) :: filename
      'diamonds, read_ocean_depth: reading ',filename
     if (field_exist(filename, 'depth')) then
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
-       'diamonds, read_restart_calving: reading stored_heat from restart file.'
+       'diamonds, read_ocean_depth: reading depth from topog file.'
       call read_data(filename, 'depth', grd%ocean_depth, grd%domain)
     else
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
-     'diamonds, read_restart_calving: stored_heat WAS NOT FOUND in the file. Setting to 0.'
+     'diamonds, read_ocean_depth: depth WAS NOT FOUND in the file. Setting to 0.'
       !grd%ocean_depth(:,:)=0.
     endif
   else
