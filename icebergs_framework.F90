@@ -4805,7 +4805,7 @@ subroutine test_check_for_duplicate_ids_in_list()
   if (mpp_pe() == mpp_root_pe()) ids(5) = 7 + 5*mpp_pe()
   error_count = check_for_duplicate_ids_in_list(5, ids, verbose=.false.)
   call mpp_sum(error_count)
-  if (error_count == 0) then
+  if (error_count == 0 .and. mpp_npes()>1) then
     error_count = check_for_duplicate_ids_in_list(5, ids, verbose=.true.)
     call error_mesg('diamonds, test_check_for_duplicate_ids_in_list:', 'Unit test for a really dirty list failed!', FATAL)
   endif
