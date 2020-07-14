@@ -1,0 +1,10 @@
+&icebergs_driver_nml
+  ni=30
+  nj=20
+/
+
+&icebergs_nml
+/
+
+&diag_manager_nml
+/
