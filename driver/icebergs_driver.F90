@@ -20,6 +20,7 @@ use time_manager_mod, only : set_date
 use time_manager_mod, only : set_calendar_type
 use time_manager_mod, only : THIRTY_DAY_MONTHS
 use diag_manager_mod, only : diag_manager_init
+use diag_axis_mod, only : diag_axis_init
 
 use ice_bergs, only : icebergs
 use ice_bergs, only : icebergs_init
@@ -66,6 +67,7 @@ real, allocatable :: sin_rot(:,:) !< Sine of angle of grid orientation
 real, allocatable :: depth(:,:) !< Depth of ocean (m)
 ! Work variables
 integer :: i,j
+real, allocatable :: coord(:) !< One dimensional coordinate for initializing diagnostics
 
 ! Boot FMS
 call fms_init()
@@ -93,7 +95,21 @@ call mpp_define_domains((/1,ni,1,nj/), layout, mpp_domain, &
 io_layout = (/1,1/) ! 1,1 tells FMS to use just one processor for I/O
 call mpp_define_io_domain(mpp_domain, io_layout)
 
+! Diagnostics manager
 call diag_manager_init()
+! Axes for diagnostics
+allocate( coord(ni) )
+do i = 1, ni
+  coord(i) = real(i)
+enddo
+axes(1) = diag_axis_init('i', coord, 'index', 'X', 'cell index i', Domain2=mpp_domain)
+deallocate( coord )
+allocate( coord(nj) )
+do j = 1, nj
+  coord(j) = real(j)
+enddo
+axes(2) = diag_axis_init('j', coord, 'index', 'Y', 'cell index j', Domain2=mpp_domain)
+deallocate( coord )
 
 ! Query for declaration ranges
 call mpp_get_data_domain(mpp_domain, isd, ied, jsd, jed)
