@@ -4,7 +4,7 @@ To create list of files to compile:
 ```
 To create a `Makefile`:
 ```
-../../mkmf/bin/mkmf -t ../../mkmf/templates/ncrc-gnu.mk -p bergs.x path_names 
+../../mkmf/bin/mkmf -t ../../mkmf/templates/ncrc-gnu.mk -c "-Duse_libMPI -Duse_netCDF" -p bergs.x path_names 
 ```
 To compile a "debug" executable:
 ```
