@@ -574,6 +574,8 @@ integer, allocatable, dimension(:) :: ine,        &
        call read_int_vector(filename,'id_ij',id_ij,grd%domain)
      endif
      call read_real_vector(filename,'static_berg',static_berg,grd%domain,value_if_not_in_file=0.)
+  else
+     stop 'read_restart_bergs, RESTART NOT FOUND!'
   endif
 
   ! Find approx outer bounds for tile
@@ -774,8 +776,11 @@ logical :: lres
   call get_date(Time, iyr, imon, iday, ihr, imin, isec)
 
   do j=grd%jsc,grd%jec; do i=grd%isc,grd%iec
+     
     if (grd%msk(i,j)>0. .and. abs(grd%latc(i,j))>80.0) then
-      if (max(grd%lat(i,j),grd%lat(i-1,j),grd%lat(i,j-1),grd%lat(i-1,j-1))>89.999) cycle ! Cannot use this at Pole cells
+       if (max(grd%lat(i,j),grd%lat(i-1,j),grd%lat(i,j-1),grd%lat(i-1,j-1))>89.999) cycle ! Cannot use this at Pole cells
+       
+     
       localberg%xi=-999.
       localberg%yj=-999.
       localberg%ine=i
@@ -861,7 +866,7 @@ subroutine loc_set_berg_pos(grd, xi, yj, uvel, vvel, berg)
     write(0,*) 'bx=',berg%lon, 'gx=',grd%lon(i-1,j-1), grd%lon(i,j-1), grd%lon(i,j), grd%lon(i-1,j),'cx=', grd%lonc(i,j)
     write(0,*) 'by=',berg%lat, 'gy=',grd%lat(i-1,j-1), grd%lat(i,j-1), grd%lat(i,j), grd%lat(i-1,j),'cy=', grd%latc(i,j)
     stop 'generate_bergs, loc_set_berg_pos(): VERY FATAL!'
-  endif
+  Endif
 end subroutine loc_set_berg_pos
 
 !> Read bond restart file

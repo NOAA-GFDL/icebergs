@@ -1,0 +1,1 @@
+make NETCDF=3 DEBUG=1 bergs.x -j

@@ -1,0 +1,49 @@
+&icebergs_driver_nml
+  ni=20,
+  nj=20,
+  ibdt=3600.0,
+  ibuo=0.3,
+  ibvo=0.0,
+  ibhrs=4000,
+  halo=4,
+  debug=.true.
+/
+
+&icebergs_nml
+    verbose=.false.,
+    verbose_hrs=5,
+    traj_sample_hrs=5,
+    debug=.false.,
+    really_debug=.false.,
+    use_slow_find=.true.,
+    add_weight_to_ocean=.false.,
+    passive_mode=.false.,
+    generate_test_icebergs=.false.,
+    use_roundoff_fix=.true.,
+    make_calving_reproduce=.true.,
+    grid_is_regular=.true.,
+    grid_is_latlon=.false.,
+    set_melt_rates_to_zero=.true.,
+    interactive_icebergs_on=.true.,
+    critical_interaction_damping_on=.true.,
+    use_new_predictive_corrective=.true.,
+    halo=4,
+    halo_debugging=.false.,
+    ignore_ij_restart=.true.,
+    parallel_reprod=.true.,
+    Lx=200000.0,
+    restart_input_dir='INPUT/',
+    hexagonal_icebergs=.true.,
+    iceberg_bonds_on=.false.,
+    use_old_spreading=.false., !for if bergs are rec
+    runge_not_verlet=.false.,
+    manually_initialize_bonds=.false.
+/
+
+&diag_manager_nml
+/
+
+ &fms_io_nml
+         fms_netcdf_restart=.false.,
+         threading_read='multi'
+ /

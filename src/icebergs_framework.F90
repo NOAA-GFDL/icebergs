@@ -440,128 +440,128 @@ end interface
 contains
 
 !> Initializes parallel framework
-subroutine ice_bergs_framework_init(bergs, &
-             gni, gnj, layout, io_layout, axes, dom_x_flags, dom_y_flags, &
-             dt, Time, ice_lon, ice_lat, ice_wet, ice_dx, ice_dy, ice_area, &
-             cos_rot, sin_rot, ocean_depth, maskmap, fractional_area)
+  subroutine ice_bergs_framework_init(bergs, &
+       gni, gnj, layout, io_layout, axes, dom_x_flags, dom_y_flags, &
+       dt, Time, ice_lon, ice_lat, ice_wet, ice_dx, ice_dy, ice_area, &
+       cos_rot, sin_rot, ocean_depth, maskmap, fractional_area)
 
-use mpp_parameter_mod, only: SCALAR_PAIR, CGRID_NE, BGRID_NE, CORNER, AGRID
-use mpp_domains_mod, only: mpp_update_domains, mpp_define_domains
-use mpp_domains_mod, only: mpp_get_compute_domain, mpp_get_data_domain, mpp_get_global_domain
-use mpp_domains_mod, only: CYCLIC_GLOBAL_DOMAIN, FOLD_NORTH_EDGE
-use mpp_domains_mod, only: mpp_get_neighbor_pe, NORTH, SOUTH, EAST, WEST
-use mpp_domains_mod, only: mpp_define_io_domain
+    use mpp_parameter_mod, only: SCALAR_PAIR, CGRID_NE, BGRID_NE, CORNER, AGRID
+    use mpp_domains_mod, only: mpp_update_domains, mpp_define_domains
+    use mpp_domains_mod, only: mpp_get_compute_domain, mpp_get_data_domain, mpp_get_global_domain
+    use mpp_domains_mod, only: CYCLIC_GLOBAL_DOMAIN, FOLD_NORTH_EDGE
+    use mpp_domains_mod, only: mpp_get_neighbor_pe, NORTH, SOUTH, EAST, WEST
+    use mpp_domains_mod, only: mpp_define_io_domain
 
-use mpp_mod, only: mpp_clock_begin, mpp_clock_end, mpp_clock_id, input_nml_file
-use mpp_mod, only: CLOCK_COMPONENT, CLOCK_SUBCOMPONENT, CLOCK_LOOP
+    use mpp_mod, only: mpp_clock_begin, mpp_clock_end, mpp_clock_id, input_nml_file
+    use mpp_mod, only: CLOCK_COMPONENT, CLOCK_SUBCOMPONENT, CLOCK_LOOP
 
-use fms_mod, only: open_namelist_file, check_nml_error, close_file
-use fms_mod, only: clock_flag_default
+    use fms_mod, only: open_namelist_file, check_nml_error, close_file
+    use fms_mod, only: clock_flag_default
 
-use diag_manager_mod, only: register_diag_field, register_static_field, send_data
-use diag_manager_mod, only: diag_axis_init
+    use diag_manager_mod, only: register_diag_field, register_static_field, send_data
+    use diag_manager_mod, only: diag_axis_init
 
-! Arguments
-type(icebergs), pointer :: bergs !< Container for all types and memory
-integer, intent(in) :: gni !< Number grid cells in i-direction
-integer, intent(in) :: gnj !< Number grid cells in j-direction
-integer, intent(in) :: layout(2) !< Number of processing cores in i,j direction
-integer, intent(in) :: io_layout(2) !< Number of i/o cores in i,j direction
-integer, intent(in) :: axes(2) !< Diagnostic axes
-integer, intent(in) :: dom_x_flags !< Domain flags in i-direction
-integer, intent(in) :: dom_y_flags !< Domain flags in j-direction
-real, intent(in) :: dt !< Time-step (s)
-type (time_type), intent(in) :: Time !< Current model time
-real, dimension(:,:), intent(in) :: ice_lon !< Longitude of cell corners using NE convention (degree E)
-real, dimension(:,:), intent(in) :: ice_lat !< Latitude of cell corners using NE conventino (degree N)
-real, dimension(:,:), intent(in) :: ice_wet !< Wet/dry mask (1 is wet, 0 is dry) of cell centers
-real, dimension(:,:), intent(in) :: ice_dx !< Zonal length of cell on northern side (m)
-real, dimension(:,:), intent(in) :: ice_dy !< Meridional length of cell on eastern side (m)
-real, dimension(:,:), intent(in) :: ice_area !< Area of cells (m^2, or non-dim is fractional_area=True)
-real, dimension(:,:), intent(in) :: cos_rot !< Cosine from rotation matrix to lat-lon coords
-real, dimension(:,:), intent(in) :: sin_rot !< Sine from rotation matrix to lat-lon coords
-real, dimension(:,:), intent(in),optional :: ocean_depth !< Depth of ocean bottom (m)
-logical, intent(in), optional :: maskmap(:,:) !< Masks out parallel cores
-logical, intent(in), optional :: fractional_area !< If true, ice_area contains cell area as fraction of entire spherical surface
+    ! Arguments
+    type(icebergs), pointer :: bergs !< Container for all types and memory
+    integer, intent(in) :: gni !< Number grid cells in i-direction
+    integer, intent(in) :: gnj !< Number grid cells in j-direction
+    integer, intent(in) :: layout(2) !< Number of processing cores in i,j direction
+    integer, intent(in) :: io_layout(2) !< Number of i/o cores in i,j direction
+    integer, intent(in) :: axes(2) !< Diagnostic axes
+    integer, intent(in) :: dom_x_flags !< Domain flags in i-direction
+    integer, intent(in) :: dom_y_flags !< Domain flags in j-direction
+    real, intent(in) :: dt !< Time-step (s)
+    type (time_type), intent(in) :: Time !< Current model time
+    real, dimension(:,:), intent(in) :: ice_lon !< Longitude of cell corners using NE convention (degree E)
+    real, dimension(:,:), intent(in) :: ice_lat !< Latitude of cell corners using NE convention (degree N)
+    real, dimension(:,:), intent(in) :: ice_wet !< Wet/dry mask (1 is wet, 0 is dry) of cell centers
+    real, dimension(:,:), intent(in) :: ice_dx !< Zonal length of cell on northern side (m)
+    real, dimension(:,:), intent(in) :: ice_dy !< Meridional length of cell on eastern side (m)
+    real, dimension(:,:), intent(in) :: ice_area !< Area of cells (m^2, or non-dim is fractional_area=True)
+    real, dimension(:,:), intent(in) :: cos_rot !< Cosine from rotation matrix to lat-lon coords
+    real, dimension(:,:), intent(in) :: sin_rot !< Sine from rotation matrix to lat-lon coords
+    real, dimension(:,:), intent(in),optional :: ocean_depth !< Depth of ocean bottom (m)
+    logical, intent(in), optional :: maskmap(:,:) !< Masks out parallel cores
+    logical, intent(in), optional :: fractional_area !< If true, ice_area contains cell area as fraction of entire spherical surface
 
-! Namelist parameters (and defaults)
-integer :: halo=4 ! Width of halo region
-integer :: traj_sample_hrs=24 ! Period between sampling of position for trajectory storage
-integer :: traj_write_hrs=480 ! Period between writing sampled trajectories to disk
-integer :: verbose_hrs=24 ! Period between verbose messages
-integer :: max_bonds=6 ! Maximum number of iceberg bond passed between processors
-real :: rho_bergs=850. ! Density of icebergs
-real :: spring_coef=1.e-8 ! Spring constant for iceberg interactions (this seems to be the highest stable value)
-real :: bond_coef=1.e-8 ! Spring constant for iceberg bonds - not being used right now
-real :: radial_damping_coef=1.e-4 ! Coefficient for relative iceberg motion damping (radial component) -Alon
-real :: tangental_damping_coef=2.e-5 ! Coefficient for relative iceberg motion damping (tangential component) -Alon
-real :: LoW_ratio=1.5 ! Initial ratio L/W for newly calved icebergs
-real :: bergy_bit_erosion_fraction=0. ! Fraction of erosion melt flux to divert to bergy bits
-real :: sicn_shift=0. ! Shift of sea-ice concentration in erosion flux modulation (0<sicn_shift<1)
-real :: lat_ref=0. ! Reference latitude for f-plane (when this option is on)
-real :: u_override=0.0 ! Overrides the u velocity of icebergs (for ocean testing)
-real :: v_override=0.0 ! Overrides the v velocity of icebergs (for ocean testing)
-real :: Lx=360. ! Length of domain in x direction, used for periodicity (use a huge number for non-periodic)
-real :: initial_orientation=0. ! Iceberg orientation relative to this angle (in degrees). Used for hexagonal mass spreading.
-real :: utide_icebergs= 0. ! Tidal speeds, set to zero for now.
-real :: ustar_icebergs_bg=0.001 ! Background u_star under icebergs. This should be linked to a value felt by the ocean boundary layer
-real :: cdrag_icebergs =  1.5e-3 ! Momentum Drag coef, taken from HJ99  (Holland and Jenkins 1999)
-real :: Gamma_T_3EQ=0.022 ! Non-dimensional heat-transfer coefficient
-real :: melt_cutoff=-1.0 ! Minimum ocean thickness for melting to occur (is not applied for values < 0)
-logical :: const_gamma=.True. ! If true uses a constant heat transfer coefficient, from which the salt transfer is calculated
-logical :: use_operator_splitting=.true. ! Use first order operator splitting for thermodynamics
-logical :: add_weight_to_ocean=.true. ! Add weight of icebergs + bits to ocean
-logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
-logical :: time_average_weight=.false. ! Time average the weight on the ocean
-real :: speed_limit=0. ! CFL speed limit for a berg
-real :: tau_calving=0. ! Time scale for smoothing out calving field (years)
-real :: tip_parameter=0. ! Parameter to override iceberg rolling critical ratio (use zero to get parameter directly from ice and seawater densities
-real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
-real :: coastal_drift=0. ! A velocity added to ocean currents to cause bergs to drift away from land cells
-real :: tidal_drift=0. ! Amplitude of a stochastic tidal velocity added to ocean currents to cause bergs to drift randomly
-logical :: Runge_not_Verlet=.True. ! True=Runge Kutta, False=Verlet.
-logical :: use_mixed_melting=.False. ! If true, then the melt is determined partly using 3 eq model partly using iceberg parameterizations (according to iceberg bond number)
-logical :: apply_thickness_cutoff_to_gridded_melt=.False. ! Prevents melt for ocean thickness below melt_cuttoff (applied to gridded melt fields)
-logical :: apply_thickness_cutoff_to_bergs_melt=.False. ! Prevents melt for ocean thickness below melt_cuttoff (applied to bergs)
-logical :: use_updated_rolling_scheme=.false. ! Use the corrected Rolling Scheme rather than the erroneous one
-logical :: pass_fields_to_ocean_model=.False. ! Iceberg area, mass and ustar fields are prepared to pass to ocean model
-logical :: use_mixed_layer_salinity_for_thermo=.False. ! If true, then model uses ocean salinity for 3 and 2 equation melt model.
-logical :: find_melt_using_spread_mass=.False. ! If true, then the model calculates ice loss by looping at the spread_mass before and after.
-logical :: Use_three_equation_model=.True. ! Uses 3 equation model for melt when ice shelf type thermodynamics are used.
-logical :: melt_icebergs_as_ice_shelf=.False. ! Uses iceshelf type thermodynamics
-logical :: Iceberg_melt_without_decay=.False. ! Allows icebergs meltwater fluxes to enter the ocean, without the iceberg decaying or changing shape.
-logical :: add_iceberg_thickness_to_SSH=.False. ! Adds the iceberg contribution to SSH.
-logical :: override_iceberg_velocities=.False. ! Allows you to set a fixed iceberg velocity for all non-static icebergs.
-logical :: use_f_plane=.False. ! Flag to use a f-plane for the rotation
-logical :: grid_is_latlon=.True. ! True means that the grid is specified in lat lon, and uses to radius of the earth to convert to distance
-logical :: grid_is_regular=.True. ! Flag to say whether point in cell can be found assuming regular Cartesian grid
-logical :: rotate_icebergs_for_mass_spreading=.True. ! Flag allows icebergs to rotate for spreading their mass (in hexagonal spreading mode)
-logical :: set_melt_rates_to_zero=.False. ! Sets all melt rates to zero, for testing purposes (thermodynamics routine is still run)
-logical :: allow_bergs_to_roll=.True. ! Allows icebergs to roll over when rolling conditions are met
-logical :: hexagonal_icebergs=.False. ! True treats icebergs as rectangles, False as hexagonal elements (for the purpose of mass spreading)
-logical :: ignore_missing_restart_bergs=.False. ! True Allows the model to ignore icebergs missing in the restart.
-logical :: Static_icebergs=.False. ! True= icebergs do no move
-logical :: only_interactive_forces=.False. ! Icebergs only feel interactive forces, and not ocean, wind...
-logical :: halo_debugging=.False. ! Use for debugging halos (remove when its working)
-logical :: save_short_traj=.True. ! True saves only lon,lat,time,id in iceberg_trajectory.nc
-logical :: ignore_traj=.False. ! If true, then model does not traj trajectory data at all
-logical :: iceberg_bonds_on=.False. ! True=Allow icebergs to have bonds, False=don't allow.
-logical :: manually_initialize_bonds=.False. ! True= Bonds are initialize manually.
-logical :: use_new_predictive_corrective =.False. ! Flag to use Bob's predictive corrective iceberg scheme- Added by Alon
-logical :: interactive_icebergs_on=.false. ! Turn on/off interactions between icebergs  - Added by Alon
-logical :: critical_interaction_damping_on=.true. ! Sets the damping on relative iceberg velocity to critical value - Added by Alon
-logical :: do_unit_tests=.false. ! Conduct some unit tests
-logical :: input_freq_distribution=.false. ! Flag to show if input distribution is freq or mass dist (=1 if input is a freq dist, =0 to use an input mass dist)
-logical :: read_old_restarts=.false. ! Legacy option that does nothing
-logical :: use_old_spreading=.true. ! If true, spreads iceberg mass as if the berg is one grid cell wide
-logical :: read_ocean_depth_from_file=.false. ! If true, ocean depth is read from a file.
-real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
-real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim) ,
-real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
-real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
-integer(kind=8) :: debug_iceberg_with_id = -1 ! If positive, monitors a berg with this id
+    ! Namelist parameters (and defaults)
+    integer :: halo=4 ! Width of halo region
+    integer :: traj_sample_hrs=24 ! Period between sampling of position for trajectory storage
+    integer :: traj_write_hrs=480 ! Period between writing sampled trajectories to disk
+    integer :: verbose_hrs=24 ! Period between verbose messages
+    integer :: max_bonds=6 ! Maximum number of iceberg bond passed between processors
+    real :: rho_bergs=850. ! Density of icebergs
+    real :: spring_coef=1.e-8 ! Spring constant for iceberg interactions (this seems to be the highest stable value)
+    real :: bond_coef=1.e-8 ! Spring constant for iceberg bonds - not being used right now
+    real :: radial_damping_coef=1.e-4 ! Coefficient for relative iceberg motion damping (radial component) -Alon
+    real :: tangental_damping_coef=2.e-5 ! Coefficient for relative iceberg motion damping (tangential component) -Alon
+    real :: LoW_ratio=1.5 ! Initial ratio L/W for newly calved icebergs
+    real :: bergy_bit_erosion_fraction=0. ! Fraction of erosion melt flux to divert to bergy bits
+    real :: sicn_shift=0. ! Shift of sea-ice concentration in erosion flux modulation (0<sicn_shift<1)
+    real :: lat_ref=0. ! Reference latitude for f-plane (when this option is on)
+    real :: u_override=0.0 ! Overrides the u velocity of icebergs (for ocean testing)
+    real :: v_override=0.0 ! Overrides the v velocity of icebergs (for ocean testing)
+    real :: Lx=360. ! Length of domain in x direction, used for periodicity (use a huge number for non-periodic)
+    real :: initial_orientation=0. ! Iceberg orientation relative to this angle (in degrees). Used for hexagonal mass spreading.
+    real :: utide_icebergs= 0. ! Tidal speeds, set to zero for now.
+    real :: ustar_icebergs_bg=0.001 ! Background u_star under icebergs. This should be linked to a value felt by the ocean boundary layer
+    real :: cdrag_icebergs =  1.5e-3 ! Momentum Drag coef, taken from HJ99  (Holland and Jenkins 1999)
+    real :: Gamma_T_3EQ=0.022 ! Non-dimensional heat-transfer coefficient
+    real :: melt_cutoff=-1.0 ! Minimum ocean thickness for melting to occur (is not applied for values < 0)
+    logical :: const_gamma=.True. ! If true uses a constant heat transfer coefficient, from which the salt transfer is calculated
+    logical :: use_operator_splitting=.true. ! Use first order operator splitting for thermodynamics
+    logical :: add_weight_to_ocean=.true. ! Add weight of icebergs + bits to ocean
+    logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
+    logical :: time_average_weight=.false. ! Time average the weight on the ocean
+    real :: speed_limit=0. ! CFL speed limit for a berg
+    real :: tau_calving=0. ! Time scale for smoothing out calving field (years)
+    real :: tip_parameter=0. ! Parameter to override iceberg rolling critical ratio (use zero to get parameter directly from ice and seawater densities
+    real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
+    real :: coastal_drift=0. ! A velocity added to ocean currents to cause bergs to drift away from land cells
+    real :: tidal_drift=0. ! Amplitude of a stochastic tidal velocity added to ocean currents to cause bergs to drift randomly
+    logical :: Runge_not_Verlet=.True. ! True=Runge Kutta, False=Verlet.
+    logical :: use_mixed_melting=.False. ! If true, then the melt is determined partly using 3 eq model partly using iceberg parameterizations (according to iceberg bond number)
+    logical :: apply_thickness_cutoff_to_gridded_melt=.False. ! Prevents melt for ocean thickness below melt_cuttoff (applied to gridded melt fields)
+    logical :: apply_thickness_cutoff_to_bergs_melt=.False. ! Prevents melt for ocean thickness below melt_cuttoff (applied to bergs)
+    logical :: use_updated_rolling_scheme=.false. ! Use the corrected Rolling Scheme rather than the erroneous one
+    logical :: pass_fields_to_ocean_model=.False. ! Iceberg area, mass and ustar fields are prepared to pass to ocean model
+    logical :: use_mixed_layer_salinity_for_thermo=.False. ! If true, then model uses ocean salinity for 3 and 2 equation melt model.
+    logical :: find_melt_using_spread_mass=.False. ! If true, then the model calculates ice loss by looping at the spread_mass before and after.
+    logical :: Use_three_equation_model=.True. ! Uses 3 equation model for melt when ice shelf type thermodynamics are used.
+    logical :: melt_icebergs_as_ice_shelf=.False. ! Uses iceshelf type thermodynamics
+    logical :: Iceberg_melt_without_decay=.False. ! Allows icebergs meltwater fluxes to enter the ocean, without the iceberg decaying or changing shape.
+    logical :: add_iceberg_thickness_to_SSH=.False. ! Adds the iceberg contribution to SSH.
+    logical :: override_iceberg_velocities=.False. ! Allows you to set a fixed iceberg velocity for all non-static icebergs.
+    logical :: use_f_plane=.False. ! Flag to use a f-plane for the rotation
+    logical :: grid_is_latlon=.True. ! True means that the grid is specified in lat lon, and uses to radius of the earth to convert to distance
+    logical :: grid_is_regular=.True. ! Flag to say whether point in cell can be found assuming regular Cartesian grid
+    logical :: rotate_icebergs_for_mass_spreading=.True. ! Flag allows icebergs to rotate for spreading their mass (in hexagonal spreading mode)
+    logical :: set_melt_rates_to_zero=.False. ! Sets all melt rates to zero, for testing purposes (thermodynamics routine is still run)
+    logical :: allow_bergs_to_roll=.True. ! Allows icebergs to roll over when rolling conditions are met
+    logical :: hexagonal_icebergs=.False. ! True treats icebergs as rectangles, False as hexagonal elements (for the purpose of mass spreading)
+    logical :: ignore_missing_restart_bergs=.False. ! True Allows the model to ignore icebergs missing in the restart.
+    logical :: Static_icebergs=.False. ! True= icebergs do no move
+    logical :: only_interactive_forces=.False. ! Icebergs only feel interactive forces, and not ocean, wind...
+    logical :: halo_debugging=.False. ! Use for debugging halos (remove when its working)
+    logical :: save_short_traj=.True. ! True saves only lon,lat,time,id in iceberg_trajectory.nc
+    logical :: ignore_traj=.False. ! If true, then model does not traj trajectory data at all
+    logical :: iceberg_bonds_on=.False. ! True=Allow icebergs to have bonds, False=don't allow.
+    logical :: manually_initialize_bonds=.False. ! True= Bonds are initialize manually.
+    logical :: use_new_predictive_corrective =.False. ! Flag to use Bob's predictive corrective iceberg scheme- Added by Alon
+    logical :: interactive_icebergs_on=.false. ! Turn on/off interactions between icebergs  - Added by Alon
+    logical :: critical_interaction_damping_on=.true. ! Sets the damping on relative iceberg velocity to critical value - Added by Alon
+    logical :: do_unit_tests=.false. ! Conduct some unit tests
+    logical :: input_freq_distribution=.false. ! Flag to show if input distribution is freq or mass dist (=1 if input is a freq dist, =0 to use an input mass dist)
+    logical :: read_old_restarts=.false. ! Legacy option that does nothing
+    logical :: use_old_spreading=.true. ! If true, spreads iceberg mass as if the berg is one grid cell wide
+    logical :: read_ocean_depth_from_file=.false. ! If true, ocean depth is read from a file.
+    real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
+    real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim) ,
+    real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
+    real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
+    integer(kind=8) :: debug_iceberg_with_id = -1 ! If positive, monitors a berg with this id
 
-namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,Static_icebergs,  &
+    namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,Static_icebergs,  &
          distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef, radial_damping_coef, tangental_damping_coef, only_interactive_forces, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, iceberg_bonds_on, manually_initialize_bonds, ignore_missing_restart_bergs, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, halo_debugging, hexagonal_icebergs, &
@@ -573,561 +573,598 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          const_gamma, Gamma_T_3EQ, ignore_traj, debug_iceberg_with_id,use_updated_rolling_scheme, tip_parameter, read_old_restarts, tau_calving, read_ocean_depth_from_file, melt_cutoff,&
          apply_thickness_cutoff_to_gridded_melt, apply_thickness_cutoff_to_bergs_melt, use_mixed_melting, coastal_drift, tidal_drift
 
-! Local variables
-integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
-type(icebergs_gridded), pointer :: grd
-real :: lon_mod, big_number
-logical :: lerr
-integer :: stdlogunit, stderrunit
-real :: Total_mass  !Added by Alon
+    ! Local variables
+    integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
+    type(icebergs_gridded), pointer :: grd
+    real :: lon_mod, big_number
+    logical :: lerr
+    integer :: stdlogunit, stderrunit
+    real :: Total_mass  !Added by Alon
 
-  ! Get the stderr and stdlog unit numbers
-  stderrunit=stderr()
-  stdlogunit=stdlog()
-  write(stdlogunit,*) "ice_bergs_framework: "//trim(version)
+    ! Get the stderr and stdlog unit numbers
+    stderrunit=stderr()
+    stdlogunit=stdlog()
+    write(stdlogunit,*) "ice_bergs_framework: "//trim(version)
 
-! Read namelist parameters
- !write(stderrunit,*) 'diamonds: reading namelist'
+    ! Read namelist parameters
+    !write(stderrunit,*) 'diamonds: reading namelist'
 #ifdef INTERNAL_FILE_NML
-  read (input_nml_file, nml=icebergs_nml, iostat=ierr)
+    read (input_nml_file, nml=icebergs_nml, iostat=ierr)
 #else
-  iunit = open_namelist_file()
-  read  (iunit, icebergs_nml,iostat=ierr)
-  call close_file (iunit)
+    iunit = open_namelist_file()
+    read  (iunit, icebergs_nml,iostat=ierr)
+    call close_file (iunit)
 #endif
-  ierr = check_nml_error(ierr,'icebergs_nml')
+    ierr = check_nml_error(ierr,'icebergs_nml')
 
-  if (really_debug) debug=.true. ! One implies the other...
+    if (really_debug) debug=.true. ! One implies the other...
 
-  write (stdlogunit, icebergs_nml)
-
-
-! Allocate overall structure
- !write(stderrunit,*) 'diamonds: allocating bergs'
-  allocate(bergs)
-  allocate(bergs%grd)
-  grd=>bergs%grd ! For convenience to avoid bergs%grd%X
- !write(stderrunit,*) 'diamonds: allocating domain'
-  allocate(grd%domain)
-
-! Clocks
-  bergs%clock=mpp_clock_id( 'Icebergs', flags=clock_flag_default, grain=CLOCK_COMPONENT )
-  bergs%clock_mom=mpp_clock_id( 'Icebergs-momentum', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-  bergs%clock_the=mpp_clock_id( 'Icebergs-thermodyn', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-  bergs%clock_int=mpp_clock_id( 'Icebergs-interface', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-  bergs%clock_cal=mpp_clock_id( 'Icebergs-calving', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-  bergs%clock_com=mpp_clock_id( 'Icebergs-communication', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-  bergs%clock_ini=mpp_clock_id( 'Icebergs-initialization', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-  bergs%clock_ior=mpp_clock_id( 'Icebergs-I/O read', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-  bergs%clock_iow=mpp_clock_id( 'Icebergs-I/O write', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-  bergs%clock_dia=mpp_clock_id( 'Icebergs-diagnostics', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-
-  call mpp_clock_begin(bergs%clock)
-  call mpp_clock_begin(bergs%clock_ini)
-
-! Set up iceberg domain
- !write(stderrunit,*) 'diamonds: defining domain'
-  call mpp_define_domains( (/1,gni,1,gnj/), layout, grd%domain, &
-                           maskmap=maskmap, &
-                           xflags=dom_x_flags, xhalo=halo,  &
-                           yflags=dom_y_flags, yhalo=halo, name='diamond')
-
-  call mpp_define_io_domain(grd%domain, io_layout)
-
- !write(stderrunit,*) 'diamond: get compute domain'
-  call mpp_get_compute_domain( grd%domain, grd%isc, grd%iec, grd%jsc, grd%jec )
-  call mpp_get_data_domain( grd%domain, grd%isd, grd%ied, grd%jsd, grd%jed )
-  call mpp_get_global_domain( grd%domain, grd%isg, grd%ieg, grd%jsg, grd%jeg )
-
-  call mpp_get_neighbor_pe(grd%domain, NORTH, grd%pe_N)
-  call mpp_get_neighbor_pe(grd%domain, SOUTH, grd%pe_S)
-  call mpp_get_neighbor_pe(grd%domain, EAST, grd%pe_E)
-  call mpp_get_neighbor_pe(grd%domain, WEST, grd%pe_W)
+    write (stdlogunit, icebergs_nml)
 
 
-  folded_north_on_pe = ((dom_y_flags == FOLD_NORTH_EDGE) .and. (grd%jec == gnj))
- !write(stderrunit,'(a,6i4)') 'diamonds, icebergs_init: pe,n,s,e,w =',mpp_pe(),grd%pe_N,grd%pe_S,grd%pe_E,grd%pe_W, NULL_PE
+    ! Allocate overall structure
+    !write(stderrunit,*) 'diamonds: allocating bergs'
+    allocate(bergs)
+    allocate(bergs%grd)
+    grd=>bergs%grd ! For convenience to avoid bergs%grd%X
+    !write(stderrunit,*) 'diamonds: allocating domain'
+    allocate(grd%domain)
 
- !if (verbose) &
- !write(stderrunit,'(a,i3,a,4i4,a,4f8.2)') 'diamonds, icebergs_init: (',mpp_pe(),') [ij][se]c=', &
- !     grd%isc,grd%iec,grd%jsc,grd%jec, &
- !     ' [lon|lat][min|max]=', minval(ice_lon),maxval(ice_lon),minval(ice_lat),maxval(ice_lat)
- !write(stderrunit,*) 'diamonds, int args = ', mpp_pe(),gni, gnj, layout, axes
+    ! Clocks
+    bergs%clock=mpp_clock_id( 'Icebergs', flags=clock_flag_default, grain=CLOCK_COMPONENT )
+    bergs%clock_mom=mpp_clock_id( 'Icebergs-momentum', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+    bergs%clock_the=mpp_clock_id( 'Icebergs-thermodyn', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+    bergs%clock_int=mpp_clock_id( 'Icebergs-interface', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+    bergs%clock_cal=mpp_clock_id( 'Icebergs-calving', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+    bergs%clock_com=mpp_clock_id( 'Icebergs-communication', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+    bergs%clock_ini=mpp_clock_id( 'Icebergs-initialization', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+    bergs%clock_ior=mpp_clock_id( 'Icebergs-I/O read', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+    bergs%clock_iow=mpp_clock_id( 'Icebergs-I/O write', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+    bergs%clock_dia=mpp_clock_id( 'Icebergs-diagnostics', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
 
- ! Allocate grid of pointers
-  allocate( bergs%list(grd%isd:grd%ied, grd%jsd:grd%jed) )
-  do j = grd%jsd,grd%jed ; do i = grd%isd,grd%ied
-    bergs%list(i,j)%first => null()
-  enddo ; enddo
+    call mpp_clock_begin(bergs%clock)
+    call mpp_clock_begin(bergs%clock_ini)
 
-  big_number=1.0E15
- !write(stderrunit,*) 'diamonds: allocating grid'
-  allocate( grd%lon(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%lon(:,:)=big_number
-  allocate( grd%lat(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%lat(:,:)=big_number
-  allocate( grd%lonc(grd%isd:grd%ied, grd%jsd:grd%jed) );grd%lon(:,:)=big_number
-  allocate( grd%latc(grd%isd:grd%ied, grd%jsd:grd%jed) );grd%lat(:,:)=big_number
-  allocate( grd%dx(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%dx(:,:)=0.
-  allocate( grd%dy(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%dy(:,:)=0.
-  allocate( grd%area(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%area(:,:)=0.
-  allocate( grd%msk(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%msk(:,:)=0.
-  allocate( grd%cos(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%cos(:,:)=1.
-  allocate( grd%sin(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%sin(:,:)=0.
-  allocate( grd%ocean_depth(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%ocean_depth(:,:)=0.
-  allocate( grd%calving(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%calving(:,:)=0.
-  allocate( grd%calving_hflx(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%calving_hflx(:,:)=0.
-  allocate( grd%stored_heat(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%stored_heat(:,:)=0.
-  allocate( grd%floating_melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%floating_melt(:,:)=0.
-  allocate( grd%berg_melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%berg_melt(:,:)=0.
-  allocate( grd%melt_buoy(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%melt_buoy(:,:)=0.
-  allocate( grd%melt_eros(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%melt_eros(:,:)=0.
-  allocate( grd%melt_conv(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%melt_conv(:,:)=0.
-  allocate( grd%bergy_src(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_src(:,:)=0.
-  allocate( grd%bergy_melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_melt(:,:)=0.
-  allocate( grd%bergy_mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_mass(:,:)=0.
-  allocate( grd%spread_mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_mass(:,:)=0.
-  allocate( grd%spread_mass_old(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_mass_old(:,:)=0.
-  allocate( grd%spread_area(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_area(:,:)=0.
-  allocate( grd%u_iceberg(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%u_iceberg(:,:)=0.
-  allocate( grd%v_iceberg(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%v_iceberg(:,:)=0.
-  allocate( grd%spread_uvel(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_uvel(:,:)=0.
-  allocate( grd%spread_vvel(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_vvel(:,:)=0.
-  allocate( grd%ustar_iceberg(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%ustar_iceberg(:,:)=0.
-  allocate( grd%virtual_area(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%virtual_area(:,:)=0.
-  allocate( grd%mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%mass(:,:)=0.
-  allocate( grd%mass_on_ocean(grd%isd:grd%ied, grd%jsd:grd%jed, 9) ); grd%mass_on_ocean(:,:,:)=0.
-  allocate( grd%area_on_ocean(grd%isd:grd%ied, grd%jsd:grd%jed, 9) ); grd%area_on_ocean(:,:,:)=0.
-  allocate( grd%Uvel_on_ocean(grd%isd:grd%ied, grd%jsd:grd%jed, 9) ); grd%Uvel_on_ocean(:,:,:)=0.
-  allocate( grd%Vvel_on_ocean(grd%isd:grd%ied, grd%jsd:grd%jed, 9) ); grd%Vvel_on_ocean(:,:,:)=0.
-  allocate( grd%stored_ice(grd%isd:grd%ied, grd%jsd:grd%jed, nclasses) ); grd%stored_ice(:,:,:)=0.
-  allocate( grd%rmean_calving(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%rmean_calving(:,:)=0.
-  allocate( grd%rmean_calving_hflx(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%rmean_calving_hflx(:,:)=0.
-  allocate( grd%real_calving(grd%isd:grd%ied, grd%jsd:grd%jed, nclasses) ); grd%real_calving(:,:,:)=0.
-  allocate( grd%uo(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%uo(:,:)=0.
-  allocate( grd%vo(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%vo(:,:)=0.
-  allocate( grd%ui(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%ui(:,:)=0.
-  allocate( grd%vi(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%vi(:,:)=0.
-  allocate( grd%ua(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%ua(:,:)=0.
-  allocate( grd%va(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%va(:,:)=0.
-  allocate( grd%ssh(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%ssh(:,:)=0.
-  allocate( grd%sst(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%sst(:,:)=0.
-  allocate( grd%sss(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%sss(:,:)=0.
-  allocate( grd%cn(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%cn(:,:)=0.
-  allocate( grd%hi(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%hi(:,:)=0.
-  allocate( grd%tmp(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%tmp(:,:)=0.
-  allocate( grd%tmpc(grd%isc:grd%iec, grd%jsc:grd%jec) ); grd%tmpc(:,:)=0.
-  allocate( bergs%nbergs_calved_by_class(nclasses) ); bergs%nbergs_calved_by_class(:)=0
-  allocate( grd%parity_x(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_x(:,:)=1.
-  allocate( grd%parity_y(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_y(:,:)=1.
-  allocate( grd%iceberg_counter_grd(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%iceberg_counter_grd(:,:)=0
+    ! Set up iceberg domain
+    !write(stderrunit,*) 'diamonds: defining domain'
+    call mpp_define_domains( (/1,gni,1,gnj/), layout, grd%domain, &
+         maskmap=maskmap, &
+         xflags=dom_x_flags, xhalo=halo,  &
+         yflags=dom_y_flags, yhalo=halo, name='diamond')
 
- !write(stderrunit,*) 'diamonds: copying grid'
-  ! Copy data declared on ice model computational domain
-  is=grd%isc; ie=grd%iec; js=grd%jsc; je=grd%jec
-  grd%lon(is:ie,js:je)=ice_lon(:,:)
-  grd%lat(is:ie,js:je)=ice_lat(:,:)
-  grd%area(is:ie,js:je)=ice_area(:,:) !sis2 has *(4.*pi*radius*radius)
+    call mpp_define_io_domain(grd%domain, io_layout)
 
-  !!!!!!!!!!!!!!!debugging!!!!!!!!!!!!!!!!!!
-  !if (mpp_pe().eq.5) then
-  ! write(stderrunit,'(a3,32i7)') 'LB',(i,i=grd%isd,grd%ied)
-  ! do j=grd%jed,grd%jsd,-1
-  !   write(stderrunit,'(i3,32f7.1)') j,(grd%lon(i,j),i=grd%isd,grd%ied)
-  ! enddo
-  ! write(stderrunit,'(a3,32i7)') 'Ice lon',(i,i=grd%isd,grd%ied)
-  ! do j=grd%jed,grd%jsd,-1
-  !   write(stderrunit,'(i3,32f7.1)') j,(ice_lon(i,j),i=grd%isd,grd%ied)
-  ! enddo
-  ! write(stderrunit,'(a3,32i7)') 'LA',(i,i=grd%isd,grd%ied)
-  ! do j=grd%jed,grd%jsd,-1
-  !   write(stderrunit,'(i3,32f7.1)') j,(grd%lon(i,j),i=grd%isd,grd%ied)
-  ! enddo
-  !endif
-  !!!!!!!!!!!!!!!debugging!!!!!!!!!!!!!!!!!!
+    !write(stderrunit,*) 'diamond: get compute domain'
+    call mpp_get_compute_domain( grd%domain, grd%isc, grd%iec, grd%jsc, grd%jec )
+    call mpp_get_data_domain( grd%domain, grd%isd, grd%ied, grd%jsd, grd%jed )
+    call mpp_get_global_domain( grd%domain, grd%isg, grd%ieg, grd%jsg, grd%jeg )
 
-  !For SIS not to change answers
-  if(present(fractional_area)) then
-    if(fractional_area) grd%area(is:ie,js:je)=ice_area(:,:) *(4.*pi*radius*radius)
-  endif
-  if(present(ocean_depth)) grd%ocean_depth(is:ie,js:je)=ocean_depth(:,:)
+    call mpp_get_neighbor_pe(grd%domain, NORTH, grd%pe_N)
+    call mpp_get_neighbor_pe(grd%domain, SOUTH, grd%pe_S)
+    call mpp_get_neighbor_pe(grd%domain, EAST, grd%pe_E)
+    call mpp_get_neighbor_pe(grd%domain, WEST, grd%pe_W)
 
-  ! Copy data declared on ice model data domain
-  is=grd%isc-1; ie=grd%iec+1; js=grd%jsc-1; je=grd%jec+1
-  grd%dx(is:ie,js:je)=ice_dx(:,:)
-  grd%dy(is:ie,js:je)=ice_dy(:,:)
-  grd%msk(is:ie,js:je)=ice_wet(:,:)
-  grd%cos(is:ie,js:je)=cos_rot(:,:)
-  grd%sin(is:ie,js:je)=sin_rot(:,:)
 
-  call mpp_update_domains(grd%lon, grd%domain, position=CORNER)
-  call mpp_update_domains(grd%lat, grd%domain, position=CORNER)
-  call mpp_update_domains(grd%dy, grd%dx, grd%domain, gridtype=CGRID_NE, flags=SCALAR_PAIR)
-  call mpp_update_domains(grd%area, grd%domain)
-  call mpp_update_domains(grd%msk, grd%domain)
-  call mpp_update_domains(grd%cos, grd%domain, position=CORNER)
-  call mpp_update_domains(grd%sin, grd%domain, position=CORNER)
-  call mpp_update_domains(grd%ocean_depth, grd%domain)
-  call mpp_update_domains(grd%parity_x, grd%parity_y, grd%domain, gridtype=AGRID) ! If either parity_x/y is -ve, we need rotation of vectors
+    folded_north_on_pe = ((dom_y_flags == FOLD_NORTH_EDGE) .and. (grd%jec == gnj))
+    !write(stderrunit,'(a,6i4)') 'diamonds, icebergs_init: pe,n,s,e,w =',mpp_pe(),grd%pe_N,grd%pe_S,grd%pe_E,grd%pe_W, NULL_PE
 
-  ! Sanitize lon and lat in the southern halo
-  do j=grd%jsc-1,grd%jsd,-1; do i=grd%isd,grd%ied
-      if (grd%lon(i,j).ge.big_number) grd%lon(i,j)=grd%lon(i,j+1)
-      if (grd%lat(i,j).ge.big_number) grd%lat(i,j)=2.*grd%lat(i,j+1)-grd%lat(i,j+2)
-  enddo; enddo
+    !if (verbose) &
+    !write(stderrunit,'(a,i3,a,4i4,a,4f8.2)') 'diamonds, icebergs_init: (',mpp_pe(),') [ij][se]c=', &
+    !     grd%isc,grd%iec,grd%jsc,grd%jec, &
+    !     ' [lon|lat][min|max]=', minval(ice_lon),maxval(ice_lon),minval(ice_lat),maxval(ice_lat)
+    !write(stderrunit,*) 'diamonds, int args = ', mpp_pe(),gni, gnj, layout, axes
 
-  ! fix halos on edge of the domain
-  !1) South
-  do j=grd%jsc-1,grd%jsd,-1; do i=grd%isd,grd%ied
-      if (grd%lon(i,j).ge.big_number) grd%lon(i,j)=2.*grd%lon(i,j+1)-grd%lon(i,j+2)
-      if (grd%lat(i,j).ge.big_number) grd%lat(i,j)=2.*grd%lat(i,j+1)-grd%lat(i,j+2)
-  enddo; enddo
-  !2) North
-  do j=grd%jec+1,grd%jed; do i=grd%isd,grd%ied
-      if (grd%lon(i,j).ge.big_number) grd%lon(i,j)=2.*grd%lon(i,j-1)-grd%lon(i,j-2)
-      if (grd%lat(i,j).ge.big_number) grd%lat(i,j)=2.*grd%lat(i,j-1)-grd%lat(i,j-2)
-  enddo; enddo
-  !3) West
-  do i=grd%isc-1,grd%isd,-1; do j=grd%jsd,grd%jed
-      if (grd%lon(i,j).ge.big_number) grd%lon(i,j)=2.*grd%lon(i+1,j)-grd%lon(i+2,j)
-      if (grd%lat(i,j).ge.big_number) grd%lat(i,j)=2.*grd%lat(i+1,j)-grd%lat(i+2,j)
-  enddo; enddo
-  !4) East
-  do i=grd%iec+1,grd%ied; do j=grd%jsd,grd%jed
-      if (grd%lon(i,j).ge.big_number) grd%lon(i,j)=2.*grd%lon(i-1,j)-grd%lon(i-2,j)
-      if (grd%lat(i,j).ge.big_number) grd%lat(i,j)=2.*grd%lat(i-1,j)-grd%lat(i-2,j)
-  enddo; enddo
-
-  if (.not. present(maskmap)) then ! Using a maskmap causes tickles this sanity check
-    do j=grd%jsd,grd%jed; do i=grd%isd,grd%ied
-      !if (grd%lon(i,j).ge.big_number) write(stderrunit,*) 'bad lon: ',mpp_pe(),i-grd%isc+1,j-grd%jsc+1,grd%lon(i,j)
-      !if (grd%lat(i,j).ge.big_number) write(stderrunit,*) 'bad lat: ',mpp_pe(),i-grd%isc+1,j-grd%jsc+1,grd%lat(i,j)
+    ! Allocate grid of pointers
+    allocate( bergs%list(grd%isd:grd%ied, grd%jsd:grd%jed) )
+    do j = grd%jsd,grd%jed ; do i = grd%isd,grd%ied
+       bergs%list(i,j)%first => null()
     enddo; enddo
-  endif
 
-  if ((Lx.gt.1E15 ) .and. (mpp_pe().eq.mpp_root_pe())) then
-          call error_mesg('diamonds, framework', 'Model does not enjoy the domain being larger than 1E15. Not sure why. Probably to do with floating point precision.', WARNING)
-  endif
-  if ((.not. grid_is_latlon) .and. (Lx.eq.360.)) then
-    if (mpp_pe().eq.mpp_root_pe())  then
-            call error_mesg('diamonds, framework', 'Since the lat/lon grid is off, the x-direction is being set as non-periodic. Set Lx not equal to 360 override.', WARNING)
+    big_number=1.0E15
+    !write(stderrunit,*) 'diamonds: allocating grid'
+    allocate( grd%lon(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%lon(:,:)=big_number
+    allocate( grd%lat(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%lat(:,:)=big_number
+    allocate( grd%lonc(grd%isd:grd%ied, grd%jsd:grd%jed) );grd%lon(:,:)=big_number
+    allocate( grd%latc(grd%isd:grd%ied, grd%jsd:grd%jed) );grd%lat(:,:)=big_number
+    allocate( grd%dx(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%dx(:,:)=0.
+    allocate( grd%dy(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%dy(:,:)=0.
+    allocate( grd%area(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%area(:,:)=0.
+    allocate( grd%msk(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%msk(:,:)=0.
+    allocate( grd%cos(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%cos(:,:)=1.
+    allocate( grd%sin(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%sin(:,:)=0.
+    allocate( grd%ocean_depth(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%ocean_depth(:,:)=0.
+    allocate( grd%calving(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%calving(:,:)=0.
+    allocate( grd%calving_hflx(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%calving_hflx(:,:)=0.
+    allocate( grd%stored_heat(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%stored_heat(:,:)=0.
+    allocate( grd%floating_melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%floating_melt(:,:)=0.
+    allocate( grd%berg_melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%berg_melt(:,:)=0.
+    allocate( grd%melt_buoy(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%melt_buoy(:,:)=0.
+    allocate( grd%melt_eros(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%melt_eros(:,:)=0.
+    allocate( grd%melt_conv(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%melt_conv(:,:)=0.
+    allocate( grd%bergy_src(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_src(:,:)=0.
+    allocate( grd%bergy_melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_melt(:,:)=0.
+    allocate( grd%bergy_mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_mass(:,:)=0.
+    allocate( grd%spread_mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_mass(:,:)=0.
+    allocate( grd%spread_mass_old(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_mass_old(:,:)=0.
+    allocate( grd%spread_area(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_area(:,:)=0.
+    allocate( grd%u_iceberg(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%u_iceberg(:,:)=0.
+    allocate( grd%v_iceberg(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%v_iceberg(:,:)=0.
+    allocate( grd%spread_uvel(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_uvel(:,:)=0.
+    allocate( grd%spread_vvel(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_vvel(:,:)=0.
+    allocate( grd%ustar_iceberg(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%ustar_iceberg(:,:)=0.
+    allocate( grd%virtual_area(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%virtual_area(:,:)=0.
+    allocate( grd%mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%mass(:,:)=0.
+    allocate( grd%mass_on_ocean(grd%isd:grd%ied, grd%jsd:grd%jed, 9) ); grd%mass_on_ocean(:,:,:)=0.
+    allocate( grd%area_on_ocean(grd%isd:grd%ied, grd%jsd:grd%jed, 9) ); grd%area_on_ocean(:,:,:)=0.
+    allocate( grd%Uvel_on_ocean(grd%isd:grd%ied, grd%jsd:grd%jed, 9) ); grd%Uvel_on_ocean(:,:,:)=0.
+    allocate( grd%Vvel_on_ocean(grd%isd:grd%ied, grd%jsd:grd%jed, 9) ); grd%Vvel_on_ocean(:,:,:)=0.
+    allocate( grd%stored_ice(grd%isd:grd%ied, grd%jsd:grd%jed, nclasses) ); grd%stored_ice(:,:,:)=0.
+    allocate( grd%rmean_calving(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%rmean_calving(:,:)=0.
+    allocate( grd%rmean_calving_hflx(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%rmean_calving_hflx(:,:)=0.
+    allocate( grd%real_calving(grd%isd:grd%ied, grd%jsd:grd%jed, nclasses) ); grd%real_calving(:,:,:)=0.
+    allocate( grd%uo(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%uo(:,:)=0.
+    allocate( grd%vo(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%vo(:,:)=0.
+    allocate( grd%ui(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%ui(:,:)=0.
+    allocate( grd%vi(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%vi(:,:)=0.
+    allocate( grd%ua(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%ua(:,:)=0.
+    allocate( grd%va(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%va(:,:)=0.
+    allocate( grd%ssh(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%ssh(:,:)=0.
+    allocate( grd%sst(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%sst(:,:)=0.
+    allocate( grd%sss(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%sss(:,:)=0.
+    allocate( grd%cn(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%cn(:,:)=0.
+    allocate( grd%hi(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%hi(:,:)=0.
+    allocate( grd%tmp(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%tmp(:,:)=0.
+    allocate( grd%tmpc(grd%isc:grd%iec, grd%jsc:grd%jec) ); grd%tmpc(:,:)=0.
+    allocate( bergs%nbergs_calved_by_class(nclasses) ); bergs%nbergs_calved_by_class(:)=0
+    allocate( grd%parity_x(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_x(:,:)=1.
+    allocate( grd%parity_y(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_y(:,:)=1.
+    allocate( grd%iceberg_counter_grd(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%iceberg_counter_grd(:,:)=0
+
+    !write(stderrunit,*) 'diamonds: copying grid'
+    ! Copy data declared on ice model computational domain
+    is=grd%isc; ie=grd%iec; js=grd%jsc; je=grd%jec
+    grd%lon(is:ie,js:je)=ice_lon(:,:)
+    grd%lat(is:ie,js:je)=ice_lat(:,:)
+    grd%area(is:ie,js:je)=ice_area(:,:) !sis2 has *(4.*pi*radius*radius)
+
+!!!!!!!!!!!!!!!debugging!!!!!!!!!!!!!!!!!!
+    !if (mpp_pe().eq.5) then
+    ! write(stderrunit,'(a3,32i7)') 'LB',(i,i=grd%isd,grd%ied)
+    ! do j=grd%jed,grd%jsd,-1
+    !   write(stderrunit,'(i3,32f7.1)') j,(grd%lon(i,j),i=grd%isd,grd%ied)
+    ! enddo
+    ! write(stderrunit,'(a3,32i7)') 'Ice lon',(i,i=grd%isd,grd%ied)
+    ! do j=grd%jed,grd%jsd,-1
+    !   write(stderrunit,'(i3,32f7.1)') j,(ice_lon(i,j),i=grd%isd,grd%ied)
+    ! enddo
+    ! write(stderrunit,'(a3,32i7)') 'LA',(i,i=grd%isd,grd%ied)
+    ! do j=grd%jed,grd%jsd,-1
+    !   write(stderrunit,'(i3,32f7.1)') j,(grd%lon(i,j),i=grd%isd,grd%ied)
+    ! enddo
+    !endif
+!!!!!!!!!!!!!!!debugging!!!!!!!!!!!!!!!!!!
+
+    !For SIS not to change answers
+    if(present(fractional_area)) then
+       if(fractional_area) grd%area(is:ie,js:je)=ice_area(:,:) *(4.*pi*radius*radius)
     endif
-    Lx=-1.
-  endif
+    if(present(ocean_depth)) grd%ocean_depth(is:ie,js:je)=ocean_depth(:,:)
+
+    ! Copy data declared on ice model data domain
+    is=grd%isc-1; ie=grd%iec+1; js=grd%jsc-1; je=grd%jec+1
+    grd%dx(is:ie,js:je)=ice_dx(:,:)
+    grd%dy(is:ie,js:je)=ice_dy(:,:)
+    grd%msk(is:ie,js:je)=ice_wet(:,:)
+    grd%cos(is:ie,js:je)=cos_rot(:,:)
+    grd%sin(is:ie,js:je)=sin_rot(:,:)
+
+    call mpp_update_domains(grd%lon, grd%domain, position=CORNER)
+    call mpp_update_domains(grd%lat, grd%domain, position=CORNER)
+    call mpp_update_domains(grd%dy, grd%dx, grd%domain, gridtype=CGRID_NE, flags=SCALAR_PAIR)
+    call mpp_update_domains(grd%area, grd%domain)
+    call mpp_update_domains(grd%msk, grd%domain)
+    call mpp_update_domains(grd%cos, grd%domain, position=CORNER)
+    call mpp_update_domains(grd%sin, grd%domain, position=CORNER)
+    call mpp_update_domains(grd%ocean_depth, grd%domain)
+    call mpp_update_domains(grd%parity_x, grd%parity_y, grd%domain, gridtype=AGRID) ! If either parity_x/y is -ve, we need rotation of vectors
+
+    ! Sanitize lon and lat in the southern halo
+    do j=grd%jsc-1,grd%jsd,-1; do i=grd%isd,grd%ied
+       if (grd%lon(i,j).ge.big_number) grd%lon(i,j)=grd%lon(i,j+1)
+       if (grd%lat(i,j).ge.big_number) grd%lat(i,j)=2.*grd%lat(i,j+1)-grd%lat(i,j+2)
+    enddo; enddo
+
+    ! fix halos on edge of the domain
+    !1) South
+    do j=grd%jsc-1,grd%jsd,-1; do i=grd%isd,grd%ied
+       if (grd%lon(i,j).ge.big_number) grd%lon(i,j)=2.*grd%lon(i,j+1)-grd%lon(i,j+2)
+       if (grd%lat(i,j).ge.big_number) grd%lat(i,j)=2.*grd%lat(i,j+1)-grd%lat(i,j+2)
+    enddo; enddo
+    !2) North
+    do j=grd%jec+1,grd%jed; do i=grd%isd,grd%ied
+       if (grd%lon(i,j).ge.big_number) grd%lon(i,j)=2.*grd%lon(i,j-1)-grd%lon(i,j-2)
+       if (grd%lat(i,j).ge.big_number) grd%lat(i,j)=2.*grd%lat(i,j-1)-grd%lat(i,j-2)
+    enddo; enddo
+    !3) West
+    do i=grd%isc-1,grd%isd,-1; do j=grd%jsd,grd%jed
+       if (grd%lon(i,j).ge.big_number) grd%lon(i,j)=2.*grd%lon(i+1,j)-grd%lon(i+2,j)
+       if (grd%lat(i,j).ge.big_number) grd%lat(i,j)=2.*grd%lat(i+1,j)-grd%lat(i+2,j)
+    enddo; enddo
+    !4) East
+    do i=grd%iec+1,grd%ied; do j=grd%jsd,grd%jed
+       if (grd%lon(i,j).ge.big_number) grd%lon(i,j)=2.*grd%lon(i-1,j)-grd%lon(i-2,j)
+       if (grd%lat(i,j).ge.big_number) grd%lat(i,j)=2.*grd%lat(i-1,j)-grd%lat(i-2,j)
+    enddo; enddo
 
 
- !The fix to reproduce across PE layout change, from AJA
-  if (Lx>0.) then
-    j=grd%jsc; do i=grd%isc+1,grd%ied
-      lon_mod = apply_modulo_around_point(grd%lon(i,j),grd%lon(i-1,j),Lx)
-      if (abs(grd%lon(i,j)-lon_mod)>(Lx/2.)) &
-        grd%lon(i,j)= lon_mod
+    if (mpp_pe() == 0) then
+       print *,'before'
+       print *,'grd%lon(:,1)',grd%lon(:,grd%jsd)
+       ! print *,''
+       ! print *,'grd%lat(:,1)',grd%lat(:,grd%jsd)
+       ! print *,''
+       ! print *,'grd%lon(1,:)',grd%lon(grd%isd,:)
+       ! print *,''
+       ! print *,'grd%lat(1,:)',grd%lat(grd%isd,:)
+       ! print *,''
+    end if
+
+
+    if (.not. present(maskmap)) then ! Using a maskmap causes tickles this sanity check
+       do j=grd%jsd,grd%jed; do i=grd%isd,grd%ied
+          !if (grd%lon(i,j).ge.big_number) write(stderrunit,*) 'bad lon: ',mpp_pe(),i-grd%isc+1,j-grd%jsc+1,grd%lon(i,j)
+          !if (grd%lat(i,j).ge.big_number) write(stderrunit,*) 'bad lat: ',mpp_pe(),i-grd%isc+1,j-grd%jsc+1,grd%lat(i,j)
+       enddo; enddo
+    endif
+
+    if ((Lx.gt.1E15 ) .and. (mpp_pe().eq.mpp_root_pe())) then
+       call error_mesg('diamonds, framework', 'Model does not enjoy the domain being larger than 1E15. Not sure why. Probably to do with floating point precision.', WARNING)
+    endif
+    if ((.not. grid_is_latlon) .and. (Lx.eq.360.)) then
+       if (mpp_pe().eq.mpp_root_pe())  then
+          call error_mesg('diamonds, framework', 'Since the lat/lon grid is off, the x-direction is being set as non-periodic. Set Lx not equal to 360 override.', WARNING)
+       endif
+       Lx=-1.
+    endif
+
+
+    !The fix to reproduce across PE layout change, from AJA
+    if (Lx>0.) then
+       j=grd%jsc; do i=grd%isc+1,grd%ied
+       lon_mod = apply_modulo_around_point(grd%lon(i,j),grd%lon(i-1,j),Lx)
+       if (abs(grd%lon(i,j)-lon_mod)>(Lx/2.)) &
+            grd%lon(i,j)= lon_mod
     enddo
     j=grd%jsc; do i=grd%isc-1,grd%isd,-1
-      lon_mod = apply_modulo_around_point(grd%lon(i,j),grd%lon(i+1,j) ,Lx)
-      if (abs(grd%lon(i,j)-  lon_mod )>(Lx/2.)) &
-        grd%lon(i,j)= lon_mod
-    enddo
-    do j=grd%jsc+1,grd%jed; do i=grd%isd,grd%ied
-      lon_mod = apply_modulo_around_point(grd%lon(i,j),grd%lon(i,j-1) ,Lx)
-      if (abs(grd%lon(i,j)-(lon_mod ))>(Lx/2.)) &
-        grd%lon(i,j)= lon_mod
-    enddo; enddo
-    do j=grd%jsc-1,grd%jsd,-1; do i=grd%isd,grd%ied
-      lon_mod = apply_modulo_around_point(grd%lon(i,j),grd%lon(i,j+1) ,Lx)
-      if (abs(grd%lon(i,j)- lon_mod )>(Lx/2.)) &
-        grd%lon(i,j)=  lon_mod
-    enddo; enddo
-  endif
+    lon_mod = apply_modulo_around_point(grd%lon(i,j),grd%lon(i+1,j) ,Lx)
+    if (abs(grd%lon(i,j)-  lon_mod )>(Lx/2.)) &
+         grd%lon(i,j)= lon_mod
+ enddo
+ do j=grd%jsc+1,grd%jed; do i=grd%isd,grd%ied
+    lon_mod = apply_modulo_around_point(grd%lon(i,j),grd%lon(i,j-1) ,Lx)
+    if (abs(grd%lon(i,j)-(lon_mod ))>(Lx/2.)) &
+         grd%lon(i,j)= lon_mod
+ enddo; enddo
+ do j=grd%jsc-1,grd%jsd,-1; do i=grd%isd,grd%ied
+    lon_mod = apply_modulo_around_point(grd%lon(i,j),grd%lon(i,j+1) ,Lx)
+    if (abs(grd%lon(i,j)- lon_mod )>(Lx/2.)) &
+         grd%lon(i,j)=  lon_mod
+ enddo; enddo
+endif
 
 
+! lonc, latc used for searches
+do j=grd%jsd+1,grd%jed; do i=grd%isd+1,grd%ied
+ grd%lonc(i,j)=0.25*( (grd%lon(i,j)+grd%lon(i-1,j-1)) &
+      +(grd%lon(i-1,j)+grd%lon(i,j-1)) )
+ grd%latc(i,j)=0.25*( (grd%lat(i,j)+grd%lat(i-1,j-1)) &
+      +(grd%lat(i-1,j)+grd%lat(i,j-1)) )
+enddo; enddo
 
-  ! lonc, latc used for searches
-  do j=grd%jsd+1,grd%jed; do i=grd%isd+1,grd%ied
-    grd%lonc(i,j)=0.25*( (grd%lon(i,j)+grd%lon(i-1,j-1)) &
-                        +(grd%lon(i-1,j)+grd%lon(i,j-1)) )
-    grd%latc(i,j)=0.25*( (grd%lat(i,j)+grd%lat(i-1,j-1)) &
-                        +(grd%lat(i-1,j)+grd%lat(i,j-1)) )
-  enddo; enddo
+if (debug) then
+   ! Write(stderrunit,'(a,i3,a,4i4,a,4f8.2)') 'diamonds, icebergs_init: (',mpp_pe(),') [ij][se]c=', &
+   !      grd%isc,grd%iec,grd%jsc,grd%jec, &
+   !      ' [Lon|lat][min|max]=', minval(grd%lon),maxval(grd%lon),minval(grd%lat),maxval(grd%lat)
 
-  if (debug) then
-    write(stderrunit,'(a,i3,a,4i4,a,4f8.2)') 'diamonds, icebergs_init: (',mpp_pe(),') [ij][se]c=', &
-         grd%isc,grd%iec,grd%jsc,grd%jec, &
-         ' [lon|lat][min|max]=', minval(grd%lon),maxval(grd%lon),minval(grd%lat),maxval(grd%lat)
-  endif
 
- !if (mpp_pe().eq.5) then
- !  write(stderrunit,'(a3,32i7)') 'Lon',(i,i=grd%isd,grd%ied)
- !  do j=grd%jed,grd%jsd,-1
- !    write(stderrunit,'(i3,32f7.1)') j,(grd%lon(i,j),i=grd%isd,grd%ied)
- !  enddo
- !  write(stderrunit,'(a3,32i7)') 'Lat',(i,i=grd%isd,grd%ied)
- !  do j=grd%jed,grd%jsd,-1
- !    write(stderrunit,'(i3,32f7.1)') j,(grd%lat(i,j),i=grd%isd,grd%ied)
- !  enddo
- !  write(stderrunit,'(a3,32i7)') 'Msk',(i,i=grd%isd,grd%ied)
- !  do j=grd%jed,grd%jsd,-1
- !    write(stderrunit,'(i3,32f7.1)') j,(grd%msk(i,j),i=grd%isd,grd%ied)
- !  enddo
- !endif
+ Write(stderrunit,'(a,i3,a,4i4)') 'diamonds, icebergs_init: (',mpp_pe(),') [ij][se]c=', &
+      grd%isc,grd%iec,grd%jsc,grd%jec   
+
+ print *,'minval(grd%lon)',minval(grd%lon)
+ print *,'maxval(grd%lon)',maxval(grd%lon)
+ print *,'minval(grd%lat)',minval(grd%lat)
+ print *,'maxval(grd%lat)',maxval(grd%lat)    
+
+ write(stderrunit,'(a,4f10.2)') '[Lon|lat][min|max]=', &
+      minval(grd%lon),maxval(grd%lon),minval(grd%lat),maxval(grd%lat)
+endif
+
+ if (mpp_pe() == 1) then
+    print *,'after'
+    print *,'grd%lon(:,1)',grd%lon(:,grd%jsd)
+    ! print *,''
+    ! print *,'grd%lat(:,1)',grd%lat(:,grd%jsd)
+    ! print *,''
+    ! print *,'grd%lon(1,:)',grd%lon(grd%isd,:)
+    ! print *,''
+    ! print *,'grd%lat(1,:)',grd%lat(grd%isd,:)
+    ! print *,''
+ end if
+
+!if (mpp_pe().eq.5) then
+!  write(stderrunit,'(a3,32i7)') 'Lon',(i,i=grd%isd,grd%ied)
+!  do j=grd%jed,grd%jsd,-1
+!    write(stderrunit,'(i3,32f7.1)') j,(grd%lon(i,j),i=grd%isd,grd%ied)
+!  enddo
+!  write(stderrunit,'(a3,32i7)') 'Lat',(i,i=grd%isd,grd%ied)
+!  do j=grd%jed,grd%jsd,-1
+!    write(stderrunit,'(i3,32f7.1)') j,(grd%lat(i,j),i=grd%isd,grd%ied)
+!  enddo
+!  write(stderrunit,'(a3,32i7)') 'Msk',(i,i=grd%isd,grd%ied)
+!  do j=grd%jed,grd%jsd,-1
+!    write(stderrunit,'(i3,32f7.1)') j,(grd%msk(i,j),i=grd%isd,grd%ied)
+!  enddo
+!endif
 
 ! Final check for NaN's in the latlon grid:
-  do j=grd%jsd+1,grd%jed; do i=grd%isd+1,grd%ied
-    if (grd%lat(i,j) .ne. grd%lat(i,j)) then
-      write(stderrunit,*) 'Lat not defined properly', mpp_pe(),i,j,grd%lat(i,j)
-      call error_mesg('diamonds,grid defining', 'Latitude contains NaNs', FATAL)
-    endif
-    if (grd%lon(i,j) .ne. grd%lon(i,j)) then
-      write(stderrunit,*) 'Lon not defined properly', mpp_pe(),i,j,grd%lon(i,j)
-      call error_mesg('diamonds, grid defining', 'Longatudes contains NaNs', FATAL)
-    endif
-  enddo; enddo
+do j=grd%jsd+1,grd%jed; do i=grd%isd+1,grd%ied
+ if (grd%lat(i,j) .ne. grd%lat(i,j)) then
+    write(stderrunit,*) 'Lat not defined properly', mpp_pe(),i,j,grd%lat(i,j)
+    call error_mesg('diamonds,grid defining', 'Latitude contains NaNs', FATAL)
+ endif
+ if (grd%lon(i,j) .ne. grd%lon(i,j)) then
+    write(stderrunit,*) 'Lon not defined properly', mpp_pe(),i,j,grd%lon(i,j)
+    call error_mesg('diamonds, grid defining', 'Longatudes contains NaNs', FATAL)
+ endif
+enddo; enddo
 
 
 !Added by Alon  - If a freq distribution is input, we have to convert the freq distribution to a mass flux distribution)
 if (input_freq_distribution) then
-     Total_mass=0.
-     do j=1,nclasses
-          Total_mass=Total_mass+(distribution(j)*initial_mass(j))
-     enddo
-     do j=1,nclasses
-           distribution(j)=(distribution(j)*initial_mass(j))/Total_mass
-     enddo
+ Total_mass=0.
+ do j=1,nclasses
+    Total_mass=Total_mass+(distribution(j)*initial_mass(j))
+ enddo
+ do j=1,nclasses
+    distribution(j)=(distribution(j)*initial_mass(j))/Total_mass
+ enddo
 endif
 
 if ((halo .lt. 3) .and. (rotate_icebergs_for_mass_spreading .and. iceberg_bonds_on) )   then
-    halo=3
-    call error_mesg('diamonds, framework', 'Setting iceberg halos =3, since halos must be >= 3 for rotating icebergs for mass spreading', WARNING)
+ halo=3
+ call error_mesg('diamonds, framework', 'Setting iceberg halos =3, since halos must be >= 3 for rotating icebergs for mass spreading', WARNING)
 elseif  ((halo .lt. 2) .and. (interactive_icebergs_on .or. iceberg_bonds_on) )   then
-    halo=2
-    call error_mesg('diamonds, framework', 'Setting iceberg halos =2, since halos must be >= 2 for interactions', WARNING)
+ halo=2
+ call error_mesg('diamonds, framework', 'Setting iceberg halos =2, since halos must be >= 2 for interactions', WARNING)
 endif
 
 if (interactive_icebergs_on) then
-  if (Runge_not_Verlet) then
+ if (Runge_not_Verlet) then
     !Runge_not_Verlet=.false.  ! Iceberg interactions only with Verlet
     call error_mesg('diamonds, framework', 'It is unlcear whther interactive icebergs work with Runge Kutta stepping.', WARNING)
-  endif
+ endif
 endif
 if (.not.interactive_icebergs_on) then
-  if (iceberg_bonds_on) then
+ if (iceberg_bonds_on) then
     !iceberg_bonds_on=.false.
     call error_mesg('diamonds, framework', 'Interactive icebergs off requires iceberg bonds off (turning bonds off).', WARNING)
-  endif
+ endif
 endif
 if (.not. iceberg_bonds_on) then
-   max_bonds=0
+ max_bonds=0
 else
-  buffer_width=buffer_width+(max_bonds*4) ! Increase buffer width to include bonds being passed between processors
+ buffer_width=buffer_width+(max_bonds*4) ! Increase buffer width to include bonds being passed between processors
 endif
 if (save_short_traj) buffer_width_traj=6 ! This is the length of the short buffer used for abrevated traj
 if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files should be ignored
 
 
- ! Parameters
-  bergs%dt=dt
-  bergs%traj_sample_hrs=traj_sample_hrs
-  bergs%traj_write_hrs=traj_write_hrs
-  bergs%save_short_traj=save_short_traj
-  bergs%ignore_traj=ignore_traj
-  bergs%verbose_hrs=verbose_hrs
-  bergs%grd%halo=halo
-  bergs%grd%Lx=Lx
-  bergs%grd%grid_is_latlon=grid_is_latlon
-  bergs%grd%grid_is_regular=grid_is_regular
-  bergs%max_bonds=max_bonds
-  bergs%rho_bergs=rho_bergs
-  bergs%spring_coef=spring_coef
-  bergs%bond_coef=bond_coef
-  bergs%radial_damping_coef=radial_damping_coef
-  bergs%tangental_damping_coef=tangental_damping_coef
-  bergs%LoW_ratio=LoW_ratio
-  bergs%use_operator_splitting=use_operator_splitting
-  bergs%bergy_bit_erosion_fraction=bergy_bit_erosion_fraction
-  bergs%sicn_shift=sicn_shift
-  bergs%passive_mode=passive_mode
-  bergs%time_average_weight=time_average_weight
-  bergs%speed_limit=speed_limit
-  bergs%tau_calving=tau_calving
-  bergs%tip_parameter=tip_parameter
-  bergs%use_updated_rolling_scheme=use_updated_rolling_scheme  !Alon
-  bergs%Runge_not_Verlet=Runge_not_Verlet
-  bergs%use_mixed_melting=use_mixed_melting
-  bergs%apply_thickness_cutoff_to_bergs_melt=apply_thickness_cutoff_to_bergs_melt
-  bergs%apply_thickness_cutoff_to_gridded_melt=apply_thickness_cutoff_to_gridded_melt
-  bergs%melt_cutoff=melt_cutoff
-  bergs%read_ocean_depth_from_file=read_ocean_depth_from_file
-  bergs%const_gamma=const_gamma
-  bergs%Gamma_T_3EQ=Gamma_T_3EQ
-  bergs%pass_fields_to_ocean_model=pass_fields_to_ocean_model
-  bergs%ustar_icebergs_bg=ustar_icebergs_bg
-  bergs%utide_icebergs=utide_icebergs
-  bergs%cdrag_icebergs=cdrag_icebergs
-  bergs%use_mixed_layer_salinity_for_thermo=use_mixed_layer_salinity_for_thermo
-  bergs%find_melt_using_spread_mass=find_melt_using_spread_mass
-  bergs%Use_three_equation_model=Use_three_equation_model
-  bergs%melt_icebergs_as_ice_shelf=melt_icebergs_as_ice_shelf
-  bergs%Iceberg_melt_without_decay=Iceberg_melt_without_decay
-  bergs%add_iceberg_thickness_to_SSH=add_iceberg_thickness_to_SSH
-  bergs%override_iceberg_velocities=override_iceberg_velocities
-  bergs%use_f_plane=use_f_plane
-  bergs%rotate_icebergs_for_mass_spreading=rotate_icebergs_for_mass_spreading
-  bergs%lat_ref=lat_ref
-  bergs%u_override=u_override
-  bergs%v_override=v_override
-  bergs%initial_orientation=initial_orientation
-  bergs%set_melt_rates_to_zero=set_melt_rates_to_zero
-  bergs%allow_bergs_to_roll=allow_bergs_to_roll
-  bergs%hexagonal_icebergs=hexagonal_icebergs
-  bergs%ignore_missing_restart_bergs=ignore_missing_restart_bergs
-  bergs%Static_icebergs=Static_icebergs
-  bergs%only_interactive_forces=only_interactive_forces
-  bergs%halo_debugging=halo_debugging
-  bergs%iceberg_bonds_on=iceberg_bonds_on   !Alon
-  bergs%manually_initialize_bonds=manually_initialize_bonds   !Alon
-  bergs%critical_interaction_damping_on=critical_interaction_damping_on   !Alon
-  bergs%interactive_icebergs_on=interactive_icebergs_on   !Alon
-  bergs%use_new_predictive_corrective=use_new_predictive_corrective  !Alon
-  bergs%grounding_fraction=grounding_fraction
-  bergs%add_weight_to_ocean=add_weight_to_ocean
-  bergs%use_old_spreading=use_old_spreading
-  bergs%debug_iceberg_with_id=debug_iceberg_with_id
-  allocate( bergs%initial_mass(nclasses) ); bergs%initial_mass(:)=initial_mass(:)
-  allocate( bergs%distribution(nclasses) ); bergs%distribution(:)=distribution(:)
-  allocate( bergs%mass_scaling(nclasses) ); bergs%mass_scaling(:)=mass_scaling(:)
-  allocate( bergs%initial_thickness(nclasses) ); bergs%initial_thickness(:)=initial_thickness(:)
-  allocate( bergs%initial_width(nclasses) )
-  allocate( bergs%initial_length(nclasses) )
-  bergs%initial_width(:)=sqrt(initial_mass(:)/(LoW_ratio*rho_bergs*initial_thickness(:)))
-  bergs%initial_length(:)=LoW_ratio*bergs%initial_width(:)
-  grd%coastal_drift = coastal_drift
-  grd%tidal_drift = tidal_drift
+! Parameters
+bergs%dt=dt
+bergs%traj_sample_hrs=traj_sample_hrs
+bergs%traj_write_hrs=traj_write_hrs
+bergs%save_short_traj=save_short_traj
+bergs%ignore_traj=ignore_traj
+bergs%verbose_hrs=verbose_hrs
+bergs%grd%halo=halo
+bergs%grd%Lx=Lx
+bergs%grd%grid_is_latlon=grid_is_latlon
+bergs%grd%grid_is_regular=grid_is_regular
+bergs%max_bonds=max_bonds
+bergs%rho_bergs=rho_bergs
+bergs%spring_coef=spring_coef
+bergs%bond_coef=bond_coef
+bergs%radial_damping_coef=radial_damping_coef
+bergs%tangental_damping_coef=tangental_damping_coef
+bergs%LoW_ratio=LoW_ratio
+bergs%use_operator_splitting=use_operator_splitting
+bergs%bergy_bit_erosion_fraction=bergy_bit_erosion_fraction
+bergs%sicn_shift=sicn_shift
+bergs%passive_mode=passive_mode
+bergs%time_average_weight=time_average_weight
+bergs%speed_limit=speed_limit
+bergs%tau_calving=tau_calving
+bergs%tip_parameter=tip_parameter
+bergs%use_updated_rolling_scheme=use_updated_rolling_scheme  !Alon
+bergs%Runge_not_Verlet=Runge_not_Verlet
+bergs%use_mixed_melting=use_mixed_melting
+bergs%apply_thickness_cutoff_to_bergs_melt=apply_thickness_cutoff_to_bergs_melt
+bergs%apply_thickness_cutoff_to_gridded_melt=apply_thickness_cutoff_to_gridded_melt
+bergs%melt_cutoff=melt_cutoff
+bergs%read_ocean_depth_from_file=read_ocean_depth_from_file
+bergs%const_gamma=const_gamma
+bergs%Gamma_T_3EQ=Gamma_T_3EQ
+bergs%pass_fields_to_ocean_model=pass_fields_to_ocean_model
+bergs%ustar_icebergs_bg=ustar_icebergs_bg
+bergs%utide_icebergs=utide_icebergs
+bergs%cdrag_icebergs=cdrag_icebergs
+bergs%use_mixed_layer_salinity_for_thermo=use_mixed_layer_salinity_for_thermo
+bergs%find_melt_using_spread_mass=find_melt_using_spread_mass
+bergs%Use_three_equation_model=Use_three_equation_model
+bergs%melt_icebergs_as_ice_shelf=melt_icebergs_as_ice_shelf
+bergs%Iceberg_melt_without_decay=Iceberg_melt_without_decay
+bergs%add_iceberg_thickness_to_SSH=add_iceberg_thickness_to_SSH
+bergs%override_iceberg_velocities=override_iceberg_velocities
+bergs%use_f_plane=use_f_plane
+bergs%rotate_icebergs_for_mass_spreading=rotate_icebergs_for_mass_spreading
+bergs%lat_ref=lat_ref
+bergs%u_override=u_override
+bergs%v_override=v_override
+bergs%initial_orientation=initial_orientation
+bergs%set_melt_rates_to_zero=set_melt_rates_to_zero
+bergs%allow_bergs_to_roll=allow_bergs_to_roll
+bergs%hexagonal_icebergs=hexagonal_icebergs
+bergs%ignore_missing_restart_bergs=ignore_missing_restart_bergs
+bergs%Static_icebergs=Static_icebergs
+bergs%only_interactive_forces=only_interactive_forces
+bergs%halo_debugging=halo_debugging
+bergs%iceberg_bonds_on=iceberg_bonds_on   !Alon
+bergs%manually_initialize_bonds=manually_initialize_bonds   !Alon
+bergs%critical_interaction_damping_on=critical_interaction_damping_on   !Alon
+bergs%interactive_icebergs_on=interactive_icebergs_on   !Alon
+bergs%use_new_predictive_corrective=use_new_predictive_corrective  !Alon
+bergs%grounding_fraction=grounding_fraction
+bergs%add_weight_to_ocean=add_weight_to_ocean
+bergs%use_old_spreading=use_old_spreading
+bergs%debug_iceberg_with_id=debug_iceberg_with_id
+allocate( bergs%initial_mass(nclasses) ); bergs%initial_mass(:)=initial_mass(:)
+allocate( bergs%distribution(nclasses) ); bergs%distribution(:)=distribution(:)
+allocate( bergs%mass_scaling(nclasses) ); bergs%mass_scaling(:)=mass_scaling(:)
+allocate( bergs%initial_thickness(nclasses) ); bergs%initial_thickness(:)=initial_thickness(:)
+allocate( bergs%initial_width(nclasses) )
+allocate( bergs%initial_length(nclasses) )
+bergs%initial_width(:)=sqrt(initial_mass(:)/(LoW_ratio*rho_bergs*initial_thickness(:)))
+bergs%initial_length(:)=LoW_ratio*bergs%initial_width(:)
+grd%coastal_drift = coastal_drift
+grd%tidal_drift = tidal_drift
 
-  if (read_old_restarts) call error_mesg('diamonds, ice_bergs_framework_init', 'Setting "read_old_restarts=.true." is obsolete and does nothing!', WARNING)
+if (read_old_restarts) call error_mesg('diamonds, ice_bergs_framework_init', 'Setting "read_old_restarts=.true." is obsolete and does nothing!', WARNING)
 
-  ! Diagnostics
-  id_class = diag_axis_init('mass_class', initial_mass, 'kg','Z', 'iceberg mass')
-  axes3d(1:2)=axes
-  axes3d(3)=id_class
-  grd%id_calving=register_diag_field('icebergs', 'calving', axes, Time, &
-     'Incoming Calving mass rate', 'kg/s')
-  grd%id_calving_hflx_in=register_diag_field('icebergs', 'calving_hflx_in', axes, Time, &
-     'Incoming Calving heat flux', 'J/s')
-  grd%id_accum=register_diag_field('icebergs', 'accum_calving', axes, Time, &
-     'Accumulated calving mass rate', 'kg/s')
-  grd%id_unused=register_diag_field('icebergs', 'unused_calving', axes, Time, &
-     'Unused calving mass rate', 'kg/s')
-  grd%id_floating_melt=register_diag_field('icebergs', 'melt', axes, Time, &
-     'Melt rate of icebergs + bits', 'kg/(m^2*s)')
-  grd%id_melt_m_per_year=register_diag_field('icebergs', 'melt_m_per_year', axes, Time, &
-     'Melt rate of icebergs + bits (m/yr)', 'm/yr')
-  grd%id_berg_melt=register_diag_field('icebergs', 'berg_melt', axes, Time, &
-     'Melt rate of icebergs', 'kg/(m^2*s)')
-  grd%id_melt_buoy=register_diag_field('icebergs', 'melt_buoy', axes, Time, &
-     'Buoyancy component of iceberg melt rate', 'kg/(m^2*s)')
-  grd%id_melt_eros=register_diag_field('icebergs', 'melt_eros', axes, Time, &
-     'Erosion component of iceberg melt rate', 'kg/(m^2*s)')
-  grd%id_melt_conv=register_diag_field('icebergs', 'melt_conv', axes, Time, &
-     'Convective component of iceberg melt rate', 'kg/(m^2*s)')
-  grd%id_bergy_src=register_diag_field('icebergs', 'bergy_src', axes, Time, &
-     'Mass source of bergy bits', 'kg/(m^2*s)')
-  grd%id_bergy_melt=register_diag_field('icebergs', 'bergy_melt', axes, Time, &
-     'Melt rate of bergy bits', 'kg/(m^2*s)')
-  grd%id_bergy_mass=register_diag_field('icebergs', 'bergy_mass', axes, Time, &
-     'Bergy bit density field', 'kg/(m^2)')
-  grd%id_spread_mass=register_diag_field('icebergs', 'spread_mass', axes, Time, &
-     'Iceberg mass after spreading', 'kg/(m^2)')
-  grd%id_spread_area=register_diag_field('icebergs', 'spread_area', axes, Time, &
-     'Iceberg area after spreading', 'm^2/(m^2)')
-  grd%id_u_iceberg=register_diag_field('icebergs', 'u_iceberg', axes, Time, &
-     'Iceberg u velocity (m/s)')
-  grd%id_v_iceberg=register_diag_field('icebergs', 'v_iceberg', axes, Time, &
-     'Iceberg v velocity (m/s)')
-  grd%id_spread_uvel=register_diag_field('icebergs', 'spread_uvel', axes, Time, &
-     'Iceberg u velocity spread (m/s)')
-  grd%id_spread_vvel=register_diag_field('icebergs', 'spread_vvel', axes, Time, &
-     'Iceberg v velocity spread (m/s)')
-  grd%id_ustar_iceberg=register_diag_field('icebergs', 'ustar_iceberg', axes, Time, &
-     'Iceberg frictional velocity (m/s)')
-  grd%id_virtual_area=register_diag_field('icebergs', 'virtual_area', axes, Time, &
-     'Virtual coverage by icebergs', 'm^2')
-  grd%id_mass=register_diag_field('icebergs', 'mass', axes, Time, &
-     'Iceberg density field', 'kg/(m^2)')
-  grd%id_stored_ice=register_diag_field('icebergs', 'stored_ice', axes3d, Time, &
-     'Accumulated ice mass by class', 'kg')
-  grd%id_real_calving=register_diag_field('icebergs', 'real_calving', axes3d, Time, &
-     'Calving into iceberg class', 'kg/s')
-  grd%id_rmean_calving=register_diag_field('icebergs', 'running_mean_calving', axes, Time, &
-     'Running mean of calving', 'kg/s')
-  grd%id_rmean_calving_hflx=register_diag_field('icebergs', 'running_mean_calving_hflx', axes, Time, &
-     'Running mean of calving heat flux', 'J/s')
-  grd%id_count=register_diag_field('icebergs', 'bergs_per_cell', axes, Time, &
-     'Number of bergs per cell', '#')
-  grd%id_chksum=register_diag_field('icebergs', 'list_chksum', axes, Time, &
-     'mpp_chksum on bergs in each cell', '#')
-  grd%id_uo=register_diag_field('icebergs', 'uo', axes, Time, &
-     'Ocean zonal component of velocity', 'm s^-1')
-  grd%id_vo=register_diag_field('icebergs', 'vo', axes, Time, &
-     'Ocean meridional component of velocity', 'm s^-1')
-  grd%id_ui=register_diag_field('icebergs', 'ui', axes, Time, &
-     'Ice zonal component of velocity', 'm s^-1')
-  grd%id_vi=register_diag_field('icebergs', 'vi', axes, Time, &
-     'Ice meridional component of velocity', 'm s^-1')
-  grd%id_ua=register_diag_field('icebergs', 'ua', axes, Time, &
-     'Atmos zonal component of velocity', 'm s^-1')
-  grd%id_va=register_diag_field('icebergs', 'va', axes, Time, &
-     'Atmos meridional component of velocity', 'm s^-1')
-  grd%id_sst=register_diag_field('icebergs', 'sst', axes, Time, &
-     'Sea surface temperature', 'degrees_C')
-  grd%id_sss=register_diag_field('icebergs', 'sss', axes, Time, &
-     'Sea surface salinity', 'psu')
-  grd%id_cn=register_diag_field('icebergs', 'cn', axes, Time, &
-     'Sea ice concentration', '(fraction)')
-  grd%id_hi=register_diag_field('icebergs', 'hi', axes, Time, &
-     'Sea ice thickness', 'm')
-  grd%id_ssh=register_diag_field('icebergs', 'ssh', axes, Time, &
-     'Sea surface hieght', 'm')
-  grd%id_fax=register_diag_field('icebergs', 'taux', axes, Time, &
-     'X-stress on ice from atmosphere', 'N m^-2')
-  grd%id_fay=register_diag_field('icebergs', 'tauy', axes, Time, &
-     'Y-stress on ice from atmosphere', 'N m^-2')
-  grd%id_ocean_depth=register_diag_field('icebergs', 'Depth', axes, Time, &
-     'Ocean Depth', 'm')
+! Diagnostics
+id_class = diag_axis_init('mass_class', initial_mass, 'kg','Z', 'iceberg mass')
+axes3d(1:2)=axes
+axes3d(3)=id_class
+grd%id_calving=register_diag_field('icebergs', 'calving', axes, Time, &
+   'Incoming Calving mass rate', 'kg/s')
+grd%id_calving_hflx_in=register_diag_field('icebergs', 'calving_hflx_in', axes, Time, &
+   'Incoming Calving heat flux', 'J/s')
+grd%id_accum=register_diag_field('icebergs', 'accum_calving', axes, Time, &
+   'Accumulated calving mass rate', 'kg/s')
+grd%id_unused=register_diag_field('icebergs', 'unused_calving', axes, Time, &
+   'Unused calving mass rate', 'kg/s')
+grd%id_floating_melt=register_diag_field('icebergs', 'melt', axes, Time, &
+   'Melt rate of icebergs + bits', 'kg/(m^2*s)')
+grd%id_melt_m_per_year=register_diag_field('icebergs', 'melt_m_per_year', axes, Time, &
+   'Melt rate of icebergs + bits (m/yr)', 'm/yr')
+grd%id_berg_melt=register_diag_field('icebergs', 'berg_melt', axes, Time, &
+   'Melt rate of icebergs', 'kg/(m^2*s)')
+grd%id_melt_buoy=register_diag_field('icebergs', 'melt_buoy', axes, Time, &
+   'Buoyancy component of iceberg melt rate', 'kg/(m^2*s)')
+grd%id_melt_eros=register_diag_field('icebergs', 'melt_eros', axes, Time, &
+   'Erosion component of iceberg melt rate', 'kg/(m^2*s)')
+grd%id_melt_conv=register_diag_field('icebergs', 'melt_conv', axes, Time, &
+   'Convective component of iceberg melt rate', 'kg/(m^2*s)')
+grd%id_bergy_src=register_diag_field('icebergs', 'bergy_src', axes, Time, &
+   'Mass source of bergy bits', 'kg/(m^2*s)')
+grd%id_bergy_melt=register_diag_field('icebergs', 'bergy_melt', axes, Time, &
+   'Melt rate of bergy bits', 'kg/(m^2*s)')
+grd%id_bergy_mass=register_diag_field('icebergs', 'bergy_mass', axes, Time, &
+   'Bergy bit density field', 'kg/(m^2)')
+grd%id_spread_mass=register_diag_field('icebergs', 'spread_mass', axes, Time, &
+   'Iceberg mass after spreading', 'kg/(m^2)')
+grd%id_spread_area=register_diag_field('icebergs', 'spread_area', axes, Time, &
+   'Iceberg area after spreading', 'm^2/(m^2)')
+grd%id_u_iceberg=register_diag_field('icebergs', 'u_iceberg', axes, Time, &
+   'Iceberg u velocity (m/s)')
+grd%id_v_iceberg=register_diag_field('icebergs', 'v_iceberg', axes, Time, &
+   'Iceberg v velocity (m/s)')
+grd%id_spread_uvel=register_diag_field('icebergs', 'spread_uvel', axes, Time, &
+   'Iceberg u velocity spread (m/s)')
+grd%id_spread_vvel=register_diag_field('icebergs', 'spread_vvel', axes, Time, &
+   'Iceberg v velocity spread (m/s)')
+grd%id_ustar_iceberg=register_diag_field('icebergs', 'ustar_iceberg', axes, Time, &
+   'Iceberg frictional velocity (m/s)')
+grd%id_virtual_area=register_diag_field('icebergs', 'virtual_area', axes, Time, &
+   'Virtual coverage by icebergs', 'm^2')
+grd%id_mass=register_diag_field('icebergs', 'mass', axes, Time, &
+   'Iceberg density field', 'kg/(m^2)')
+grd%id_stored_ice=register_diag_field('icebergs', 'stored_ice', axes3d, Time, &
+   'Accumulated ice mass by class', 'kg')
+grd%id_real_calving=register_diag_field('icebergs', 'real_calving', axes3d, Time, &
+   'Calving into iceberg class', 'kg/s')
+grd%id_rmean_calving=register_diag_field('icebergs', 'running_mean_calving', axes, Time, &
+   'Running mean of calving', 'kg/s')
+grd%id_rmean_calving_hflx=register_diag_field('icebergs', 'running_mean_calving_hflx', axes, Time, &
+   'Running mean of calving heat flux', 'J/s')
+grd%id_count=register_diag_field('icebergs', 'bergs_per_cell', axes, Time, &
+   'Number of bergs per cell', '#')
+grd%id_chksum=register_diag_field('icebergs', 'list_chksum', axes, Time, &
+   'mpp_chksum on bergs in each cell', '#')
+grd%id_uo=register_diag_field('icebergs', 'uo', axes, Time, &
+   'Ocean zonal component of velocity', 'm s^-1')
+grd%id_vo=register_diag_field('icebergs', 'vo', axes, Time, &
+   'Ocean meridional component of velocity', 'm s^-1')
+grd%id_ui=register_diag_field('icebergs', 'ui', axes, Time, &
+   'Ice zonal component of velocity', 'm s^-1')
+grd%id_vi=register_diag_field('icebergs', 'vi', axes, Time, &
+   'Ice meridional component of velocity', 'm s^-1')
+grd%id_ua=register_diag_field('icebergs', 'ua', axes, Time, &
+   'Atmos zonal component of velocity', 'm s^-1')
+grd%id_va=register_diag_field('icebergs', 'va', axes, Time, &
+   'Atmos meridional component of velocity', 'm s^-1')
+grd%id_sst=register_diag_field('icebergs', 'sst', axes, Time, &
+   'Sea surface temperature', 'degrees_C')
+grd%id_sss=register_diag_field('icebergs', 'sss', axes, Time, &
+   'Sea surface salinity', 'psu')
+grd%id_cn=register_diag_field('icebergs', 'cn', axes, Time, &
+   'Sea ice concentration', '(fraction)')
+grd%id_hi=register_diag_field('icebergs', 'hi', axes, Time, &
+   'Sea ice thickness', 'm')
+grd%id_ssh=register_diag_field('icebergs', 'ssh', axes, Time, &
+   'Sea surface hieght', 'm')
+grd%id_fax=register_diag_field('icebergs', 'taux', axes, Time, &
+   'X-stress on ice from atmosphere', 'N m^-2')
+grd%id_fay=register_diag_field('icebergs', 'tauy', axes, Time, &
+   'Y-stress on ice from atmosphere', 'N m^-2')
+grd%id_ocean_depth=register_diag_field('icebergs', 'Depth', axes, Time, &
+   'Ocean Depth', 'm')
 
-  ! Static fields
-  id_class=register_static_field('icebergs', 'lon', axes, &
-               'longitude (corners)', 'degrees_E')
-  if (id_class>0) lerr=send_data(id_class, grd%lon(grd%isc:grd%iec,grd%jsc:grd%jec))
-  id_class=register_static_field('icebergs', 'lat', axes, &
-               'latitude (corners)', 'degrees_N')
-  if (id_class>0) lerr=send_data(id_class, grd%lat(grd%isc:grd%iec,grd%jsc:grd%jec))
-  id_class=register_static_field('icebergs', 'area', axes, &
-               'cell area', 'm^2')
-  if (id_class>0) lerr=send_data(id_class, grd%area(grd%isc:grd%iec,grd%jsc:grd%jec))
-  id_class=register_static_field('icebergs', 'mask', axes, &
-               'wet point mask', 'none')
-  if (id_class>0) lerr=send_data(id_class, grd%msk(grd%isc:grd%iec,grd%jsc:grd%jec))
-  id_class=register_static_field('icebergs', 'ocean_depth_static', axes, &
-               'ocean depth static', 'm')
-  if (id_class>0) lerr=send_data(id_class, grd%ocean_depth(grd%isc:grd%iec,grd%jsc:grd%jec))
+! Static fields
+id_class=register_static_field('icebergs', 'lon', axes, &
+   'longitude (corners)', 'degrees_E')
+if (id_class>0) lerr=send_data(id_class, grd%lon(grd%isc:grd%iec,grd%jsc:grd%jec))
+id_class=register_static_field('icebergs', 'lat', axes, &
+   'latitude (corners)', 'degrees_N')
+if (id_class>0) lerr=send_data(id_class, grd%lat(grd%isc:grd%iec,grd%jsc:grd%jec))
+id_class=register_static_field('icebergs', 'area', axes, &
+   'cell area', 'm^2')
+if (id_class>0) lerr=send_data(id_class, grd%area(grd%isc:grd%iec,grd%jsc:grd%jec))
+id_class=register_static_field('icebergs', 'mask', axes, &
+   'wet point mask', 'none')
+if (id_class>0) lerr=send_data(id_class, grd%msk(grd%isc:grd%iec,grd%jsc:grd%jec))
+id_class=register_static_field('icebergs', 'ocean_depth_static', axes, &
+   'ocean depth static', 'm')
+if (id_class>0) lerr=send_data(id_class, grd%ocean_depth(grd%isc:grd%iec,grd%jsc:grd%jec))
 
-  if (debug) then
-    call grd_chksum2(grd, grd%lon, 'init lon')
-    call grd_chksum2(grd, grd%lat, 'init lat')
-    call grd_chksum2(grd, grd%lonc, 'init lonc')
-    call grd_chksum2(grd, grd%latc, 'init latc')
-    call grd_chksum2(grd, grd%area, 'init area')
-    call grd_chksum2(grd, grd%msk, 'init msk')
-    call grd_chksum2(grd, grd%cos, 'init cos')
-    call grd_chksum2(grd, grd%sin, 'init sin')
-    call grd_chksum2(grd, grd%ocean_depth, 'init ocean_depth')
-  endif
+if (debug) then
+ call grd_chksum2(grd, grd%lon, 'init lon')
+ call grd_chksum2(grd, grd%lat, 'init lat')
+ call grd_chksum2(grd, grd%lonc, 'init lonc')
+ call grd_chksum2(grd, grd%latc, 'init latc')
+ call grd_chksum2(grd, grd%area, 'init area')
+ call grd_chksum2(grd, grd%msk, 'init msk')
+ call grd_chksum2(grd, grd%cos, 'init cos')
+ call grd_chksum2(grd, grd%sin, 'init sin')
+ call grd_chksum2(grd, grd%ocean_depth, 'init ocean_depth')
+endif
 
-  if (do_unit_tests) then
-   if (unit_tests(bergs)) call error_mesg('diamonds, icebergs_init', 'Unit tests failed!', FATAL)
-  endif
+if (do_unit_tests) then
+ if (unit_tests(bergs)) call error_mesg('diamonds, icebergs_init', 'Unit tests failed!', FATAL)
+endif
 
- !write(stderrunit,*) 'diamonds: done'
-  call mpp_clock_end(bergs%clock_ini)
-  call mpp_clock_end(bergs%clock)
+!write(stderrunit,*) 'diamonds: done'
+call mpp_clock_end(bergs%clock_ini)
+call mpp_clock_end(bergs%clock)
 
 end subroutine ice_bergs_framework_init
 
@@ -2720,7 +2757,7 @@ integer, optional, intent(in) :: il !< i-index of cell berg should be in
 integer, optional, intent(in) :: jl !< j-index of cell berg should be in
 ! Local variables
 
-  write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,a,2f10.4,i5,f7.2,es12.4,f5.1)') &
+  write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,a,2f16.4,i5,f7.2,es12.4,f5.1)') &
     label, 'pe=(', mpp_pe(), ') #=', berg%id, ' start lon,lat,yr,day,mass,hb=', &
     berg%start_lon, berg%start_lat, berg%start_year, berg%start_day, berg%start_mass, berg%halo_berg
   if (present(il).and.present(jl)) then
@@ -2731,7 +2768,7 @@ integer, optional, intent(in) :: jl !< j-index of cell berg should be in
     label, 'pe=(', mpp_pe(), ') #=', berg%id, &
     ' i,j=', berg%ine, berg%jne, &
     ' p,n=', associated(berg%prev), associated(berg%next)
-  write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,3(a,2f14.8))') &
+  write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,3(a,2f16.8))') &
     label, 'pe=(', mpp_pe(), ') #=', berg%id, &
     ' xi,yj=', berg%xi, berg%yj, &
     ' lon,lat=', berg%lon, berg%lat, &
@@ -4434,6 +4471,7 @@ integer :: grdi, grdj
       icnt(this%ine,this%jne)=icnt(this%ine,this%jne)+1
       fld2(i,:) = fld(i,:)*float( icnt(this%ine,this%jne) ) !*float( i )
       grd%tmp(this%ine,this%jne)=grd%tmp(this%ine,this%jne)+time_hash(this)*pos_hash(this)+log(this%mass)
+
       ichk5=ichk5+iberg
       this=>this%next
     enddo
