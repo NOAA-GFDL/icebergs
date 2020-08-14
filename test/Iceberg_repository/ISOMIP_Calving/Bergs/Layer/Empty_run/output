@@ -1,0 +1,16 @@
+ 
+***NOTICE TO DDT USERS*** 
+With version 4.0 (and later) of DDT, the procedure for memory debugging has 
+changed.  You no longer need to compile with the ddtmem-cc, ddtmem-CC, 
+and ddtmem-ftn scripts.  Rather, just load the ddt-memdebug module (in 
+addition to this module) and compile as you normally would (with cc, 
+CC and/or ftn).  The appropriate memory debugging libraries will be 
+linked automatically. 
+ 
+Please direct questions to help@olcf.ornl.gov 
+ 
+python_scipy(3):ERROR:105: Unable to locate a modulefile for 'python_scipy/0.17.0'
+python_scipy(3):ERROR:105: Unable to locate a modulefile for 'python_scipy/0.17.0'
+python_scipy(3):ERROR:105: Unable to locate a modulefile for 'python_scipy/0.17.0'
+aprun: file ../../../../../build/intel/ice_ocean_SIS2/repro/old_executable/MOM6 not found
+aprun: Exiting due to errors. Application aborted

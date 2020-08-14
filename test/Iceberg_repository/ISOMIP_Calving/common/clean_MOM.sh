@@ -1,0 +1,14 @@
+rm *.nc*
+rm available_diags.000000
+rm logfile.000000.out
+rm MOM_parameter_doc.*
+rm ocean.stats
+rm time_stamp.out
+rm V_velocity_truncations
+rm U_velocity_truncations
+rm output
+rm SIS_parameter_doc.*
+rm seaice.stats
+rm SIS.available_diags
+rm SIS_fast.available_diags
+rm TPY_*

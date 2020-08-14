@@ -1,0 +1,5 @@
+A tabular iceberg breaks away from the ice shelf. The non-static icebergs move away from the ice shelf at a prescribed velocity. The time step is quite small (10s) in order to resolve ocean motions
+
+Works best when started from restart file created by Static_berg simulation.
+
+

@@ -1,0 +1,71 @@
+! Blank file in which we can put "overrides" for parameters
+
+!TPY params
+#override NK = 72
+#override NKML = 4
+
+! TIME STEP
+#override DT = 10
+#override DT_THERM = 10
+#override DT_FORCING = 10
+
+! MIXING
+#override SMAGORINSKY_KH = False
+#override BIHARMONIC = False
+#override KH = 6.0  ! back. horiz. visc.
+#override KHTR = 1.0    ! back. horiz. diff.
+#override KD = 5.0E-5     ! back. diapycnal diff.
+#override KV = 1.0E-3     ! back. diapycnal visc.
+
+!WARM IC
+#override ISOMIP_T_SUR = -1.9
+#override ISOMIP_S_SUR = 33.8
+#override ISOMIP_T_BOT = 1.0
+#override ISOMIP_S_BOT = 34.7
+
+! ice shelf
+#override ICE_SHELF = False                !   [Boolean] default = False
+#override SHELF_THERMO = True
+#override SHELF_THREE_EQN = True
+#override SHELF_3EQ_GAMMA = False
+#override UTIDE = 0.01
+!SHELF_S_ROOT = True
+!#override USE_HMIX_SFC_PROP = True
+!#override HMIX_SFC_PROP = 10.
+
+! FRAZIL  - making sure sea ice does not form
+#override FRAZIL = False
+#override PRESSURE_DEPENDENT_FRAZIL = False
+
+! MIXED LAYER
+#override BULKMIXEDLAYER = True
+#override BULK_RI_ML = 0.25
+#override MIXEDLAYER_RESTRAT = True
+#override HMIX_MIN = 2.0
+!#override KV_TBL_MIN = 1.0E-2
+#override HTBL_SHELF_MIN = 2.0
+#override BOUND_SALINITY = True
+ 
+! SHEAR MIXING
+#override USE_JACKSON_PARAM = True
+#override RINO_CRIT = 0.25
+!#override KD_KAPPA_SHEAR_0 = 1.0E-2
+
+! SPONGE
+#override SPONGE = True
+ISOMIP_SPONGE_FILE = "3D_LAYER_WARM_TPY_IC.nc"
+#override ISOMIP_TNUDG = 0.1
+!#override ISOMIP_SPONGE_TEMP_OFFSET=0.1
+
+
+! PASSIVE TRACERS
+USE_ISOMIP_TRACER = False
+
+! Simulation time
+#override DAYMAX = 730
+
+!#override FIT_SALINITY = False
+
+!Passing Iceberg field to ocean
+ICEBERGS_APPLY_RIGID_BOUNDARY=True !Different boundary condition is used under ice shelves
+ALLOW_ICEBERG_FLUX_DIAGNOSTICS=True

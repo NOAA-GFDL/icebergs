@@ -1,0 +1,1 @@
+../../../common/run_script.sh

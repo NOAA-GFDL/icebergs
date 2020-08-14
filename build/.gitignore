@@ -5,3 +5,4 @@ logfile.000000.out
 .bergs.x.cppdefs
 *.mod
 *.o
+core
