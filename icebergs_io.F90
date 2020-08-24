@@ -58,6 +58,7 @@ type(domain2d), pointer, save :: io_domain=>NULL()
 integer, save :: io_tile_id(1), io_tile_root_pe, io_npes
 integer, allocatable,save :: io_tile_pelist(:)
 logical :: is_io_tile_root_pe = .true.
+integer :: ntrajs_sent_io,ntrajs_rcvd_io
 
 integer :: clock_trw,clock_trp
 
@@ -1255,7 +1256,6 @@ type(xyt), pointer :: this, next
 integer :: stderrunit, cnt, ij
 !I/O vars
 type(xyt), pointer :: traj4io=>null()
-integer :: ntrajs_sent_io,ntrajs_rcvd_io
 integer :: from_pe,np
 type(buffer), pointer :: obuffer_io=>null(), ibuffer_io=>null()
 logical :: io_is_in_append_mode
