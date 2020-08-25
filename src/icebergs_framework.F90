@@ -24,7 +24,7 @@ integer, parameter :: nclasses=10 ! Number of ice bergs classes
 
 !Local Vars
 ! Global data (minimal for debugging)
-logical :: folded_north_on_pe = .false. !< If true, indicates the presence of the tri-polar grid
+Logical :: folded_north_on_pe = .false. !< If true, indicates the presence of the tri-polar grid
 logical :: verbose=.false. !< Be verbose to stderr
 logical :: budget=.true. !< Calculate budgets
 logical :: debug=.false. !< Turn on debugging
@@ -372,6 +372,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   logical :: read_ocean_depth_from_file=.false. !< If true, ocean depth is read from a file.
   integer(kind=8) :: debug_iceberg_with_id = -1 !< If positive, monitors a berg with this id
 
+  real :: length_for_manually_initialize_bonds=1000.0 !<if manually init bonds, only  bond if dist between particles is .lt. this length -Added by Alex
   real :: speed_limit=0. !< CFL speed limit for a berg [m/s]
   real :: tau_calving=0. !< Time scale for smoothing out calving field (years)
   real :: tip_parameter=0. !< parameter to override iceberg rolling critical ratio (use zero to get parameter directly from ice and seawater densities)
@@ -513,6 +514,7 @@ contains
     logical :: add_weight_to_ocean=.true. ! Add weight of icebergs + bits to ocean
     logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
     logical :: time_average_weight=.false. ! Time average the weight on the ocean
+    real :: length_for_manually_initialize_bonds=1000.0 !<if manually init bonds, only  bond if dist between particles is .lt. this length - Alex
     real :: speed_limit=0. ! CFL speed limit for a berg
     real :: tau_calving=0. ! Time scale for smoothing out calving field (years)
     real :: tip_parameter=0. ! Parameter to override iceberg rolling critical ratio (use zero to get parameter directly from ice and seawater densities
@@ -561,11 +563,12 @@ contains
     real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
     integer(kind=8) :: debug_iceberg_with_id = -1 ! If positive, monitors a berg with this id
 
-    namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,Static_icebergs,  &
+    Namelist /icebergs_nml/ Verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,Static_icebergs,  &
          distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef, radial_damping_coef, tangental_damping_coef, only_interactive_forces, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, iceberg_bonds_on, manually_initialize_bonds, ignore_missing_restart_bergs, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, halo_debugging, hexagonal_icebergs, &
-         time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_icebergs_on, critical_interaction_damping_on, &
+         time_average_weight, generate_test_icebergs, length_for_manually_initialize_bonds, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, &
+         interactive_icebergs_on, critical_interaction_damping_on, &
          old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj, &
          allow_bergs_to_roll,set_melt_rates_to_zero,lat_ref,initial_orientation,rotate_icebergs_for_mass_spreading,grid_is_latlon,Lx,use_f_plane,use_old_spreading, &
          grid_is_regular,override_iceberg_velocities,u_override,v_override,add_iceberg_thickness_to_SSH,Iceberg_melt_without_decay,melt_icebergs_as_ice_shelf, &
@@ -587,7 +590,7 @@ contains
     write(stdlogunit,*) "ice_bergs_framework: "//trim(version)
 
     ! Read namelist parameters
-    !write(stderrunit,*) 'diamonds: reading namelist'
+    !write(stderrunit,*) 'KID: reading namelist'
 #ifdef INTERNAL_FILE_NML
     read (input_nml_file, nml=icebergs_nml, iostat=ierr)
 #else
@@ -603,11 +606,11 @@ contains
 
 
     ! Allocate overall structure
-    !write(stderrunit,*) 'diamonds: allocating bergs'
+    !write(stderrunit,*) 'KID: allocating bergs'
     allocate(bergs)
     allocate(bergs%grd)
     grd=>bergs%grd ! For convenience to avoid bergs%grd%X
-    !write(stderrunit,*) 'diamonds: allocating domain'
+    !write(stderrunit,*) 'KID: allocating domain'
     allocate(grd%domain)
 
     ! Clocks
@@ -626,15 +629,15 @@ contains
     call mpp_clock_begin(bergs%clock_ini)
 
     ! Set up iceberg domain
-    !write(stderrunit,*) 'diamonds: defining domain'
+    !write(stderrunit,*) 'KID: defining domain'
     call mpp_define_domains( (/1,gni,1,gnj/), layout, grd%domain, &
          maskmap=maskmap, &
          xflags=dom_x_flags, xhalo=halo,  &
-         yflags=dom_y_flags, yhalo=halo, name='diamond')
+         yflags=dom_y_flags, yhalo=halo, name='KID')
 
     call mpp_define_io_domain(grd%domain, io_layout)
 
-    !write(stderrunit,*) 'diamond: get compute domain'
+    !write(stderrunit,*) 'KID: get compute domain'
     call mpp_get_compute_domain( grd%domain, grd%isc, grd%iec, grd%jsc, grd%jec )
     call mpp_get_data_domain( grd%domain, grd%isd, grd%ied, grd%jsd, grd%jed )
     call mpp_get_global_domain( grd%domain, grd%isg, grd%ieg, grd%jsg, grd%jeg )
@@ -646,13 +649,13 @@ contains
 
 
     folded_north_on_pe = ((dom_y_flags == FOLD_NORTH_EDGE) .and. (grd%jec == gnj))
-    !write(stderrunit,'(a,6i4)') 'diamonds, icebergs_init: pe,n,s,e,w =',mpp_pe(),grd%pe_N,grd%pe_S,grd%pe_E,grd%pe_W, NULL_PE
+    !write(stderrunit,'(a,6i4)') 'KID, icebergs_init: pe,n,s,e,w =',mpp_pe(),grd%pe_N,grd%pe_S,grd%pe_E,grd%pe_W, NULL_PE
 
     !if (verbose) &
-    !write(stderrunit,'(a,i3,a,4i4,a,4f8.2)') 'diamonds, icebergs_init: (',mpp_pe(),') [ij][se]c=', &
+    !write(stderrunit,'(a,i3,a,4i4,a,4f8.2)') 'KID, icebergs_init: (',mpp_pe(),') [ij][se]c=', &
     !     grd%isc,grd%iec,grd%jsc,grd%jec, &
     !     ' [lon|lat][min|max]=', minval(ice_lon),maxval(ice_lon),minval(ice_lat),maxval(ice_lat)
-    !write(stderrunit,*) 'diamonds, int args = ', mpp_pe(),gni, gnj, layout, axes
+    !write(stderrunit,*) 'KID, int args = ', mpp_pe(),gni, gnj, layout, axes
 
     ! Allocate grid of pointers
     allocate( bergs%list(grd%isd:grd%ied, grd%jsd:grd%jed) )
@@ -661,7 +664,7 @@ contains
     enddo; enddo
 
     big_number=1.0E15
-    !write(stderrunit,*) 'diamonds: allocating grid'
+    !write(stderrunit,*) 'KID: allocating grid'
     allocate( grd%lon(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%lon(:,:)=big_number
     allocate( grd%lat(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%lat(:,:)=big_number
     allocate( grd%lonc(grd%isd:grd%ied, grd%jsd:grd%jed) );grd%lon(:,:)=big_number
@@ -720,7 +723,7 @@ contains
     allocate( grd%parity_y(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_y(:,:)=1.
     allocate( grd%iceberg_counter_grd(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%iceberg_counter_grd(:,:)=0
 
-    !write(stderrunit,*) 'diamonds: copying grid'
+    !write(stderrunit,*) 'KID: copying grid'
     ! Copy data declared on ice model computational domain
     is=grd%isc; ie=grd%iec; js=grd%jsc; je=grd%jec
     grd%lon(is:ie,js:je)=ice_lon(:,:)
@@ -797,16 +800,10 @@ contains
     enddo; enddo
 
 
-    if (mpp_pe() == 0) then
-       print *,'before'
-       print *,'grd%lon(:,1)',grd%lon(:,grd%jsd)
-       ! print *,''
-       ! print *,'grd%lat(:,1)',grd%lat(:,grd%jsd)
-       ! print *,''
-       ! print *,'grd%lon(1,:)',grd%lon(grd%isd,:)
-       ! print *,''
-       ! print *,'grd%lat(1,:)',grd%lat(grd%isd,:)
-       ! print *,''
+    if ( (mpp_pe() == 0) .and. (Lx .ne. 360.) .and. .not. (grid_is_latlon) ) then
+       print *,''
+       print *,'pe0 x-domain before periodicity fix'
+       write(*,'(f12.2)') (grd%lon(i,grd%jsd), i=grd%isd,grd%ied)
     end if
 
 
@@ -818,11 +815,11 @@ contains
     endif
 
     if ((Lx.gt.1E15 ) .and. (mpp_pe().eq.mpp_root_pe())) then
-       call error_mesg('diamonds, framework', 'Model does not enjoy the domain being larger than 1E15. Not sure why. Probably to do with floating point precision.', WARNING)
+       call error_mesg('KID, framework', 'Model does not enjoy the domain being larger than 1E15. Not sure why. Probably to do with floating point precision.', WARNING)
     endif
     if ((.not. grid_is_latlon) .and. (Lx.eq.360.)) then
        if (mpp_pe().eq.mpp_root_pe())  then
-          call error_mesg('diamonds, framework', 'Since the lat/lon grid is off, the x-direction is being set as non-periodic. Set Lx not equal to 360 override.', WARNING)
+          call error_mesg('KID, framework', 'Since the lat/lon grid is off, the x-direction is being set as non-periodic. Set Lx not equal to 360 override.', WARNING)
        endif
        Lx=-1.
     endif
@@ -862,12 +859,12 @@ do j=grd%jsd+1,grd%jed; do i=grd%isd+1,grd%ied
 enddo; enddo
 
 if (debug) then
-   ! Write(stderrunit,'(a,i3,a,4i4,a,4f8.2)') 'diamonds, icebergs_init: (',mpp_pe(),') [ij][se]c=', &
+   ! Write(stderrunit,'(a,i3,a,4i4,a,4f8.2)') 'KID, icebergs_init: (',mpp_pe(),') [ij][se]c=', &
    !      grd%isc,grd%iec,grd%jsc,grd%jec, &
    !      ' [Lon|lat][min|max]=', minval(grd%lon),maxval(grd%lon),minval(grd%lat),maxval(grd%lat)
 
 
- Write(stderrunit,'(a,i3,a,4i4)') 'diamonds, icebergs_init: (',mpp_pe(),') [ij][se]c=', &
+ Write(stderrunit,'(a,i3,a,4i4)') 'KID, icebergs_init: (',mpp_pe(),') [ij][se]c=', &
       grd%isc,grd%iec,grd%jsc,grd%jec   
 
  print *,'minval(grd%lon)',minval(grd%lon)
@@ -879,17 +876,11 @@ if (debug) then
       minval(grd%lon),maxval(grd%lon),minval(grd%lat),maxval(grd%lat)
 endif
 
- if (mpp_pe() == 1) then
-    print *,'after'
-    print *,'grd%lon(:,1)',grd%lon(:,grd%jsd)
-    ! print *,''
-    ! print *,'grd%lat(:,1)',grd%lat(:,grd%jsd)
-    ! print *,''
-    ! print *,'grd%lon(1,:)',grd%lon(grd%isd,:)
-    ! print *,''
-    ! print *,'grd%lat(1,:)',grd%lat(grd%isd,:)
-    ! print *,''
- end if
+if ( (mpp_pe() == 0) .and. (Lx .ne. -1.) .and. .not. (grid_is_latlon) ) then
+ print *,''
+ print *,'pe 0 x-domain after periodicity fix'
+ write(*,'(f12.2)') (grd%lon(i,grd%jsd), i=grd%isd,grd%ied)
+end if
 
 !if (mpp_pe().eq.5) then
 !  write(stderrunit,'(a3,32i7)') 'Lon',(i,i=grd%isd,grd%ied)
@@ -910,11 +901,11 @@ endif
 do j=grd%jsd+1,grd%jed; do i=grd%isd+1,grd%ied
  if (grd%lat(i,j) .ne. grd%lat(i,j)) then
     write(stderrunit,*) 'Lat not defined properly', mpp_pe(),i,j,grd%lat(i,j)
-    call error_mesg('diamonds,grid defining', 'Latitude contains NaNs', FATAL)
+    call error_mesg('KID,grid defining', 'Latitude contains NaNs', FATAL)
  endif
  if (grd%lon(i,j) .ne. grd%lon(i,j)) then
     write(stderrunit,*) 'Lon not defined properly', mpp_pe(),i,j,grd%lon(i,j)
-    call error_mesg('diamonds, grid defining', 'Longatudes contains NaNs', FATAL)
+    call error_mesg('KID, grid defining', 'Longatudes contains NaNs', FATAL)
  endif
 enddo; enddo
 
@@ -932,22 +923,22 @@ endif
 
 if ((halo .lt. 3) .and. (rotate_icebergs_for_mass_spreading .and. iceberg_bonds_on) )   then
  halo=3
- call error_mesg('diamonds, framework', 'Setting iceberg halos =3, since halos must be >= 3 for rotating icebergs for mass spreading', WARNING)
+ call error_mesg('KID, framework', 'Setting iceberg halos =3, since halos must be >= 3 for rotating icebergs for mass spreading', WARNING)
 elseif  ((halo .lt. 2) .and. (interactive_icebergs_on .or. iceberg_bonds_on) )   then
  halo=2
- call error_mesg('diamonds, framework', 'Setting iceberg halos =2, since halos must be >= 2 for interactions', WARNING)
+ call error_mesg('KID, framework', 'Setting iceberg halos =2, since halos must be >= 2 for interactions', WARNING)
 endif
 
 if (interactive_icebergs_on) then
  if (Runge_not_Verlet) then
     !Runge_not_Verlet=.false.  ! Iceberg interactions only with Verlet
-    call error_mesg('diamonds, framework', 'It is unlcear whther interactive icebergs work with Runge Kutta stepping.', WARNING)
+    call error_mesg('KID, framework', 'It is unlcear whther interactive icebergs work with Runge Kutta stepping.', WARNING)
  endif
 endif
 if (.not.interactive_icebergs_on) then
  if (iceberg_bonds_on) then
     !iceberg_bonds_on=.false.
-    call error_mesg('diamonds, framework', 'Interactive icebergs off requires iceberg bonds off (turning bonds off).', WARNING)
+    call error_mesg('KID, framework', 'Interactive icebergs off requires iceberg bonds off (turning bonds off).', WARNING)
  endif
 endif
 if (.not. iceberg_bonds_on) then
@@ -1020,6 +1011,7 @@ bergs%only_interactive_forces=only_interactive_forces
 bergs%halo_debugging=halo_debugging
 bergs%iceberg_bonds_on=iceberg_bonds_on   !Alon
 bergs%manually_initialize_bonds=manually_initialize_bonds   !Alon
+bergs%length_for_manually_initialize_bonds=length_for_manually_initialize_bonds !Alex
 bergs%critical_interaction_damping_on=critical_interaction_damping_on   !Alon
 bergs%interactive_icebergs_on=interactive_icebergs_on   !Alon
 bergs%use_new_predictive_corrective=use_new_predictive_corrective  !Alon
@@ -1038,7 +1030,7 @@ bergs%initial_length(:)=LoW_ratio*bergs%initial_width(:)
 grd%coastal_drift = coastal_drift
 grd%tidal_drift = tidal_drift
 
-if (read_old_restarts) call error_mesg('diamonds, ice_bergs_framework_init', 'Setting "read_old_restarts=.true." is obsolete and does nothing!', WARNING)
+if (read_old_restarts) call error_mesg('KID, ice_bergs_framework_init', 'Setting "read_old_restarts=.true." is obsolete and does nothing!', WARNING)
 
 ! Diagnostics
 id_class = diag_axis_init('mass_class', initial_mass, 'kg','Z', 'iceberg mass')
@@ -1159,10 +1151,10 @@ if (debug) then
 endif
 
 if (do_unit_tests) then
- if (unit_tests(bergs)) call error_mesg('diamonds, icebergs_init', 'Unit tests failed!', FATAL)
+ if (unit_tests(bergs)) call error_mesg('KID, icebergs_init', 'Unit tests failed!', FATAL)
 endif
 
-!write(stderrunit,*) 'diamonds: done'
+!write(stderrunit,*) 'KID: done'
 call mpp_clock_end(bergs%clock_ini)
 call mpp_clock_end(bergs%clock)
 
@@ -1198,7 +1190,7 @@ integer :: grdi, grdj
 
   yr_offset=int(latest_start_year+1.)-iyr
   if (mpp_pe().eq.mpp_root_pe()) write(*,'(a,i8,a)') &
-    'diamonds: Bergs found with creation dates after model date! Adjusting berg dates by ',yr_offset,' years'
+    'KID: Bergs found with creation dates after model date! Adjusting berg dates by ',yr_offset,' years'
   call bergs_chksum(bergs, 'before adjusting start dates')
   do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
     this=>bergs%list(grdi,grdj)%first
@@ -1219,7 +1211,7 @@ type(icebergs), pointer :: bergs !< Container for all types and memory
 type(icebergs_gridded), pointer :: grd => null()
 type(iceberg), pointer :: moving_berg => null(), this => null()
 integer :: grdi, grdj
-logical :: quick
+
 ! For convenience
 grd=>bergs%grd
 
@@ -1286,7 +1278,7 @@ logical :: halo_debugging
     do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
       this=>bergs%list(grdi,grdj)%first
       do while (associated(this))
-          write(stderrunit,*) 'A', this%id, mpp_pe(), this%halo_berg, grdi, grdj
+          write(stderrunit,'(a,5i)') 'A', this%id, mpp_pe(), int(this%halo_berg), grdi, grdj
         this=>this%next
       enddo
     enddo; enddo
@@ -1319,7 +1311,7 @@ logical :: halo_debugging
     do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
       this=>bergs%list(grdi,grdj)%first
         do while (associated(this))
-        write(stderrunit,*) 'B', this%id, mpp_pe(), this%halo_berg, grdi, grdj
+        write(stderrunit,'(a,5i)') 'B', this%id, mpp_pe(), int(this%halo_berg), grdi, grdj
       this=>this%next
       enddo
     enddo; enddo
@@ -1522,7 +1514,7 @@ logical :: halo_debugging
     do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
       this=>bergs%list(grdi,grdj)%first
       do while (associated(this))
-        write(stderrunit,*)  'C', this%id, mpp_pe(), this%halo_berg,  grdi, grdj
+        write(stderrunit,'(a,5i)')  'C', this%id, mpp_pe(), int(this%halo_berg),  grdi, grdj
         this=>this%next
       enddo
     enddo; enddo
@@ -1535,19 +1527,19 @@ logical :: halo_debugging
     i=nbergs_rcvd_from_n+nbergs_rcvd_from_s+nbergs_rcvd_from_e+nbergs_rcvd_from_w &
      -nbergs_to_send_n-nbergs_to_send_s-nbergs_to_send_e-nbergs_to_send_w
     if (nbergs_end-(nbergs_start+i).ne.0) then
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_end=',nbergs_end,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_start=',nbergs_start,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: delta=',i,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: error=',nbergs_end-(nbergs_start+i),' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_to_send_n=',nbergs_to_send_n,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_to_send_s=',nbergs_to_send_s,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_to_send_e=',nbergs_to_send_e,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_to_send_w=',nbergs_to_send_w,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_rcvd_from_n=',nbergs_rcvd_from_n,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_rcvd_from_s=',nbergs_rcvd_from_s,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_rcvd_from_e=',nbergs_rcvd_from_e,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_rcvd_from_w=',nbergs_rcvd_from_w,' on PE',mpp_pe()
-      !call error_mesg('diamonds, update_halos:', 'We lost some bergs!', FATAL)
+      write(stderrunit,'(a,i4,a,i4)') 'KID, update_halos: nbergs_end=',nbergs_end,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, update_halos: nbergs_start=',nbergs_start,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, update_halos: delta=',i,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, update_halos: error=',nbergs_end-(nbergs_start+i),' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, update_halos: nbergs_to_send_n=',nbergs_to_send_n,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, update_halos: nbergs_to_send_s=',nbergs_to_send_s,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, update_halos: nbergs_to_send_e=',nbergs_to_send_e,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, update_halos: nbergs_to_send_w=',nbergs_to_send_w,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, update_halos: nbergs_rcvd_from_n=',nbergs_rcvd_from_n,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, update_halos: nbergs_rcvd_from_s=',nbergs_rcvd_from_s,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, update_halos: nbergs_rcvd_from_e=',nbergs_rcvd_from_e,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, update_halos: nbergs_rcvd_from_w=',nbergs_rcvd_from_w,' on PE',mpp_pe()
+      !call error_mesg('KID, update_halos:', 'We lost some bergs!', FATAL)
     endif
   endif
   if (debug) then
@@ -1565,8 +1557,8 @@ logical :: halo_debugging
     enddo ; enddo
     call mpp_sum(i)
     if (i>0 .and. mpp_pe()==mpp_root_pe()) then
-      write(stderrunit,'(a,i4)') 'diamonds, update_halos: # of bergs outside computational domain = ',i
-      call error_mesg('diamonds, update_halos:', 'there are bergs still in halos!', FATAL)
+      write(stderrunit,'(a,i4)') 'KID, update_halos: # of bergs outside computational domain = ',i
+      call error_mesg('KID, update_halos:', 'there are bergs still in halos!', FATAL)
     endif ! root_pe
   endif ! debug
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!Debugging!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!111
@@ -1804,19 +1796,19 @@ integer :: grdi, grdj
     i=nbergs_rcvd_from_n+nbergs_rcvd_from_s+nbergs_rcvd_from_e+nbergs_rcvd_from_w &
      -nbergs_to_send_n-nbergs_to_send_s-nbergs_to_send_e-nbergs_to_send_w
     if (nbergs_end-(nbergs_start+i).ne.0) then
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_end=',nbergs_end,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_start=',nbergs_start,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_bergs_to_other_pes: delta=',i,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_bergs_to_other_pes: error=',nbergs_end-(nbergs_start+i),' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_to_send_n=',nbergs_to_send_n,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_to_send_s=',nbergs_to_send_s,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_to_send_e=',nbergs_to_send_e,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_to_send_w=',nbergs_to_send_w,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_rcvd_from_n=',nbergs_rcvd_from_n,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_rcvd_from_s=',nbergs_rcvd_from_s,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_rcvd_from_e=',nbergs_rcvd_from_e,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_rcvd_from_w=',nbergs_rcvd_from_w,' on PE',mpp_pe()
-      call error_mesg('diamonds, send_bergs_to_other_pes:', 'We lost some bergs!', FATAL)
+      write(stderrunit,'(a,i4,a,i4)') 'KID, send_bergs_to_other_pes: nbergs_end=',nbergs_end,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, send_bergs_to_other_pes: nbergs_start=',nbergs_start,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, send_bergs_to_other_pes: delta=',i,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, send_bergs_to_other_pes: error=',nbergs_end-(nbergs_start+i),' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, send_bergs_to_other_pes: nbergs_to_send_n=',nbergs_to_send_n,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, send_bergs_to_other_pes: nbergs_to_send_s=',nbergs_to_send_s,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, send_bergs_to_other_pes: nbergs_to_send_e=',nbergs_to_send_e,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, send_bergs_to_other_pes: nbergs_to_send_w=',nbergs_to_send_w,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, send_bergs_to_other_pes: nbergs_rcvd_from_n=',nbergs_rcvd_from_n,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, send_bergs_to_other_pes: nbergs_rcvd_from_s=',nbergs_rcvd_from_s,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, send_bergs_to_other_pes: nbergs_rcvd_from_e=',nbergs_rcvd_from_e,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, send_bergs_to_other_pes: nbergs_rcvd_from_w=',nbergs_rcvd_from_w,' on PE',mpp_pe()
+      call error_mesg('KID, send_bergs_to_other_pes:', 'We lost some bergs!', FATAL)
     endif
   endif
 
@@ -1835,8 +1827,8 @@ integer :: grdi, grdj
     enddo ; enddo
     call mpp_sum(i)
     if (i>0 .and. mpp_pe()==mpp_root_pe()) then
-      write(stderrunit,'(a,i4)') 'diamonds, send_bergs_to_other_pes: # of bergs outside computational domain = ',i
-      call error_mesg('diamonds, send_bergs_to_other_pes:', 'there are bergs still in halos!', FATAL)
+      write(stderrunit,'(a,i4)') 'KID, send_bergs_to_other_pes: # of bergs outside computational domain = ',i
+      call error_mesg('KID, send_bergs_to_other_pes:', 'there are bergs still in halos!', FATAL)
     endif ! root_pe
   endif ! debug
 
@@ -1994,7 +1986,7 @@ stderrunit = stderr()
       enddo
     else
      ! Note: This is meant to be unmatched after you have cleared the first berg
-     ! call error_mesg('diamonds, clear berg from partners', 'The bond you are trying to clear is unmatched!', WARNING)
+     ! call error_mesg('KID, clear berg from partners', 'The bond you are trying to clear is unmatched!', WARNING)
     endif
     current_bond=>current_bond%next_bond
   enddo !End loop over bonds
@@ -2022,12 +2014,10 @@ integer :: counter, k, max_bonds, id_cnt, id_ij
 integer(kind=8) :: id
 integer :: stderrunit
 logical :: force_app
-logical :: quick
 
   ! Get the stderr unit number
   stderrunit = stderr()
 
-  quick=.false.
   max_bonds=0
   if (present(max_bonds_in)) max_bonds=max_bonds_in
 
@@ -2073,19 +2063,19 @@ logical :: quick
 
   ! force_app=.true.
   if(force_app) then !force append with origin ine,jne (for I/O)
-    call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg, quick, this)
+    call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg, this)
   else
     lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
     if (lres) then
       lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
-      call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg,quick,this)
+      call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg,this)
     else
       lres=find_cell_wide(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
       if (lres) then
         lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
-        call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg,quick,this)
+        call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg,this)
       else
-        write(stderrunit,'("diamonds, unpack_berg_from_buffer pe=(",i3,a,2i4,a,2f8.2)')&
+        write(stderrunit,'("KID, unpack_berg_from_buffer pe=(",i3,a,2i4,a,2f8.2)')&
          & mpp_pe(),') Failed to find i,j=',localberg%ine,localberg%jne,' for lon,lat=',localberg%lon,localberg%lat
         write(stderrunit,*) localberg%lon,localberg%lat
         write(stderrunit,*) localberg%uvel,localberg%vvel
@@ -2100,7 +2090,7 @@ logical :: quick
         write(stderrunit,*) grd%lon(grd%isd,grd%jsd),grd%lon(grd%ied,grd%jsd)
         write(stderrunit,*) grd%lat(grd%isd,grd%jsd),grd%lat(grd%ied,grd%jed)
         write(stderrunit,*) lres
-        call error_mesg('diamonds, unpack_berg_from_buffer', 'can not find a cell to place berg in!', FATAL)
+        call error_mesg('KID, unpack_berg_from_buffer', 'can not find a cell to place berg in!', FATAL)
       endif
     endif
   endif
@@ -2160,7 +2150,7 @@ integer :: new_size, old_size
       deallocate(old)
     endif
     old=>new
-   !write(stderr(),*) 'diamonds, increase_ibuffer',mpp_pe(),' increased to',new_size
+   !write(stderr(),*) 'KID, increase_ibuffer',mpp_pe(),' increased to',new_size
   endif
 
 end subroutine increase_ibuffer
@@ -2276,12 +2266,11 @@ end subroutine unpack_traj_from_buffer2
 !! temporary. This routine allocates memory for a new berg and copies the
 !! the input values into it. The memory for the new berg is pointed to
 !! by newberg_return (if present).
-subroutine add_new_berg_to_list(first, bergvals, quick, newberg_return)
+subroutine add_new_berg_to_list(first, bergvals, newberg_return)
 ! Arguments
 type(iceberg), pointer :: first !< List of icebergs
 type(iceberg), intent(in) :: bergvals !< Berg values to copy
 type(iceberg), intent(out), pointer, optional :: newberg_return !< New berg
-logical, intent(in), optional :: quick !< If true, use the quick insertion algorithm
 ! Local variables
 type(iceberg), pointer :: new=>null()
 
@@ -2293,15 +2282,7 @@ type(iceberg), pointer :: new=>null()
     !newberg_return=>null()
   endif
 
-  if (present(quick)) then
-    if(quick) then
-      call insert_berg_into_list(first, new, quick=.true.)
-    else
-      call insert_berg_into_list(first, new)
-    endif
-  else
-    call insert_berg_into_list(first, new)
-  endif
+  call insert_berg_into_list(first, new)
 
   !Clear new
   new=>null()
@@ -2347,14 +2328,14 @@ integer :: grdi, grdj
           this%jne>bergs%grd%jec) icnt2=icnt2+1
       this=>this%next
       if (i>1.and..not.associated(this%prev)) then
-        call error_mesg('diamonds, count_out_of_order', 'Pointer %prev is unassociated. This should not happen!', FATAL)
+        call error_mesg('KID, count_out_of_order', 'Pointer %prev is unassociated. This should not happen!', FATAL)
       endif
     enddo
   enddo; enddo
   call mpp_sum(icnt2)
 
   if ((debug.or.icnt1.ne.0).and.mpp_pe().eq.mpp_root_pe()) then
-    write(*,'(a,3(x,a,i6),x,a)') 'diamonds, count_out_of_order:', &
+    write(*,'(a,3(x,a,i6),x,a)') 'KID, count_out_of_order:', &
       '# out of order=', icnt1,'# in halo=',icnt2,'# identicals=',icnt3,label
   endif
 
@@ -2399,7 +2380,7 @@ integer :: grdi_inner, grdj_inner
   call mpp_sum(icnt_same)
 
   if ((debug.or.icnt_id>0.or.icnt_same>0).and.mpp_pe().eq.mpp_root_pe()) then
-    write(*,'(a,2(x,a,i9),x,a)') 'diamonds, check_for_duplicates:', &
+    write(*,'(a,2(x,a,i9),x,a)') 'KID, check_for_duplicates:', &
       '# with same id=', icnt_id,'# identical bergs=',icnt_same,label
   endif
 
@@ -2515,20 +2496,15 @@ integer :: stderrunit
 end subroutine monitor_a_berg
 
 !> Inserts a berg into a list
-subroutine insert_berg_into_list(first, newberg, quick)
+subroutine insert_berg_into_list(first, newberg)
 ! Arguments
 type(iceberg), pointer :: first !< List of bergs
 type(iceberg), pointer :: newberg !< New berg to insert
-logical, intent(in), optional :: quick !< If true, use the quick insertion algorithm
-                                       !! \todo Delete arguments since the code does not appear to use it.
 ! Local variables
 type(iceberg), pointer :: this, prev
-logical :: quickly
-
-  quickly = .false.
 
   if (associated(first)) then
-    if (.not. parallel_reprod .or. quickly) then
+    if (.not. parallel_reprod) then
       newberg%next=>first
       newberg%prev=>null()
       first%prev=>newberg
@@ -2698,8 +2674,8 @@ integer :: stderrunit
   stderrunit=stderr()
 
   if (associated(berg)) then
-    write(stderrunit,*) 'diamonds, create_iceberg: berg already associated!!!!',mpp_pe()
-    call error_mesg('diamonds, create_iceberg', 'berg already associated. This should not happen!', FATAL)
+    write(stderrunit,*) 'KID, create_iceberg: berg already associated!!!!',mpp_pe()
+    call error_mesg('KID, create_iceberg', 'berg already associated. This should not happen!', FATAL)
   endif
   allocate(berg)
   berg=bergvals
@@ -2757,31 +2733,31 @@ integer, optional, intent(in) :: il !< i-index of cell berg should be in
 integer, optional, intent(in) :: jl !< j-index of cell berg should be in
 ! Local variables
 
-  write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,a,2f16.4,i5,f7.2,es12.4,f5.1)') &
+  write(iochan,'("KID, print_berg: ",2a,i5,a,i12,a,2f16.4,i5,f7.2,es12.4,f5.1)') &
     label, 'pe=(', mpp_pe(), ') #=', berg%id, ' start lon,lat,yr,day,mass,hb=', &
     berg%start_lon, berg%start_lat, berg%start_year, berg%start_day, berg%start_mass, berg%halo_berg
   if (present(il).and.present(jl)) then
-    write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,a,2i5)') &
+    write(iochan,'("KID, print_berg: ",2a,i5,a,i12,a,2i5)') &
       label, 'pe=(', mpp_pe(), ') #=', berg%id, ' List i,j=',il,jl
   endif
-  write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,a,2i5,a,2l2)') &
+  write(iochan,'("KID, print_berg: ",2a,i5,a,i12,a,2i5,a,2l2)') &
     label, 'pe=(', mpp_pe(), ') #=', berg%id, &
     ' i,j=', berg%ine, berg%jne, &
     ' p,n=', associated(berg%prev), associated(berg%next)
-  write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,3(a,2f16.8))') &
+  write(iochan,'("KID, print_berg: ",2a,i5,a,i12,3(a,2f16.8))') &
     label, 'pe=(', mpp_pe(), ') #=', berg%id, &
     ' xi,yj=', berg%xi, berg%yj, &
     ' lon,lat=', berg%lon, berg%lat, &
     ' lon_old,lat_old=', berg%lon_old, berg%lat_old
-  write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,2(a,2f14.8))') &
+  write(iochan,'("KID, print_berg: ",2a,i5,a,i12,2(a,2f14.8))') &
     label, 'pe=(', mpp_pe(), ') #=', berg%id, &
     ' u,v=', berg%uvel, berg%vvel, &
     ' uvel_old,vvel_old=', berg%uvel_old, berg%vvel_old
-  write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,2(a,2f14.8))') &
+  write(iochan,'("KID, print_berg: ",2a,i5,a,i12,2(a,2f14.8))') &
     label, 'pe=(', mpp_pe(), ') #=', berg%id, &
     ' axn,ayn=', berg%axn, berg%ayn, &
     ' bxn,byn=', berg%bxn, berg%byn
-  write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,3(a,2f14.8))') &
+  write(iochan,'("KID, print_berg: ",2a,i5,a,i12,3(a,2f14.8))') &
     label, 'pe=(', mpp_pe(), ') #=', berg%id, &
     ' uo,vo=', berg%uo, berg%vo, &
     ' ua,va=', berg%ua, berg%va, &
@@ -2809,7 +2785,7 @@ integer :: grdi, grdj
   nbergs=count_bergs(bergs)
   nnbergs=nbergs
   call mpp_sum(nnbergs)
-  if (nbergs.gt.0) write(iochan,'("diamonds, ",a," there are",i5," bergs out of",i6," on PE ",i4)') label, nbergs, nnbergs, mpp_pe()
+  if (nbergs.gt.0) write(iochan,'("KID, ",a," there are",i5," bergs out of",i6," on PE ",i4)') label, nbergs, nnbergs, mpp_pe()
 
 end subroutine print_bergs
 
@@ -2857,7 +2833,7 @@ if (berg%id .ne. other_id) then
    endif
    new_bond=>null()
  else
-   call error_mesg('diamonds, bonds', 'An iceberg is trying to bond with itself!!!', FATAL)
+   call error_mesg('KID, bonds', 'An iceberg is trying to bond with itself!!!', FATAL)
  endif
 
 end subroutine form_a_bond
@@ -2886,7 +2862,7 @@ type(bond) , pointer :: current_bond
           current_bond%other_berg_jne=current_bond%other_berg%jne
         else
           if (berg%halo_berg .lt. 0.5) then
-            call error_mesg('diamonds, bond address update', 'other berg in bond not assosiated!', FATAL)
+            call error_mesg('KID, bond address update', 'other berg in bond not assosiated!', FATAL)
           endif
         endif
         current_bond=>current_bond%next_bond
@@ -2914,17 +2890,22 @@ type(bond) , pointer :: current_bond
     do while (associated(berg)) ! loop over all bergs
       current_bond=>berg%first_bond
       do while (associated(current_bond)) ! loop over all bonds
-        print *, 'Show Bond1 :', berg%id, current_bond%other_id, current_bond%other_berg_ine, current_bond%other_berg_jne,  mpp_pe()
+         !print *, 'Show Bond1 :', berg%id, current_bond%other_id, current_bond%other_berg_ine, current_bond%other_berg_jne,  mpp_pe()
+        !write(*,'(a,5i)')'Show Bond1 :',berg%id, current_bond%other_id, current_bond%other_berg_ine, current_bond%other_berg_jne, mpp_pe()
         !print *, 'Current:', berg%id, berg%ine, berg%jne,berg%halo_berg, mpp_pe()
         if  (associated(current_bond%other_berg)) then
           if (current_bond%other_berg%id .ne. current_bond%other_id) then
-            print *, 'Bond matching', berg%id,current_bond%other_berg%id, current_bond%other_id,&
-            berg%halo_berg,current_bond%other_berg%halo_berg ,mpp_pe()
-            call error_mesg('diamonds, show all bonds:', 'The bonds are not matching properly!', FATAL)
+            !print *, 'Bond matching', berg%id,current_bond%other_berg%id, current_bond%other_id,&
+            !     berg%halo_berg,current_bond%other_berg%halo_berg ,mpp_pe()
+            write(*,'(a,3i,2i3,i4)')'Bond matching :',berg%id,current_bond%other_berg%id, current_bond%other_id,&
+                 int(berg%halo_berg),current_bond%other_berg%halo_berg ,mpp_pe()
+            call error_mesg('KID, show all bonds:', 'The bonds are not matching properly!', FATAL)
           endif
         else
-            print *, 'This bond has an non-assosiated other berg :', berg%id, current_bond%other_id,&
-            current_bond%other_berg_ine, current_bond%other_berg_jne, berg%halo_berg,  mpp_pe()
+            !print *, 'This bond has an non-assosiated other berg :', berg%id, current_bond%other_id,&
+            !     current_bond%other_berg_ine, current_bond%other_berg_jne, berg%halo_berg,  mpp_pe()
+         !   write(*,'(a,4i,i3,i4)')'This bond has an non-assosiated other berg :', berg%id, current_bond%other_id,&
+         !        current_bond%other_berg_ine, current_bond%other_berg_jne, int(berg%halo_berg),  mpp_pe()
         endif
         current_bond=>current_bond%next_bond
       enddo
@@ -2935,89 +2916,114 @@ type(bond) , pointer :: current_bond
 end subroutine show_all_bonds
 
 subroutine connect_all_bonds(bergs)
-type(icebergs), pointer :: bergs !< Container for all types and memory
-type(iceberg), pointer :: other_berg, berg
-type(icebergs_gridded), pointer :: grd
-integer :: i, j
-integer :: grdi, grdj
-integer :: grdi_inner, grdj_inner
-type(bond) , pointer :: current_bond, other_berg_bond
-logical :: bond_matched, missing_bond, check_bond_quality
-integer nbonds
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  type(iceberg), pointer :: other_berg, berg
+  type(icebergs_gridded), pointer :: grd
+  integer :: i, j
+  integer :: grdi, grdj
+  integer :: grdi_inner, grdj_inner
+  type(bond) , pointer :: current_bond, other_berg_bond
+  logical :: bond_matched, missing_bond, check_bond_quality
+  integer nbonds
 
-missing_bond=.false.
-bond_matched=.false.
+  missing_bond=.false.
+  bond_matched=.false.
 
-! For convenience
+  ! For convenience
   grd=>bergs%grd
 
   do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
-! do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec  ! Don't connect halo bergs
-    berg=>bergs%list(grdi,grdj)%first
-    do while (associated(berg)) ! loop over all bergs
-      current_bond=>berg%first_bond
-      do while (associated(current_bond)) ! loop over all bonds
-        !code to find parter bond goes here
-        if (.not.associated(current_bond%other_berg)) then
-          bond_matched=.false.
-          i = current_bond%other_berg_ine ; j = current_bond%other_berg_jne
-          if ( (i.gt. grd%isd-1) .and. (i .lt. grd%ied+1) .and. (j .gt. grd%jsd-1) .and. (j .lt. grd%jed+1)) then
-            other_berg=>bergs%list(i,j)%first
-            do while (associated(other_berg)) ! loop over all other bergs
-              if (other_berg%id .eq. current_bond%other_id) then
-                current_bond%other_berg=>other_berg
-                other_berg=>null()
-                bond_matched=.true.
-              else
-                other_berg=>other_berg%next
-              endif
-            enddo
-          endif
-          if (.not.bond_matched) then
-            ! If you are stil not matched, then search adjacent cells
-            do grdj_inner = j-1,j+1 ; do grdi_inner = i-1,i+1
-              if (.not. bond_matched) then
-                if    ((grdj_inner .gt. grd%jsd-1) .and. (grdj_inner .lt. grd%jed+1)        &
-                .and.  (grdi_inner .gt. grd%isd-1) .and. (grdi_inner .lt. grd%ied+1)      &
-                .and. ((grdi_inner .ne. i) .or. (grdj_inner .ne. j)) ) then
-                  other_berg=>bergs%list(grdi_inner,grdj_inner)%first
-                  do while (associated(other_berg)) ! loop over all other bergs
+     ! do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec  ! Don't connect halo bergs
+     berg=>bergs%list(grdi,grdj)%first
+     do while (associated(berg)) ! loop over all bergs
+        current_bond=>berg%first_bond
+        do while (associated(current_bond)) ! loop over all bonds
+           !code to find parter bond goes here
+           if (.not.associated(current_bond%other_berg)) then
+              bond_matched=.false.
+              i = current_bond%other_berg_ine ; j = current_bond%other_berg_jne
+              if ( (i.gt. grd%isd-1) .and. (i .lt. grd%ied+1) .and. (j .gt. grd%jsd-1) .and. (j .lt. grd%jed+1)) then
+                 other_berg=>bergs%list(i,j)%first
+                 do while (associated(other_berg)) ! loop over all other bergs
                     if (other_berg%id .eq. current_bond%other_id) then
-                      current_bond%other_berg=>other_berg
-                      other_berg=>null()
-                      bond_matched=.true.
+                       current_bond%other_berg=>other_berg
+                       other_berg=>null()
+                       bond_matched=.true.
                     else
-                      other_berg=>other_berg%next
+                       other_berg=>other_berg%next
                     endif
-                  enddo
-                endif
+                 enddo
               endif
-            enddo;enddo
-          endif
-          if (.not.bond_matched) then
-            if (berg%halo_berg .lt. 0.5) then
-              missing_bond=.true.
-              print * ,'non-halo berg unmatched: ', berg%id, mpp_pe(), current_bond%other_id, current_bond%other_berg_ine
-              call error_mesg('diamonds, connect_all_bonds', 'A non-halo bond is missing!!!', FATAL)
-            else  ! This is not a problem if the partner berg is not yet in the halo
-              !if (  (current_bond%other_berg_ine .gt.grd%isd-1) .and. (current_bond%other_berg_ine .lt.grd%ied+1) &
-                !.and.  (current_bond%other_berg_jne .gt.grd%jsd-1) .and. (current_bond%other_berg_jne .lt.grd%jed+1) ) then
-                !print * ,'halo berg unmatched: ',mpp_pe(),  berg%id, current_bond%other_id, current_bond%other_berg_ine,current_bond%other_berg_jne
-                !call error_mesg('diamonds, connect_all_bonds', 'A halo bond is missing!!!', WARNING)
-              !endif
-            endif
-          endif
-        endif
-        current_bond=>current_bond%next_bond
-      enddo
-      berg=>berg%next
-    enddo
+              if (.not.bond_matched) then
+                 ! If you are still not matched, then search adjacent cells (to other berg)
+                 do grdj_inner = j-1,j+1 ; do grdi_inner = i-1,i+1
+                    if (.not. bond_matched) then
+                       if    ((grdj_inner .gt. grd%jsd-1) .and. (grdj_inner .lt. grd%jed+1)        &
+                            .and.  (grdi_inner .gt. grd%isd-1) .and. (grdi_inner .lt. grd%ied+1)      &
+                            .and. ((grdi_inner .ne. i) .or. (grdj_inner .ne. j)) ) then
+                          other_berg=>bergs%list(grdi_inner,grdj_inner)%first
+                          do while (associated(other_berg)) ! loop over all other bergs
+                             if (other_berg%id .eq. current_bond%other_id) then
+                                current_bond%other_berg=>other_berg
+                                other_berg=>null()
+                                bond_matched=.true.
+                             else
+                                other_berg=>other_berg%next
+                             endif
+                          enddo
+                       endif
+                    endif
+                 enddo;enddo
+              endif
+              if (.not.bond_matched) then
+                 ! Finally, if still not matched, search adjacent cells to current berg -Alex (periodicity fix)
+                 i = berg%ine; j = berg%jne            
+                 do grdj_inner = j-2,j+2 ; do grdi_inner = i-2,i+2 !probably wider search than necessary...
+                    if (.not. bond_matched) then                    
+                       if    ((grdj_inner .gt. grd%jsd-1) .and. (grdj_inner .lt. grd%jed+1)        &
+                            .and.  (grdi_inner .gt. grd%isd-1) .and. (grdi_inner .lt. grd%ied+1) ) then
+                          other_berg=>bergs%list(grdi_inner,grdj_inner)%first
+                          do while (associated(other_berg)) ! loop over all other bergs
+                             if (other_berg%id .eq. current_bond%other_id) then
+                                current_bond%other_berg=>other_berg
+                                current_bond%other_berg_ine = grdi_inner
+                                current_bond%other_berg_jne = grdj_inner
+                                other_berg=>null()
+                                bond_matched=.true.
+                             else
+                                other_berg=>other_berg%next
+                             endif
+                          enddo
+                       endif
+                    endif
+                 enddo;enddo
+              endif
+
+              if (.not.bond_matched) then
+                 if (berg%halo_berg .lt. 0.5) then
+                    missing_bond=.true.
+                    print * ,'non-halo berg unmatched: ', berg%id, berg%ine, berg%jne, mpp_pe(), &
+                         current_bond%other_id, current_bond%other_berg_ine, current_bond%other_berg_jne
+                    call error_mesg('KID, connect_all_bonds', 'A non-halo bond is missing!!!', FATAL)
+                 else  ! This is not a problem if the partner berg is not yet in the halo
+                    !if (  (current_bond%other_berg_ine .gt.grd%isd-1) .and. (current_bond%other_berg_ine .lt.grd%ied+1) &
+                    !.and.  (current_bond%other_berg_jne .gt.grd%jsd-1) .and. (current_bond%other_berg_jne .lt.grd%jed+1) ) then
+                    !print * ,'halo berg unmatched: ',mpp_pe(),  berg%id, current_bond%other_id, current_bond%other_berg_ine,current_bond%other_berg_jne
+                    !call error_mesg('KID, connect_all_bonds', 'A halo bond is missing!!!', WARNING)
+                    !endif
+                 endif
+              endif
+           endif
+           current_bond=>current_bond%next_bond
+        enddo
+        berg=>berg%next
+     enddo
   enddo;enddo
 
   if (debug) then
-    check_bond_quality=.true.
-    nbonds=0
-    call count_bonds(bergs, nbonds,check_bond_quality)
+     check_bond_quality=.true.
+     nbonds=0
+     call count_bonds(bergs, nbonds,check_bond_quality)
   endif
 end subroutine connect_all_bonds
 
@@ -3115,12 +3121,12 @@ integer :: stderrunit
       call mpp_sum(num_unassosiated_bond_pairs_all_pe)
 
       if (num_unmatched_bonds_all_pe .gt. 0) then
-        call error_mesg('diamonds, bonds', 'Bonds are not matching!', FATAL)
+        call error_mesg('KID, bonds', 'Bonds are not matching!', FATAL)
       endif
       if (num_unassosiated_bond_pairs_all_pe .ne. 0) then
-        call error_mesg('diamonds, bonds', 'Bonds partners not located!', Warning)
+        call error_mesg('KID, bonds', 'Bonds partners not located!', Warning)
         if (num_unassosiated_bond_pairs .ne. 0) then
-          write(*,'(2a)') 'diamonds, Bonds parnters not located!!!! PE=', mpp_pe()
+          write(*,'(2a)') 'KID, Bonds parnters not located!!!! PE=', mpp_pe()
         endif
       endif
       if ((num_unmatched_bonds_all_pe .eq. 0)  .and. (num_unassosiated_bond_pairs_all_pe .eq. 0)) then
@@ -3129,7 +3135,7 @@ integer :: stderrunit
         endif
         check_bond_quality=.true.
       else
-        if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') 'diamonds: Warning, Broken Bonds! '
+        if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') 'KID: Warning, Broken Bonds! '
       endif
     endif
 
@@ -3358,7 +3364,7 @@ real :: Lx
   elseif (d3==dmin) then; i=ie-1; j=je-1
   elseif (d4==dmin) then; i=is+1; j=je-1
   else
-    call error_mesg('diamonds, find_cell_by_search:', 'This should never EVER happen! (1)', FATAL)
+    call error_mesg('KID, find_cell_by_search:', 'This should never EVER happen! (1)', FATAL)
   endif
 
   if (explain) then
@@ -3397,7 +3403,7 @@ real :: Lx
     elseif (d5==dmin) then; di=0; dj=-1
     elseif (d7==dmin) then; di=1; dj=0
     else
-      call error_mesg('diamonds, find_cell_by_search:', 'This should never EVER happen!', FATAL)
+      call error_mesg('KID, find_cell_by_search:', 'This should never EVER happen!', FATAL)
     endif
 
     i=min(ie, max(is, io+di))
@@ -3437,7 +3443,7 @@ real :: Lx
   !         call print_fld(grd, grd%tmp, 'Cost')
   !         stop 'Avoid recursing'
   !       endif
-  !       write(0,'(i3,a,2i5,a,2i3,a,2f8.3)') mpp_pe(),'diamonds, find_cell_by_search: false negative io,jo=',io,jo,' di,dj=',di,dj,' targ=',x,y
+  !       write(0,'(i3,a,2i5,a,2i3,a,2f8.3)') mpp_pe(),'KID, find_cell_by_search: false negative io,jo=',io,jo,' di,dj=',di,dj,' targ=',x,y
   !       explain=.true.; goto 911
   !     endif
       endif
@@ -3453,9 +3459,9 @@ real :: Lx
     write(0,'(i3,a,3f9.5)') mpp_pe(),'cost ',d4,d5,d6
     write(0,'(i3,a,2f9.5)') mpp_pe(),'x,y ',x,y
     write(0,'(i3,a,4i5)') mpp_pe(),'io,jo ',io,jo,di,dj
-    write(0,'(i3,a,2i5,a,2i3)') mpp_pe(),'diamonds, find_cell_by_search: false negative 2 i,j=',i-is,j-js,' di,dj=',di,dj
-    write(0,'(i3,a,2i5,a,2f8.3)') mpp_pe(),'diamonds, find_cell_by_search: false negative 2 io,jo=',io,jo
-    write(0,'(i3,a,2i5,a,2f8.3)') mpp_pe(),'diamonds, find_cell_by_search: false negative 2 i,j=',i,j,' targ=',x,y
+    write(0,'(i3,a,2i5,a,2i3)') mpp_pe(),'KID, find_cell_by_search: false negative 2 i,j=',i-is,j-js,' di,dj=',di,dj
+    write(0,'(i3,a,2i5,a,2f8.3)') mpp_pe(),'KID, find_cell_by_search: false negative 2 io,jo=',io,jo
+    write(0,'(i3,a,2i5,a,2f8.3)') mpp_pe(),'KID, find_cell_by_search: false negative 2 i,j=',i,j,' targ=',x,y
     return
   endif
   find_cell_by_search=.false.
@@ -3639,9 +3645,9 @@ real :: tol
   ! Safety check index bounds
   if (i-1.lt.grd%isd.or.i.gt.grd%ied.or.j-1.lt.grd%jsd.or.j.gt.grd%jed) then
     write(stderrunit,'(a,i3,(a,3i4))') &
-                     'diamonds, is_point_in_cell: pe=(',mpp_pe(),') i,s,e=', &
+                     'KID, is_point_in_cell: pe=(',mpp_pe(),') i,s,e=', &
                      i,grd%isd,grd%ied,' j,s,e=', j,grd%jsd,grd%jed
-    call error_mesg('diamonds, is_point_in_cell', 'test is off the PE!', FATAL)
+    call error_mesg('KID, is_point_in_cell', 'test is off the PE!', FATAL)
   endif
 
   is_point_in_cell=.false.
@@ -3937,14 +3943,14 @@ logical :: is_point_in_cell_using_xi_yj
         fac=2.1*max( abs(xi-0.5), abs(yj-0.5) ); fac=max(1., fac)
         xi=0.5+(xi-0.5)/fac
         yj=0.5+(yj-0.5)/fac
-        if (debug) call error_mesg('diamonds, pos_within_cell', 'in cell but scaling internal coordinates!', WARNING)
+        if (debug) call error_mesg('KID, pos_within_cell', 'in cell but scaling internal coordinates!', WARNING)
       endif
     else
       ! The point is not inside the spherical quad
       if (abs(xi-0.5)<0.5.and.abs(yj-0.5)<0.5) then
         ! The projection of the spherical quad onto the tangent plane should be larger than
         ! quad in the tangent plane so we should never be able to get here.
-        call error_mesg('diamonds, pos_within_cell', 'not in cell but coordinates <0.5!', FATAL)
+        call error_mesg('KID, pos_within_cell', 'not in cell but coordinates <0.5!', FATAL)
       endif
     endif
   endif
@@ -3963,7 +3969,7 @@ logical :: is_point_in_cell_using_xi_yj
       if (debug) then
         write(stderrunit,'(a,1p6e12.4)') 'values of xi, yj ',xi, yj
         pos_within_cell=is_point_in_cell(grd, x, y, i, j,explain=.True.)
-        call error_mesg('diamonds, pos_within_cell', 'pos_within_cell is False BUT is_point_in_cell disagrees!', FATAL)
+        call error_mesg('KID, pos_within_cell', 'pos_within_cell is False BUT is_point_in_cell disagrees!', FATAL)
       endif
     endif
   else
@@ -3973,7 +3979,7 @@ logical :: is_point_in_cell_using_xi_yj
       if (debug) then
         write(stderrunit,'(a,1p6e12.4)') 'values of xi, yj ',xi, yj
         pos_within_cell=is_point_in_cell(grd, x, y, i, j,explain=.True.)
-        call error_mesg('diamonds, pos_within_cell', 'pos_within_cell is True BUT is_point_in_cell disagrees!', FATAL)
+        call error_mesg('KID, pos_within_cell', 'pos_within_cell is True BUT is_point_in_cell disagrees!', FATAL)
       endif
     endif
   endif
@@ -4044,7 +4050,7 @@ if (abs(a)>1.e-12) then
     write(stderrunit,'(a,i3,1p6e12.4)') 'calc_xiyj: coeffs alpha..kappa',mpp_pe(),alpha,beta,gamma,delta,epsilon,kappa
     write(stderrunit,'(a,i3)') 'calc_xiyj: b<0 in quadratic root solver!!!!',mpp_pe()
     write(stderrunit,'(a,i3,1p6e12.4)') 'calc_xiyj: coeffs a,b,c,d,dx,dy',mpp_pe(),a,b,c,d,dx,dy
-    call error_mesg('diamonds, calc_xiyj', 'We have complex roots. The grid must be very distorted!', FATAL)
+    call error_mesg('KID, calc_xiyj', 'We have complex roots. The grid must be very distorted!', FATAL)
   endif
 else
   if (b.ne.0.) then
@@ -4071,7 +4077,7 @@ else
     write(stderrunit,'(a,i3,3f8.2)') 'calc_xiyj: y2..y4 - x1',mpp_pe(),y2-y1,y3-y1,y4-y1
     write(stderrunit,'(a,i3,1p6e12.4)') 'calc_xiyj: coeffs alpha..kappa',mpp_pe(),alpha,beta,gamma,delta,epsilon,kappa
     write(stderrunit,'(a,i3,1p2e12.4)') 'calc_xiyj: coeffs a,b',mpp_pe(),a,b
-    call error_mesg('diamonds, calc_xiyj', 'Can not invert either linear equaton for xi! This should not happen!', FATAL)
+    call error_mesg('KID, calc_xiyj', 'Can not invert either linear equaton for xi! This should not happen!', FATAL)
   endif
 endif
 if (expl) write(stderrunit,'(a,2e12.4)') 'calc_xiyj: xi,yj=',xi,yj
@@ -4135,14 +4141,14 @@ integer :: stderrunit
 
   lret=pos_within_cell(grd, berg%lon, berg%lat, berg%ine, berg%jne, xi, yj)
   if (xi.ne.berg%xi.or.yj.ne.berg%yj) then
-    write(stderrunit,'("diamonds: check_position (",i4,") b%x,x,-=",3(es12.4,x),a)') mpp_pe(),berg%xi,xi,berg%xi-xi,label
-    write(stderrunit,'("diamonds: check_position (",i4,") b%y,y,-=",3(es12.4,x),a)') mpp_pe(),berg%yj,yj,berg%yj-yj,label
+    write(stderrunit,'("KID: check_position (",i4,") b%x,x,-=",3(es12.4,x),a)') mpp_pe(),berg%xi,xi,berg%xi-xi,label
+    write(stderrunit,'("KID: check_position (",i4,") b%y,y,-=",3(es12.4,x),a)') mpp_pe(),berg%yj,yj,berg%yj-yj,label
     call print_berg(stderrunit, berg, 'check_position', il, jl)
-    call error_mesg('diamonds, check_position, '//trim(label),'berg has inconsistent xi,yj!',FATAL)
+    call error_mesg('KID, check_position, '//trim(label),'berg has inconsistent xi,yj!',FATAL)
   endif
   if (grd%msk(berg%ine, berg%jne)==0.) then
     call print_berg(stderrunit, berg, 'check_position, '//trim(label), il, jl)
-    call error_mesg('diamonds, check_position, '//trim(label),'berg is in a land cell!',FATAL)
+    call error_mesg('KID, check_position, '//trim(label),'berg is in a land cell!',FATAL)
   endif
 
 end subroutine check_position
@@ -4227,7 +4233,7 @@ type(icebergs_gridded), pointer :: grd !< Container for gridded fields
 character(len=*) :: label !< Label to use in messages
 ! Local variables
 
-  if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') 'diamonds: checksumming gridded data @ ',trim(label)
+  if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') 'KID: checksumming gridded data @ ',trim(label)
 
   ! external forcing
   call grd_chksum2(grd, grd%uo, 'uo')
@@ -4343,7 +4349,7 @@ real, dimension(lbound(fld,1):ubound(fld,1), lbound(fld,2):ubound(fld,2), lbound
   j=mpp_chksum( tmp(lbound(fld,1)+halo:ubound(fld,1)-halo, &
                     lbound(fld,2)+halo:ubound(fld,2)-halo,:) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(*,'("diamonds, grd_chksum3: ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9))') &
+    write(*,'("KID, grd_chksum3: ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9))') &
      txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd
 #ifdef CHECKSUM_HALOS
   i=mpp_chksum( fld(lbound(fld,1):ubound(fld,1), &
@@ -4351,7 +4357,7 @@ real, dimension(lbound(fld,1):ubound(fld,1), lbound(fld,2):ubound(fld,2), lbound
   j=mpp_chksum( tmp(lbound(fld,1):ubound(fld,1), &
                     lbound(fld,2):ubound(fld,2),:) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(*,'("diamonds, grd_chksum3* ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9))') &
+    write(*,'("KID, grd_chksum3* ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9))') &
      txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd
 #endif
 
@@ -4402,13 +4408,13 @@ real :: mean, rms, SD, minv, maxv
   i=mpp_chksum( fld(grd%isc:grd%iec,grd%jsc:grd%jec) )
   j=mpp_chksum( grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(*,'("diamonds, grd_chksum2: ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9),x,a,"=",i8)') &
+    write(*,'("KID, grd_chksum2: ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9),x,a,"=",i8)') &
      txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd!, '#', icount
 #ifdef CHECKSUM_HALOS
   i=mpp_chksum( fld(grd%isd:grd%ied,grd%jsd:grd%jed) )
   j=mpp_chksum( grd%tmp(grd%isd:grd%ied,grd%jsd:grd%jed) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(*,'("diamonds, grd_chksum2* ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9),x,a,"=",i)') &
+    write(*,'("KID, grd_chksum2* ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9),x,a,"=",i)') &
      txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd!, '#', icount
 #endif
 
@@ -4485,9 +4491,9 @@ integer :: grdi, grdj
   nbergs=count_bergs(bergs)
 
   if (nbergs.ne.sum(icnt(:,:))) then
-    write(*,'("diamonds, bergs_chksum: ",2(a,i8))') &
+    write(*,'("KID, bergs_chksum: ",2(a,i8))') &
       '# bergs =', nbergs, ' sum(icnt) =',sum(icnt(:,:))
-    call error_mesg('diamonds, bergs_chksum:', 'mismatch in berg count!', FATAL)
+    call error_mesg('KID, bergs_chksum:', 'mismatch in berg count!', FATAL)
   endif
 
   check_halo=.true.
@@ -4495,14 +4501,14 @@ integer :: grdi, grdj
     if (ignore_halo_violation) check_halo=.false.
   endif
   if (check_halo.and.nbergs.ne.sum(icnt(grd%isc:grd%iec, grd%jsc:grd%jec))) then
-    write(*,'("diamonds, bergs_chksum: ",2(a,i8))') &
+    write(*,'("KID, bergs_chksum: ",2(a,i8))') &
       '# bergs =', nbergs, ' sum(icnt(comp_dom)) =',sum(icnt(:,:))
-    call error_mesg('diamonds, bergs_chksum:', 'mismatch in berg count on computational domain!', FATAL)
+    call error_mesg('KID, bergs_chksum:', 'mismatch in berg count on computational domain!', FATAL)
   endif
 
   call mpp_sum(nbergs)
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(*,'("diamonds, bergs_chksum: ",a18,6(x,a,"=",i22))') &
+    write(*,'("KID, bergs_chksum: ",a18,6(x,a,"=",i22))') &
       txt, 'chksum', ichk1, 'chksum2', ichk2, 'chksum3', ichk3, 'chksum4', ichk4, 'chksum5', ichk5, '#', nbergs
 
   grd%tmp(:,:)=real(icnt(:,:))
@@ -4736,10 +4742,10 @@ subroutine check_for_duplicates_in_parallel(bergs)
   endif
   if (k /= nbergs) then
     write(stderrunit,*) 'counted bergs=',k,'count_bergs()=',nbergs
-    call error_mesg('diamonds, check_for_duplicates:', 'Mismatch between concatenation of lists and count_bergs()!', FATAL)
+    call error_mesg('KID, check_for_duplicates:', 'Mismatch between concatenation of lists and count_bergs()!', FATAL)
   endif
   k = check_for_duplicate_ids_in_list(nbergs, ids, verbose=.true.)
-  if (k /= 0) call error_mesg('diamonds, check_for_duplicates:', 'Duplicate berg detected across PEs!', FATAL)
+  if (k /= 0) call error_mesg('KID, check_for_duplicates:', 'Duplicate berg detected across PEs!', FATAL)
   if (nbergs>0) deallocate(ids)
 end subroutine check_for_duplicates_in_parallel
 
@@ -4831,21 +4837,21 @@ subroutine test_check_for_duplicate_ids_in_list()
   call mpp_sum(error_count)
   if (error_count /= 0) then
     error_count = check_for_duplicate_ids_in_list(5, ids, verbose=.true.)
-    call error_mesg('diamonds, test_check_for_duplicate_ids_in_list:', 'Unit test for clean list failed!', FATAL)
+    call error_mesg('KID, test_check_for_duplicate_ids_in_list:', 'Unit test for clean list failed!', FATAL)
   endif
   if (mpp_pe() == mpp_root_pe()) ids(5) = ids(4)
   error_count = check_for_duplicate_ids_in_list(5, ids, verbose=.false.)
   call mpp_sum(error_count)
   if (error_count == 0) then
     error_count = check_for_duplicate_ids_in_list(5, ids, verbose=.true.)
-    call error_mesg('diamonds, test_check_for_duplicate_ids_in_list:', 'Unit test for dirty list failed!', FATAL)
+    call error_mesg('KID, test_check_for_duplicate_ids_in_list:', 'Unit test for dirty list failed!', FATAL)
   endif
   if (mpp_pe() == mpp_root_pe()) ids(5) = 7 + 5*mpp_pe()
   error_count = check_for_duplicate_ids_in_list(5, ids, verbose=.false.)
   call mpp_sum(error_count)
   if (error_count == 0 .and. mpp_npes()>1) then
     error_count = check_for_duplicate_ids_in_list(5, ids, verbose=.true.)
-    call error_mesg('diamonds, test_check_for_duplicate_ids_in_list:', 'Unit test for a really dirty list failed!', FATAL)
+    call error_mesg('KID, test_check_for_duplicate_ids_in_list:', 'Unit test for a really dirty list failed!', FATAL)
   endif
   deallocate(ids)
 end subroutine test_check_for_duplicate_ids_in_list

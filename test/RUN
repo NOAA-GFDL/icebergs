@@ -1,2 +1,0 @@
-rm iceberg_trajectories.nc
-srun -n4 ./../build/bergs.x

@@ -401,7 +401,7 @@ integer :: grdi, grdj
 
   ! Write stored ice
   filename='calving.res.nc'
-  if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stderrunit,'(2a)') 'diamonds, write_restart: writing ',filename
+  if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stderrunit,'(2a)') 'KID, write_restart: writing ',filename
   call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'write stored_ice')
   call grd_chksum2(bergs%grd, bergs%grd%stored_heat, 'write stored_heat')
   if (bergs%tau_calving>0.) then
@@ -604,9 +604,9 @@ integer, allocatable, dimension(:) :: ine,        &
       endif
     endif
     if (really_debug) then
-      write(stderrunit,'(a,i8,a,2f9.4,a,i8)') 'diamonds, read_restart_bergs: berg ',k,' is at ',localberg%lon,localberg%lat,&
+      write(stderrunit,'(a,i8,a,2f9.4,a,i8)') 'KID, read_restart_bergs: berg ',k,' is at ',localberg%lon,localberg%lat,&
            & ' on PE ',mpp_pe()
-      write(stderrunit,*) 'diamonds, read_restart_bergs: lres = ',lres
+      write(stderrunit,*) 'KID, read_restart_bergs: lres = ',lres
     endif
     if (lres) then ! true if we reside on this PE grid
       localberg%uvel=uvel(k)
@@ -642,20 +642,20 @@ integer, allocatable, dimension(:) :: ine,        &
 
       if (really_debug) lres=is_point_in_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, explain=.true.)
       lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
-      !call add_new_berg_to_list(bergs%first, localberg, quick=.true.)
+      !call add_new_berg_to_list(bergs%first, localberg)
 
       if (bergs%grd%area(localberg%ine,localberg%jne) .ne. 0)  then
         call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg)
       else
         if (mpp_pe().eq.mpp_root_pe()) then
           print * , 'Grounded iceberg: ', lat(k),lon(k), localberg%id
-          call error_mesg('diamonds, read_restart_bergs', 'Iceberg not added because it is grounded', WARNING)
+          call error_mesg('KID, read_restart_bergs', 'Iceberg not added because it is grounded', WARNING)
         endif
        endif
 
       if (really_debug) call print_berg(stderrunit, bergs%list(localberg%ine,localberg%jne)%first, 'read_restart_bergs, add_new_berg_to_list')
     elseif (multiPErestart .and. io_tile_id(1) .lt. 0) then
-      call error_mesg('diamonds, read_restart_bergs', 'berg in PE file was not on PE!', FATAL)
+      call error_mesg('KID, read_restart_bergs', 'berg in PE file was not on PE!', FATAL)
     endif
   enddo
 
@@ -698,17 +698,17 @@ integer, allocatable, dimension(:) :: ine,        &
     !nbergs_read=count_bergs(bergs)
     !call mpp_sum(nbergs_read)
     !if (mpp_pe().eq.mpp_root_pe()) then
-    !  write(*,'(a,i8,a,i8,a)') 'diamonds, read_restart_bergs: Number of Icebergs in restart file=',nbergs_in_file,' Number of Icebergs read=', nbergs_read
+    !  write(*,'(a,i8,a,i8,a)') 'KID, read_restart_bergs: Number of Icebergs in restart file=',nbergs_in_file,' Number of Icebergs read=', nbergs_read
     !  if (nbergs_read .gt. nbergs_in_file) then
-    !    call error_mesg('diamonds, read_restart_bergs', 'More icebergs read than exist in restart file.', FATAL)
+    !    call error_mesg('KID, read_restart_bergs', 'More icebergs read than exist in restart file.', FATAL)
     !  elseif (nbergs_read .lt. nbergs_in_file) then
     !    if (bergs%ignore_missing_restart_bergs) then
-    !      call error_mesg('diamonds, read_restart_bergs', 'Some Icebergs from restart file were not found (ignore_missing flag is on)', WARNING)
+    !      call error_mesg('KID, read_restart_bergs', 'Some Icebergs from restart file were not found (ignore_missing flag is on)', WARNING)
     !    else
-    !      call error_mesg('diamonds, read_restart_bergs', 'Some Icebergs from restart file were not found', FATAL)
+    !      call error_mesg('KID, read_restart_bergs', 'Some Icebergs from restart file were not found', FATAL)
     !    endif
     !  elseif (nbergs_read .eq. nbergs_in_file) then
-    !    write(*,'(a,i8,a,i8,a)') 'diamonds, read_restart_bergs: Number of icebergs read (#',nbergs_read,') matches the number of icebergs in the file'
+    !    write(*,'(a,i8,a,i8,a)') 'KID, read_restart_bergs: Number of icebergs read (#',nbergs_read,') matches the number of icebergs in the file'
     !  endif
     !endif
 
@@ -724,7 +724,7 @@ integer, allocatable, dimension(:) :: ine,        &
   call mpp_sum( bergs%icebergs_mass_start )
   bergs%bergy_mass_start=sum_mass(bergs,justbits=.true.)
   call mpp_sum( bergs%bergy_mass_start )
-  if (mpp_pe().eq.mpp_root_pe().and.verbose) write(*,'(a)') 'diamonds, read_restart_bergs: completed'
+  if (mpp_pe().eq.mpp_root_pe().and.verbose) write(*,'(a)') 'KID, read_restart_bergs: completed'
 
 end subroutine read_restart_bergs
 
@@ -832,7 +832,7 @@ logical :: lres
   bergs%nbergs_start=count_bergs(bergs)
   call mpp_sum(bergs%nbergs_start)
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(*,'(a,i8,a)') 'diamonds, generate_bergs: ',bergs%nbergs_start,' were generated'
+    write(*,'(a,i8,a)') 'KID, generate_bergs: ',bergs%nbergs_start,' were generated'
 
 end subroutine generate_bergs
 
@@ -926,7 +926,7 @@ integer(kind=8), allocatable, dimension(:) :: first_id,   &
   nbonds_in_file = siz(1)
 
     if (mpp_pe() .eq. mpp_root_pe()) then
-      write(stderrunit,*)  'diamonds, bond read restart : ','Number of bonds in file',  nbonds_in_file
+      write(stderrunit,*)  'KID, bond read restart : ','Number of bonds in file',  nbonds_in_file
     endif
 
   if (nbonds_in_file .gt. 0) then
@@ -1061,7 +1061,7 @@ integer(kind=8), allocatable, dimension(:) :: first_id,   &
             !call form_a_bond(first_berg, other_id(k), other_berg_ine(k),other_berg_jne(k))
           endif
         else
-          write(stderrunit,*) 'diamonds, bond read restart : ','Not enough partial bonds formed', k, mpp_pe(), nbonds_in_file
+          write(stderrunit,*) 'KID, bond read restart : ','Not enough partial bonds formed', k, mpp_pe(), nbonds_in_file
           call error_mesg('read_restart_bonds_bergs_new', 'Failure with reading bonds: First bond not found on pe', FATAL)
         endif
       endif
@@ -1078,23 +1078,23 @@ integer(kind=8), allocatable, dimension(:) :: first_id,   &
     call mpp_sum(all_pe_number_perfect_bonds_with_first_on_pe)
 
     if (all_pe_number_partial_bonds .lt. nbonds_in_file) then
-      write(stderrunit,*) 'diamonds, bond read restart : ','Not enough partial bonds formed', all_pe_number_partial_bonds , nbonds_in_file
+      write(stderrunit,*) 'KID, bond read restart : ','Not enough partial bonds formed', all_pe_number_partial_bonds , nbonds_in_file
       call error_mesg('read_restart_bonds_bergs_new', 'Not enough partial bonds formed', FATAL)
     endif
 
     if (all_pe_number_perfect_bonds .lt. nbonds_in_file) then
       call mpp_sum(all_pe_number_first_bonds_matched)
       call mpp_sum(all_pe_number_second_bonds_matched)
-      write(stderrunit,*)  'diamonds, bond read restart : ','Warning, some bonds are not fully formed',  all_pe_number_first_bonds_matched , nbonds_in_file
-      write(stderrunit,*)  'diamonds, bond read restart : ','Number of first and second bonds matched:', all_pe_number_second_bonds_matched , nbonds_in_file
+      write(stderrunit,*)  'KID, bond read restart : ','Warning, some bonds are not fully formed',  all_pe_number_first_bonds_matched , nbonds_in_file
+      write(stderrunit,*)  'KID, bond read restart : ','Number of first and second bonds matched:', all_pe_number_second_bonds_matched , nbonds_in_file
       call error_mesg('read_restart_bonds_bergs_new', 'Not enough perfect bonds formed', NOTE)
     endif
 
     if (all_pe_number_perfect_bonds_with_first_on_pe .ne. nbonds_in_file) then
       call mpp_sum(all_pe_number_first_bonds_matched)
       call mpp_sum(all_pe_number_second_bonds_matched)
-      write(stderrunit,*)  'diamonds, bond read restart : ','Warning, # bonds with first bond on computational domain, does not match file',  all_pe_number_first_bonds_matched , nbonds_in_file
-      write(stderrunit,*)  'diamonds, bond read restart : ','Computational bond, first second:', all_pe_number_second_bonds_matched , nbonds_in_file
+      write(stderrunit,*)  'KID, bond read restart : ','Warning, # bonds with first bond on computational domain, does not match file',  all_pe_number_first_bonds_matched , nbonds_in_file
+      write(stderrunit,*)  'KID, bond read restart : ','Computational bond, first second:', all_pe_number_second_bonds_matched , nbonds_in_file
       call error_mesg('read_restart_bonds_bergs_new', 'Computational perfect bonds do not match those in file', NOTE)
     endif
 
@@ -1106,8 +1106,8 @@ integer(kind=8), allocatable, dimension(:) :: first_id,   &
   endif
 
   if (mpp_pe() .eq. mpp_root_pe()) then
-    write(stderrunit,*)  'diamonds, bond read restart : ','Number of bonds (including halos)',  all_pe_number_perfect_bonds
-    write(stderrunit,*)  'diamonds, bond read restart : ','Number of true bonds created',  all_pe_number_perfect_bonds_with_first_on_pe
+    write(stderrunit,*)  'KID, bond read restart : ','Number of bonds (including halos)',  all_pe_number_perfect_bonds
+    write(stderrunit,*)  'KID, bond read restart : ','Number of true bonds created',  all_pe_number_perfect_bonds_with_first_on_pe
   endif
 
 end subroutine read_restart_bonds
@@ -1131,48 +1131,48 @@ type(randomNumberStream) :: rns
   filename=trim(restart_input_dir)//'calving.res.nc'
   if (file_exist(filename)) then
     if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') &
-     'diamonds, read_restart_calving: reading ',filename
+     'KID, read_restart_calving: reading ',filename
     call read_data(filename, 'stored_ice', grd%stored_ice, grd%domain)
     if (field_exist(filename, 'stored_heat')) then
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
-       'diamonds, read_restart_calving: reading stored_heat from restart file.'
+       'KID, read_restart_calving: reading stored_heat from restart file.'
       call read_data(filename, 'stored_heat', grd%stored_heat, grd%domain)
     else
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
-     'diamonds, read_restart_calving: stored_heat WAS NOT FOUND in the file. Setting to 0.'
+     'KID, read_restart_calving: stored_heat WAS NOT FOUND in the file. Setting to 0.'
       grd%stored_heat(:,:)=0.
     endif
     if (field_exist(filename, 'rmean_calving')) then
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
-       'diamonds, read_restart_calving: reading rmean_calving from restart file.'
+       'KID, read_restart_calving: reading rmean_calving from restart file.'
       call read_data(filename, 'rmean_calving', grd%rmean_calving, grd%domain)
       grd%rmean_calving_initialized=.true.
     else
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
-     'diamonds, read_restart_calving: rmean_calving WAS NOT FOUND in the file. Setting to 0.'
+     'KID, read_restart_calving: rmean_calving WAS NOT FOUND in the file. Setting to 0.'
     endif
     if (field_exist(filename, 'rmean_calving_hflx')) then
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
-       'diamonds, read_restart_calving: reading rmean_calving_hflx from restart file.'
+       'KID, read_restart_calving: reading rmean_calving_hflx from restart file.'
       call read_data(filename, 'rmean_calving_hflx', grd%rmean_calving_hflx, grd%domain)
       grd%rmean_calving_hflx_initialized=.true.
     else
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
-     'diamonds, read_restart_calving: rmean_calving_hflx WAS NOT FOUND in the file. Setting to 0.'
+     'KID, read_restart_calving: rmean_calving_hflx WAS NOT FOUND in the file. Setting to 0.'
     endif
     if (field_exist(filename, 'iceberg_counter_grd')) then
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
-       'diamonds, read_restart_calving: reading iceberg_counter_grd from restart file.'
+       'KID, read_restart_calving: reading iceberg_counter_grd from restart file.'
       call read_data(filename, 'iceberg_counter_grd', grd%iceberg_counter_grd, grd%domain)
     else
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
-     'diamonds, read_restart_calving: iceberg_counter_grd WAS NOT FOUND in the file. Setting to 0.'
+     'KID, read_restart_calving: iceberg_counter_grd WAS NOT FOUND in the file. Setting to 0.'
       grd%iceberg_counter_grd(:,:) = 0
     endif
     bergs%restarted=.true.
   else
     if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
-     'diamonds, read_restart_calving: initializing stored ice to random numbers'
+     'KID, read_restart_calving: initializing stored ice to random numbers'
     if ( make_calving_reproduce ) then
        allocate(randnum(1,nclasses))
        do j=grd%jsc, grd%jec
@@ -1225,19 +1225,19 @@ character(len=37) :: filename
   filename=trim(restart_input_dir)//'topog.nc'
   if (file_exist(filename)) then
     if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') &
-     'diamonds, read_ocean_depth: reading ',filename
+     'KID, read_ocean_depth: reading ',filename
     if (field_exist(filename, 'depth')) then
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
-       'diamonds, read_ocean_depth: reading depth from topog file.'
+       'KID, read_ocean_depth: reading depth from topog file.'
       call read_data(filename, 'depth', grd%ocean_depth, grd%domain)
     else
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
-     'diamonds, read_ocean_depth: depth WAS NOT FOUND in the file. Setting to 0.'
+     'KID, read_ocean_depth: depth WAS NOT FOUND in the file. Setting to 0.'
       !grd%ocean_depth(:,:)=0.
     endif
   else
     if (mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
-     'diamonds, read_ocean_depth: Ocean depth file (topog.nc) not present)'
+     'KID, read_ocean_depth: Ocean depth file (topog.nc) not present)'
   endif
 
   !call grd_chksum2(bergs%grd, bergs%grd%ocean_depth, 'read_ocean_depth, ocean_depth')
@@ -1245,25 +1245,25 @@ end subroutine read_ocean_depth
 
 !> Write a trajectory-based diagnostics file
 subroutine write_trajectory(trajectory, save_short_traj)
-! Arguments
-type(xyt), pointer :: trajectory !< An iceberg trajectory
-logical, intent(in) :: save_short_traj !< If true, record less data
-! Local variables
-integer :: iret, ncid, i_dim, i
-integer :: lonid, latid, yearid, dayid, uvelid, vvelid, idcntid, idijid
-integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid, sssid
-integer :: cnid, hiid
-integer :: mid, did, wid, lid, mbid, hdid
-character(len=37) :: filename
-character(len=7) :: pe_name
-type(xyt), pointer :: this, next
-integer :: stderrunit, cnt, ij
-!I/O vars
-type(xyt), pointer :: traj4io=>null()
-integer :: ntrajs_sent_io,ntrajs_rcvd_io
-integer :: from_pe,np
-type(buffer), pointer :: obuffer_io=>null(), ibuffer_io=>null()
-logical :: io_is_in_append_mode
+  ! Arguments
+  type(xyt), pointer :: trajectory !< An iceberg trajectory
+  logical, intent(in) :: save_short_traj !< If true, record less data
+  ! Local variables
+  integer :: iret, ncid, i_dim, i
+  integer :: lonid, latid, yearid, dayid, uvelid, vvelid, idcntid, idijid
+  integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid, sssid
+  integer :: cnid, hiid
+  integer :: mid, did, wid, lid, mbid, hdid
+  character(len=37) :: filename
+  character(len=7) :: pe_name
+  type(xyt), pointer :: this, next
+  integer :: stderrunit, cnt, ij
+  !I/O vars
+  type(xyt), pointer :: traj4io=>null()
+  integer :: ntrajs_sent_io,ntrajs_rcvd_io
+  integer :: from_pe,np
+  type(buffer), pointer :: obuffer_io=>null(), ibuffer_io=>null()
+  logical :: io_is_in_append_mode
 
   ! Get the stderr unit number
   stderrunit=stderr()
@@ -1288,38 +1288,38 @@ logical :: io_is_in_append_mode
 
   if(.NOT. force_all_pes_traj ) then
 
-  !Now gather and append the bergs from all pes in the io_tile to the list on corresponding io_tile_root_pe
-  ntrajs_sent_io =0
-  ntrajs_rcvd_io =0
+     !Now gather and append the bergs from all pes in the io_tile to the list on corresponding io_tile_root_pe
+     ntrajs_sent_io =0
+     ntrajs_rcvd_io =0
 
-  if(is_io_tile_root_pe) then
-     !Receive trajs from all pes in this I/O tile !FRAGILE!SCARY!
-     do np=2,size(io_tile_pelist) ! Note: np starts from 2 to exclude self
-        from_pe=io_tile_pelist(np)
-        call mpp_recv(ntrajs_rcvd_io, glen=1, from_pe=from_pe, tag=COMM_TAG_11)
-        if (ntrajs_rcvd_io .gt. 0) then
-           call increase_ibuffer(ibuffer_io, ntrajs_rcvd_io,buffer_width_traj)
-           call mpp_recv(ibuffer_io%data, ntrajs_rcvd_io*buffer_width_traj,from_pe=from_pe, tag=COMM_TAG_12)
-           do i=1, ntrajs_rcvd_io
-              call unpack_traj_from_buffer2(traj4io, ibuffer_io, i, save_short_traj)
-           enddo
-       endif
-     enddo
-  else
-     ! Pack and send trajectories to the root PE for this I/O tile
-     do while (associated(trajectory))
-       ntrajs_sent_io = ntrajs_sent_io +1
-       call pack_traj_into_buffer2(trajectory, obuffer_io, ntrajs_sent_io, save_short_traj)
-       this => trajectory ! Need to keep pointer in order to free up the links memory
-       trajectory => trajectory%next ! This will eventually result in trajectory => null()
-       deallocate(this) ! Delete the link from memory
-     enddo
+     if(is_io_tile_root_pe) then
+        !Receive trajs from all pes in this I/O tile !FRAGILE!SCARY!
+        do np=2,size(io_tile_pelist) ! Note: np starts from 2 to exclude self
+           from_pe=io_tile_pelist(np)
+           call mpp_recv(ntrajs_rcvd_io, glen=1, from_pe=from_pe, tag=COMM_TAG_11)
+           if (ntrajs_rcvd_io .gt. 0) then
+              call increase_ibuffer(ibuffer_io, ntrajs_rcvd_io,buffer_width_traj)
+              call mpp_recv(ibuffer_io%data, ntrajs_rcvd_io*buffer_width_traj,from_pe=from_pe, tag=COMM_TAG_12)
+              do i=1, ntrajs_rcvd_io
+                 call unpack_traj_from_buffer2(traj4io, ibuffer_io, i, save_short_traj)
+              enddo
+           endif
+        enddo
+     else
+        ! Pack and send trajectories to the root PE for this I/O tile
+        do while (associated(trajectory))
+           ntrajs_sent_io = ntrajs_sent_io +1
+           call pack_traj_into_buffer2(trajectory, obuffer_io, ntrajs_sent_io, save_short_traj)
+           this => trajectory ! Need to keep pointer in order to free up the links memory
+           trajectory => trajectory%next ! This will eventually result in trajectory => null()
+           deallocate(this) ! Delete the link from memory
+        enddo
 
-     call mpp_send(ntrajs_sent_io, plen=1, to_pe=io_tile_root_pe, tag=COMM_TAG_11)
-     if (ntrajs_sent_io .gt. 0) then
-        call mpp_send(obuffer_io%data, ntrajs_sent_io*buffer_width_traj, to_pe=io_tile_root_pe, tag=COMM_TAG_12)
+        call mpp_send(ntrajs_sent_io, plen=1, to_pe=io_tile_root_pe, tag=COMM_TAG_11)
+        if (ntrajs_sent_io .gt. 0) then
+           call mpp_send(obuffer_io%data, ntrajs_sent_io*buffer_width_traj, to_pe=io_tile_root_pe, tag=COMM_TAG_12)
+        endif
      endif
-  endif
 
   endif !.NOT. force_all_pes_traj
 
@@ -1330,213 +1330,213 @@ logical :: io_is_in_append_mode
 
   if((force_all_pes_traj .OR. is_io_tile_root_pe) .AND. associated(traj4io)) then
 
-    call get_instance_filename("iceberg_trajectories.nc", filename)
-    if(io_tile_id(1) .ge. 0 .AND. .NOT. force_all_pes_traj) then !io_tile_root_pes write
-       if(io_npes .gt. 1) then !attach tile_id  to filename only if there is more than one I/O pe
-          if (io_tile_id(1)<10000) then
-             write(filename,'(A,".",I4.4)') trim(filename), io_tile_id(1)
-          else
-             write(filename,'(A,".",I6.6)') trim(filename), io_tile_id(1)
-          endif
-       endif
-    else !All pes write, attach pe# to filename
-       if (mpp_npes()<10000) then
-          write(filename,'(A,".",I4.4)') trim(filename), mpp_pe()
-       else
-          write(filename,'(A,".",I6.6)') trim(filename), mpp_pe()
-       endif
-    endif
+     call get_instance_filename("iceberg_trajectories.nc", filename)
+     if(io_tile_id(1) .ge. 0 .AND. .NOT. force_all_pes_traj) then !io_tile_root_pes write
+        if(io_npes .gt. 1) then !attach tile_id  to filename only if there is more than one I/O pe
+           if (io_tile_id(1)<10000) then
+              write(filename,'(A,".",I4.4)') trim(filename), io_tile_id(1)
+           else
+              write(filename,'(A,".",I6.6)') trim(filename), io_tile_id(1)
+           endif
+        endif
+     else !All pes write, attach pe# to filename
+        if (mpp_npes()<10000) then
+           write(filename,'(A,".",I4.4)') trim(filename), mpp_pe()
+        else
+           write(filename,'(A,".",I6.6)') trim(filename), mpp_pe()
+        endif
+     endif
 
-    io_is_in_append_mode = .false.
-    iret = nf_create(filename, NF_NOCLOBBER, ncid)
-    if (iret .ne. NF_NOERR) then
-      iret = nf_open(filename, NF_WRITE, ncid)
-      io_is_in_append_mode = .true.
-      if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_open failed'
-    endif
-    if (verbose) then
-      if (io_is_in_append_mode) then
-        write(*,'(2a)') 'diamonds, write_trajectory: appending to ',filename
-      else
-        write(*,'(2a)') 'diamonds, write_trajectory: creating ',filename
-      endif
-    endif
+     io_is_in_append_mode = .false.
+     iret = nf_create(filename, NF_NOCLOBBER, ncid)
+     if (iret .ne. NF_NOERR) then
+        iret = nf_open(filename, NF_WRITE, ncid)
+        io_is_in_append_mode = .true.
+        if (iret .ne. NF_NOERR) write(stderrunit,*) 'KID, write_trajectory: nf_open failed'
+     endif
+     if (verbose) then
+        if (io_is_in_append_mode) then
+           write(*,'(2a)') 'KID, write_trajectory: appending to ',filename
+        else
+           write(*,'(2a)') 'KID, write_trajectory: creating ',filename
+        endif
+     endif
 
-    if (io_is_in_append_mode) then
-      iret = nf_inq_dimid(ncid, 'i', i_dim)
-      if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_inq_dimid i failed'
-      lonid = inq_varid(ncid, 'lon')
-      latid = inq_varid(ncid, 'lat')
-      yearid = inq_varid(ncid, 'year')
-      dayid = inq_varid(ncid, 'day')
-      idcntid = inq_varid(ncid, 'id_cnt')
-      idijid = inq_varid(ncid, 'id_ij')
-      if (.not.save_short_traj) then
-        uvelid = inq_varid(ncid, 'uvel')
-        vvelid = inq_varid(ncid, 'vvel')
-        uoid = inq_varid(ncid, 'uo')
-        void = inq_varid(ncid, 'vo')
-        uiid = inq_varid(ncid, 'ui')
-        viid = inq_varid(ncid, 'vi')
-        uaid = inq_varid(ncid, 'ua')
-        vaid = inq_varid(ncid, 'va')
-        mid = inq_varid(ncid, 'mass')
-        mbid = inq_varid(ncid, 'mass_of_bits')
-        hdid = inq_varid(ncid, 'heat_density')
-        did = inq_varid(ncid, 'thickness')
-        wid = inq_varid(ncid, 'width')
-        lid = inq_varid(ncid, 'length')
-        sshxid = inq_varid(ncid, 'ssh_x')
-        sshyid = inq_varid(ncid, 'ssh_y')
-        sstid = inq_varid(ncid, 'sst')
-        sssid = inq_varid(ncid, 'sss')
-        cnid = inq_varid(ncid, 'cn')
-        hiid = inq_varid(ncid, 'hi')
-      endif
-    else
-      ! Dimensions
-      iret = nf_def_dim(ncid, 'i', NF_UNLIMITED, i_dim)
-      if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_def_dim i failed'
+     if (io_is_in_append_mode) then
+        iret = nf_inq_dimid(ncid, 'i', i_dim)
+        if (iret .ne. NF_NOERR) write(stderrunit,*) 'KID, write_trajectory: nf_inq_dimid i failed'
+        lonid = inq_varid(ncid, 'lon')
+        latid = inq_varid(ncid, 'lat')
+        yearid = inq_varid(ncid, 'year')
+        dayid = inq_varid(ncid, 'day')
+        idcntid = inq_varid(ncid, 'id_cnt')
+        idijid = inq_varid(ncid, 'id_ij')
+        if (.not.save_short_traj) then
+           uvelid = inq_varid(ncid, 'uvel')
+           vvelid = inq_varid(ncid, 'vvel')
+           uoid = inq_varid(ncid, 'uo')
+           void = inq_varid(ncid, 'vo')
+           uiid = inq_varid(ncid, 'ui')
+           viid = inq_varid(ncid, 'vi')
+           uaid = inq_varid(ncid, 'ua')
+           vaid = inq_varid(ncid, 'va')
+           mid = inq_varid(ncid, 'mass')
+           mbid = inq_varid(ncid, 'mass_of_bits')
+           hdid = inq_varid(ncid, 'heat_density')
+           did = inq_varid(ncid, 'thickness')
+           wid = inq_varid(ncid, 'width')
+           lid = inq_varid(ncid, 'length')
+           sshxid = inq_varid(ncid, 'ssh_x')
+           sshyid = inq_varid(ncid, 'ssh_y')
+           sstid = inq_varid(ncid, 'sst')
+           sssid = inq_varid(ncid, 'sss')
+           cnid = inq_varid(ncid, 'cn')
+           hiid = inq_varid(ncid, 'hi')
+        endif
+     else
+        ! Dimensions
+        iret = nf_def_dim(ncid, 'i', NF_UNLIMITED, i_dim)
+        if (iret .ne. NF_NOERR) write(stderrunit,*) 'KID, write_trajectory: nf_def_dim i failed'
 
-      ! Variables
-      lonid = def_var(ncid, 'lon', NF_DOUBLE, i_dim)
-      latid = def_var(ncid, 'lat', NF_DOUBLE, i_dim)
-      yearid = def_var(ncid, 'year', NF_INT, i_dim)
-      dayid = def_var(ncid, 'day', NF_DOUBLE, i_dim)
-      idcntid = def_var(ncid, 'id_cnt', NF_INT, i_dim)
-      idijid = def_var(ncid, 'id_ij', NF_INT, i_dim)
-      if (.not. save_short_traj) then
-        uvelid = def_var(ncid, 'uvel', NF_DOUBLE, i_dim)
-        vvelid = def_var(ncid, 'vvel', NF_DOUBLE, i_dim)
-        uoid = def_var(ncid, 'uo', NF_DOUBLE, i_dim)
-        void = def_var(ncid, 'vo', NF_DOUBLE, i_dim)
-        uiid = def_var(ncid, 'ui', NF_DOUBLE, i_dim)
-        viid = def_var(ncid, 'vi', NF_DOUBLE, i_dim)
-        uaid = def_var(ncid, 'ua', NF_DOUBLE, i_dim)
-        vaid = def_var(ncid, 'va', NF_DOUBLE, i_dim)
-        mid = def_var(ncid, 'mass', NF_DOUBLE, i_dim)
-        mbid = def_var(ncid, 'mass_of_bits', NF_DOUBLE, i_dim)
-        hdid = def_var(ncid, 'heat_density', NF_DOUBLE, i_dim)
-        did = def_var(ncid, 'thickness', NF_DOUBLE, i_dim)
-        wid = def_var(ncid, 'width', NF_DOUBLE, i_dim)
-        lid = def_var(ncid, 'length', NF_DOUBLE, i_dim)
-        sshxid = def_var(ncid, 'ssh_x', NF_DOUBLE, i_dim)
-        sshyid = def_var(ncid, 'ssh_y', NF_DOUBLE, i_dim)
-        sstid = def_var(ncid, 'sst', NF_DOUBLE, i_dim)
-        sssid = def_var(ncid, 'sss', NF_DOUBLE, i_dim)
-        cnid = def_var(ncid, 'cn', NF_DOUBLE, i_dim)
-        hiid = def_var(ncid, 'hi', NF_DOUBLE, i_dim)
-      endif
+        ! Variables
+        lonid = def_var(ncid, 'lon', NF_DOUBLE, i_dim)
+        latid = def_var(ncid, 'lat', NF_DOUBLE, i_dim)
+        yearid = def_var(ncid, 'year', NF_INT, i_dim)
+        dayid = def_var(ncid, 'day', NF_DOUBLE, i_dim)
+        idcntid = def_var(ncid, 'id_cnt', NF_INT, i_dim)
+        idijid = def_var(ncid, 'id_ij', NF_INT, i_dim)
+        if (.not. save_short_traj) then
+           uvelid = def_var(ncid, 'uvel', NF_DOUBLE, i_dim)
+           vvelid = def_var(ncid, 'vvel', NF_DOUBLE, i_dim)
+           uoid = def_var(ncid, 'uo', NF_DOUBLE, i_dim)
+           void = def_var(ncid, 'vo', NF_DOUBLE, i_dim)
+           uiid = def_var(ncid, 'ui', NF_DOUBLE, i_dim)
+           viid = def_var(ncid, 'vi', NF_DOUBLE, i_dim)
+           uaid = def_var(ncid, 'ua', NF_DOUBLE, i_dim)
+           vaid = def_var(ncid, 'va', NF_DOUBLE, i_dim)
+           mid = def_var(ncid, 'mass', NF_DOUBLE, i_dim)
+           mbid = def_var(ncid, 'mass_of_bits', NF_DOUBLE, i_dim)
+           hdid = def_var(ncid, 'heat_density', NF_DOUBLE, i_dim)
+           did = def_var(ncid, 'thickness', NF_DOUBLE, i_dim)
+           wid = def_var(ncid, 'width', NF_DOUBLE, i_dim)
+           lid = def_var(ncid, 'length', NF_DOUBLE, i_dim)
+           sshxid = def_var(ncid, 'ssh_x', NF_DOUBLE, i_dim)
+           sshyid = def_var(ncid, 'ssh_y', NF_DOUBLE, i_dim)
+           sstid = def_var(ncid, 'sst', NF_DOUBLE, i_dim)
+           sssid = def_var(ncid, 'sss', NF_DOUBLE, i_dim)
+           cnid = def_var(ncid, 'cn', NF_DOUBLE, i_dim)
+           hiid = def_var(ncid, 'hi', NF_DOUBLE, i_dim)
+        endif
 
-      ! Attributes
-      iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_major_version', NF_INT, 1, 0)
-      iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_minor_version', NF_INT, 1, 1)
-      call put_att(ncid, lonid, 'long_name', 'longitude')
-      call put_att(ncid, lonid, 'units', 'degrees_E')
-      call put_att(ncid, latid, 'long_name', 'latitude')
-      call put_att(ncid, latid, 'units', 'degrees_N')
-      call put_att(ncid, yearid, 'long_name', 'year')
-      call put_att(ncid, yearid, 'units', 'years')
-      call put_att(ncid, dayid, 'long_name', 'year day')
-      call put_att(ncid, dayid, 'units', 'days')
-      call put_att(ncid, idcntid, 'long_name', 'counter component of iceberg id')
-      call put_att(ncid, idcntid, 'units', 'dimensionless')
-      call put_att(ncid, idijid, 'long_name', 'position component of iceberg id')
-      call put_att(ncid, idijid, 'units', 'dimensionless')
+        ! Attributes
+        iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_major_version', NF_INT, 1, 0)
+        iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_minor_version', NF_INT, 1, 1)
+        call put_att(ncid, lonid, 'long_name', 'longitude')
+        call put_att(ncid, lonid, 'units', 'degrees_E')
+        call put_att(ncid, latid, 'long_name', 'latitude')
+        call put_att(ncid, latid, 'units', 'degrees_N')
+        call put_att(ncid, yearid, 'long_name', 'year')
+        call put_att(ncid, yearid, 'units', 'years')
+        call put_att(ncid, dayid, 'long_name', 'year day')
+        call put_att(ncid, dayid, 'units', 'days')
+        call put_att(ncid, idcntid, 'long_name', 'counter component of iceberg id')
+        call put_att(ncid, idcntid, 'units', 'dimensionless')
+        call put_att(ncid, idijid, 'long_name', 'position component of iceberg id')
+        call put_att(ncid, idijid, 'units', 'dimensionless')
 
-      if (.not. save_short_traj) then
-        call put_att(ncid, uvelid, 'long_name', 'zonal spped')
-        call put_att(ncid, uvelid, 'units', 'm/s')
-        call put_att(ncid, vvelid, 'long_name', 'meridional spped')
-        call put_att(ncid, vvelid, 'units', 'm/s')
-        call put_att(ncid, uoid, 'long_name', 'ocean zonal spped')
-        call put_att(ncid, uoid, 'units', 'm/s')
-        call put_att(ncid, void, 'long_name', 'ocean meridional spped')
-        call put_att(ncid, void, 'units', 'm/s')
-        call put_att(ncid, uiid, 'long_name', 'ice zonal spped')
-        call put_att(ncid, uiid, 'units', 'm/s')
-        call put_att(ncid, viid, 'long_name', 'ice meridional spped')
-        call put_att(ncid, viid, 'units', 'm/s')
-        call put_att(ncid, uaid, 'long_name', 'atmos zonal spped')
-        call put_att(ncid, uaid, 'units', 'm/s')
-        call put_att(ncid, vaid, 'long_name', 'atmos meridional spped')
-        call put_att(ncid, vaid, 'units', 'm/s')
-        call put_att(ncid, mid, 'long_name', 'mass')
-        call put_att(ncid, mid, 'units', 'kg')
-        call put_att(ncid, mbid, 'long_name', 'mass_of_bits')
-        call put_att(ncid, mbid, 'units', 'kg')
-        call put_att(ncid, hdid, 'long_name', 'heat_density')
-        call put_att(ncid, hdid, 'units', 'J/kg')
-        call put_att(ncid, did, 'long_name', 'thickness')
-        call put_att(ncid, did, 'units', 'm')
-        call put_att(ncid, wid, 'long_name', 'width')
-        call put_att(ncid, wid, 'units', 'm')
-        call put_att(ncid, lid, 'long_name', 'length')
-        call put_att(ncid, lid, 'units', 'm')
-        call put_att(ncid, sshxid, 'long_name', 'sea surface height gradient_x')
-        call put_att(ncid, sshxid, 'units', 'non-dim')
-        call put_att(ncid, sshyid, 'long_name', 'sea surface height gradient_y')
-        call put_att(ncid, sshyid, 'units', 'non-dim')
-        call put_att(ncid, sstid, 'long_name', 'sea surface temperature')
-        call put_att(ncid, sstid, 'units', 'degrees_C')
-        call put_att(ncid, sssid, 'long_name', 'sea surface salinity')
-        call put_att(ncid, sssid, 'units', 'psu')
-        call put_att(ncid, cnid, 'long_name', 'sea ice concentration')
-        call put_att(ncid, cnid, 'units', 'none')
-        call put_att(ncid, hiid, 'long_name', 'sea ice thickness')
-        call put_att(ncid, hiid, 'units', 'm')
-      endif
-    endif
+        if (.not. save_short_traj) then
+           call put_att(ncid, uvelid, 'long_name', 'zonal spped')
+           call put_att(ncid, uvelid, 'units', 'm/s')
+           call put_att(ncid, vvelid, 'long_name', 'meridional spped')
+           call put_att(ncid, vvelid, 'units', 'm/s')
+           call put_att(ncid, uoid, 'long_name', 'ocean zonal spped')
+           call put_att(ncid, uoid, 'units', 'm/s')
+           call put_att(ncid, void, 'long_name', 'ocean meridional spped')
+           call put_att(ncid, void, 'units', 'm/s')
+           call put_att(ncid, uiid, 'long_name', 'ice zonal spped')
+           call put_att(ncid, uiid, 'units', 'm/s')
+           call put_att(ncid, viid, 'long_name', 'ice meridional spped')
+           call put_att(ncid, viid, 'units', 'm/s')
+           call put_att(ncid, uaid, 'long_name', 'atmos zonal spped')
+           call put_att(ncid, uaid, 'units', 'm/s')
+           call put_att(ncid, vaid, 'long_name', 'atmos meridional spped')
+           call put_att(ncid, vaid, 'units', 'm/s')
+           call put_att(ncid, mid, 'long_name', 'mass')
+           call put_att(ncid, mid, 'units', 'kg')
+           call put_att(ncid, mbid, 'long_name', 'mass_of_bits')
+           call put_att(ncid, mbid, 'units', 'kg')
+           call put_att(ncid, hdid, 'long_name', 'heat_density')
+           call put_att(ncid, hdid, 'units', 'J/kg')
+           call put_att(ncid, did, 'long_name', 'thickness')
+           call put_att(ncid, did, 'units', 'm')
+           call put_att(ncid, wid, 'long_name', 'width')
+           call put_att(ncid, wid, 'units', 'm')
+           call put_att(ncid, lid, 'long_name', 'length')
+           call put_att(ncid, lid, 'units', 'm')
+           call put_att(ncid, sshxid, 'long_name', 'sea surface height gradient_x')
+           call put_att(ncid, sshxid, 'units', 'non-dim')
+           call put_att(ncid, sshyid, 'long_name', 'sea surface height gradient_y')
+           call put_att(ncid, sshyid, 'units', 'non-dim')
+           call put_att(ncid, sstid, 'long_name', 'sea surface temperature')
+           call put_att(ncid, sstid, 'units', 'degrees_C')
+           call put_att(ncid, sssid, 'long_name', 'sea surface salinity')
+           call put_att(ncid, sssid, 'units', 'psu')
+           call put_att(ncid, cnid, 'long_name', 'sea ice concentration')
+           call put_att(ncid, cnid, 'units', 'none')
+           call put_att(ncid, hiid, 'long_name', 'sea ice thickness')
+           call put_att(ncid, hiid, 'units', 'm')
+        endif
+     endif
 
-    ! End define mode
-    iret = nf_enddef(ncid)
+     ! End define mode
+     iret = nf_enddef(ncid)
 
-    ! Write variables
-    this=>traj4io
-    if (io_is_in_append_mode) then
-      iret = nf_inq_dimlen(ncid, i_dim, i)
-      if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_inq_dimlen i failed'
-    else
-      i = 0
-    endif
-    do while (associated(this))
-      i=i+1
-      call put_double(ncid, lonid, i, this%lon)
-      call put_double(ncid, latid, i, this%lat)
-      call put_int(ncid, yearid, i, this%year)
-      call put_double(ncid, dayid, i, this%day)
-      call split_id(this%id, cnt, ij)
-      call put_int(ncid, idcntid, i, cnt)
-      call put_int(ncid, idijid, i, ij)
-      if (.not. save_short_traj) then
-        call put_double(ncid, uvelid, i, this%uvel)
-        call put_double(ncid, vvelid, i, this%vvel)
-        call put_double(ncid, uoid, i, this%uo)
-        call put_double(ncid, void, i, this%vo)
-        call put_double(ncid, uiid, i, this%ui)
-        call put_double(ncid, viid, i, this%vi)
-        call put_double(ncid, uaid, i, this%ua)
-        call put_double(ncid, vaid, i, this%va)
-        call put_double(ncid, mid, i, this%mass)
-        call put_double(ncid, hdid, i, this%heat_density)
-        call put_double(ncid, did, i, this%thickness)
-        call put_double(ncid, wid, i, this%width)
-        call put_double(ncid, lid, i, this%length)
-        call put_double(ncid, sshxid, i, this%ssh_x)
-        call put_double(ncid, sshyid, i, this%ssh_y)
-        call put_double(ncid, sstid, i, this%sst)
-        call put_double(ncid, sssid, i, this%sss)
-        call put_double(ncid, cnid, i, this%cn)
-        call put_double(ncid, hiid, i, this%hi)
-      endif
-      next=>this%next
-      deallocate(this)
-      this=>next
-    enddo
+     ! Write variables
+     this=>traj4io
+     if (io_is_in_append_mode) then
+        iret = nf_inq_dimlen(ncid, i_dim, i)
+        if (iret .ne. NF_NOERR) write(stderrunit,*) 'KID, write_trajectory: nf_inq_dimlen i failed'
+     else
+        i = 0
+     endif
+     do while (associated(this))
+        i=i+1
+        call put_double(ncid, lonid, i, this%lon)
+        call put_double(ncid, latid, i, this%lat)
+        call put_int(ncid, yearid, i, this%year)
+        call put_double(ncid, dayid, i, this%day)
+        call split_id(this%id, cnt, ij)
+        call put_int(ncid, idcntid, i, cnt)
+        call put_int(ncid, idijid, i, ij)
+        if (.not. save_short_traj) then
+           call put_double(ncid, uvelid, i, this%uvel)
+           call put_double(ncid, vvelid, i, this%vvel)
+           call put_double(ncid, uoid, i, this%uo)
+           call put_double(ncid, void, i, this%vo)
+           call put_double(ncid, uiid, i, this%ui)
+           call put_double(ncid, viid, i, this%vi)
+           call put_double(ncid, uaid, i, this%ua)
+           call put_double(ncid, vaid, i, this%va)
+           call put_double(ncid, mid, i, this%mass)
+           call put_double(ncid, hdid, i, this%heat_density)
+           call put_double(ncid, did, i, this%thickness)
+           call put_double(ncid, wid, i, this%width)
+           call put_double(ncid, lid, i, this%length)
+           call put_double(ncid, sshxid, i, this%ssh_x)
+           call put_double(ncid, sshyid, i, this%ssh_y)
+           call put_double(ncid, sstid, i, this%sst)
+           call put_double(ncid, sssid, i, this%sss)
+           call put_double(ncid, cnid, i, this%cn)
+           call put_double(ncid, hiid, i, this%hi)
+        endif
+        next=>this%next
+        deallocate(this)
+        this=>next
+     enddo
 
-    ! Finish up
-    iret = nf_close(ncid)
-    if (iret .ne. NF_NOERR) write(stderrunit,*) 'diamonds, write_trajectory: nf_close failed',mpp_pe(),filename
+     ! Finish up
+     iret = nf_close(ncid)
+     if (iret .ne. NF_NOERR) write(stderrunit,*) 'KID, write_trajectory: nf_close failed',mpp_pe(),filename
 
   endif !(is_io_tile_root_pe .AND. associated(traj4io))
   call mpp_clock_end(clock_trw)
@@ -1561,8 +1561,8 @@ logical :: unsafely=.false.
   iret=nf_inq_varid(ncid, var, inq_var)
   if (iret .ne. NF_NOERR) then
     if (.not. unsafely) then
-      write(stderrunit,*) 'diamonds, inq_var: nf_inq_varid ',var,' failed'
-      call error_mesg('diamonds, inq_var', 'netcdf function returned a failure!', FATAL)
+      write(stderrunit,*) 'KID, inq_var: nf_inq_varid ',var,' failed'
+      call error_mesg('KID, inq_var', 'netcdf function returned a failure!', FATAL)
     else
       inq_var=-1
     endif
@@ -1586,7 +1586,7 @@ integer :: stderrunit
 
   iret = nf_def_var(ncid, var, ntype, 1, idim, def_var)
   if (iret .ne. NF_NOERR) then
-    call error_mesg('diamonds, def_var', nf_strerror(iret), FATAL)
+    call error_mesg('KID, def_var', nf_strerror(iret), FATAL)
   endif
 
 end function def_var
@@ -1605,8 +1605,8 @@ integer :: stderrunit
 
   iret = nf_inq_varid(ncid, var, inq_varid)
   if (iret .ne. NF_NOERR) then
-    write(stderrunit,*) 'diamonds, inq_varid: nf_inq_varid failed for ',trim(var)
-    call error_mesg('diamonds, inq_varid', 'netcdf function returned a failure!', FATAL)
+    write(stderrunit,*) 'KID, inq_varid: nf_inq_varid failed for ',trim(var)
+    call error_mesg('KID, inq_varid', 'netcdf function returned a failure!', FATAL)
   endif
 
 end function inq_varid
@@ -1628,9 +1628,9 @@ integer :: stderrunit
   vallen=len_trim(attval)
   iret = nf_put_att_text(ncid, id, att, vallen, attval)
   if (iret .ne. NF_NOERR) then
-    write(stderrunit,*) 'diamonds, put_att: nf_put_att_text failed adding', &
+    write(stderrunit,*) 'KID, put_att: nf_put_att_text failed adding', &
       trim(att),' = ',trim(attval)
-    call error_mesg('diamonds, put_att', 'netcdf function returned a failure!', FATAL)
+    call error_mesg('KID, put_att', 'netcdf function returned a failure!', FATAL)
   endif
 
 end subroutine put_att
@@ -1650,8 +1650,8 @@ integer :: stderrunit
 
   iret=nf_get_var1_double(ncid, id, i, get_double)
   if (iret .ne. NF_NOERR) then
-    write(stderrunit,*) 'diamonds, get_double: nf_get_var1_double failed reading'
-    call error_mesg('diamonds, get_double', 'netcdf function returned a failure!', FATAL)
+    write(stderrunit,*) 'KID, get_double: nf_get_var1_double failed reading'
+    call error_mesg('KID, get_double', 'netcdf function returned a failure!', FATAL)
   endif
 
 end function get_double
@@ -1671,8 +1671,8 @@ integer :: stderrunit
 
   iret=nf_get_var1_int(ncid, id, i, get_int)
   if (iret .ne. NF_NOERR) then
-    write(stderrunit,*) 'diamonds, get_int: nf_get_var1_int failed reading'
-    call error_mesg('diamonds, get_int', 'netcdf function returned a failure!', FATAL)
+    write(stderrunit,*) 'KID, get_int: nf_get_var1_int failed reading'
+    call error_mesg('KID, get_int', 'netcdf function returned a failure!', FATAL)
   endif
 
 end function get_int
@@ -1693,8 +1693,8 @@ integer :: stderrunit
 
   iret = nf_put_vara_double(ncid, id, i, 1, val)
   if (iret .ne. NF_NOERR) then
-    write(stderrunit,*) 'diamonds, put_double: nf_put_vara_double failed writing'
-    call error_mesg('diamonds, put_double', 'netcdf function returned a failure!', FATAL)
+    write(stderrunit,*) 'KID, put_double: nf_put_vara_double failed writing'
+    call error_mesg('KID, put_double', 'netcdf function returned a failure!', FATAL)
   endif
 
 end subroutine put_double
@@ -1715,8 +1715,8 @@ integer :: stderrunit
 
   iret = nf_put_vara_int(ncid, id, i, 1, val)
   if (iret .ne. NF_NOERR) then
-    write(stderrunit,*) 'diamonds, put_int: nf_put_vara_int failed writing'
-    call error_mesg('diamonds, put_int', 'netcdf function returned a failure!', FATAL)
+    write(stderrunit,*) 'KID, put_int: nf_put_vara_int failed writing'
+    call error_mesg('KID, put_int', 'netcdf function returned a failure!', FATAL)
   endif
 
 end subroutine put_int

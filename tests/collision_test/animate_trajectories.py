@@ -55,7 +55,7 @@ num_frames = len(ud)
 movie_len = 5.0 #seconds
 frame_len = 1000.0*movie_len/num_frames
 
-smax = max(max(x),max(y),200)
+smax = max(max(x),max(y),20)
 xmin = 0.0
 xmax = smax
 ymin = 0.0
@@ -66,9 +66,11 @@ ymax = smax
 f = plt.figure(figsize=(5,5))
 f.tight_layout()
 ax1 = plt.subplot(111,xlim=(xmin, xmax), ylim=(ymin, ymax))
-scat = ax1.scatter([],[],marker='H',facecolor='w',s=140,edgecolor='red')
+scat = ax1.scatter([],[],marker='o',facecolor='w',s=110,edgecolor='red')
 time_text = ax1.text(0.02, 0.95, '', transform=ax1.transAxes)
 
+ax1.set_xticks(np.arange(0, xmax+1, 1)) 
+ax1.set_yticks(np.arange(0, ymax+1, 1)) 
 ax1.set_xlabel('x (km)')
 ax1.set_ylabel('y (km)')
 ax1.set_title('Iceberg trajectory')
@@ -82,6 +84,7 @@ ani = FuncAnimation(
 
 print('time',t)
 
+plt.grid()
 plt.show()
 
 #animation.save("iceberg_traj_animation.mp4")

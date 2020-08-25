@@ -11,7 +11,8 @@ import netCDF4 as nc
 nx = 20
 ny = 20
 New_ice_thickness_filename='testberg.nc'
-grid_area = 10.e3*10.e3 #10 km grid res
+grid_res = 1.e3 #1 km 
+grid_area = grid_res * grid_res
 h_ice = 300.0
 
 New_ice_thickness_filename='testtabularberg.nc'
@@ -41,28 +42,32 @@ lat_h.standard_name = 'latitude'
 g.variables['area'][:,:]=grid_area
 
 #create a circular tabular berg centered on the following coords (km)
-cx = 60.e3
-cy = 60.e3
+cy = 4.5e3
+cx = 4.5e3
+cx2 = 15.5e3
 
 for i in range(nx):
 
-        tx = float(i) * 10.e3
+        tx = float(i) * grid_res
         g.variables['lon'][i] = tx
         
         for j in range(ny):
                
-                ty = float(j) * 10.e3
+                ty = float(j) * grid_res
                 dist = sqrt((tx-cx)*(tx-cx) + (ty-cy)*(ty-cy))
+                dist2 =  sqrt((tx-cx2)*(tx-cx2) + (ty-cy)*(ty-cy))
                 #g.variables['lon'][i,j] = tx
                 #g.variables['lat'][i,j] = ty
         
-                if (dist < 50.e3):
+                if (dist <1.e3 or dist2<1.e3):
                         g.variables['thick'][i,j]=h_ice
                 else:
                         g.variables['thick'][i,j]=0.0
 
+                        
+
 for j in range(ny):
-        g.variables['lat'][j] = float(j) * 10.e3
+        g.variables['lat'][j] = float(j) * grid_res
 
 print('Creating file: ' , New_ice_thickness_filename)
 

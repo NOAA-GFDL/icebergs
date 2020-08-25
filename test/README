@@ -1,4 +1,0 @@
-- Use the scripts in ./Iceberg_repository to create a tabular iceberg and restart (input) file for testing the solo driver
-- edit input.nml
-- run the model (e.g. ./RUN)
-- animate the results with animate_trajectories.py

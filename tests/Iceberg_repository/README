@@ -1,8 +1,8 @@
-- Alon's Iceberg Repository, edited for initializing a model setup for testing the iceberg driver.
-- Added the directory ./testberg, where file testberg.py can be edited and run to create a test iceberg.
-- This berg is then transformed into a restart (input) file via initialize_bergs_in_pattern.py,
-  as called by the RUN script.
 
+- Alon's Iceberg Repository, edited for initializing a model setup for testing the iceberg driver.
+- 1. Initialize a berg using the scripts in one of the test directories
+- 2. Use ./Scripts_and_analysis/initialize_bergs_in_pattern.py to convert the berg into a restart (input)
+     file
 
 
 
