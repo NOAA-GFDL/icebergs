@@ -8,7 +8,7 @@ use mpp_domains_mod, only: mpp_domain_is_tile_root_pe,mpp_get_domain_tile_root_p
 use mpp_domains_mod, only: mpp_get_tile_pelist,mpp_get_tile_npes,mpp_get_io_domain,mpp_get_tile_id
 
 use mpp_mod, only: mpp_npes, mpp_pe, mpp_root_pe, mpp_sum, mpp_min, mpp_max, NULL_PE
-use mpp_mod, only: mpp_send, mpp_recv, mpp_gather, mpp_chksum
+use mpp_mod, only: mpp_send, mpp_recv, mpp_gather, mpp_chksum, mpp_sync_self
 use mpp_mod, only: COMM_TAG_11, COMM_TAG_12, COMM_TAG_13, COMM_TAG_14
 
 use fms_mod, only: stdlog, stderr, error_mesg, FATAL, WARNING, NOTE
@@ -58,7 +58,6 @@ type(domain2d), pointer, save :: io_domain=>NULL()
 integer, save :: io_tile_id(1), io_tile_root_pe, io_npes
 integer, allocatable,save :: io_tile_pelist(:)
 logical :: is_io_tile_root_pe = .true.
-integer :: ntrajs_sent_io,ntrajs_rcvd_io
 
 integer :: clock_trw,clock_trp
 
@@ -1259,6 +1258,7 @@ type(xyt), pointer :: traj4io=>null()
 integer :: from_pe,np
 type(buffer), pointer :: obuffer_io=>null(), ibuffer_io=>null()
 logical :: io_is_in_append_mode
+integer :: ntrajs_sent_io,ntrajs_rcvd_io
 
   ! Get the stderr unit number
   stderrunit=stderr()
@@ -1315,7 +1315,7 @@ logical :: io_is_in_append_mode
         call mpp_send(obuffer_io%data, ntrajs_sent_io*buffer_width_traj, to_pe=io_tile_root_pe, tag=COMM_TAG_12)
      endif
   endif
-
+  call mpp_sync_self()
   endif !.NOT. force_all_pes_traj
 
   call mpp_clock_end(clock_trp)
