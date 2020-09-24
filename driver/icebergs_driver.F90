@@ -62,11 +62,12 @@ program icebergs_driver
   real :: ibvo=0.0
   real :: ibui=0.0
   real :: ibvi=0.0
-  real :: gridres
+  real :: gridres=1.e3
   integer :: ibhrs=2
   integer :: nmax = 2000000000 !<max number of iterations    
   namelist /icebergs_driver_nml/ debug, ni, nj, halo, ibhrs, ibdt, ibuo, ibvo, nmax, &
-       saverestart,ibui,ibvi,collision_test
+       saverestart,ibui,ibvi,collision_test,gridres
+  real :: time_begin, time_finish
   ! For loops
   integer :: isc !< Start of i-index for computational domain (used for loops)
   integer :: iec !< End of i-index for computational domain (used for loops)
@@ -109,6 +110,8 @@ program icebergs_driver
   real, dimension(:,:), pointer  :: ustar_berg !< Friction velocity on base of bergs (m/s)
   real, dimension(:,:), pointer :: area_berg !< Area of bergs (m2)
 
+  call cpu_time(time_begin)
+  
   ! Boot FMS
   call fms_init()
 
@@ -172,7 +175,6 @@ program icebergs_driver
   allocate( sin_rot(isd:ied,jsd:jed) )
   allocate( depth(isd:ied,jsd:jed) )
 
-  gridres = 1.e3
 
 
   do j = jsd, jed
@@ -182,11 +184,7 @@ program icebergs_driver
         dx(i,j) = gridres
         dy(i,j) = gridres
         area(i,j) = gridres*gridres
-        ! if (j>18.0 .or. j < 2.0) then
-        !    wet(i,j)=0.0
-        ! else
         wet(i,j) = 1.0
-        ! end if
         cos_rot(i,j) = 1.0 
         sin_rot(i,j) = 0.0
         depth(i,j) = 1000.
@@ -232,14 +230,35 @@ program icebergs_driver
   hi = 0.0 !sea-ice thickness (m)
   calving_hflx = 0.0 !calving heat flux (W/m2)
 
+  ! if (collision_test) then
+  !   do j = jsd,jed
+  !     if (j>10) then
+  !       vo(:,j) = -ibvo
+  !     elseif (j==10) then
+  !       vo(:,j) = 0.
+  !     else
+  !       vo(:,j) = ibvo
+  !     endif
+  !   enddo
+  !   do i = isd,ied
+  !      if (i>10) vo(i,:) = 0.0
+  !   enddo
+  ! end if
+
   if (collision_test) then
-    do j = jsc,jec
-       if (j>10) vo = -ibvo
-    enddo
-    do i = isc,iec
-       if (i>10) vo = 0.0
-    enddo
-  end if
+    do j=jsd,jed; do i=isd,ied
+      if (lon(i,j)>10.e3 .or. lon(i,j)<=0.0 .or. lat(i,j)==10.e3) then
+        vo(i,j)=0.0
+      else
+        if (lat(i,j)>10.e3) then
+          vo(i,j)=-ibvo
+        else
+          vo(i,j)=ibvo
+        endif
+      endif
+    enddo;enddo
+  endif
+  
 
   ! optional:
   ! allocate( sss(isd:ied,jsd:jed) )
@@ -284,11 +303,6 @@ program icebergs_driver
      ! call icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh, sst, &
      ! calving_hflx, cn, hi,stagger, stress_stagger, sss, mass_berg, ustar_berg, area_berg)       
 
-     ! if (ns == 1) then
-     !    calving = 0.0
-     ! endif
-
-
      Time = Time + real_to_time_type(dt)
      ns = ns+1
   enddo
@@ -297,5 +311,11 @@ program icebergs_driver
 
   !Deallocate all memory and disassociated pointer
   call icebergs_end(bergs)
+
+  call cpu_time(time_finish)
+
+  if (mpp_pe()==0) then
+     write(*,*) 'Simulation finished in ', (time_finish - time_begin)/60., 'minutes'
+  end if
 
 end program icebergs_driver

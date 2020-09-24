@@ -40,6 +40,7 @@ use ice_bergs_framework, only: ignore_ij_restart, use_slow_find,generate_test_ic
 use ice_bergs_framework, only: force_all_pes_traj
 use ice_bergs_framework, only: check_for_duplicates_in_parallel
 use ice_bergs_framework, only: split_id, id_from_2_ints, generate_id
+use ice_bergs_framework, only: mts !-alex
 
 implicit none ; private
 
@@ -809,6 +810,12 @@ logical :: lres
       localberg%vvel_old=0. !Alon
       localberg%bxn=0. !Alon
       localberg%byn=0. !Alon
+      localberg%uvel_prev=0. !Alon
+      localberg%vvel_prev=0. !Alon
+      localberg%axn_fast=0. !Alex
+      localberg%ayn_fast=0. !Alex
+      localberg%bxn_fast=0. !Alex
+      localberg%byn_fast=0. !Alex      
 
       !Berg A
       call loc_set_berg_pos(grd, 0.9, 0.5, 1., 0., localberg)
@@ -1251,8 +1258,9 @@ subroutine write_trajectory(trajectory, save_short_traj)
   ! Local variables
   integer :: iret, ncid, i_dim, i
   integer :: lonid, latid, yearid, dayid, uvelid, vvelid, idcntid, idijid
+  integer :: uvelpid,vvelpid
   integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid, sssid
-  integer :: cnid, hiid
+  integer :: cnid, hiid, hsid
   integer :: mid, did, wid, lid, mbid, hdid
   character(len=37) :: filename
   character(len=7) :: pe_name
@@ -1392,6 +1400,11 @@ subroutine write_trajectory(trajectory, save_short_traj)
            sssid = inq_varid(ncid, 'sss')
            cnid = inq_varid(ncid, 'cn')
            hiid = inq_varid(ncid, 'hi')
+           hsid = inq_varid(ncid, 'halo_berg')
+           if (mts) then
+             uvelpid = inq_varid(ncid, 'uvel_prev')
+             vvelpid = inq_varid(ncid, 'vvel_prev')             
+           endif
         endif
      else
         ! Dimensions
@@ -1426,6 +1439,11 @@ subroutine write_trajectory(trajectory, save_short_traj)
            sssid = def_var(ncid, 'sss', NF_DOUBLE, i_dim)
            cnid = def_var(ncid, 'cn', NF_DOUBLE, i_dim)
            hiid = def_var(ncid, 'hi', NF_DOUBLE, i_dim)
+           hsid = def_var(ncid, 'halo_berg', NF_DOUBLE, i_dim)
+           if (mts) then
+             uvelpid = def_var(ncid, 'uvel_prev', NF_DOUBLE, i_dim)
+             vvelpid = def_var(ncid, 'vvel_prev', NF_DOUBLE, i_dim)                         
+           endif           
         endif
 
         ! Attributes
@@ -1485,6 +1503,14 @@ subroutine write_trajectory(trajectory, save_short_traj)
            call put_att(ncid, cnid, 'units', 'none')
            call put_att(ncid, hiid, 'long_name', 'sea ice thickness')
            call put_att(ncid, hiid, 'units', 'm')
+           call put_att(ncid, hsid, 'long_name', 'halo status')
+           call put_att(ncid, hsid, 'units', 'non-dim')
+           if (mts) then
+             call put_att(ncid, uvelpid, 'long_name', 'zonal speed mts')
+             call put_att(ncid, uvelpid, 'units', 'm/s')
+             call put_att(ncid, vvelpid, 'long_name', 'meridional speed mts')
+             call put_att(ncid, vvelpid, 'units', 'm/s')                        
+           endif             
         endif
      endif
 
@@ -1528,6 +1554,9 @@ subroutine write_trajectory(trajectory, save_short_traj)
            call put_double(ncid, sssid, i, this%sss)
            call put_double(ncid, cnid, i, this%cn)
            call put_double(ncid, hiid, i, this%hi)
+           call put_double(ncid, hsid, i, this%halo_berg)
+           call put_double(ncid, uvelpid, i, this%uvel_prev)
+           call put_double(ncid, vvelpid, i, this%vvel_prev)           
         endif
         next=>this%next
         deallocate(this)

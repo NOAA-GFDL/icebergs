@@ -43,12 +43,14 @@ real, parameter :: pi_180=pi/180. !< Converts degrees to radians
 logical :: fix_restart_dates=.true. !< After a restart, check that bergs were created before the current model date
 logical :: do_unit_tests=.false. !< Conduct some unit tests
 logical :: force_all_pes_traj=.false. !< Force all pes write trajectory files regardless of io_layout
+logical :: mts=.false.
 
 !Public params !Niki: write a subroutine to expose these
 public nclasses,buffer_width,buffer_width_traj
 public verbose, really_debug, debug, restart_input_dir,make_calving_reproduce,old_bug_bilin,use_roundoff_fix
 public ignore_ij_restart, use_slow_find,generate_test_icebergs,old_bug_rotated_weights,budget
 public orig_read, force_all_pes_traj
+public mts !Alex
 
 !Public types
 public icebergs_gridded, xyt, iceberg, icebergs, buffer, bond
@@ -76,6 +78,7 @@ public is_point_within_xi_yj_bounds
 public test_check_for_duplicate_ids_in_list
 public check_for_duplicates_in_parallel
 public split_id, id_from_2_ints, generate_id, cij_from_old_id, convert_old_id
+public update_latlon
 
 !> Container for gridded fields
 type :: icebergs_gridded
@@ -101,6 +104,8 @@ type :: icebergs_gridded
   logical :: grid_is_latlon !< Flag to say whether the coordinate is in lat-lon degrees, or meters
   logical :: grid_is_regular !< Flag to say whether point in cell can be found assuming regular Cartesian grid
   real :: Lx !< Length of the domain in x direction
+  real :: maxlon_c !< maximum x coord of computational domain
+  real :: minlon_c !< minimum x coord of computational domain
   real, dimension(:,:), pointer :: lon=>null() !< Longitude of cell corners (degree E)
   real, dimension(:,:), pointer :: lat=>null() !< Latitude of cell corners (degree N)
   real, dimension(:,:), pointer :: lonc=>null() !< Longitude of cell centers (degree E)
@@ -197,6 +202,12 @@ type :: xyt
   real :: ayn
   real :: bxn
   real :: byn
+  real :: axn_fast
+  real :: ayn_fast
+  real :: bxn_fast
+  real :: byn_fast  
+  real :: uvel_prev
+  real :: vvel_prev  
   real :: uvel_old
   real :: vvel_old
   real :: lat_old
@@ -239,6 +250,12 @@ type :: iceberg
   real :: ayn
   real :: bxn
   real :: byn
+  real :: axn_fast
+  real :: ayn_fast
+  real :: bxn_fast
+  real :: byn_fast
+  real :: uvel_prev
+  real :: vvel_prev 
   real :: uvel_old
   real :: vvel_old
   real :: lon_old
@@ -300,14 +317,14 @@ end type linked_list
 type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_io cannot compile if this is private!
   type(icebergs_gridded), pointer :: grd !< Container with all gridded data
   type(linked_list), dimension(:,:), allocatable :: list !< Linked list of icebergs
-  type(xyt), pointer :: trajectories=>null() !< A linked list for detached segments of trajectories
+  type(xyt), pointer :: trajectories=>null() !< A linked list for detached segments of trajectories  
   real :: dt !< Time-step between iceberg calls
              !! \todo Should make dt adaptive?
   integer :: current_year !< Current year (years)
   real :: current_yearday !< Current year-day, 1.00-365.99, (days)
-  integer :: traj_sample_hrs !< Period between sampling for trajectories (hours)
-  integer :: traj_write_hrs !< Period between writing of trajectories (hours)
-  integer :: verbose_hrs !< Period between terminal status reports (hours)
+  real :: traj_sample_hrs !< Period between sampling for trajectories (hours)
+  real :: traj_write_hrs !< Period between writing of trajectories (hours)
+  real :: verbose_hrs !< Period between terminal status reports (hours)
   integer :: max_bonds
   !>@{
   !! Handles for clocks
@@ -315,7 +332,8 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   integer :: clock_trw, clock_trp
   !>@}
   real :: rho_bergs !< Density of icebergs [kg/m^3]
-  real :: spring_coef !< Spring constant for iceberg interactions
+  real :: spring_coef !< Spring constant for bonded iceberg interactions
+  real :: contact_spring_coef !<Spring coefficient for berg collisions -Alex
   real :: bond_coef !< Spring constant for iceberg bonds
   real :: radial_damping_coef !< Coefficient for relative iceberg motion damping (radial component) -Alon
   real :: tangental_damping_coef !< Coefficient for relative iceberg motion damping (tangential component) -Alon
@@ -415,6 +433,13 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   integer :: nspeeding_tickets=0
   integer :: nbonds=0
   integer, dimension(:), pointer :: nbergs_calved_by_class=>null()
+  ! mts parameters - added by Alex
+  logical :: mts=.false. !use multiple timestepping scheme (substep size is automatically determined)
+  integer :: mts_sub_steps
+  real :: mts_fast_dt
+  integer :: mts_part !for turning on/off berg interactions/collisions during different mts scheme
+  real :: contact_distance
+  integer :: num_contact_cells !for how many cells to search to find contact pairs
 end type icebergs
 
 !> Read original restarts. Needs to be module global so can be public to icebergs_mod.
@@ -487,12 +512,13 @@ contains
 
     ! Namelist parameters (and defaults)
     integer :: halo=4 ! Width of halo region
-    integer :: traj_sample_hrs=24 ! Period between sampling of position for trajectory storage
-    integer :: traj_write_hrs=480 ! Period between writing sampled trajectories to disk
-    integer :: verbose_hrs=24 ! Period between verbose messages
+    real :: traj_sample_hrs=24. ! Period between sampling of position for trajectory storage
+    real :: traj_write_hrs=480. ! Period between writing sampled trajectories to disk
+    real :: verbose_hrs=24. ! Period between verbose messages
     integer :: max_bonds=6 ! Maximum number of iceberg bond passed between processors
     real :: rho_bergs=850. ! Density of icebergs
     real :: spring_coef=1.e-8 ! Spring constant for iceberg interactions (this seems to be the highest stable value)
+    real :: contact_spring_coef=0. !Spring coef for berg collisions (is set to spring_coef if not specified)
     real :: bond_coef=1.e-8 ! Spring constant for iceberg bonds - not being used right now
     real :: radial_damping_coef=1.e-4 ! Coefficient for relative iceberg motion damping (radial component) -Alon
     real :: tangental_damping_coef=2.e-5 ! Coefficient for relative iceberg motion damping (tangential component) -Alon
@@ -557,6 +583,9 @@ contains
     logical :: read_old_restarts=.false. ! Legacy option that does nothing
     logical :: use_old_spreading=.true. ! If true, spreads iceberg mass as if the berg is one grid cell wide
     logical :: read_ocean_depth_from_file=.false. ! If true, ocean depth is read from a file.
+    !logical :: mts=.false. !use multiple timestepping scheme (substep size is automatically determined)
+    integer :: mts_sub_steps=-1 !if -1, the number of mts sub-steps will be automatically determined
+    real :: contact_distance=0.0 !for unbonded berg interactions, collision is assumed at max(contact_distance,sum of the 2 bergs radii)
     real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
     real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim) ,
     real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
@@ -564,7 +593,7 @@ contains
     integer(kind=8) :: debug_iceberg_with_id = -1 ! If positive, monitors a berg with this id
 
     Namelist /icebergs_nml/ Verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,Static_icebergs,  &
-         distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef, radial_damping_coef, tangental_damping_coef, only_interactive_forces, &
+         distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,contact_spring_coef,bond_coef, radial_damping_coef, tangental_damping_coef, only_interactive_forces, &
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, iceberg_bonds_on, manually_initialize_bonds, ignore_missing_restart_bergs, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, halo_debugging, hexagonal_icebergs, &
          time_average_weight, generate_test_icebergs, length_for_manually_initialize_bonds, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, &
@@ -574,15 +603,16 @@ contains
          grid_is_regular,override_iceberg_velocities,u_override,v_override,add_iceberg_thickness_to_SSH,Iceberg_melt_without_decay,melt_icebergs_as_ice_shelf, &
          Use_three_equation_model,find_melt_using_spread_mass,use_mixed_layer_salinity_for_thermo,utide_icebergs,ustar_icebergs_bg,cdrag_icebergs, pass_fields_to_ocean_model, &
          const_gamma, Gamma_T_3EQ, ignore_traj, debug_iceberg_with_id,use_updated_rolling_scheme, tip_parameter, read_old_restarts, tau_calving, read_ocean_depth_from_file, melt_cutoff,&
-         apply_thickness_cutoff_to_gridded_melt, apply_thickness_cutoff_to_bergs_melt, use_mixed_melting, coastal_drift, tidal_drift
+         apply_thickness_cutoff_to_gridded_melt, apply_thickness_cutoff_to_bergs_melt, use_mixed_melting, coastal_drift, tidal_drift,mts,mts_sub_steps,contact_distance
 
     ! Local variables
     integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
     type(icebergs_gridded), pointer :: grd
-    real :: lon_mod, big_number
+    real :: lon_mod, big_number,mts_fast_dt=0.0
     logical :: lerr
     integer :: stdlogunit, stderrunit
     real :: Total_mass  !Added by Alon
+    real :: maxlon_c,minlon_c !Alex, for mts verlet periodicity
 
     ! Get the stderr and stdlog unit numbers
     stderrunit=stderr()
@@ -949,6 +979,32 @@ endif
 if (save_short_traj) buffer_width_traj=6 ! This is the length of the short buffer used for abrevated traj
 if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files should be ignored
 
+!must use verlet with mts - Alex
+if (mts) then
+
+  buffer_width_traj=buffer_width_traj+6 !to accomodate fast acceration and vel_prev terms
+  buffer_width=buffer_width+18 !to accomodate external forcing (uo,vo,ua,va,ui,vi,ssh_x,ssh_y,sst,sss,cn,hi)
+  
+  !if mts_sub_steps is not given in the nml already,
+  !then detemine according to the max dt according to the spring coef
+  if (mts_sub_steps .eq. -1) then
+    mts_fast_dt = 2./sqrt(bergs%spring_coef)   !the (theoretical) maximum "fast" dt for mts scheme      
+    mts_sub_steps = ceiling(dt/mts_fast_dt)    !the number of substeps
+  end if
+
+  mts_fast_dt = dt/mts_sub_steps !adjust mts_fast_dt so that dt is an integer multiple of mts_fast_dt
+
+  if (Runge_not_Verlet) then
+    call error_mesg('KID, framework', &
+      'Multiple time stepping does not work with Runge Kutta stepping, switching to Verlet.', WARNING)
+    Runge_not_Verlet=.false.
+  end if
+end if
+
+!by default, set contact_spring_coef equal to the spring_coef for bonded interactions, unless
+!contact_spring_coef is specified as > 0.
+if (contact_spring_coef.le.0.) contact_spring_coef=spring_coef
+
 
 ! Parameters
 bergs%dt=dt
@@ -964,6 +1020,7 @@ bergs%grd%grid_is_regular=grid_is_regular
 bergs%max_bonds=max_bonds
 bergs%rho_bergs=rho_bergs
 bergs%spring_coef=spring_coef
+bergs%contact_spring_coef=contact_spring_coef !Alex
 bergs%bond_coef=bond_coef
 bergs%radial_damping_coef=radial_damping_coef
 bergs%tangental_damping_coef=tangental_damping_coef
@@ -1019,6 +1076,21 @@ bergs%grounding_fraction=grounding_fraction
 bergs%add_weight_to_ocean=add_weight_to_ocean
 bergs%use_old_spreading=use_old_spreading
 bergs%debug_iceberg_with_id=debug_iceberg_with_id
+bergs%mts=mts
+bergs%mts_fast_dt = mts_fast_dt
+bergs%mts_sub_steps = mts_sub_steps
+bergs%mts_part = 1
+bergs%contact_distance=contact_distance
+bergs%num_contact_cells = max(int(ceiling(contact_distance/(grd%lon(grd%isc+1,grd%jsc)-grd%lon(grd%isc,grd%jsc)))),1)
+if (halo<bergs%num_contact_cells) then
+  if (mpp_pe()==0) then  
+    write(stderrunit,'(a,i3)') 'KID, icebergs_init: halo width ',halo
+    write(stderrunit,'(a,f8.2,a,i3)') 'KID, icebergs_init: contact distance ',bergs%contact_distance,&
+      ' num contact cells',bergs%num_contact_cells
+    call error_mesg('KID, ice_bergs_framework_init', &
+      'halo width must be increased to accomodate specified contact distance!!!', FATAL)
+  endif
+endif
 allocate( bergs%initial_mass(nclasses) ); bergs%initial_mass(:)=initial_mass(:)
 allocate( bergs%distribution(nclasses) ); bergs%distribution(:)=distribution(:)
 allocate( bergs%mass_scaling(nclasses) ); bergs%mass_scaling(:)=mass_scaling(:)
@@ -1029,6 +1101,12 @@ bergs%initial_width(:)=sqrt(initial_mass(:)/(LoW_ratio*rho_bergs*initial_thickne
 bergs%initial_length(:)=LoW_ratio*bergs%initial_width(:)
 grd%coastal_drift = coastal_drift
 grd%tidal_drift = tidal_drift
+
+!needed for periodicity
+maxlon_c = grd%lon(grd%iec,grd%jec); minlon_c = grd%lon(grd%isc-1,grd%jsc-1)
+call mpp_max(maxlon_c); call mpp_min(minlon_c)
+grd%maxlon_c=maxlon_c; grd%minlon_c=minlon_c
+
 
 if (read_old_restarts) call error_mesg('KID, ice_bergs_framework_init', 'Setting "read_old_restarts=.true." is obsolete and does nothing!', WARNING)
 
@@ -1302,7 +1380,21 @@ logical :: halo_debugging
 
   do grdj = grd%jsd,grd%jed ;    do grdi = grd%iec+1,grd%ied
     call delete_all_bergs_in_list(bergs,grdj,grdi)
-  enddo ; enddo
+  enddo; enddo
+
+  if (bergs%mts) then
+    !remove conglomerate bergs outside halo
+    do grdj = grd%jsc,grd%jec ;    do grdi = grd%isc,grd%iec
+      this=>bergs%list(grdi,grdj)%first
+      do while (associated(this))
+        kick_the_bucket=>this
+        this=>this%next
+        if (kick_the_bucket%halo_berg .ne. 0) then
+          call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
+        end if
+      enddo
+    enddo;enddo
+  end if  
 
   call mpp_sync_self()
 
@@ -1521,6 +1613,11 @@ logical :: halo_debugging
     call show_all_bonds(bergs)
   endif
 
+  if (bergs%mts) then
+    call mpp_sync_self()    
+    call transfer_mts_bergs(bergs)
+  end if  
+
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!Debugging!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   if (debug) then
     nbergs_end=count_bergs(bergs)
@@ -1564,6 +1661,742 @@ logical :: halo_debugging
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!Debugging!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!111
 
 end subroutine update_halo_icebergs
+
+!> For the MTS Verlet scheme: entire conglomerates of iceberg elements are passed between all
+!! PEs that they overlap, skipping the elements that were already transferred. Berg elements
+!! within contact distance of the conglomerates must also be transferred.
+subroutine transfer_mts_bergs(bergs)
+! Arguments
+type(icebergs), pointer :: bergs !< Container for all types and memory
+! Local variables
+type(iceberg), pointer :: kick_the_bucket, this
+integer :: nbergs_to_send_e, nbergs_to_send_w
+integer :: nbergs_to_send_n, nbergs_to_send_s
+integer :: nbergs_rcvd_from_e, nbergs_rcvd_from_w
+integer :: nbergs_rcvd_from_n, nbergs_rcvd_from_s
+type(icebergs_gridded), pointer :: grd
+integer :: i
+integer :: stderrunit
+integer :: grdi, grdj, grdi2, grdj2
+integer :: halo_width
+real :: current_halo_status,current_lat,current_lon
+logical :: halo_debugging,leavedo
+integer :: conglom_count,nc,contact_distance,last_berg,last_cell
+real :: Lx,dist,dx,dy
+logical :: periodicityfix
+
+  halo_width=bergs%grd%halo
+  halo_debugging=bergs%halo_debugging
+  nc=bergs%num_contact_cells
+  contact_distance=bergs%contact_distance
+
+  ! Get the stderr unit number
+  stderrunit = stderr()
+
+  ! For convenience
+  grd=>bergs%grd
+  
+  Lx = grd%Lx
+  periodicityfix=.false.
+  
+  nbergs_to_send_e=0
+  nbergs_to_send_w=0
+
+  !connect bonds currently residing on each PE.
+  !Needed to determine which conglomerate elements to send.
+  call connect_all_bonds(bergs,ignore_unmatched=.true.)
+
+  !---Step A. summary of current halo_berg statuses on current PE---
+  !halo_berg=0: bergs on computational domain
+  !halo_berg=1: bergs on halo domain
+  
+  ! Send all berg elements (east/west) in conglomerate:
+  ! conglomerate berg elements to send EAST:
+  last_berg=-1
+  if (Lx>0.0 .and. grd%lon(grd%iec,grd%jec).eq. grd%maxlon_c) periodicityfix=.true.
+  grdi = grd%iec-halo_width+2
+  do grdj = grd%jsd+1,grd%jed   !mark the additional elements to send
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+      !mark conglomerate elements west of the eastern halo as
+      !halo_berg = halo_berg+2 (so their new halo_berg will equal 2 or 3)      
+      call mts_mark_conglomerate_bergs(this,grdi,1) 
+      this=>this%next
+    enddo
+  enddo
+  !add them to the buffer:
+  conglom_count = 1
+  do while(conglom_count>0)
+    grdi=grdi-1
+    if (grdi<grd%isd+1) exit
+    conglom_count = 0
+    do grdj = grd%jsd+1,grd%jed
+      this=>bergs%list(grdi,grdj)%first
+      do while (associated(this))
+        if (this%halo_berg>1) then
+          conglom_count=conglom_count+1
+          kick_the_bucket=>this
+          current_halo_status=kick_the_bucket%halo_berg
+          this=>this%next
+          kick_the_bucket%halo_berg=2.
+          nbergs_to_send_e=nbergs_to_send_e+1
+          if (periodicityfix) kick_the_bucket%lon=kick_the_bucket%lon-Lx
+          call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_e, nbergs_to_send_e, bergs%max_bonds)        
+          !kick_the_bucket%halo_berg=current_halo_status-2 !unmark
+          kick_the_bucket%halo_berg=current_halo_status
+          last_berg=kick_the_bucket%id
+          if (periodicityfix) kick_the_bucket%lon=kick_the_bucket%lon+Lx
+        else
+          this=>this%next
+        end if
+      enddo
+    enddo
+  enddo
+
+  !---Step B: updated summary of current halo_berg statuses on current PE---
+  !halo_berg=0: bergs on computational domain
+  !halo_berg=1: bergs on halo domain
+  !halo_berg=2: conglomerate bergs, packed to send east, from computational domain
+  !halo_berg=3: conglomerate bergs, packed to send east, from halo domain
+
+  !now mark non-conglomerate bergs within the contact distance of the conglomerate
+  !to send EAST as halo_berg=halo_berg+4,that also need to sent EAST:
+  last_cell=grd%iec-halo_width+1
+  leavedo=.false.
+
+  do grdi=grd%iec-halo_width+2,grd%isd+1,-1 !outer cell i-loop
+    do grdj = grd%jsd+1,grd%jed !outer cell j-loop
+      this=>bergs%list(grdi,grdj)%first
+      do while (associated(this)) !outer berg loop
+        if (this%halo_berg>1) then
+          !conglomerate berg found. search surroundings for non_conglomerate bergs within the
+          !contact distance, and add to buffer
+          if (grdi<last_cell) last_cell=grdi
+          do grdj2=max(grdj-nc,grd%jsd+1),min(grdj+nc,grd%jed); &
+            do grdi2=max(grdi-nc,grd%isd+1),min(grdi+nc,grd%iec-halo_width+1) !inner cell loop
+            !if (grdi2>grd%iec-halo_width+1) cycle !don't process east halo cells 
+            kick_the_bucket=>bergs%list(grdi2,grdj2)%first
+            do while (associated(kick_the_bucket)) ! inner berg loop
+              if (kick_the_bucket%halo_berg < 2) then
+                dx=kick_the_bucket%lon-this%lon
+                dy=kick_the_bucket%lat-this%lat
+                dist=dx*dx+dy*dy
+                if (dist<contact_distance*contact_distance) then
+                  current_halo_status=kick_the_bucket%halo_berg+4
+                  kick_the_bucket%halo_berg=10
+                  nbergs_to_send_e=nbergs_to_send_e+1
+                  if (periodicityfix) kick_the_bucket%lon=kick_the_bucket%lon-Lx
+                  call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_e, nbergs_to_send_e, bergs%max_bonds)
+                  kick_the_bucket%halo_berg=current_halo_status
+                  if (periodicityfix) kick_the_bucket%lon=kick_the_bucket%lon+Lx
+                  if (kick_the_bucket%ine<last_cell) last_cell=kick_the_bucket%ine
+                endif
+              endif
+              kick_the_bucket=>kick_the_bucket%next
+            enddo !inner berg loop
+          enddo; enddo !inner cell loop
+        endif
+        if (this%id==last_berg) then
+          leavedo=.true.
+          this=>null()
+          exit
+        else
+          this=>this%next
+        endif
+      enddo !outer berg loop
+      if (leavedo) exit
+    enddo !outer cell j-loop
+    if (leavedo) exit
+  enddo !outer cell i-loop
+
+  periodicityfix=.false.
+  leavedo=.false.
+
+  !---Step C: updated summary of current halo_berg statuses on current PE---
+  !adding to Step B, we now also have:
+  !halo_berg=4: non-conglomerate bergs on computational domain, within contact distance of conglom to send E
+  !halo_berg=5: non-conglomerate bergs on a halo domain, within contact distance of conglom to send E
+
+  !now go back and reset berg halo statuses that are being sent EAST to the way it was in Step A above
+  do grdi=grd%iec-halo_width+1,last_cell,-1
+    do grdj = grd%jsd+1,grd%jed
+      this=>bergs%list(grdi,grdj)%first
+      do while (associated(this))
+        if (this%halo_berg>1) then 
+          if (this%halo_berg<4) then
+            this%halo_berg=this%halo_berg-2
+          else
+            this%halo_berg=this%halo_berg-4
+          endif
+        endif
+        this=>this%next
+      enddo
+    enddo
+  enddo
+
+  !---Step D: updated summary of current halo_berg statuses on current PE---
+  ! Same as Step A summary
+  
+
+  !----now do Steps A-D for the bergs to send west:----
+  ! conglomerate berg elements to send WEST:  
+  last_berg=-1  
+  if (Lx>0.0 .and. grd%lon(grd%isc-1,grd%jsc-1).eq. grd%minlon_c) periodicityfix=.true.  
+  grdi = grd%isc+halo_width-1
+  do grdj = grd%jsd+1,grd%jed
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+      call mts_mark_conglomerate_bergs(this,grdi,-1)
+      this=>this%next
+    enddo
+  enddo
+  !add them to the buffer:
+  conglom_count = 1
+  do while(conglom_count>0)
+    grdi=grdi+1
+    if (grdi>grd%ied) exit
+    conglom_count = 0
+    do grdj = grd%jsd+1,grd%jed
+      this=>bergs%list(grdi,grdj)%first
+      do while (associated(this))
+        if (this%halo_berg>1) then
+          conglom_count=conglom_count+1
+          kick_the_bucket=>this
+          current_halo_status=kick_the_bucket%halo_berg
+          this=>this%next
+          kick_the_bucket%halo_berg=2.
+          nbergs_to_send_w=nbergs_to_send_w+1
+          if (periodicityfix) kick_the_bucket%lon=kick_the_bucket%lon+Lx
+          call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_w, nbergs_to_send_w, bergs%max_bonds)
+          !kick_the_bucket%halo_berg=current_halo_status-2 !unmark
+          kick_the_bucket%halo_berg=current_halo_status
+          last_berg=kick_the_bucket%id          
+          if (periodicityfix) kick_the_bucket%lon=kick_the_bucket%lon-Lx
+        else
+          this=>this%next
+        end if
+      enddo
+    enddo
+  enddo
+
+  !now mark non-conglomerate bergs within the contact distance of the conglomerate
+  !to send WEST as halo_berg=halo_berg+4,that also need to be sent WEST:
+  last_cell=grd%isc+halo_width
+
+  do grdi=grd%isc+halo_width-1,grd%ied !outer cell i-loop
+    do grdj = grd%jsd+1,grd%jed !outer cell j-loop
+      this=>bergs%list(grdi,grdj)%first
+      do while (associated(this)) !outer berg loop
+        if (this%halo_berg>1) then
+          !conglomerate berg found. search surroundings for non_conglomerate bergs within the
+          !contact distance, and add to buffer
+          if (grdi>last_cell) last_cell=grdi
+          do grdj2=max(grdj-nc,grd%jsd+1),min(grdj+nc,grd%jed); &
+            do grdi2=max(grdi-nc,grd%isc+halo_width),min(grdi+nc,grd%ied) !inner cell loop
+            !if (grdi2<grd%isc+halo_width) cycle
+            kick_the_bucket=>bergs%list(grdi2,grdj2)%first
+            do while (associated(kick_the_bucket)) ! inner berg loop
+              if (kick_the_bucket%halo_berg < 2) then
+                dx=kick_the_bucket%lon-this%lon
+                dy=kick_the_bucket%lat-this%lat
+                dist=dx*dx+dy*dy
+                if (dist<contact_distance*contact_distance) then                
+                  current_halo_status=kick_the_bucket%halo_berg+4
+                  kick_the_bucket%halo_berg=10
+                  nbergs_to_send_w=nbergs_to_send_w+1
+                  if (periodicityfix) kick_the_bucket%lon=kick_the_bucket%lon+Lx
+                  call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_w, nbergs_to_send_w, bergs%max_bonds)
+                  kick_the_bucket%halo_berg=current_halo_status
+                  if (periodicityfix) kick_the_bucket%lon=kick_the_bucket%lon-Lx
+                  if (kick_the_bucket%ine>last_cell) last_cell=kick_the_bucket%ine
+                endif
+              endif
+              kick_the_bucket=>kick_the_bucket%next
+            enddo !inner berg loop
+          enddo; enddo !inner cell loop
+        endif
+        if (this%id==last_berg) then
+          leavedo=.true.
+          this=>null()
+          exit
+        else
+          this=>this%next
+        endif
+      enddo !outer berg loop
+      if (leavedo) exit
+    enddo !outer cell j-loop
+    if (leavedo) exit
+  enddo !outer cell i-loop
+  
+  periodicityfix=.false.
+  leavedo=.false.
+
+  !now go back and reset berg halo statuses that are being sent WEST to the way it was in Step A above
+  do grdi=grd%isc+halo_width,last_cell
+    do grdj = grd%jsd+1,grd%jed
+      this=>bergs%list(grdi,grdj)%first
+      do while (associated(this))
+        if (this%halo_berg>1) then 
+          if (this%halo_berg<4) then
+            this%halo_berg=this%halo_berg-2
+          else
+            this%halo_berg=this%halo_berg-4
+          endif
+        endif
+        this=>this%next
+      enddo
+    enddo
+  enddo
+
+  !----finished E/W packing----
+
+  ! Send bergs east
+  if (grd%pe_E.ne.NULL_PE) then
+    call mpp_send(nbergs_to_send_e, plen=1, to_pe=grd%pe_E, tag=COMM_TAG_1)
+    if (nbergs_to_send_e.gt.0) then
+      call mpp_send(bergs%obuffer_e%data, nbergs_to_send_e*buffer_width, grd%pe_E, tag=COMM_TAG_2)
+    endif
+  endif
+
+  ! Send bergs west
+  if (grd%pe_W.ne.NULL_PE) then
+    call mpp_send(nbergs_to_send_w, plen=1, to_pe=grd%pe_W, tag=COMM_TAG_3)
+    if (nbergs_to_send_w.gt.0) then
+      call mpp_send(bergs%obuffer_w%data, nbergs_to_send_w*buffer_width, grd%pe_W, tag=COMM_TAG_4)
+    endif
+  endif
+
+  ! Receive bergs from west
+  if (grd%pe_W.ne.NULL_PE) then
+    nbergs_rcvd_from_w=-999
+    call mpp_recv(nbergs_rcvd_from_w, glen=1, from_pe=grd%pe_W, tag=COMM_TAG_1)
+    if (nbergs_rcvd_from_w.lt.0) then
+      write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_w,' from',grd%pe_W,' (W) !!!!!!!!!!!!!!!!!!!!!!'
+    endif
+    if (nbergs_rcvd_from_w.gt.0) then
+      call increase_ibuffer(bergs%ibuffer_w, nbergs_rcvd_from_w,buffer_width)
+      call mpp_recv(bergs%ibuffer_w%data, nbergs_rcvd_from_w*buffer_width, grd%pe_W, tag=COMM_TAG_2)
+      do i=1, nbergs_rcvd_from_w
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_w, i, grd, max_bonds_in=bergs%max_bonds )
+      enddo
+    endif
+  else
+    nbergs_rcvd_from_w=0
+  endif
+
+  ! Receive bergs from east
+  if (grd%pe_E.ne.NULL_PE) then
+    nbergs_rcvd_from_e=-999
+    call mpp_recv(nbergs_rcvd_from_e, glen=1, from_pe=grd%pe_E, tag=COMM_TAG_3)
+    if (nbergs_rcvd_from_e.lt.0) then
+      write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_e,' from',grd%pe_E,' (E) !!!!!!!!!!!!!!!!!!!!!!'
+    endif
+    if (nbergs_rcvd_from_e.gt.0) then
+      call increase_ibuffer(bergs%ibuffer_e, nbergs_rcvd_from_e,buffer_width)
+      call mpp_recv(bergs%ibuffer_e%data, nbergs_rcvd_from_e*buffer_width, grd%pe_E, tag=COMM_TAG_4)
+      do i=1, nbergs_rcvd_from_e
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_e, i, grd, max_bonds_in=bergs%max_bonds )
+      enddo
+    endif
+  else
+    nbergs_rcvd_from_e=0
+  endif
+
+  !---Step E. updated summary of current halo_berg statuses on current PE---
+  !halo_berg=0: bergs on computational domain
+  !halo_berg=1: bergs on halo domain
+  !halo_berg=2: conglomerate bergs received from the computational domain of the PE to the East or West
+  !halo_berg=10: bergs received from the computational domain of the PE to the East or West that are
+  !             within contact distance to any of the current PE bergs with halo_berg==1 or 2
+
+  !reconnect bonds in preparation for sending north/south
+  call mpp_sync_self() 
+  call connect_all_bonds(bergs,ignore_unmatched=.true.)
+  do grdj = grd%jsd+1,grd%jed ;  do grdi = grd%isd+1,grd%ied
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+      !conglomerate elements from the E/W transfers now have berg%halo_berg==2 or 3, and
+      !
+      !The conglomerate elements for the N/S transfers will also be given halo_berg>1 below.
+      !Before the N/S transfer procedure, temporarily change the sign of the conglomerate
+      !halo_berg statuses from the E/W transfers to differentiate between the E/W vs N/S procedures.
+      if (this%halo_berg>1) this%halo_berg=-this%halo_berg      
+      this=>this%next
+    enddo
+  enddo; enddo
+
+  nbergs_to_send_n=0
+  nbergs_to_send_s=0
+
+  ! ---Send all berg elements (north/south) in conglomerate---:
+  ! conglomerate berg elements to send NORTH:  
+  last_berg=-1  
+  do grdj = grd%jec-halo_width+2,grd%jed; do grdi = grd%isd+1,grd%ied
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+      call mts_mark_conglomerate_bergs(this,grdj,2)
+      this=>this%next
+    enddo
+  enddo; enddo
+  !add them to the buffer:
+  grdj = grd%jed+1
+  conglom_count = 1
+  do while(conglom_count>0 .or. grdj .ge. grd%jec-halo_width+2)
+    grdj=grdj-1
+    if (grdj<grd%jsd+1) exit
+    conglom_count = 0
+    do grdi = grd%isd,grd%ied
+      this=>bergs%list(grdi,grdj)%first
+      do while (associated(this))
+        if (this%halo_berg>1) then
+          conglom_count=conglom_count+1
+          kick_the_bucket=>this
+          current_halo_status=kick_the_bucket%halo_berg
+          this=>this%next
+          kick_the_bucket%halo_berg=2.
+          nbergs_to_send_n=nbergs_to_send_n+1
+          call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_n, nbergs_to_send_n, bergs%max_bonds)
+          !kick_the_bucket%halo_berg=-(current_halo_status-2) !unmark
+          kick_the_bucket%halo_berg=current_halo_status
+          last_berg=kick_the_bucket%id   
+        else
+          this=>this%next
+        end if
+      enddo
+    enddo
+  enddo
+
+    !---Step F. updated summary of current halo_berg statuses on current PE---
+  !halo_berg=0: bergs on computational domain
+  !halo_berg=1: bergs on halo domain
+  !halo_berg=-2: conglomerate bergs received from the computational domain of the PE to the East or West
+  !halo_berg=-10: bergs received from the computational domain of the PE to the East or West that are
+  !             within contact distance to any of the current PE bergs with halo_berg==1 or 2
+  !halo_berg=2:  same as halo_berg=0,   but marked as conglom to send North
+  !halo_berg=3:  same as halo_berg=1,   but marked as conglom to send North
+  !halo_berg=4:  same as halo_berg=-2,  but marked as conglom to send North
+  !halo_berg=12: same as halo_berg=-10, but marked as conglom to send North
+
+  !now mark non-conglomerate bergs within the contact distance of the conglomerate
+  !to send NORTH as halo_berg=halo_berg+111,that also need to sent NORTH:
+  last_cell=grd%jec-halo_width+1
+
+  do grdj=grd%jec-halo_width+2,grd%jsd+1,-1 !outer cell j-loop
+    do grdi = grd%isd+1,grd%ied !outer cell i-loop
+      this=>bergs%list(grdi,grdj)%first
+      do while (associated(this)) !outer berg loop
+        if (this%halo_berg>1) then
+          !conglomerate berg found. search surroundings for non_conglomerate bergs within the
+          !contact distance, and add to buffer
+          if (grdj<last_cell) last_cell=grdj
+          do grdj2=max(grdj-nc,grd%jsd+1),min(grdj+nc,grd%jec-halo_width+1) !inner cell j-loop
+            !if (grdj2>grd%jec-halo_width+1) cycle !don't process east halo cells 
+            do grdi2=max(grdi-nc,grd%isd+1),min(grdi+nc,grd%ied) !inner cell i-loop
+              kick_the_bucket=>bergs%list(grdi2,grdj2)%first
+              do while (associated(kick_the_bucket)) ! inner berg loop
+                if (kick_the_bucket%halo_berg < 2) then
+                  dx=kick_the_bucket%lon-this%lon
+                  dy=kick_the_bucket%lat-this%lat
+                  dist=dx*dx+dy*dy
+                  if (dist<contact_distance*contact_distance) then                  
+                    current_halo_status=kick_the_bucket%halo_berg+111 !guaranteed to be above 100
+                    kick_the_bucket%halo_berg=10 
+                    nbergs_to_send_e=nbergs_to_send_n+1
+                    call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_n, nbergs_to_send_n, bergs%max_bonds)
+                    kick_the_bucket%halo_berg=current_halo_status
+                    if (kick_the_bucket%jne<last_cell) last_cell=kick_the_bucket%jne
+                  endif
+                endif
+                kick_the_bucket=>kick_the_bucket%next
+              enddo !inner berg loop
+            enddo !inner cell i-loop
+          enddo !inner cell j-loop
+        endif
+        if (this%id==last_berg) then
+          leavedo=.true.
+          this=>null()
+          exit
+        else
+          this=>this%next
+        endif
+      enddo !outer berg loop
+      if (leavedo) exit
+    enddo !outer cell i-loop
+    if (leavedo) exit
+  enddo !outer cell j-loop
+
+  leavedo=.false.
+
+  !now go back and reset berg halo statuses that are being sent NORTH to the way it was in Step F above
+  do grdj=grd%jec-halo_width+1,last_cell,-1
+    do grdi = grd%isd+1,grd%ied
+      this=>bergs%list(grdi,grdj)%first
+      do while (associated(this))
+        if (this%halo_berg>1) then 
+          if (this%halo_berg<4) then
+            this%halo_berg=this%halo_berg-2
+          elseif (this%halo_berg>100) then
+            this%halo_berg=this%halo_berg-111
+          else
+            this%halo_berg=-(this%halo_berg-2)
+          endif
+        endif
+        this=>this%next
+      enddo
+    enddo
+  enddo  
+
+  !--do the same for transfers to SOUTH--
+
+  ! conglomerate berg elements to send SOUTH:  
+  last_berg=-1  
+  do grdj = grd%jsd+1,grd%jsc+halo_width-1; do grdi = grd%isd,grd%ied
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+      call mts_mark_conglomerate_bergs(this,grdj,-2)
+      this=>this%next
+    enddo
+  enddo; enddo
+  grdj = grd%jsd
+  !add them to the buffer:
+  conglom_count = 1
+  do while(conglom_count>0 .or. grdj .le. grd%jsc+halo_width-1)
+    grdj=grdj+1
+    if (grdj>grd%jed) exit
+    conglom_count = 0
+    do grdi = grd%isd,grd%ied
+      this=>bergs%list(grdi,grdj)%first
+      do while (associated(this))
+        if (this%halo_berg>1) then
+          conglom_count=conglom_count+1
+          kick_the_bucket=>this
+          current_halo_status=kick_the_bucket%halo_berg
+          this=>this%next
+          kick_the_bucket%halo_berg=2.
+          nbergs_to_send_s=nbergs_to_send_s+1
+          call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_s, nbergs_to_send_s, bergs%max_bonds)
+          !kick_the_bucket%halo_berg=-(current_halo_status-2) !unmark
+          kick_the_bucket%halo_berg=current_halo_status
+          last_berg=kick_the_bucket%id    
+        else
+          this=>this%next
+        end if
+      enddo
+    enddo
+  enddo
+
+  !now mark non-conglomerate bergs within the contact distance of the conglomerate
+  !to send SOUTH as halo_berg=halo_berg+111,that also need to be sent SOUTH:
+  last_cell=grd%jsc+halo_width
+
+  do grdj=grd%jsc+halo_width-1,grd%jed !outer cell i-loop
+    do grdi = grd%isd+1,grd%ied !outer cell j-loop
+      this=>bergs%list(grdi,grdj)%first
+      do while (associated(this)) !outer berg loop
+        if (this%halo_berg>1) then
+          !conglomerate berg found. search surroundings for non_conglomerate bergs within the
+          !contact distance, and add to buffer
+          if (grdj>last_cell) last_cell=grdj
+          do grdj2=max(grdj-nc,grd%jsc+halo_width),min(grdj+nc,grd%jed) !inner cell j-loop
+            !if (grdj2<grd%jsc+halo_width) cycle
+            do grdi2=max(grdi-nc,grd%isd+1),min(grdi+nc,grd%ied) !inner cell i-loop
+              kick_the_bucket=>bergs%list(grdi2,grdj2)%first
+              do while (associated(kick_the_bucket)) ! inner berg loop
+                if (kick_the_bucket%halo_berg < 2) then
+                  dx=kick_the_bucket%lon-this%lon
+                  dy=kick_the_bucket%lat-this%lat
+                  dist=dx*dx+dy*dy
+                  if (dist<contact_distance*contact_distance) then                  
+                    current_halo_status=kick_the_bucket%halo_berg+111
+                    kick_the_bucket%halo_berg=10
+                    nbergs_to_send_n=nbergs_to_send_n+1
+                    call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_n, nbergs_to_send_n, bergs%max_bonds)
+                    kick_the_bucket%halo_berg=current_halo_status
+                    if (kick_the_bucket%jne>last_cell) last_cell=kick_the_bucket%jne
+                  endif
+                endif
+                kick_the_bucket=>kick_the_bucket%next
+              enddo !inner berg loop
+            enddo !inner cell i-loop
+          enddo !inner cell j-loop
+        endif
+        if (this%id==last_berg) then
+          leavedo=.true.
+          this=>null()
+          exit
+        else
+          this=>this%next
+        endif
+      enddo !outer berg loop
+      if (leavedo) exit
+    enddo !outer cell i-loop
+    if (leavedo) exit
+  enddo !outer cell j-loop
+  
+  leavedo=.false.
+
+  !now go back and reset berg halo statuses that are being sent SOUTH to the way it was in Step E above
+  do grdj=grd%jsd+1,grd%jed
+    do grdi = grd%isd+1,grd%ied
+      this=>bergs%list(grdi,grdj)%first
+      do while (associated(this))
+        if (this%halo_berg>1) then 
+          if (this%halo_berg<4) then
+            this%halo_berg=this%halo_berg-2
+          elseif (this%halo_berg>100) then
+            this%halo_berg=abs(this%halo_berg-111)
+          else
+            this%halo_berg=this%halo_berg-2
+          endif
+        elseif (this%halo_berg<0) then
+          this%halo_berg=abs(this%halo_berg)
+        endif
+        this=>this%next        
+      enddo
+    enddo
+  enddo
+
+  !---Step G. updated summary of current halo_berg statuses on current PE---
+  ! Same as Step E
+
+
+ ! Send bergs north
+  if (grd%pe_N.ne.NULL_PE) then
+    if(folded_north_on_pe) then
+      call mpp_send(nbergs_to_send_n, plen=1, to_pe=grd%pe_N, tag=COMM_TAG_9)
+    else
+      call mpp_send(nbergs_to_send_n, plen=1, to_pe=grd%pe_N, tag=COMM_TAG_5)
+    endif
+    if (nbergs_to_send_n.gt.0) then
+      if(folded_north_on_pe) then
+        call mpp_send(bergs%obuffer_n%data, nbergs_to_send_n*buffer_width, grd%pe_N, tag=COMM_TAG_10)
+      else
+        call mpp_send(bergs%obuffer_n%data, nbergs_to_send_n*buffer_width, grd%pe_N, tag=COMM_TAG_6)
+      endif
+    endif
+  endif
+
+  ! Send bergs south
+  if (grd%pe_S.ne.NULL_PE) then
+    call mpp_send(nbergs_to_send_s, plen=1, to_pe=grd%pe_S, tag=COMM_TAG_7)
+    if (nbergs_to_send_s.gt.0) then
+      call mpp_send(bergs%obuffer_s%data, nbergs_to_send_s*buffer_width, grd%pe_S, tag=COMM_TAG_8)
+    endif
+  endif
+
+  ! Receive bergs from south
+  if (grd%pe_S.ne.NULL_PE) then
+    nbergs_rcvd_from_s=-999
+    call mpp_recv(nbergs_rcvd_from_s, glen=1, from_pe=grd%pe_S, tag=COMM_TAG_5)
+    if (nbergs_rcvd_from_s.lt.0) then
+      write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_s,' from',grd%pe_S,' (S) !!!!!!!!!!!!!!!!!!!!!!'
+    endif
+    if (nbergs_rcvd_from_s.gt.0) then
+      call increase_ibuffer(bergs%ibuffer_s, nbergs_rcvd_from_s,buffer_width)
+      call mpp_recv(bergs%ibuffer_s%data, nbergs_rcvd_from_s*buffer_width, grd%pe_S, tag=COMM_TAG_6)
+      do i=1, nbergs_rcvd_from_s
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_s, i, grd, max_bonds_in=bergs%max_bonds  )
+      enddo
+    endif
+  else
+    nbergs_rcvd_from_s=0
+  endif
+
+  ! Receive bergs from north
+  if (grd%pe_N.ne.NULL_PE) then
+    nbergs_rcvd_from_n=-999
+    if(folded_north_on_pe) then
+      call mpp_recv(nbergs_rcvd_from_n, glen=1, from_pe=grd%pe_N, tag=COMM_TAG_9)
+    else
+      call mpp_recv(nbergs_rcvd_from_n, glen=1, from_pe=grd%pe_N, tag=COMM_TAG_7)
+    endif
+    if (nbergs_rcvd_from_n.lt.0) then
+      write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_n,' from',grd%pe_N,' (N) !!!!!!!!!!!!!!!!!!!!!!'
+    endif
+    if (nbergs_rcvd_from_n.gt.0) then
+      call increase_ibuffer(bergs%ibuffer_n, nbergs_rcvd_from_n,buffer_width)
+      if(folded_north_on_pe) then
+        call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_10)
+      else
+        call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_8)
+      endif
+      do i=1, nbergs_rcvd_from_n
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_n, i, grd, max_bonds_in=bergs%max_bonds )
+      enddo
+    endif
+  else
+    nbergs_rcvd_from_n=0
+  endif
+
+  call mpp_sync_self()
+  
+  ! For debugging
+  if (halo_debugging) then
+    call mpp_sync_self()
+    do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
+      this=>bergs%list(grdi,grdj)%first
+      do while (associated(this))
+        write(stderrunit,'(a,5i)')  'MTS_C', this%id, mpp_pe(), int(this%halo_berg),  grdi, grdj
+        this=>this%next
+      enddo
+    enddo; enddo
+    call show_all_bonds(bergs)
+  endif
+
+end subroutine transfer_mts_bergs
+
+
+!> For the MTS scheme, marks the conglomerate icebergs elements that overlap
+!! multiple processors as berg%halo_berg>1.
+recursive subroutine mts_mark_conglomerate_bergs(berg,completedcell,dir)
+  type(iceberg), pointer :: berg
+  integer,intent(in) :: completedcell !<column of halo cells that has already sent bergs
+  integer, intent(in) :: dir !<direction bergs will be sent. East/West=1, North/South=2
+  integer :: k
+  type(iceberg), pointer :: other_berg
+  type(bond) , pointer :: current_bond
+  
+  current_bond=>berg%first_bond
+  do while (associated(current_bond))
+    if  (associated(current_bond%other_berg)) then
+      other_berg=>current_bond%other_berg
+      if (abs(dir) == 1) then         !for an east/west transfer
+        !to east
+        if (dir==1) then
+          !mark other berg if not already marked, and not in halo cell (which has already been processed)
+          if (other_berg%halo_berg<2 .and. other_berg%ine .lt. completedcell) then
+            other_berg%halo_berg=other_berg%halo_berg+2 
+            call mts_mark_conglomerate_bergs(other_berg,completedcell,dir)
+          end if
+        else
+          !to west
+          if (other_berg%halo_berg<2 .and. other_berg%ine .gt. completedcell) then
+            other_berg%halo_berg=other_berg%halo_berg+2
+            call mts_mark_conglomerate_bergs(other_berg,completedcell,dir)
+          end if
+        end if
+      elseif (abs(dir) == 2) then     !for a north/south transfer
+        if (dir == 2) then
+          !to north
+          !mark other berg if not already marked. The other berg can be located in a halo cell, but only
+          !if it has ended up there from being passed between PEs during the earlier E/W conglomerate transfer
+          if ((other_berg%halo_berg<2 .and. other_berg%jne .lt. completedcell) .or. other_berg%halo_berg<1) then
+            other_berg%halo_berg=abs(other_berg%halo_berg)+2
+            call mts_mark_conglomerate_bergs(other_berg,completedcell,dir)
+          end if
+        else
+          !to south
+          if ((other_berg%halo_berg<2 .and. other_berg%jne .gt. completedcell) .or. other_berg%halo_berg<1) then          
+            other_berg%halo_berg=abs(other_berg%halo_berg)+2
+            call mts_mark_conglomerate_bergs(other_berg,completedcell,dir)
+          end if
+        end if
+      end if
+    end if
+    current_bond=>current_bond%next_bond
+  enddo
+end subroutine mts_mark_conglomerate_bergs
+
 
 !> Destroys all bergs in a list
 subroutine delete_all_bergs_in_list(bergs, grdj, grdi)
@@ -1884,7 +2717,28 @@ type(bond), pointer :: current_bond
   call split_id(berg%id, id_cnt, id_ij)
   call push_buffer_value(buff%data(:,n), counter, id_cnt)
   call push_buffer_value(buff%data(:,n), counter, id_ij)
-
+  
+  if (mts) then
+    call push_buffer_value(buff%data(:,n), counter, berg%uvel_prev)
+    call push_buffer_value(buff%data(:,n), counter, berg%vvel_prev)
+    call push_buffer_value(buff%data(:,n), counter, berg%axn_fast)
+    call push_buffer_value(buff%data(:,n), counter, berg%ayn_fast)
+    call push_buffer_value(buff%data(:,n), counter, berg%bxn_fast)
+    call push_buffer_value(buff%data(:,n), counter, berg%byn_fast)  
+    call push_buffer_value(buff%data(:,n), counter, berg%uo)
+    call push_buffer_value(buff%data(:,n), counter, berg%vo)
+    call push_buffer_value(buff%data(:,n), counter, berg%ua)
+    call push_buffer_value(buff%data(:,n), counter, berg%va)
+    call push_buffer_value(buff%data(:,n), counter, berg%ui)
+    call push_buffer_value(buff%data(:,n), counter, berg%vi)
+    call push_buffer_value(buff%data(:,n), counter, berg%ssh_x)
+    call push_buffer_value(buff%data(:,n), counter, berg%ssh_y)
+    call push_buffer_value(buff%data(:,n), counter, berg%sst)
+    call push_buffer_value(buff%data(:,n), counter, berg%sss)
+    call push_buffer_value(buff%data(:,n), counter, berg%cn)
+    call push_buffer_value(buff%data(:,n), counter, berg%hi)
+  endif
+  
   if (max_bonds .gt. 0) then
     current_bond=>berg%first_bond
     do k = 1,max_bonds
@@ -1995,25 +2849,26 @@ end subroutine clear_berg_from_partners_bonds
 
 !> Unpacks a berg entry from a buffer to a new berg
 subroutine unpack_berg_from_buffer2(bergs, buff, n, grd, force_append, max_bonds_in)
-! Arguments
-type(icebergs), pointer :: bergs !< Container for all types and memory
-type(buffer), pointer :: buff !< Buffer from which to unpack berg
-integer, intent(in) :: n !< Position in buffer to unpack
-type(icebergs_gridded), pointer :: grd !< Container for gridded fields
-logical, optional :: force_append !< <undocumented>
-integer, optional :: max_bonds_in !< <undocumented>
-! Local variables
-!real :: lon, lat, uvel, vvel, xi, yj
-!real :: start_lon, start_lat, start_day, start_mass
-!integer :: ine, jne, start_year
-logical :: lres
-type(iceberg) :: localberg
-type(iceberg), pointer :: this
-integer :: other_berg_ine, other_berg_jne
-integer :: counter, k, max_bonds, id_cnt, id_ij
-integer(kind=8) :: id
-integer :: stderrunit
-logical :: force_app
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  type(buffer), pointer :: buff !< Buffer from which to unpack berg
+  integer, intent(in) :: n !< Position in buffer to unpack
+  type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+  logical, optional :: force_append !< <undocumented>
+  integer, optional :: max_bonds_in !< <undocumented>
+  ! Local variables
+  !real :: lon, lat, uvel, vvel, xi, yj
+  !real :: start_lon, start_lat, start_day, start_mass
+  !integer :: ine, jne, start_year
+  logical :: lres
+  type(iceberg) :: localberg
+  type(iceberg), pointer :: this,kick_the_bucket
+  integer :: other_berg_ine, other_berg_jne
+  integer :: counter, k, max_bonds, id_cnt, id_ij
+  integer(kind=8) :: id
+  integer :: stderrunit
+  logical :: force_app,duplicate
+  real :: temp_lon,temp_lat
 
   ! Get the stderr unit number
   stderrunit = stderr()
@@ -2055,42 +2910,142 @@ logical :: force_app
   call pull_buffer_value(buff%data(:,n), counter, id_ij)
   localberg%id = id_from_2_ints(id_cnt, id_ij)
 
+  if (bergs%mts) then
+    call pull_buffer_value(buff%data(:,n), counter, localberg%uvel_prev)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%vvel_prev)    
+    call pull_buffer_value(buff%data(:,n), counter, localberg%axn_fast)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%ayn_fast)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%bxn_fast)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%byn_fast)  
+    call pull_buffer_value(buff%data(:,n), counter, localberg%uo)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%vo)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%ua)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%va)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%ui)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%vi)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%ssh_x)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%ssh_y)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%sst)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%sss)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%cn)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%hi)
+  endif
+
   !These quantities no longer need to be passed between processors
   localberg%uvel_old=localberg%uvel
   localberg%vvel_old=localberg%vvel
   localberg%lon_old=localberg%lon
   localberg%lat_old=localberg%lat
 
-  ! force_app=.true.
-  if(force_app) then !force append with origin ine,jne (for I/O)
-    call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg, this)
-  else
-    lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+
+  !when using MTS Verlet, iceberg elements that are part of a conglomerate may lie outside
+  !of the PE's grid. They are assigned to the berg list of the nearest halo cell.
+  !The global (lon/lat) and local (xi,yi) coords of these elements are not adjusted.
+  if (bergs%mts .and. abs(localberg%halo_berg)>1) then
+    temp_lon = localberg%lon
+    temp_lat = localberg%lat
+
+    if (temp_lon > grd%lon(grd%ied,grd%jed)) then
+      temp_lon = grd%lonc(grd%ied,grd%jed)
+    endif
+    if (temp_lon < grd%lon(grd%isd,grd%jsd)) then
+      temp_lon = grd%lonc(grd%isd+1,grd%jsd+1)
+    endif
+    if (temp_lat > grd%lat(grd%ied,grd%jed)) then
+      temp_lat = grd%latc(grd%ied,grd%jed)
+    endif
+    if (temp_lat < grd%lat(grd%isd,grd%jsd)) then
+      temp_lat = grd%latc(grd%isd+1,grd%jsd+1)
+    endif
+
+    lres=find_cell_wide(grd, temp_lon, temp_lat, localberg%ine, localberg%jne)
     if (lres) then
-      lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
-      call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg,this)
+      duplicate=.false.
+      this=>bergs%list(localberg%ine,localberg%jne)%first
+      do while (associated(this) .and. .not. duplicate)
+        if (this%id.eq.localberg%id) then
+          if (this%halo_berg==10) then
+            kick_the_bucket=>this
+            this=>this%next
+            print *,'deleting an iceberg from the list',mpp_pe()
+            call delete_iceberg_from_list(bergs%list(localberg%ine,localberg%jne)%first,kick_the_bucket)
+            print *,'deleted an iceberg from the list',mpp_pe()
+          else
+            duplicate=.true.
+            this=>this%next
+          endif
+        else
+          this=>this%next
+        endif
+      end do
+      if (.not. duplicate) then
+        call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg,this)
+      else
+        return
+      end if
     else
-      lres=find_cell_wide(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+      write(stderrunit,'("KID, unpack_berg_from_buffer pe=(",i3,a,2i4,a,2f8.2)')&
+        & mpp_pe(),') Failed to find i,j=',localberg%ine,localberg%jne,&
+        ' for mts conglom berg lon,lat=',localberg%lon,localberg%lat
+      write(stderrunit,*) localberg%lon,localberg%lat
+      write(stderrunit,*) localberg%uvel,localberg%vvel
+      write(stderrunit,*) localberg%axn,localberg%ayn !Alon
+      write(stderrunit,*) localberg%bxn,localberg%byn !Alon
+      if (bergs%mts) then
+        write(stderrunit,*) localberg%axn_fast,localberg%ayn_fast !Alex
+        write(stderrunit,*) localberg%bxn_fast,localberg%byn_fast !Alex
+      endif
+      write(stderrunit,*) localberg%uvel_old,localberg%vvel_old
+      write(stderrunit,*) localberg%lon_old,localberg%lat_old
+      write(stderrunit,*) grd%isc,grd%iec,grd%jsc,grd%jec
+      write(stderrunit,*) grd%isd,grd%ied,grd%jsd,grd%jed
+      write(stderrunit,*) grd%lon(grd%isc-1,grd%jsc-1),grd%lon(grd%iec,grd%jsc)
+      write(stderrunit,*) grd%lat(grd%isc-1,grd%jsc-1),grd%lat(grd%iec,grd%jec)
+      write(stderrunit,*) grd%lon(grd%isd,grd%jsd),grd%lon(grd%ied,grd%jsd)
+      write(stderrunit,*) grd%lat(grd%isd,grd%jsd),grd%lat(grd%ied,grd%jed)
+      write(stderrunit,*) temp_lat,temp_lon
+      write(stderrunit,*) lres
+      call error_mesg('KID, unpack_berg_from_buffer', 'can not find a cell to place berg in!', FATAL)
+    endif
+  else
+    ! force_app=.true.
+    if(force_app) then !force append with origin ine,jne (for I/O)
+      call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg, this)
+    else
+      ! lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+      !this version is faster, by checking if current ine and jne are appropriate before searching rest of cells.
+      lres=check_and_find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
       if (lres) then
         lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
         call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg,this)
       else
-        write(stderrunit,'("KID, unpack_berg_from_buffer pe=(",i3,a,2i4,a,2f8.2)')&
-         & mpp_pe(),') Failed to find i,j=',localberg%ine,localberg%jne,' for lon,lat=',localberg%lon,localberg%lat
-        write(stderrunit,*) localberg%lon,localberg%lat
-        write(stderrunit,*) localberg%uvel,localberg%vvel
-        write(stderrunit,*) localberg%axn,localberg%ayn !Alon
-        write(stderrunit,*) localberg%bxn,localberg%byn !Alon
-        write(stderrunit,*) localberg%uvel_old,localberg%vvel_old
-        write(stderrunit,*) localberg%lon_old,localberg%lat_old
-        write(stderrunit,*) grd%isc,grd%iec,grd%jsc,grd%jec
-        write(stderrunit,*) grd%isd,grd%ied,grd%jsd,grd%jed
-        write(stderrunit,*) grd%lon(grd%isc-1,grd%jsc-1),grd%lon(grd%iec,grd%jsc)
-        write(stderrunit,*) grd%lat(grd%isc-1,grd%jsc-1),grd%lat(grd%iec,grd%jec)
-        write(stderrunit,*) grd%lon(grd%isd,grd%jsd),grd%lon(grd%ied,grd%jsd)
-        write(stderrunit,*) grd%lat(grd%isd,grd%jsd),grd%lat(grd%ied,grd%jed)
-        write(stderrunit,*) lres
-        call error_mesg('KID, unpack_berg_from_buffer', 'can not find a cell to place berg in!', FATAL)
+        lres=find_cell_wide(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+        if (lres) then
+          lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
+          call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg,this)
+        else
+          write(stderrunit,'("KID, unpack_berg_from_buffer pe=(",i3,a,2i4,a,2f8.2)')&
+            & mpp_pe(),') Failed to find i,j=',localberg%ine,localberg%jne,' for lon,lat=',localberg%lon,localberg%lat
+          write(stderrunit,*) localberg%halo_berg
+          write(stderrunit,*) localberg%lon,localberg%lat
+          write(stderrunit,*) localberg%uvel,localberg%vvel
+          write(stderrunit,*) localberg%axn,localberg%ayn !Alon
+          write(stderrunit,*) localberg%bxn,localberg%byn !Alon
+          if (bergs%mts) then
+            write(stderrunit,*) localberg%axn_fast,localberg%ayn_fast !Alex
+            write(stderrunit,*) localberg%bxn_fast,localberg%byn_fast !Alex
+          endif
+          write(stderrunit,*) localberg%uvel_old,localberg%vvel_old
+          write(stderrunit,*) localberg%lon_old,localberg%lat_old
+          write(stderrunit,*) grd%isc,grd%iec,grd%jsc,grd%jec
+          write(stderrunit,*) grd%isd,grd%ied,grd%jsd,grd%jed
+          write(stderrunit,*) grd%lon(grd%isc-1,grd%jsc-1),grd%lon(grd%iec,grd%jsc)
+          write(stderrunit,*) grd%lat(grd%isc-1,grd%jsc-1),grd%lat(grd%iec,grd%jec)
+          write(stderrunit,*) grd%lon(grd%isd,grd%jsd),grd%lon(grd%ied,grd%jsd)
+          write(stderrunit,*) grd%lat(grd%isd,grd%jsd),grd%lat(grd%ied,grd%jed)
+          write(stderrunit,*) lres
+          call error_mesg('KID, unpack_berg_from_buffer', 'can not find a cell to place berg in!', FATAL)
+        endif
       endif
     endif
   endif
@@ -2177,6 +3132,7 @@ subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj)
   call split_id(traj%id, cnt, ij)
   call push_buffer_value(buff%data(:,n),counter,cnt)
   call push_buffer_value(buff%data(:,n),counter,ij)
+  
   if (.not. save_short_traj) then
     call push_buffer_value(buff%data(:,n),counter,traj%uvel)
     call push_buffer_value(buff%data(:,n),counter,traj%vvel)
@@ -2200,10 +3156,19 @@ subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj)
     call push_buffer_value(buff%data(:,n),counter,traj%axn)
     call push_buffer_value(buff%data(:,n),counter,traj%ayn)
     call push_buffer_value(buff%data(:,n),counter,traj%bxn)
-    call push_buffer_value(buff%data(:,n),counter,traj%byn)
+    call push_buffer_value(buff%data(:,n),counter,traj%byn)  
     call push_buffer_value(buff%data(:,n),counter,traj%halo_berg)
     call push_buffer_value(buff%data(:,n),counter,traj%static_berg)
     call push_buffer_value(buff%data(:,n),counter,traj%sss)
+
+    if (mts) then
+      call push_buffer_value(buff%data(:,n),counter,traj%uvel_prev)
+      call push_buffer_value(buff%data(:,n),counter,traj%vvel_prev)
+      call push_buffer_value(buff%data(:,n),counter,traj%axn_fast)
+      call push_buffer_value(buff%data(:,n),counter,traj%ayn_fast)
+      call push_buffer_value(buff%data(:,n),counter,traj%bxn_fast)
+      call push_buffer_value(buff%data(:,n),counter,traj%byn_fast)
+    endif
   endif
 
 end subroutine pack_traj_into_buffer2
@@ -2251,10 +3216,19 @@ subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj)
     call pull_buffer_value(buff%data(:,n),counter,traj%axn)
     call pull_buffer_value(buff%data(:,n),counter,traj%ayn)
     call pull_buffer_value(buff%data(:,n),counter,traj%bxn)
-    call pull_buffer_value(buff%data(:,n),counter,traj%byn)
+    call pull_buffer_value(buff%data(:,n),counter,traj%byn)  
     call pull_buffer_value(buff%data(:,n),counter,traj%halo_berg)
     call pull_buffer_value(buff%data(:,n),counter,traj%static_berg)
     call pull_buffer_value(buff%data(:,n),counter,traj%sss)
+
+    if (mts) then
+      call pull_buffer_value(buff%data(:,n),counter,traj%uvel_prev)
+      call pull_buffer_value(buff%data(:,n),counter,traj%vvel_prev)      
+      call pull_buffer_value(buff%data(:,n),counter,traj%axn_fast)
+      call pull_buffer_value(buff%data(:,n),counter,traj%ayn_fast)
+      call pull_buffer_value(buff%data(:,n),counter,traj%bxn_fast)
+      call pull_buffer_value(buff%data(:,n),counter,traj%byn_fast)
+    endif
   endif
   call append_posn(first, traj)
 
@@ -2646,6 +3620,13 @@ type(iceberg), pointer :: berg2 !< An iceberg
   if (berg1%vvel_old.ne.berg2%vvel_old) return  !Alon
   if (berg1%lon_old .ne.berg2%lon_old) return  !Alon
   if (berg1%lat_old.ne.berg2%lat_old) return  !Alon
+
+  if (mts) then
+    if (berg1%axn_fast.ne.berg2%axn_fast) return  !Alex
+    if (berg1%ayn_fast.ne.berg2%ayn_fast) return  !Alex
+    if (berg1%bxn_fast.ne.berg2%bxn_fast) return  !Alex
+    if (berg1%byn_fast.ne.berg2%byn_fast) return  !Alex
+  endif
   sameberg=.true. ! passing the above tests mean that bergs 1 and 2 are identical
 end function sameberg
 
@@ -2757,6 +3738,12 @@ integer, optional, intent(in) :: jl !< j-index of cell berg should be in
     label, 'pe=(', mpp_pe(), ') #=', berg%id, &
     ' axn,ayn=', berg%axn, berg%ayn, &
     ' bxn,byn=', berg%bxn, berg%byn
+  if (mts) then
+    write(iochan,'("KID, print_berg: ",2a,i5,a,i12,2(a,2f14.8))') &
+      label, 'pe=(', mpp_pe(), ') #=', berg%id, &
+      ' axn_fast,ayn_fast=', berg%axn_fast, berg%ayn_fast, &
+      ' bxn_fast,byn_fast=', berg%bxn_fast, berg%byn_fast
+  endif
   write(iochan,'("KID, print_berg: ",2a,i5,a,i12,3(a,2f14.8))') &
     label, 'pe=(', mpp_pe(), ') #=', berg%id, &
     ' uo,vo=', berg%uo, berg%vo, &
@@ -2915,16 +3902,22 @@ type(bond) , pointer :: current_bond
 
 end subroutine show_all_bonds
 
-subroutine connect_all_bonds(bergs)
+subroutine connect_all_bonds(bergs,ignore_unmatched)
   type(icebergs), pointer :: bergs !< Container for all types and memory
   type(iceberg), pointer :: other_berg, berg
   type(icebergs_gridded), pointer :: grd
+  logical,optional :: ignore_unmatched
   integer :: i, j
   integer :: grdi, grdj
   integer :: grdi_inner, grdj_inner
   type(bond) , pointer :: current_bond, other_berg_bond
-  logical :: bond_matched, missing_bond, check_bond_quality
+  logical :: bond_matched, missing_bond, check_bond_quality,check_match
   integer nbonds
+
+  check_match = .true.
+  if (present(ignore_unmatched)) then
+    if (ignore_unmatched) check_match = .false.
+  end if
 
   missing_bond=.false.
   bond_matched=.false.
@@ -2932,10 +3925,21 @@ subroutine connect_all_bonds(bergs)
   ! For convenience
   grd=>bergs%grd
 
+  !If interacting bergs & domain is periodic, then correct lat & lon for halo bergs - Alex   
+  call update_latlon(bergs)   
+
   do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
      ! do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec  ! Don't connect halo bergs
      berg=>bergs%list(grdi,grdj)%first
      do while (associated(berg)) ! loop over all bergs
+
+       if (berg%halo_berg==10) then
+         !these bergs only serve the purpose of exerting a contact force on a conglomerate berg
+         !when bergs%contact_distance>0, and bonds are not needed
+         berg=>berg%next
+         cycle
+       endif
+       
         current_bond=>berg%first_bond
         do while (associated(current_bond)) ! loop over all bonds
            !code to find parter bond goes here
@@ -2999,7 +4003,7 @@ subroutine connect_all_bonds(bergs)
                  enddo;enddo
               endif
 
-              if (.not.bond_matched) then
+              if (check_match .and. .not.bond_matched) then
                  if (berg%halo_berg .lt. 0.5) then
                     missing_bond=.true.
                     print * ,'non-halo berg unmatched: ', berg%id, berg%ine, berg%jne, mpp_pe(), &
@@ -3008,8 +4012,20 @@ subroutine connect_all_bonds(bergs)
                  else  ! This is not a problem if the partner berg is not yet in the halo
                     !if (  (current_bond%other_berg_ine .gt.grd%isd-1) .and. (current_bond%other_berg_ine .lt.grd%ied+1) &
                     !.and.  (current_bond%other_berg_jne .gt.grd%jsd-1) .and. (current_bond%other_berg_jne .lt.grd%jed+1) ) then
-                    !print * ,'halo berg unmatched: ',mpp_pe(),  berg%id, current_bond%other_id, current_bond%other_berg_ine,current_bond%other_berg_jne
-                    !call error_mesg('KID, connect_all_bonds', 'A halo bond is missing!!!', WARNING)
+                   !print * ,'halo berg unmatched: ',mpp_pe(),  berg%id, current_bond%other_id, current_bond%other_berg_ine,current_bond%other_berg_jne
+                   if (bergs%mts) call error_mesg('KID, connect_all_bonds', 'A halo bond is missing!!!', WARNING)
+                   if (bergs%mts) print *,'berg,target,x,y,halo_stat',berg%id,current_bond%other_id,i,j,berg%halo_berg
+                   ! do grdj_inner = j-2,j+2 ; do grdi_inner = i-2,i+2
+                   !   if    ((grdj_inner .gt. grd%jsd-1) .and. (grdj_inner .lt. grd%jed+1)        &
+                   !     .and.  (grdi_inner .gt. grd%isd-1) .and. (grdi_inner .lt. grd%ied+1) ) then
+                   !     other_berg=>bergs%list(grdi_inner,grdj_inner)%first
+                   !     do while (associated(other_berg))
+                   !       print *,'berg,other_berg,ob_halo_stat',berg%id,other_berg%id,other_berg%halo_berg
+                   !       other_berg=>other_berg%next
+                   !     enddo
+                   !   endif
+                   ! enddo;enddo
+                   
                     !endif
                  endif
               endif
@@ -3026,6 +4042,49 @@ subroutine connect_all_bonds(bergs)
      call count_bonds(bergs, nbonds,check_bond_quality)
   endif
 end subroutine connect_all_bonds
+
+!> If periodic domain, update lat & lon for bergs located beyond Lx - Alex
+subroutine update_latlon(bergs)
+  !Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  ! Local variables
+  type(icebergs_gridded), pointer :: grd
+  type(iceberg), pointer :: berg
+  real :: dlon, dlat,xi,yj,Lx
+  integer :: grdi,grdj
+  logical :: lret
+
+  ! For convenience
+  grd=>bergs%grd
+  Lx=grd%Lx
+
+  if (Lx > 0.) then
+    if ((grd%lon(grd%isc-1,grd%jsc-1) == grd%minlon_c) .or.  (grd%lon(grd%iec,grd%jec) == grd%maxlon_c)) then
+      do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
+        berg=>bergs%list(grdi,grdj)%first
+        do while (associated(berg))
+          if ((.not. bergs%mts) .or. (abs(berg%halo_berg .le. 1))) then
+            !for bergs%mts skip halo elements that only exist due to their
+            !inclusion in a conglomerate (berg%halo_berg > 1). Their coords have
+            !already been corrected (if needed), as the scheme below would fail.             
+            dlon = berg%lon - berg%lon_old
+            dlat = berg%lat - berg%lat_old
+
+            berg%lon=bilin(grd, grd%lon, berg%ine, berg%jne, berg%xi, berg%yj)
+            berg%lat=bilin(grd, grd%lat, berg%ine, berg%jne, berg%xi, berg%yj)
+
+            berg%lon_old = berg%lon-dlon
+            berg%lat_old = berg%lat-dlat
+            !need to update local positon in cell from updated global coords, due to roundoff
+            lret=pos_within_cell(grd, berg%lon, berg%lat, berg%ine, berg%jne, berg%xi, berg%yj)
+          end if          
+          berg=>berg%next
+        enddo !loop over all bergs
+      enddo; enddo
+    end if
+  end if
+
+end subroutine update_latlon
 
 subroutine count_bonds(bergs, number_of_bonds, check_bond_quality)
 
@@ -3189,8 +4248,15 @@ type(icebergs), pointer :: bergs !< Container for all types and memory
 type(xyt) :: posn
 type(iceberg), pointer :: this
 integer :: grdi, grdj
+integer :: js,je,is,ie
 
-  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+if (force_all_pes_traj) then
+  js=bergs%grd%jsd+1; je=bergs%grd%jed; is=bergs%grd%isd+1; ie=bergs%grd%ied
+else
+  js=bergs%grd%jsc; je=bergs%grd%jec; is=bergs%grd%isc; ie=bergs%grd%iec
+endif
+
+    do grdj = js,je ; do grdi = is,ie
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
       posn%lon=this%lon
@@ -3222,13 +4288,22 @@ integer :: grdi, grdj
         posn%axn=this%axn
         posn%ayn=this%ayn
         posn%bxn=this%bxn
-        posn%byn=this%byn
+        posn%byn=this%byn       
         posn%uvel_old=this%uvel_old
         posn%vvel_old=this%vvel_old
         posn%lon_old=this%lon_old
         posn%lat_old=this%lat_old
         posn%halo_berg=this%halo_berg
         posn%static_berg=this%static_berg
+
+        if (bergs%mts) then
+          posn%uvel_prev=this%uvel_prev
+          posn%vvel_prev=this%vvel_prev        
+          posn%axn_fast=this%axn_fast
+          posn%ayn_fast=this%ayn_fast
+          posn%bxn_fast=this%bxn_fast
+          posn%byn_fast=this%byn_fast
+        endif
       endif
 
       call push_posn(this%trajectory, posn)
@@ -3321,7 +4396,8 @@ integer :: grdi, grdj
 
   delete_bergs_after_moving_traj = .false.
   if (present(delete_bergs)) delete_bergs_after_moving_traj = delete_bergs
-  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+  !do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+    do grdj = bergs%grd%jsd+1,bergs%grd%jed ; do grdi = bergs%grd%isd+1,bergs%grd%ied
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
       next=>this%next
@@ -3577,7 +4653,36 @@ jne=999
         this=>this%next
       enddo
     enddo ; enddo
-end subroutine  find_individual_iceberg
+  end subroutine  find_individual_iceberg
+
+!> Scans each computational grid cell until is_point_in_cell() is true
+logical function check_and_find_cell(grd, x, y, oi, oj)
+! Arguments
+type(icebergs_gridded), intent(in) :: grd !< Container for gridded fields
+real, intent(in) :: x !< Longitude of position
+real, intent(in) :: y !< Latitude of position
+integer, intent(out) :: oi !< i-index of cell containing position or -999
+integer, intent(out) :: oj !< j-index of cell containing position or -999
+! Local variables
+integer :: i,j
+
+check_and_find_cell=.false.
+
+if (.not. (oi-1.lt.grd%isd.or.oi.gt.grd%ied.or.oj-1.lt.grd%jsd.or.oj.gt.grd%jed)) then
+  if (is_point_in_cell(grd, x, y, oi, oj)) then
+    check_and_find_cell=.true.
+        return
+      endif  
+endif
+
+  oi=-999; oj=-999
+  do j=grd%jsc,grd%jec; do i=grd%isc,grd%iec
+      if (is_point_in_cell(grd, x, y, i, j)) then
+        oi=i; oj=j; check_and_find_cell=.true.
+        return
+      endif
+    enddo; enddo
+end function check_and_find_cell  
 
 !> Scans each computational grid cell until is_point_in_cell() is true
 logical function find_cell(grd, x, y, oi, oj)

@@ -11,6 +11,7 @@ matplotlib.use("tkagg")
 from pylab import *
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 import argparse
 
 def parseCommandLine():
@@ -37,13 +38,19 @@ def main(args):
         x = file.variables['lon'][:]/1.e3
         y = file.variables['lat'][:]/1.e3
         day = file.variables['day'][:]
+        bid = file.variables['id_ij'][:]
+        #vo = file.variables['vvel'][:]
+        #vo = file.variables['vvel_prev'][:]
+        vo = file.variables['id_ij'][:]
 
     ud = np.unique(day)
+    ub = np.unique(bid)
     t = ud[0]
+
 
     # frame info
     num_frames = len(ud)
-    movie_len = 5.0 #seconds
+    movie_len = 20.0 #seconds
     frame_len = 1000.0*movie_len/num_frames
     
     xmin = 0 #np.floor(min(min(x),min(y),0))
@@ -58,9 +65,22 @@ def main(args):
         x1 = x[day == ud[i]]
         y1 = y[day == ud[i]]
         data = np.hstack((x1[:,np.newaxis],y1[:,np.newaxis]))
-           
+
         scat.set_offsets(data)
         
+        # bid1 = bid[day == ud[i]]        
+        # cstring=[]
+        # for j in range(len(bid1)):
+        #     if (bid1[j]==ub[1]):
+        #         cstring.append("b")
+        #     else:                 
+        #         cstring.append("r")
+        # scat.set_color(cstring)
+
+        vo1 = vo[day == ud[i]]
+        scat.set_edgecolor('k')
+        scat.set_color(cmap(norm(vo1)))
+
         t = ud[i]
         time_text.set_text('time = %.1f days' % t )        
         return scat,time_text
@@ -78,13 +98,22 @@ def main(args):
             ani.event_source.start()
             anim_running = True       
     
-    # Now we can do the plotting!
+    # Now we can do the plotting!    
     f = plt.figure(figsize=(5,5))
     f.tight_layout()
     ax1 = plt.subplot(111,xlim=(xmin, xmax), ylim=(ymin, ymax))
-    scat = ax1.scatter([],[],marker='o',facecolor='w',s=100,edgecolor='red')
+    div = make_axes_locatable(ax1)
+    cax = div.append_axes('right', '5%', '5%') 
+    scat = ax1.scatter([],[],c=[],marker='o',s=100) #,edgecolor='k')
     time_text = ax1.text(0.02, 0.95, '', transform=ax1.transAxes)
 
+    cmap = plt.cm.get_cmap('RdYlBu')
+    norm = plt.Normalize(vo.min(), vo.max())
+    cb1 = matplotlib.colorbar.ColorbarBase(cax, cmap=cmap,
+                                           norm=norm,
+                                           orientation='vertical')      
+
+   
     # Change major ticks to show every 20.
     ax1.xaxis.set_major_locator(MultipleLocator(5))
     ax1.yaxis.set_major_locator(MultipleLocator(5))

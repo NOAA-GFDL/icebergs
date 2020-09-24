@@ -1,6 +1,6 @@
-!TARGET CHKSUM (60 s time increments, non-MTS):
+!TARGET CHKSUM (1 hr time increments, MTS w/ 20 sub-steps, contact at 1.5e3 m, contact spring 1.e-7, spring_coef 1.0e-5):
 !Total number of bonds is:           52 
-!KID, bergs_chksum: write_restart berg chksum = -1211104969 chksum2= -1211104969 chksum3= 1964715299  chksum4= 1964715299  chksum5= 0            #= 16
+!KID, bergs_chksum: write_restart berg chksum = 44984808 chksum2= 1088077442 chksum3= 609798238  chksum4= 609798238  chksum5= 0            #= 16
 !KID, grd_chksum2 : # of bergs/cell chksum    = 0           chksum2= 0           min= 0.000000000E+00 max= 0.000000000E+00 mean= 0.000000000E+00 rms= 0.000000000E+00 sd= 0.000000000E+00
 !KID, grd_chksum3 : write stored_ice chksum   = -540079793  chksum2= -1237287029 min= 6.393358811E+05 max= 7.380127765E+11 mean= 8.033602570E+10 rms= 1.613270384E+11 sd= 1.399018810E+11
 !KID, grd_chksum2 : write stored_heat chksum  = 0           chksum2= 0           min= 0.000000000E+00 max= 0.000000000E+00 mean= 0.000000000E+00 rms= 0.000000000E+00 sd= 0.000000000E+00
@@ -9,7 +9,7 @@
 &icebergs_driver_nml
   ni=20 !number of elements, x direction
   nj=20 !number of elements, y direction
-  ibdt=60.0 !seconds
+  ibdt=3600.0 !seconds
   ibuo=0.2 !ocean x velocity
   ibvo=0.2 !ocean y velocity
   ibui=0.0 !ice x velocity
@@ -22,14 +22,13 @@
   collision_test=.true. !specific to the current test, must be true here
 /
 
-
-&icebergs_nml
+&icebergs_nml  
 
     !defaults given in parentheses:
-    !mts=.false. !(F) for using the Multiple Time Stepping Velocity Verlet scheme
-    !mts_sub_steps=0 !(-1) # of mts sub-steps (-1=automatically determine # from spring const)
-    !contact_distance=0 !(0) unbonded bergs contact at max(contact_dist,sum of their radii)
-    !contact_spring_coef=1.e-5!(default=spring_coeff) Berg spring coeff for collisions    
+    mts=.true. !(F) for using the Multiple Time Stepping Velocity Verlet scheme
+    mts_sub_steps=20 !1 !30 !(-1) # of mts sub-steps (-1=automatically determine # from spring const)
+    contact_distance=1.5e3 !(0) unbonded bergs contact at max(contact_dist,sum of their radii)
+    contact_spring_coef=1.e-7!(default=spring_coeff) Berg spring coeff for collisions
 
     halo=3 !(4) halo width
     Lx=20000. ! (360.) Length of X-domain. For periodicity (use a huge number for non-periodic)
@@ -70,7 +69,7 @@
     apply_thickness_cutoff_to_gridded_melt=.true.!(F)Prevnt melt for Ho < melt_cuttoff on grid
     apply_thickness_cutoff_to_bergs_melt=.true. !(F)Prevnt melt for Ho < melt_cuttoff on bergs
     melt_cutoff=10.0 ! (-1.0) Min ocean thickness for melting to occur (no apply for vals < 0)
-    allow_bergs_to_roll=.true. ! (T) Allows bergs toroll over when rolling conditions are met    
+    allow_bergs_to_roll=.true. !.true. ! (T) Allows bergs toroll over when rolling conditions are met    
     use_updated_rolling_scheme=.true. !(F) Use corrected Rolling Scheme
     pass_fields_to_ocean_model=.False. !(F) Prep berg area,mass,ustar  to pass to ocean model
     use_mixed_layer_salinity_for_thermo=.False.!(F)'T'=use ocean salinity in 3&2 eq. melt model
@@ -80,7 +79,7 @@
     Iceberg_melt_without_decay=.False. !(F)Berg melt flx to ocean w/out berg decay/shape change
     add_iceberg_thickness_to_SSH=.False. ! (F) Adds the iceberg contribution to SSH.
     override_iceberg_velocities=.False. ! (F) Allows setting a fixed vel for non-static bergs
-    use_f_plane=.False. ! (F) Flag to use a f-plane for the rotation
+    use_f_plane=.false. ! (F) Flag to use a f-plane for the rotation
     lat_ref=0. ! (0) Reference latitude for f-plane (when this option is on)    
     rotate_icebergs_for_mass_spreading=.true. !(T) Hex bergs rotate for mass spread			
     set_melt_rates_to_zero=.true.!(F)For testing, thermodyn is run, but all melt rates=0
@@ -94,9 +93,9 @@
     max_bonds=6 ! (6) Max # of bonds passed between processors    
 
     verbose=.true. !(F) Be verbose to stderr
-    verbose_hrs=1 ! (24) Period between verbose messages
-    traj_sample_hrs=1 !1 !(24) sampling period for trajectory storage
-    traj_write_hrs=6 ! (480) Period for writing sampled trajectories to disk    
+    verbose_hrs=24 ! (24) Period between verbose messages
+    traj_sample_hrs=0.5 !1 !(24) sampling period for trajectory storage
+    traj_write_hrs=0 ! (480) Period for writing sampled trajectories to disk    
     budget=.true. !(T) Calculate budgets
     debug=.false. !(F) Turn on debugging
     really_debug=.false. !(F) Turn on debugging
@@ -104,7 +103,7 @@
     debug_iceberg_with_id = -1  ! If positive, monitors a berg with this id    
     
     parallel_reprod=.true. !(T) Reproduce across different PE decompositions
-    save_short_traj=.true. ! (T) True saves only lon,lat,time,id in iceberg_trajectory.nc
+    save_short_traj=.false. ! (T) True saves only lon,lat,time,id in iceberg_trajectory.nc
     ignore_traj=.False. ! (F) If true, then model does not track trajectory data at all    
 
     ignore_missing_restart_bergs=.False. !(F) 'T'=ignore missing bergs in restart 
@@ -124,7 +123,7 @@
     make_calving_reproduce=.true. !Make  calving.res.nc reprod. across pe cnt changes
     old_bug_bilin=.false. !(T) 'T' use inverted bilinear function,'F' gives correct answer
     do_unit_tests=.true. !(F) Conduct some unit tests
-    force_all_pes_traj=.false. !(F) Force all pes write traj files regardless of io_layout
+    force_all_pes_traj=.true. !(F) Force all pes write traj files regardless of io_layout
 
     ! Mass thresholds between iceberg classes (kg):
     !( 8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11 )

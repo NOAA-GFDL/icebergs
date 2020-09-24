@@ -1,24 +1,24 @@
-!TARGET CHKSUM (60 s time increments, non-MTS):
+!TARGET CHKSUM:
 !Total number of bonds is:           52 
-!KID, bergs_chksum: write_restart berg chksum = -1211104969 chksum2= -1211104969 chksum3= 1964715299  chksum4= 1964715299  chksum5= 0            #= 16
-!KID, grd_chksum2 : # of bergs/cell chksum    = 0           chksum2= 0           min= 0.000000000E+00 max= 0.000000000E+00 mean= 0.000000000E+00 rms= 0.000000000E+00 sd= 0.000000000E+00
-!KID, grd_chksum3 : write stored_ice chksum   = -540079793  chksum2= -1237287029 min= 6.393358811E+05 max= 7.380127765E+11 mean= 8.033602570E+10 rms= 1.613270384E+11 sd= 1.399018810E+11
-!KID, grd_chksum2 : write stored_heat chksum  = 0           chksum2= 0           min= 0.000000000E+00 max= 0.000000000E+00 mean= 0.000000000E+00 rms= 0.000000000E+00 sd= 0.000000000E+00
+!KID, bergs_chksum: write_restart berg chksum = 892128108  chksum2= -515180265  chksum3= 1707263945  chksum4= 1707263945  chksum5 = 0           #= 16
+!KID, grd_chksum2 : # of bergs/cell chksum    = 0          chksum2= 0           min= 0.000000000E+00 max= 0.000000000E+00 mean= 0.000000000E+00 rms= 0.000000000E+00 sd= 0.000000000E+00
+!KID, grd_chksum3 : write stored_ice chksum   = -540079793 chksum2= -1237287029 min= 6.393358811E+05 max= 7.380127765E+11 mean= 8.033602570E+10 rms= 1.613270384E+11 sd= 1.399018810E+11
+!KID, grd_chksum2 : write stored_heat chksum  = 0          chksum2= 0           min= 0.000000000E+00 max= 0.000000000E+00 mean= 0.000000000E+00 rms= 0.000000000E+00 sd= 0.000000000E+00
 
 
 &icebergs_driver_nml
   ni=20 !number of elements, x direction
   nj=20 !number of elements, y direction
-  ibdt=60.0 !seconds
+  ibdt=<sec>.0 !10.0 !seconds
   ibuo=0.2 !ocean x velocity
   ibvo=0.2 !ocean y velocity
   ibui=0.0 !ice x velocity
   ibvi=0.0 !ice y velocity
   ibhrs=48 !total simulation hours
   nmax=99999999 !max number of timesteps
-  saverestart=.true. 
+  saverestart=.false. 
   halo=3
-  debug=.false.   
+  debug=.false.  
   collision_test=.true. !specific to the current test, must be true here
 /
 
@@ -26,10 +26,9 @@
 &icebergs_nml
 
     !defaults given in parentheses:
-    !mts=.false. !(F) for using the Multiple Time Stepping Velocity Verlet scheme
-    !mts_sub_steps=0 !(-1) # of mts sub-steps (-1=automatically determine # from spring const)
-    !contact_distance=0 !(0) unbonded bergs contact at max(contact_dist,sum of their radii)
-    !contact_spring_coef=1.e-5!(default=spring_coeff) Berg spring coeff for collisions    
+    
+    !vectorized=.true. !(F) use vectorized version of the code
+    !mts=.false. !(F) use multiple timestepping scheme (substep size is automatically determined)
 
     halo=3 !(4) halo width
     Lx=20000. ! (360.) Length of X-domain. For periodicity (use a huge number for non-periodic)
@@ -39,20 +38,19 @@
     Static_icebergs=.False. ! (T) True=icebergs do no move    
     
     rho_bergs=850. ! (850) iceberg density
-    spring_coef=1.e-5 !(1.e-8) Spring const for berg interactions (dflt~highest stable value)
+    spring_coef=<coef> !1.e-5 !(1.e-8) Spring const for berg interactions (dflt~highest stable value)
     bond_coef=1.e-8 ! (1.e-8) Spring const for berg bonds - not being used right now
     radial_damping_coef=1.e-4 ! (1.e-4) Coeff for rel berg motion damping (radial component)
     tangental_damping_coef=2.e-5 !(2.e-5) Coeff for rel berg motion damping (tangential comp.)
-    critical_interaction_damping_on=.true. !(T) Sets damping on rel berg vel to crit val 
     LoW_ratio=1.5 ! (1.5) Initial ratio L/W for newly calved icebergs
     bergy_bit_erosion_fraction=0. ! (0.) Fraction of erosion melt flux to divert to bergy bits
     sicn_shift=0. ! (0) Shift of sea-ice concent. in erosion flux modulation (0<sicn_shift<1)
     u_override=0.0 ! (0) Overrides the u velocity of icebergs (for ocean testing)
     v_override=0.0 ! (0) Overrides the v velocity of icebergs (for ocean testing)
     initial_orientation=-0. !(0)berg orient. rel. to this angle (degrees). for hex. mass spread.
-    utide_icebergs=0. ! (0.) Tidal speeds, set to zero for now.
+    utide_icebergs= 0. ! (0.) Tidal speeds, set to zero for now.
     ustar_icebergs_bg=0.0 !(0.001)Bckgrnd u_star under bergs.Should relate to ocean boundlayr
-    cdrag_icebergs = 1.5e-3 ! (1.5e-3) Momentum Drag coef, taken from Holland and Jenkins 1999
+    cdrag_icebergs =  1.5e-3 ! (1.5e-3) Momentum Drag coef, taken from Holland and Jenkins 1999
     Gamma_T_3EQ=0.022 ! (0.022) Non-dimensional heat-transfer coefficient
     const_gamma=.false. ! (T) 'T' = constant heat transfer coeff, used to calc salt transfer
     use_operator_splitting=.true. ! (T) Use 1st order operator splitting for thermodynamics
@@ -87,7 +85,8 @@
 
     iceberg_bonds_on=.true. ! (F) True=Allow icebergs to have bonds, False=don't allow.
     interactive_icebergs_on=.true. ! (F) Turn on/off interactions between icebergs
-    only_interactive_forces=.false. !(F)Bergs only feel interactive forces, not ocean, wind...       
+    only_interactive_forces=.False. !(F)Bergs only feel interactive forces, not ocean, wind...    
+    critical_interaction_damping_on=.true. !(T) Sets damping on rel berg vel to crit val    
     use_new_predictive_corrective =.true. ! (F) Flag to use Bob's pred-corr berg scheme
     input_freq_distribution=.false. !(F)input dist is: 'T' freq dist or 'F' mass dist
     use_old_spreading=.false. !(T)spreads berg mass as if  berg is 1 grid cell wide (for rect)
@@ -95,17 +94,17 @@
 
     verbose=.true. !(F) Be verbose to stderr
     verbose_hrs=1 ! (24) Period between verbose messages
-    traj_sample_hrs=1 !1 !(24) sampling period for trajectory storage
-    traj_write_hrs=6 ! (480) Period for writing sampled trajectories to disk    
+    traj_sample_hrs=1 !(24) sampling period for trajectory storage
+    traj_write_hrs=1 ! (480) Period for writing sampled trajectories to disk    
     budget=.true. !(T) Calculate budgets
     debug=.false. !(F) Turn on debugging
     really_debug=.false. !(F) Turn on debugging
     halo_debugging=.false. ! (F) Use for debugging halos (remove when its working)
-    debug_iceberg_with_id = -1  ! If positive, monitors a berg with this id    
+    debug_iceberg_with_id = -1 !12884902036 ! If positive, monitors a berg with this id    
     
     parallel_reprod=.true. !(T) Reproduce across different PE decompositions
-    save_short_traj=.true. ! (T) True saves only lon,lat,time,id in iceberg_trajectory.nc
-    ignore_traj=.False. ! (F) If true, then model does not track trajectory data at all    
+    save_short_traj=.True. ! (T) True saves only lon,lat,time,id in iceberg_trajectory.nc
+    ignore_traj=.False. ! (F) If true, then model does not traj trajectory data at all    
 
     ignore_missing_restart_bergs=.False. !(F) 'T'=ignore missing bergs in restart 
     use_slow_find=.true. !(T) Use slow, but robust, find_cell for reading restarts
@@ -114,8 +113,9 @@
     ignore_ij_restart=.true. !(F) ign. cell from restart,useful for restart on diff grid
     generate_test_icebergs=.false. ! (F) Create ergs in absence of a restart file
     fix_restart_dates=.true. !(T) Post-restart, check bergs created before curr model date
-    restart_input_dir='INPUT/' !('INPUT'/) Directory to look for restart files
-    read_ocean_depth_from_file=.false. ! (F) If true, ocean depth is read from a file.      
+    restart_input_dir = 'INPUT/' !('INPUT'/) Directory to look for restart files
+    read_ocean_depth_from_file=.false. ! (F) If true, ocean depth is read from a file.    
+    do_unit_tests=.true. ! (F) Conduct some unit tests    
     orig_read=.false. !(F) Legacy option that does nothing
     read_old_restarts=.false. ! (F) Legacy option that does nothing
     

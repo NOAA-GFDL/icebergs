@@ -6,7 +6,8 @@ rm ./output_files/Generic*
 	-set_all_bergs_static_by_default=False -Run_plotting_subroutine=False \
 	-break_some_bonds=False -Ice_geometry_source='Generic' \
 	-Generic_ice_geometry_filename='./testtabularberg.nc' \
-	-ISOMIP_reduced=False -collision_test=True
+	-ISOMIP_reduced=False -collision_test=True \
+	-select_just_min_and_max_lat_berg=True
 
 cp ./output_files/Generic_icebergs.res.nc ./../INPUT/icebergs.res.nc
 cp ./output_files/Generic_bonds_iceberg.res.nc ./../INPUT/bonds_iceberg.res.nc

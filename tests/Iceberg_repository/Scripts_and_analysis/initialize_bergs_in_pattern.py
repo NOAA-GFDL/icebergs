@@ -36,6 +36,9 @@ def parseCommandLine():
 	#p.add_argument('-b',type='bool')  # do not use 'type=bool'
 
 	#Flags
+	parser.add_argument('-collision_test', type='bool', default=False,
+		          help=''' symmetry for berg around y=10 km ''')
+        
 	parser.add_argument('-save_restart_files', type='bool', default=True,
 		          help=''' Writes an iceberg restart file,  icebergs.res ''')
 
@@ -51,6 +54,9 @@ def parseCommandLine():
 	#Iceberg setup flags
 	parser.add_argument('-only_choose_one_berg', type='bool', default=False,
 		          help=''' When true, only one iceberg (with number chosen_berg_num) is written to icebergs.res. This is for debugging  ''')
+
+	parser.add_argument('-select_just_min_and_max_lat_berg', type='bool', default=False,
+		          help=''' When true, only the bergs with max and min lat are written to icebergs.res. This is for debugging  ''')        
 
 	parser.add_argument('-chosen_berg_num', type=int, default=1,
 		          help='''When only_choose_one_berg=True, then only the iceberg with this number is written to the icebergs.res file  ''')
@@ -770,7 +776,8 @@ def remove_stationary_bergs(dx_berg, dy_berg,iceberg_num,width,Number_of_bergs,s
 
 def Create_icebergs(lon_init,lat_init,Radius,R_earth, x, y,ice_mask,h_ice,Convert_to_lat_lon,rho_ice,\
 		element_type,scale_the_grid_to_lat_lon,lat_ref,adjust_lat_ref,Interpolate_from_four_corners,\
-		Fill_in_the_boundaries,set_all_bergs_static_by_default,break_some_bonds,Remove_stationary_bergs,set_some_bergs_static_by_default):
+		Fill_in_the_boundaries,set_all_bergs_static_by_default,break_some_bonds,Remove_stationary_bergs,\
+                set_some_bergs_static_by_default,collision_test):
 	print 'Starting to create icebergs...'
 	dx_berg=[]  #x distance in cartesian of berg from lon_init
 	dy_berg=[]  #y distance in cartesian of berg from lat_init
@@ -840,13 +847,14 @@ def Create_icebergs(lon_init,lat_init,Radius,R_earth, x, y,ice_mask,h_ice,Conver
 					dx_berg.append(x_val)
 					dy_berg.append(y_val)
 					width.append(np.sqrt(element_area))
+
+                                               
 	#print 'dx_berg',dx_berg
 	#print 'dy_berg',dy_berg
 
 
-
 	Number_of_bergs=berg_count
-	print 'Icebergs created. Number of bergs = ', Number_of_bergs
+	
 	
 	#Deciding if icebergs are static or not
 	static_berg = [0. for i in dx_berg]
@@ -879,7 +887,17 @@ def Create_icebergs(lon_init,lat_init,Radius,R_earth, x, y,ice_mask,h_ice,Conver
 				h_ice,element_type,static_berg,thickness,mass)
 		print 'Number of icebergs after accounting for boundaries = ', Number_of_bergs
 	
-
+        if collision_test:
+                for i in range(berg_count):
+                        berg_count=berg_count+1
+			iceberg_num.append(berg_count)
+			dx_berg.append(dx_berg[i])
+			dy_berg.append(20000.0-dy_berg[i])
+			width.append(width[i])
+                        thickness.append(thickness[i])
+                        mass.append(mass[i])
+                        static_berg.append(static_berg[i])
+                Number_of_bergs=berg_count
 
 	if Convert_to_lat_lon==True:
 		#Defining lon lat positions:
@@ -911,7 +929,8 @@ def Create_icebergs(lon_init,lat_init,Radius,R_earth, x, y,ice_mask,h_ice,Conver
 		lon=dx_berg  ; lat=dy_berg
 	
 	#Note that static_berg calculations used to be here, after the conversion. I have moved them. I hope that this does not affect answers.
-
+                        
+        print 'Icebergs created. Number of bergs = ', Number_of_bergs
 	return (Number_of_bergs,lon,lat,iceberg_num,dx_berg,dy_berg,thickness, mass,width,x,y,Radius,static_berg,N_bergs_before_bd)
 
 
@@ -1193,6 +1212,29 @@ def Select_just_one_berg(lon,lat,thickness,width,mass,iceberg_num,chosen_berg_nu
 	iceberg_num_temp=iceberg_num[berg_ind]; iceberg_num=[] ; iceberg_num.append(iceberg_num_temp)
 	Number_of_bergs=1
 	return [Number_of_bergs,lon,lat,thickness,width,mass,iceberg_num]
+
+def Select_just_min_and_max_lat_bergs(lon,lat,thickness,width,mass,iceberg_num,static_berg):
+	print 'You have chosen to choose just two icebergs!!!'
+        minlat = lat[1]
+        maxlat = lat[1]
+        minnum = iceberg_num[1]
+        maxnum = iceberg_num[1]
+        for k in range(len(lat)):
+                if lat[k]<minlat:
+                        minlat=lat[k]
+                        minnum=k
+                if lat[k]>maxlat:
+                        maxlat=lat[k]
+                        maxnum=k
+        lon=[lon[minnum],lon[maxnum]]
+        lat=[lat[minnum],lat[maxnum]]
+        thickness=[thickness[minnum],thickness[maxnum]]
+        mass=[mass[minnum],mass[maxnum]]
+        width=[width[minnum],width[maxnum]]
+        static_berg=[static_berg[minnum],static_berg[maxnum]]
+        iceberg_num=[iceberg_num[minnum],iceberg_num[maxnum]]
+        Number_of_bergs=2
+	return [Number_of_bergs,lon,lat,thickness,width,mass,iceberg_num,static_berg]        
 
 def plotting_iceberg_positions(lat,lon,Number_of_bergs,R_earth,Radius,IA_scaling,Convert_to_lat_lon, \
 		plot_circles,h_ice,ice_mask,x,y,plot_ice_mask,plot_ice_thickness,thickness,plot_icebergs_positions,static_berg,h_ice_new,plot_h_ice_new):
@@ -1623,6 +1665,7 @@ def main(args):
 
 	#Iceberg setup flags
 	only_choose_one_berg=args.only_choose_one_berg  ; chosen_berg_num=args.chosen_berg_num
+        select_just_min_and_max_lat_berg=args.select_just_min_and_max_lat_berg
 	scale_the_grid_to_lat_lon=args.scale_the_grid_to_lat_lon
 	adjust_lat_ref=args.adjust_lat_ref
 	set_all_thicknesses_to_one=args.set_all_thicknesses_to_one   ; Th_prescribed=args.Th_prescribed
@@ -1666,7 +1709,7 @@ def main(args):
 	ISOMIP_reduced_ice_geometry_filename=args.ISOMIP_reduced_ice_geometry_filename
 	Weddell_ice_geometry_filename=args.Weddell_ice_geometry_filename
 	Generic_ice_geometry_filename=args.Generic_ice_geometry_filename
-
+        collision_test=args.collision_test
 
 	#Parameters
 	Radius=args.Radius
@@ -1742,7 +1785,8 @@ def main(args):
 	#Define the positions,thickness, mass,  of the icebergs
 	(Number_of_bergs,lon,lat,iceberg_num,dx_berg, dy_berg,thickness,mass,width,x,y,Radius,static_berg,N_bergs_before_bd)= Create_icebergs(lon_init,lat_init,\
 			Radius,R_earth, x, y,ice_mask,h_ice,Convert_to_lat_lon,rho_ice,element_type,scale_the_grid_to_lat_lon,lat_ref,adjust_lat_ref,\
-			Interpolate_from_four_corners,Fill_in_the_boundaries, set_all_bergs_static_by_default,break_some_bonds,Remove_stationary_bergs,set_some_bergs_static_by_default)
+			Interpolate_from_four_corners,Fill_in_the_boundaries, set_all_bergs_static_by_default,break_some_bonds,Remove_stationary_bergs,\
+                        set_some_bergs_static_by_default,collision_test)
 
 	print 'Maximum thickness:', np.max(thickness), np.min(thickness)
 	#Define the positions of the iceberg bonds
@@ -1758,6 +1802,11 @@ def main(args):
 	temp_mass=[mass[i]/thickness[i] for i in range(len(thickness))]
 	if only_choose_one_berg==True:
 		(Number_of_bergs,lon,lat,thickness,width,mass,iceberg_num)= Select_just_one_berg(lon,lat,thickness,width,mass,iceberg_num,chosen_berg_num,static_berg)
+
+        if select_just_min_and_max_lat_berg==True:
+                (Number_of_bergs,lon,lat,thickness,width,mass,iceberg_num,static_berg)=\
+                        Select_just_min_and_max_lat_bergs(lon,lat,thickness,width,mass,iceberg_num,static_berg)
+                print 'Selected just min and max lat bergs. New number of bergs = ', Number_of_bergs
 
 
 	if regrid_icebergs_onto_grid==True:
