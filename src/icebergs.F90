@@ -150,7 +150,6 @@ subroutine icebergs_init(bergs, &
     endif
     call update_halo_icebergs(bergs)
     call connect_all_bonds(bergs)
-    
     nbonds=0
     check_bond_quality=.True.
     call count_bonds(bergs, nbonds,check_bond_quality)
@@ -341,7 +340,7 @@ subroutine initialize_iceberg_bonds(bergs)
   grd=>bergs%grd
   !Should update halos before doing this
   ! do grdj_outer = grd%jsc,grd%jec ; do grdi_outer = grd%isc,grd%iec  !Should you be on the data domain??
-  do grdj_outer = grd%jsd,grd%jed ; do grdi_outer = grd%isd,grd%ied  !using data domain -Alex     
+  do grdj_outer = grd%jsd,grd%jed ; do grdi_outer = grd%isd,grd%ied  !using data domain -Alex
     berg=>bergs%list(grdi_outer,grdj_outer)%first
     do while (associated(berg)) ! loop over all bergs
 
@@ -349,7 +348,7 @@ subroutine initialize_iceberg_bonds(bergs)
       !call rotpos_to_tang(lon1,lat1,x1,y1)  !Is this correct? Shouldn't it only be on tangent plane?
 
       ! do grdj_inner = grd%jsc,grd%jec ; do grdi_inner = grd%isc,grd%iec  !This line uses n^2 steps
-      do grdj_inner = grd%jsd,grd%jed ; do grdi_inner = grd%isd,grd%ied !Uses n^2 steps. Change to data domain-Alex         
+      do grdj_inner = grd%jsd,grd%jed ; do grdi_inner = grd%isd,grd%ied !Uses n^2 steps. Change to data domain-Alex
 !     do grdj_inner = berg%jne-1,berg%jne+1 ; do grdi_inner = berg%ine-1,berg%ine+1   !Only looping through adjacent cells.
         other_berg=>bergs%list(grdi_inner,grdj_inner)%first
         do while (associated(other_berg)) ! loop over all other bergs
@@ -418,10 +417,9 @@ subroutine  convert_from_meters_to_grid(lat_ref,grid_is_latlon ,dlon_dx,dlat_dy)
 
 end subroutine convert_from_meters_to_grid
 
-
 !> Calculates interactions between a berg and all bergs in range
 subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
-  P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y)
+                             P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y)
   ! Arguments
   type(icebergs), pointer :: bergs !< Container for all types and memory
   type(iceberg), pointer :: berg !< Primary iceberg
@@ -459,8 +457,8 @@ subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
 
     ! Interactions for bonded berg elements only. For the mts scheme, this is only called if mts_part==3
     if ( (.not. bergs%mts) .or. (bergs%mts .and. bergs%mts_part .eq. 3)) then
-      bonded=.true. 
-      if (iceberg_bonds_on) then 
+      bonded=.true.
+      if (iceberg_bonds_on) then
         current_bond=>berg%first_bond
         do while (associated(current_bond)) ! loop over all bonds
           other_berg=>current_bond%other_berg
@@ -497,7 +495,7 @@ subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
 
   else
     !Alon's original code, only usuable for simulations WITHOUT MTS Verlet, a specified contact_distance,
-    !or a separate spring constant for collision. 
+    !or a separate spring constant for collision.
     bonded=.false. ! 'Unbonded' iceberg interactions (here, not to be taken literally)
     do grdj = berg%jne-1,berg%jne+1 ; do grdi = berg%ine-1,berg%ine+1
       other_berg=>bergs%list(grdi,grdj)%first
@@ -557,7 +555,7 @@ recursive subroutine mark_conglomerate_bergs(berg,mark_or_unmark)
       current_bond=>current_bond%next_bond
     enddo
   endif
-  
+
 end subroutine mark_conglomerate_bergs
 
 
@@ -572,10 +570,8 @@ subroutine calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, 
   real, intent(inout) :: IA_y !< Net meridional acceleration of berg due to interactions (m/s2)
   real, intent(in) :: u0 !< Zonal velocity of primary berg (m/s)
   real, intent(in) :: v0 !< Meridional velocity of primary berg (m/s)
-  
-  !u1 and v1: actually, also vel for primary berg, but might be updated vel if runge-kutta? -Alex
-  real, intent(in) :: u1 !< Zonal velocity of other berg (m/s) 
-  real, intent(in) :: v1 !< Meridional velocity of other berg (m/s) 
+  real, intent(in) :: u1 !< Zonal velocity of other berg (m/s)
+  real, intent(in) :: v1 !< Meridional velocity of other berg (m/s)
   real, intent(inout) :: P_ia_11
   real, intent(inout) :: P_ia_12
   real, intent(inout) :: P_ia_22
@@ -618,7 +614,7 @@ subroutine calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, 
 
     !call rotpos_to_tang(lon2,lat2,x2,y2)
 
-    dlon=lon1-lon2 
+    dlon=lon1-lon2
     dlat=lat1-lat2
 
     ! Note that this is not the exact distance along a great circle.
@@ -632,11 +628,11 @@ subroutine calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, 
     r_dist_y=dlat*dy_dlat
     r_dist=sqrt( (r_dist_x**2) + (r_dist_y**2) ) !(Stern et al 2017, Eqn 3)
 
-    !Stern et al 2017, Eqn 4: radius of circle inscribed within hexagon or square with area A1 or A2 
+    !Stern et al 2017, Eqn 4: radius of circle inscribed within hexagon or square with area A1 or A2
     if (bergs%hexagonal_icebergs) then
-      R1=sqrt(A1/(2.*sqrt(3.)))  
+      R1=sqrt(A1/(2.*sqrt(3.)))
       R2=sqrt(A2/(2.*sqrt(3.)))
-    else !square packing 
+    else !square packing
       R1=sqrt(A1/pi) ! Interaction radius of the iceberg (assuming circular icebergs)
       R2=sqrt(A2/pi) ! Interaction radius of the other iceberg
     endif
@@ -650,11 +646,11 @@ subroutine calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, 
     ! print *, 'outside the loop',R1, R2,r_dist, bonded
     !!!!!!!!!!!!!!!!!!!!!!!!!!!debugging!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+
     !call overlap_area(R1,R2,r_dist,A_o,trapped)
     !T_min=min(T1,T2)
     !A_min = min((pi*R1**R1),(pi*R2*R2))
     M_min=min(M1,M2)
-    
     !Calculating spring force (Stern et al 2017, Eqn 6):
     if (bonded) then
       crit_dist=R1+R2 !Stern et al 2017, Eqn 5
@@ -663,7 +659,7 @@ subroutine calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, 
       crit_dist=max(R1+R2,bergs%contact_distance)
       spring_coef=bergs%contact_spring_coef
     end if
-  
+
     radial_damping_coef=bergs%radial_damping_coef
     tangental_damping_coef=bergs%tangental_damping_coef
     critical_interaction_damping_on=bergs%critical_interaction_damping_on
@@ -682,19 +678,20 @@ subroutine calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, 
 
 
     if  ((r_dist>0.) .and. ( tbonded .or. (r_dist<crit_dist .and. .not. bonded) )) then
-      
+
       !Spring force (Stern et al 2017, Eqn 7):
       !accel_spring=spring_coef*(T_min/T1)*(A_o/A1) ! Old version dependent on area
       accel_spring=spring_coef*(M_min/M1)*(crit_dist-r_dist)
       IA_x=IA_x+(accel_spring*(r_dist_x/r_dist))
       IA_y=IA_y+(accel_spring*(r_dist_y/r_dist))
 
+
       if (r_dist < 5*(R1+R2)) then
 
         ! Damping force (Stern et al 2017, Eqn 8):
         ! Paralel velocity
         !projection matrix in Stern et al 2017, Eqn 8:
-        P_11=(r_dist_x*r_dist_x)/(r_dist**2) 
+        P_11=(r_dist_x*r_dist_x)/(r_dist**2)
         P_12=(r_dist_x*r_dist_y)/(r_dist**2)
         P_21=(r_dist_x*r_dist_y)/(r_dist**2)
         P_22=(r_dist_y*r_dist_y)/(r_dist**2)
@@ -830,10 +827,9 @@ subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, r
     use_new_predictive_corrective=.True.
   endif
 
-  
+
   u_star=uvel0+(axn*(dt/2.))  !Alon
   v_star=vvel0+(ayn*(dt/2.))  !Alon
-
 
   ! Get the stderr unit number.
   stderrunit = stderr()
@@ -841,7 +837,7 @@ subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, r
   ! For convenience
   grd=>bergs%grd
 
-  ! Interpolate gridded fields to berg 
+  ! Interpolate gridded fields to berg
   if (bergs%mts) then
     !dummy values for MTS scheme halo bergs (this should only occur during berg%mts_part==3,
     !when bergs%only_interactive_forces=.true., and therefore should have no effect)
@@ -850,7 +846,6 @@ subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, r
   else
     call interp_flds(grd, i, j, xi, yj, rx, ry, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, sss, cn, hi)
   end if
-  
 
   if ((grd%grid_is_latlon) .and. (.not. bergs%use_f_plane)) then
      f_cori=(2.*omega)*sin(pi_180*lat)
@@ -925,17 +920,16 @@ subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, r
     endif
 
   ! Interactive spring acceleration - (Does the spring part need to be called twice?)
-    if (interactive_icebergs_on) then
-      !
-      call interactive_force(bergs, berg, IA_x, IA_y, uvel0, vvel0, uvel0, vvel0, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y) ! Spring forces, Made by Alon.
-      if (.not.Runge_not_Verlet) then
-        axn=axn + IA_x
-        ayn=ayn + IA_y
-      else
-        bxn=bxn + IA_x
-        byn=byn + IA_y
-      endif
+  if (interactive_icebergs_on) then
+    call interactive_force(bergs, berg, IA_x, IA_y, uvel0, vvel0, uvel0, vvel0, P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y) ! Spring forces, Made by Alon.
+    if (.not.Runge_not_Verlet) then
+      axn=axn + IA_x
+      ayn=ayn + IA_y
+    else
+      bxn=bxn + IA_x
+      byn=byn + IA_y
     endif
+  endif
 
   if (alpha>0.) then ! If implicit Coriolis, use u_star rather than RK4 latest  !Alon
     if (C_N>0.) then !  C_N=1 for Crank Nicolson Coriolis, C_N=0 for full implicit Coriolis !Alon
@@ -976,7 +970,7 @@ subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, r
   endif
 
   !RHS ~ similar to accel terms in Stern et al 2017, Eqn B5
-  RHS_x=(axn/2) + bxn 
+  RHS_x=(axn/2) + bxn
   RHS_y=(ayn/2) + byn
 
   if (beta>0.) then ! If implicit, use u_star, v_star rather than RK4 latest
@@ -2015,7 +2009,7 @@ subroutine find_orientation_using_iceberg_bonds(grd, berg, orientation)
   real :: r_dist_x, r_dist_y
   real :: lat_ref, dx_dlon, dy_dlat
   real :: theta, bond_count, Average_angle
-  
+
   bond_count=0.
   Average_angle=0.
   !Don't check orientation of the edges of halo,  since they can contain unassosiated bonds  (this is why halo width must be larger >= 2 to use bonds)
@@ -2849,17 +2843,15 @@ subroutine interp_gridded_fields_to_bergs(bergs)
       ! Seed random numbers based on space and "time"
       rns = initializeRandomNumberStream( grdi + 10000*grdj + &
                                           int( 16384.*abs( sin(262144.*grd%ssh(grdi,grdj)) ) ) )
-    endif    
+    endif
     do while (associated(berg)) ! loop over all bergs
       if (berg%halo_berg.lt.0.5) then
-        
         if (grd%tidal_drift>0.) then
           call getRandomNumbers(rns, rx)
           rx = 2.*rx - 1.
           call getRandomNumbers(rns, ry)
           ry = 2.*ry - 1.
         endif
-        
         call interp_flds(grd, berg%ine, berg%jne, berg%xi, berg%yj, rx, ry, berg%uo, berg%vo, &
           berg%ui, berg%vi, berg%ua, berg%va, berg%ssh_x, berg%ssh_y, berg%sst, berg%sss, berg%cn, berg%hi)
       endif
@@ -2868,7 +2860,7 @@ subroutine interp_gridded_fields_to_bergs(bergs)
   enddo;enddo
 
 end subroutine interp_gridded_fields_to_bergs
- 
+
 
 subroutine interp_flds(grd, i, j, xi, yj, rx, ry, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, sss, cn, hi)
   ! Arguments
@@ -3114,7 +3106,7 @@ subroutine calculate_mass_on_ocean(bergs, with_diagnostics)
       endif
       berg=>berg%next
     enddo
-  enddo;enddo
+  enddo ;enddo
 
 end subroutine calculate_mass_on_ocean
 
@@ -3266,8 +3258,8 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
   endif
   lbudget=.false.
   if (bergs%verbose_hrs>0) then
-     !if (mod(24*iday+ihr+(imin/60.),float(bergs%verbose_hrs)).eq.0) lbudget=budget
-     if (mod(24*iday+ihr+(imin/60.),bergs%verbose_hrs).eq.0) lbudget=budget  !Added minutes, so that it does not repeat when smaller time steps are used.
+     !if (mod(24*iday+ihr+(imin/60.),float(bergs%verbose_hrs)).eq.0) lbudget=budget  !Added minutes, so that it does not repeat when smaller time steps are used.
+     if (mod(24*iday+ihr+(imin/60.),bergs%verbose_hrs).eq.0) lbudget=budget
   endif
   if (mpp_pe()==mpp_root_pe().and.lverbose) write(*,'(a,3i5,a,3i5,a,i5,f8.3)') &
        'KID: y,m,d=',iyr, imon, iday,' h,m,s=', ihr, imin, isec, &
@@ -3462,10 +3454,10 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
   if (.not. Visited) then
     Visited=.true.
     if (bergs%mts) then
-      call interp_gridded_fields_to_bergs(bergs)   
-      if ((bergs%interactive_icebergs_on) .or. (bergs%iceberg_bonds_on)) then      
+      call interp_gridded_fields_to_bergs(bergs)
+      if ((bergs%interactive_icebergs_on) .or. (bergs%iceberg_bonds_on)) then
         call update_halo_icebergs(bergs)
-        if (bergs%iceberg_bonds_on)  then
+        if (bergs%iceberg_bonds_on) then
           call connect_all_bonds(bergs)
         else
           if (grd%Lx>0.) call update_latlon(bergs)
@@ -3473,7 +3465,7 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
       endif
     endif
   endif
-  
+
   ! Accumulate ice from calving
   call accumulate_calving(bergs)
   if (grd%id_accum>0) then
@@ -3505,24 +3497,24 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
       call evolve_icebergs(bergs)
     end if
     if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'icebergs_run, after evolve()     ')
-  end if
+  endif
   call move_berg_between_cells(bergs)  !Markpoint6
   if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'icebergs_run, after move_lists() ')
   if (debug) call bergs_chksum(bergs, 'run bergs (evolved)',ignore_halo_violation=.true.)
   if (debug) call checksum_gridded(bergs%grd, 's/r run after evolve')
   call mpp_clock_end(bergs%clock_mom)
 
-
   ! Send bergs to other PEs
   call mpp_clock_begin(bergs%clock_com)
   if (bergs%iceberg_bonds_on)  call  bond_address_update(bergs)
+
   call send_bergs_to_other_pes(bergs)
-  if (bergs%mts) call interp_gridded_fields_to_bergs(bergs)  
-  if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'icebergs_run, after send_bergs() ')  
-  if ((bergs%interactive_icebergs_on) .or. (bergs%iceberg_bonds_on)) then      
-  call update_halo_icebergs(bergs)
+  if (bergs%mts) call interp_gridded_fields_to_bergs(bergs)
+  if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'icebergs_run, after send_bergs() ')
+  if ((bergs%interactive_icebergs_on) .or. (bergs%iceberg_bonds_on)) then
+    call update_halo_icebergs(bergs)
     if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'icebergs_run, after update_halo()')
-    if (bergs%iceberg_bonds_on)  then
+    if (bergs%iceberg_bonds_on) then
       call connect_all_bonds(bergs)
     else
       if (grd%Lx>0.) call update_latlon(bergs)
@@ -3535,7 +3527,7 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
   if (bergs%find_melt_using_spread_mass .or. bergs%mts) then
     call calculate_mass_on_ocean(bergs, with_diagnostics=.false.)
   end if
-  
+
   ! Calculate mass on ocean before thermodynamics, to use in melt rate calculation
   if (bergs%find_melt_using_spread_mass) then
     grd%spread_mass_old(:,:)=0.
@@ -3878,9 +3870,7 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
   call mpp_clock_end(bergs%clock_dia)
 
   call mpp_clock_end(bergs%clock)
-!  call cpu_time(tend0)
- ! tott0 = tott0+(tend0-tstart0)
- ! if (mpp_pe()==mpp_root_pe().and.lverbose) print *,'tott0',tott0
+
 end subroutine icebergs_run
 
 !> Prints summary of start and end states
@@ -4258,8 +4248,8 @@ subroutine calve_icebergs(bergs)
           newberg%yj=yj
           newberg%uvel=0.
           newberg%vvel=0.
-          newberg%uvel_prev=0.
-          newberg%vvel_prev=0.
+          newberg%uvel_prev=0.  !Added by Alex
+          newberg%vvel_prev=0.  !Added by Alex
           newberg%axn=0. !Added by Alon
           newberg%ayn=0. !Added by Alon
           newberg%bxn=0. !Added by Alon
@@ -4267,7 +4257,7 @@ subroutine calve_icebergs(bergs)
           newberg%axn_fast=0. !Added by Alex
           newberg%ayn_fast=0. !Added by Alex
           newberg%bxn_fast=0. !Added by Alex
-          newberg%byn_fast=0. !Added by Alex         
+          newberg%byn_fast=0. !Added by Alex
           newberg%mass=bergs%initial_mass(k)
           newberg%thickness=bergs%initial_thickness(k)
           newberg%width=bergs%initial_width(k)
@@ -4319,7 +4309,7 @@ subroutine evolve_icebergs_mts(bergs)
   type(icebergs_gridded), pointer :: grd
   type(iceberg), pointer :: berg
   real :: uveln, vveln, lonn, latn
-  real :: axn, ayn, bxn, byn          
+  real :: axn, ayn, bxn, byn
   real :: xi, yj, rx, ry
   integer :: i, j, k
   integer :: grdi, grdj
@@ -4341,7 +4331,7 @@ subroutine evolve_icebergs_mts(bergs)
   ! the contact distance of the conglomerate are also included, as to account for collision
   ! forces. The conglomerate iceberg elements with coords that lie outside of a PE's domain
   ! are assigned to the nearest halo cell, but the coords are not changed.
-  
+
   ! Get the stderr unit number
   stderrunit = stderr()
   only_interactive_forces=bergs%only_interactive_forces
@@ -4387,7 +4377,7 @@ subroutine evolve_icebergs_mts(bergs)
       if (berg%static_berg .lt. 0.5 .and. berg%halo_berg<10) then
         latn = berg%lat ;   lonn = berg%lon
         uvel1=berg%uvel_prev ;   vvel1=berg%vvel_prev !V_n (previous cycle)
-        !subroutine accel expects uvel1=berg%uvel_prev, and calculates ustar=uvel1+axn*dt_2. 
+        !subroutine accel expects uvel1=berg%uvel_prev, and calculates ustar=uvel1+axn*dt_2.
         !However, for the MTS case, ustar should equal berg%uvel from after the final fast force
         !iteration k from the previous cycle. To enforce this, fake in input accelerations
         !axn and ayn as:
@@ -4395,18 +4385,18 @@ subroutine evolve_icebergs_mts(bergs)
         ayn  = (berg%vvel-berg%vvel_prev)/dt_2
         bxn  = 0.0      ;   byn  = 0.0
         i=berg%ine      ;   j=berg%jne
-        xi=berg%xi      ;   yj=berg%yj                               
+        xi=berg%xi      ;   yj=berg%yj
         ! if (berg%id==4294967382 .and. berg%halo_berg==0) then
         !   print *,'berg check 1',mpp_pe(),berg%id, berg%uvel, berg%vvel, berg%lat, berg%lon
         ! endif
         call accel(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, rx, ry, &
           ax1, ay1, axn, ayn, bxn, byn)
-        ! Saving all the iceberg variables.        
+        ! Saving all the iceberg variables
         berg%axn=axn                ; berg%ayn=ayn
         berg%bxn=bxn                ; berg%byn=byn
         berg%uvel=berg%uvel+(dt*ax1); berg%vvel=berg%vvel+(dt*ay1)
 
-        !save this velocity for next time, and output 
+        !save this velocity for next time, and output
         berg%uvel_prev=berg%uvel    ; berg%vvel_prev=berg%vvel
       endif
       berg=>berg%next
@@ -4416,7 +4406,7 @@ subroutine evolve_icebergs_mts(bergs)
   !PART 2: X_0 and V_0, before fast sub-steps
   !X_0=X_n (no change)
   !update V_0 on uvel_old and vvel_old
-  !update lat and lon with implicit slow force component  
+  !update lat and lon with implicit slow force component
   do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
     berg=>bergs%list(grdi,grdj)%first
     do while (associated(berg)) ! loop over all bergs
@@ -4429,12 +4419,12 @@ subroutine evolve_icebergs_mts(bergs)
         berg%vvel = berg%vvel + dt_2*berg%ayn
         berg%lat = berg%lat + 0.5*(dt**2)*berg%byn
         berg%lon = berg%lon + 0.5*(dt**2)*berg%bxn
-        berg%lat_old = berg%lat; berg%lon_old = berg%lon 
+        berg%lat_old = berg%lat; berg%lon_old = berg%lon
         berg%uvel_old=berg%uvel; berg%vvel_old=berg%vvel
          ! if (berg%id==4294967382 .and. berg%halo_berg==0) then
          !   print *,'berg check 3',mpp_pe(),berg%id, berg%uvel, berg%vvel, &
          !     berg%lat, berg%lon, berg%axn, berg%ayn, berg%bxn, berg%byn
-         ! endif            
+         ! endif
       endif
       berg=>berg%next
     enddo
@@ -4450,10 +4440,10 @@ subroutine evolve_icebergs_mts(bergs)
   bergs%mts_part=3 !so that only bonded interactions are considered in subroutine interactive_force
   dt = bergs%mts_fast_dt
   dt_2=0.5*dt
-  
+
   do k = 1,bergs%mts_sub_steps ! loop over sub-steps
 
-    do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied ! update positions 
+    do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied ! update positions
       berg=>bergs%list(grdi,grdj)%first
       do while (associated(berg)) ! loop over all bergs
         if (berg%static_berg .lt. 0.5 .and. berg%halo_berg<10) then
@@ -4492,24 +4482,24 @@ subroutine evolve_icebergs_mts(bergs)
         end if
         berg=>berg%next
       enddo !loop over all bergs
-    enddo;enddo !update positions 
-    
+    enddo;enddo !update positions
+
     ! update velocities
     do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
       berg=>bergs%list(grdi,grdj)%first
       do while (associated(berg)) ! loop over all bergs
-        if (berg%static_berg .lt. 0.5 .and. berg%halo_berg<10) then 
+        if (berg%static_berg .lt. 0.5 .and. berg%halo_berg<10) then
 
           latn = berg%lat ;   lonn = berg%lon
           axn  = berg%axn_fast ;   ayn  = berg%ayn_fast
-          bxn  = berg%bxn_fast ;   byn  = berg%byn_fast       
+          bxn  = berg%bxn_fast ;   byn  = berg%byn_fast
           uvel1=berg%uvel ;   vvel1=berg%vvel
           i=berg%ine      ;   j=berg%jne
           xi=berg%xi      ;   yj=berg%yj
 
           ! Turn the velocities into u_star, v_star.(uvel3 is v_star) - (possible issues with tangent plane?)
           uvel3=uvel1+(dt_2*axn)                  !(Stern et al 2017, Eq B4)
-          vvel3=vvel1+(dt_2*ayn)                          
+          vvel3=vvel1+(dt_2*ayn)
 
           call accel(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, rx, ry, &
             ax1, ay1, axn, ayn, bxn, byn)
@@ -4520,16 +4510,16 @@ subroutine evolve_icebergs_mts(bergs)
           if (on_tangential_plane) then
             call rotvec_to_tang(lonn,uvel3,vvel3,xdot3,ydot3)
             call rotvec_to_tang(lonn,ax1,ay1,xddot1,yddot1)
-            xdotn=xdot3+(dt*xddot1); ydotn=ydot3+(dt*yddot1)                                   
+            xdotn=xdot3+(dt*xddot1); ydotn=ydot3+(dt*yddot1)
             call rotvec_from_tang(lonn,xdotn,ydotn,uveln,vveln)
           else
-            !uvel3, vvel3 become uveln and vveln after they are put into lat/lon co-ordinates         
-            uveln=uvel3+(dt*ax1); vveln=vvel3+(dt*ay1)    
+            !uvel3, vvel3 become uveln and vveln after they are put into lat/lon co-ordinates
+            uveln=uvel3+(dt*ax1); vveln=vvel3+(dt*ay1)
           endif
 
           ! Saving all the iceberg variables.
           berg%axn_fast=axn; berg%ayn_fast=ayn
-          berg%bxn_fast=bxn; berg%byn_fast=byn        
+          berg%bxn_fast=bxn; berg%byn_fast=byn
           berg%uvel=uveln  ; berg%vvel=vveln
         endif
         berg=>berg%next
@@ -4540,7 +4530,7 @@ subroutine evolve_icebergs_mts(bergs)
     do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
       berg=>bergs%list(grdi,grdj)%first
       do while (associated(berg)) ! loop over all bergs
-        if (berg%static_berg .lt. 0.5 .and. berg%halo_berg<10) then  
+        if (berg%static_berg .lt. 0.5 .and. berg%halo_berg<10) then
           berg%uvel_old=berg%uvel; berg%vvel_old=berg%vvel
         endif
         berg=>berg%next
@@ -4550,13 +4540,13 @@ subroutine evolve_icebergs_mts(bergs)
 
   !reset interactive_forces
   bergs%only_interactive_forces=only_interactive_forces
-  
+
   !update indices
   do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
     !no reason to worry about halo/conglomerate bergs here
     berg=>bergs%list(grdi,grdj)%first
     do while (associated(berg)) ! loop over all bergs
-      if (berg%static_berg .lt. 0.5 .and. berg%halo_berg<1) then  
+      if (berg%static_berg .lt. 0.5 .and. berg%halo_berg<1) then
         berg%uvel_old=berg%uvel; berg%vvel_old=berg%vvel
         uveln=berg%uvel; vveln=berg%vvel
         lonn=berg%lon  ; latn=berg%lat
@@ -4567,7 +4557,7 @@ subroutine evolve_icebergs_mts(bergs)
         berg%lon=lonn      ;  berg%lat=latn
         berg%lon_old=lonn  ;  berg%lat_old=latn
         berg%ine=i    ;  berg%jne=j
-        berg%xi=xi    ;  berg%yj=yj        
+        berg%xi=xi    ;  berg%yj=yj
       endif
       berg=>berg%next
     enddo ! loop over all bergs
@@ -4600,7 +4590,7 @@ subroutine evolve_icebergs(bergs)
 
   interactive_icebergs_on=bergs%interactive_icebergs_on
   Runge_not_Verlet=bergs%Runge_not_Verlet
-  
+
   do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec
     berg=>bergs%list(grdi,grdj)%first
     if (associated(berg) .and. grd%tidal_drift>0.) then
@@ -4641,7 +4631,7 @@ subroutine evolve_icebergs(bergs)
             call Runge_Kutta_stepping(bergs, berg, axn, ayn, bxn, byn, uveln, vveln, &
                                       lonn, latn, i, j, xi, yj, rx, ry)
           endif
-          if (.not.Runge_not_Verlet) then           
+          if (.not.Runge_not_Verlet) then
             call verlet_stepping(bergs, berg, axn, ayn, bxn, byn, uveln, vveln, rx, ry)
           endif
 
@@ -4658,9 +4648,6 @@ subroutine evolve_icebergs(bergs)
         berg%byn=byn
         berg%uvel=uveln
         berg%vvel=vveln
-        ! if (berg%id==4294967382 .and. berg%halo_berg==0) then
-        !   print *,'berg check 2',mpp_pe(),berg%id, berg%uvel, berg%vvel, berg%lat, berg%lon
-        ! endif        
 
         if (Runge_not_Verlet) then
           berg%lon=lonn  ;   berg%lat=latn
@@ -4756,16 +4743,14 @@ subroutine verlet_stepping(bergs,berg, axn, ayn, bxn, byn, uveln, vveln, rx, ry)
   ! Turn the velocities into u_star, v_star.(uvel3 is v_star) - Alon (not sure how this works with tangent plane)
   uvel3=uvel1+(dt_2*axn)                  !Alon (Stern et al 2017, Eq B4)
   vvel3=vvel1+(dt_2*ayn)                  !Alon
-  ! if (berg%id==4294967382 .and. berg%halo_berg==0) then
-  !   print *,'berg check 1',mpp_pe(),berg%id, uvel3, vvel3, berg%lat, berg%lon
-  ! endif
+
   ! Note, the mass scaling is equal to 1 (rather than 0.25 as in RK), since
   ! this is only called once in Verlet stepping.
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
     call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 1.0*berg%mass_scaling,berg%length*berg%width, berg%thickness)
+
   ! Calling the acceleration   (note that the velocity is converted to u_star inside the accel script)
-    call accel(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, rx, ry, ax1, ay1, axn, ayn, bxn, byn) !axn, ayn, bxn, byn - Added by Alon
-              
+  call accel(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, rx, ry, ax1, ay1, axn, ayn, bxn, byn) !axn, ayn, bxn, byn - Added by Alon
 
   ! Solving for the new velocity (Stern et al 2017, Eqn B5)
   on_tangential_plane=.false.
@@ -5345,51 +5330,52 @@ subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, boun
   lon0=lon; lat0=lat ! original position
   i0=i; j0=j ! original i,j
   lret=pos_within_cell(grd, lon, lat, i, j, xi, yj)
-  !  print *, 'Alon:', lon, lat, i, j, xi, yj, lret
+!  print *, 'Alon:', lon, lat, i, j, xi, yj, lret
   xi0=xi; yj0=yj ! original xi,yj
+
 
   !Removing this while debuggin
   if (debug) then
-     !Sanity check lret, xi and yj
-     lret=is_point_in_cell(grd, lon, lat, i, j)
-     point_in_cell_using_xi_yj=is_point_within_xi_yj_bounds(xi,yj)
-     if (.not. point_in_cell_using_xi_yj) then
+    !Sanity check lret, xi and yj
+    lret=is_point_in_cell(grd, lon, lat, i, j)
+    point_in_cell_using_xi_yj=is_point_within_xi_yj_bounds(xi,yj)
+    if (.not. point_in_cell_using_xi_yj) then
 
-        if (lret) then
-           write(stderrunit,*) 'KID, adjust: WARNING!!! lret=T but |xi,yj|>1',mpp_pe()
-           write(stderrunit,*) 'KID, adjust: xi=',xi,' lon=',lon
-           write(stderrunit,*) 'KID, adjust: x3 x2=',grd%lon(i-1,j),grd%lon(i,j)
-           write(stderrunit,*) 'KID, adjust: x0 x1=',grd%lon(i-1,j-1),grd%lon(i,j-1)
-           write(stderrunit,*) 'KID, adjust: yi=',yj,' lat=',lat
-           write(stderrunit,*) 'KID, adjust: y3 y2=',grd%lat(i-1,j),grd%lat(i,j)
-           write(stderrunit,*) 'KID, adjust: y0 y1=',grd%lat(i-1,j-1),grd%lat(i,j-1)
-           lret=is_point_in_cell(grd, lon, lat, i, j,explain=.true.)
-           write(stderrunit,*) 'KID, adjust: fn is_point_in_cell=',lret
-           lret=pos_within_cell(grd, lon, lat, i, j, xi, yj,explain=.true.)
-           write(stderrunit,*) 'KID, adjust: fn pos_within_cell=',lret
-           write(0,*) 'This should never happen!'
-           call error_mesg('adjust index, ','Iceberg is_point_in_cell=True but xi, yi are out of cell',FATAL)
-           error=.true.; return
-        endif
-     else
-        if (.not.lret) then
-           write(stderrunit,*) 'KID, adjust: WARNING!!! lret=F but |xi,yj|<1',mpp_pe()
-           write(stderrunit,*) 'KID, adjust: xi=',xi,' lon=',lon
-           write(stderrunit,*) 'KID, adjust: x3 x2=',grd%lon(i-1,j),grd%lon(i,j)
-           write(stderrunit,*) 'KID, adjust: x0 x1=',grd%lon(i-1,j-1),grd%lon(i,j-1)
-           write(stderrunit,*) 'KID, adjust: yi=',yj,' lat=',lat
-           write(stderrunit,*) 'KID, adjust: y3 y2=',grd%lat(i-1,j),grd%lat(i,j)
-           write(stderrunit,*) 'KID, adjust: y0 y1=',grd%lat(i-1,j-1),grd%lat(i,j-1)
-           lret=is_point_in_cell(grd, lon, lat, i, j,  explain=.true.)
-           write(stderrunit,*) 'KID, adjust: fn is_point_in_cell=',lret
-           lret=pos_within_cell(grd, lon, lat, i, j, xi, yj, explain=.true.)
-           write(stderrunit,*) 'KID, adjust: fn pos_within_cell=',lret
-           write(0,*) 'This should never happen!'
-           call error_mesg('adjust index, ','Iceberg is_point_in_cell=False but xi, yi are out of cell',FATAL)
-           error=.true.; return
-        endif
+      if (lret) then
+        write(stderrunit,*) 'KID, adjust: WARNING!!! lret=T but |xi,yj|>1',mpp_pe()
+        write(stderrunit,*) 'KID, adjust: xi=',xi,' lon=',lon
+        write(stderrunit,*) 'KID, adjust: x3 x2=',grd%lon(i-1,j),grd%lon(i,j)
+        write(stderrunit,*) 'KID, adjust: x0 x1=',grd%lon(i-1,j-1),grd%lon(i,j-1)
+        write(stderrunit,*) 'KID, adjust: yi=',yj,' lat=',lat
+        write(stderrunit,*) 'KID, adjust: y3 y2=',grd%lat(i-1,j),grd%lat(i,j)
+        write(stderrunit,*) 'KID, adjust: y0 y1=',grd%lat(i-1,j-1),grd%lat(i,j-1)
+        lret=is_point_in_cell(grd, lon, lat, i, j,explain=.true.)
+        write(stderrunit,*) 'KID, adjust: fn is_point_in_cell=',lret
+        lret=pos_within_cell(grd, lon, lat, i, j, xi, yj,explain=.true.)
+        write(stderrunit,*) 'KID, adjust: fn pos_within_cell=',lret
+        write(0,*) 'This should never happen!'
+        call error_mesg('adjust index, ','Iceberg is_point_in_cell=True but xi, yi are out of cell',FATAL)
+        error=.true.; return
      endif
-     lret=pos_within_cell(grd, lon, lat, i, j, xi, yj)
+    else
+      if (.not.lret) then
+        write(stderrunit,*) 'KID, adjust: WARNING!!! lret=F but |xi,yj|<1',mpp_pe()
+        write(stderrunit,*) 'KID, adjust: xi=',xi,' lon=',lon
+        write(stderrunit,*) 'KID, adjust: x3 x2=',grd%lon(i-1,j),grd%lon(i,j)
+        write(stderrunit,*) 'KID, adjust: x0 x1=',grd%lon(i-1,j-1),grd%lon(i,j-1)
+        write(stderrunit,*) 'KID, adjust: yi=',yj,' lat=',lat
+        write(stderrunit,*) 'KID, adjust: y3 y2=',grd%lat(i-1,j),grd%lat(i,j)
+        write(stderrunit,*) 'KID, adjust: y0 y1=',grd%lat(i-1,j-1),grd%lat(i,j-1)
+        lret=is_point_in_cell(grd, lon, lat, i, j,  explain=.true.)
+        write(stderrunit,*) 'KID, adjust: fn is_point_in_cell=',lret
+        lret=pos_within_cell(grd, lon, lat, i, j, xi, yj, explain=.true.)
+        write(stderrunit,*) 'KID, adjust: fn pos_within_cell=',lret
+        write(0,*) 'This should never happen!'
+        call error_mesg('adjust index, ','Iceberg is_point_in_cell=False but xi, yi are out of cell',FATAL)
+        error=.true.; return
+      endif
+    endif
+    lret=pos_within_cell(grd, lon, lat, i, j, xi, yj)
   endif ! debug
 
   if (lret) return ! Berg was already in cell
@@ -5401,168 +5387,164 @@ subroutine adjust_index_and_ground(grd, lon, lat, uvel, vvel, i, j, xi, yj, boun
   icount=0
   inm=i0; jnm=j0 ! original i,j
   do while (debug .and. .not.lret .and. icount<4)
-     icount=icount+1
-     if (xi.lt.0.) then
-        if (inm>grd%isd) then
-           inm=inm-1
-        endif
-     elseif (xi.gt.1.) then
-        !    elseif (xi.ge.1.) then   !Alon: maybe it should be .ge.
-        if (inm<grd%ied) then
-           inm=inm+1
-        endif
-     endif
-     if (yj.lt.0.) then
-        if (jnm>grd%jsd) then
-           jnm=jnm-1
-        endif
-     elseif (yj.gt.1.) then
-        !    elseif (yj.ge.1.) then   !Alon:maybe it should be .ge.
-        if (jnm<grd%jed) then
-           jnm=jnm+1
-        endif
-     endif
-     lret=pos_within_cell(grd, lon, lat, inm, jnm, xi, yj) ! Update xi and yj
+    icount=icount+1
+    if (xi.lt.0.) then
+      if (inm>grd%isd) then
+        inm=inm-1
+      endif
+    elseif (xi.gt.1.) then
+!    elseif (xi.ge.1.) then   !Alon: maybe it should be .ge.
+      if (inm<grd%ied) then
+        inm=inm+1
+      endif
+    endif
+    if (yj.lt.0.) then
+      if (jnm>grd%jsd) then
+        jnm=jnm-1
+      endif
+    elseif (yj.gt.1.) then
+!    elseif (yj.ge.1.) then   !Alon:maybe it should be .ge.
+      if (jnm<grd%jed) then
+        jnm=jnm+1
+      endif
+    endif
+    lret=pos_within_cell(grd, lon, lat, inm, jnm, xi, yj) ! Update xi and yj
   enddo
   if (abs(inm-i0)>1) then
-     write(stderrunit,*) 'pe=',mpp_pe(),'KID, adjust: inm,i0,inm-i0=',inm,i0,inm-i0
-     !stop 'Moved too far in i without mask!'
+    write(stderrunit,*) 'pe=',mpp_pe(),'KID, adjust: inm,i0,inm-i0=',inm,i0,inm-i0
+   !stop 'Moved too far in i without mask!'
   endif
   if (abs(jnm-j0)>1) then
-     write(stderrunit,*) 'pe=',mpp_pe(),'KID, adjust: jnm,i0,jnm-j0=',jnm,j0,inm-j0
-     !stop 'Moved too far in j without mask!'
+    write(stderrunit,*) 'pe=',mpp_pe(),'KID, adjust: jnm,i0,jnm-j0=',jnm,j0,inm-j0
+   !stop 'Moved too far in j without mask!'
   endif
 
   ! Adjust i,j based on xi,yj while bouncing off of masked land cells
   icount=0
   lret=pos_within_cell(grd, lon, lat, i0, j0, xi, yj)
   do while ( .not.lret.and. icount<4 )
-     icount=icount+1
-     if (xi.lt.0.) then
-        if (i>grd%isd) then
-           if (grd%msk(i-1,j)>0.) then
-              if (i>grd%isd+1) i=i-1
-           else
-              !write(stderr(),'(a,6f8.3,i)') 'KID, adjust: bouncing berg from west',lon,lat,xi,yj,uvel,vvel,mpp_pe()
-              bounced=.true.
-           endif
+    icount=icount+1
+    if (xi.lt.0.) then
+      if (i>grd%isd) then
+        if (grd%msk(i-1,j)>0.) then
+          if (i>grd%isd+1) i=i-1
+        else
+         !write(stderr(),'(a,6f8.3,i)') 'KID, adjust: bouncing berg from west',lon,lat,xi,yj,uvel,vvel,mpp_pe()
+          bounced=.true.
         endif
-     elseif (xi.ge.1.) then    !Alon!!!!
-        !    elseif (xi.gt.1.) then
-        if (i<grd%ied) then
-           if (grd%msk(i+1,j)>0.) then
-              if (i<grd%ied) i=i+1
-           else
-              !write(stderr(),'(a,6f8.3,i)') 'KID, adjust: bouncing berg from east',lon,lat,xi,yj,uvel,vvel,mpp_pe()
-              bounced=.true.
-           endif
+      endif
+    elseif (xi.ge.1.) then    !Alon!!!!
+!    elseif (xi.gt.1.) then
+      if (i<grd%ied) then
+        if (grd%msk(i+1,j)>0.) then
+          if (i<grd%ied) i=i+1
+        else
+         !write(stderr(),'(a,6f8.3,i)') 'KID, adjust: bouncing berg from east',lon,lat,xi,yj,uvel,vvel,mpp_pe()
+          bounced=.true.
         endif
-     endif
-     if (yj.lt.0.) then
-        if (j>grd%jsd) then
-           if (grd%msk(i,j-1)>0.) then
-              if (j>grd%jsd+1) j=j-1
-           else
-              !write(stderr(),'(a,6f8.3,i)') 'KID, adjust: bouncing berg from south',lon,lat,xi,yj,uvel,vvel,mpp_pe()
-              bounced=.true.
-           endif
+      endif
+    endif
+    if (yj.lt.0.) then
+      if (j>grd%jsd) then
+        if (grd%msk(i,j-1)>0.) then
+          if (j>grd%jsd+1) j=j-1
+        else
+         !write(stderr(),'(a,6f8.3,i)') 'KID, adjust: bouncing berg from south',lon,lat,xi,yj,uvel,vvel,mpp_pe()
+          bounced=.true.
         endif
-     elseif (yj.ge.1.) then     !Alon.
-        !    elseif (yj.gt.1.) then
-        if (j<grd%jed) then
-           if (grd%msk(i,j+1)>0.) then
-              if (j<grd%jed) j=j+1
-           else
-              !write(stderr(),'(a,6f8.3,i)') 'KID, adjust: bouncing berg from north',lon,lat,xi,yj,uvel,vvel,mpp_pe()
-              bounced=.true.
-           endif
+      endif
+    elseif (yj.ge.1.) then     !Alon.
+!    elseif (yj.gt.1.) then
+      if (j<grd%jed) then
+        if (grd%msk(i,j+1)>0.) then
+          if (j<grd%jed) j=j+1
+        else
+         !write(stderr(),'(a,6f8.3,i)') 'KID, adjust: bouncing berg from north',lon,lat,xi,yj,uvel,vvel,mpp_pe()
+          bounced=.true.
         endif
-     endif
-     if (bounced) then
-        if (xi>=1.) xi=1.-posn_eps   !Alon.
-        !      if (xi>1.) xi=1.-posn_eps   !
-        if (xi<0.) xi=posn_eps
-        if (yj>=1.) yj=1.-posn_eps  !Alon.
-        !      if (yj>1.) yj=1.-posn_eps
-        if (yj<0.) yj=posn_eps
-        lon=bilin(grd, grd%lon, i, j, xi, yj)
-        lat=bilin(grd, grd%lat, i, j, xi, yj)
-     endif
-     if (debug) then
-        if (grd%msk(i,j)==0.) stop 'KID, adjust: Berg is in land! This should not happen...'
-     endif
-     lret=pos_within_cell(grd, lon, lat, i, j, xi, yj) ! Update xi and yj
+      endif
+    endif
+    if (bounced) then
+      if (xi>=1.) xi=1.-posn_eps   !Alon.
+!      if (xi>1.) xi=1.-posn_eps   !
+      if (xi<0.) xi=posn_eps
+      if (yj>=1.) yj=1.-posn_eps  !Alon.
+!      if (yj>1.) yj=1.-posn_eps
+      if (yj<0.) yj=posn_eps
+      lon=bilin(grd, grd%lon, i, j, xi, yj)
+      lat=bilin(grd, grd%lat, i, j, xi, yj)
+    endif
+    if (debug) then
+      if (grd%msk(i,j)==0.) stop 'KID, adjust: Berg is in land! This should not happen...'
+    endif
+    lret=pos_within_cell(grd, lon, lat, i, j, xi, yj) ! Update xi and yj
 
   enddo
-  !if (debug) then
-  !  if (abs(i-i0)>2) then
-  !    stop 'KID, adjust: Moved too far in i!'
-  !  endif
-  !  if (abs(j-j0)>2) then
-  !    stop 'KID, adjust: Moved too far in j!'
-  !  endif
-  !endif
+ !if (debug) then
+ !  if (abs(i-i0)>2) then
+ !    stop 'KID, adjust: Moved too far in i!'
+ !  endif
+ !  if (abs(j-j0)>2) then
+ !    stop 'KID, adjust: Moved too far in j!'
+ !  endif
+ !endif
 
-
-  if (.not.bounced.and.lret.and.grd%msk(i,j)>0.) then ! Landed in ocean without bouncing so all is wel
-      return
-  endif
-
+  if (.not.bounced.and.lret.and.grd%msk(i,j)>0.) return ! Landed in ocean without bouncing so all is well
 
   if (.not.bounced.and..not.lret) then ! This implies the berg traveled many cells without getting far enough
-     if (debug) then
-        write(stderrunit,*) 'KID, adjust: lon0, lat0=',lon0,lat0
-        write(stderrunit,*) 'KID, adjust: xi0, yj0=',xi0,yj0
-        write(stderrunit,*) 'KID, adjust: i0,j0=',i0,j0
-        write(stderrunit,*) 'KID, adjust: lon, lat=',lon,lat
-        write(stderrunit,*) 'KID, adjust: xi,yj=',xi,yj
-        write(stderrunit,*) 'KID, adjust: i,j=',i,j
-        write(stderrunit,*) 'KID, adjust: inm,jnm=',inm,jnm
-        write(stderrunit,*) 'KID, adjust: icount=',icount
-        lret=pos_within_cell(grd, lon, lat, i, j, xi, yj,explain=.true.)
-        write(stderrunit,*) 'KID, adjust: lret=',lret
-     endif
+    if (debug) then
+      write(stderrunit,*) 'KID, adjust: lon0, lat0=',lon0,lat0
+      write(stderrunit,*) 'KID, adjust: xi0, yj0=',xi0,yj0
+      write(stderrunit,*) 'KID, adjust: i0,j0=',i0,j0
+      write(stderrunit,*) 'KID, adjust: lon, lat=',lon,lat
+      write(stderrunit,*) 'KID, adjust: xi,yj=',xi,yj
+      write(stderrunit,*) 'KID, adjust: i,j=',i,j
+      write(stderrunit,*) 'KID, adjust: inm,jnm=',inm,jnm
+      write(stderrunit,*) 'KID, adjust: icount=',icount
+      lret=pos_within_cell(grd, lon, lat, i, j, xi, yj,explain=.true.)
+      write(stderrunit,*) 'KID, adjust: lret=',lret
+    endif
 
-     if (abs(i-i0)+abs(j-j0)==0) then
-        if (use_roundoff_fix) then
-           ! This is a special case due to round off where is_point_in_cell()
-           ! returns false but xi and yj are between 0 and 1.
-           ! It occurs very rarely but often enough to have brought down
-           ! ESM2G four times since the spin-up began. (as of 8/10/2010)
-           ! This temporary fix arbitrarily moves the berg toward the
-           ! center of the current cell.
-           xi=(xi-0.5)*(1.-posn_eps)+0.5
-           yj=(yj-0.5)*(1.-posn_eps)+0.5
-        endif
-        call error_mesg('KID, adjust', 'Berg did not move or bounce during iterations AND was not in cell. Adjusting!', WARNING)
-        write(stderrunit,*) 'KID, adjust: The adjusting iceberg is: ', id,  mpp_pe()
-        write(stderrunit,*) 'KID, adjust: The adjusting lon,lat,u,v: ', lon, lat, uvel, vvel
-        write(stderrunit,*) 'KID, adjust: The adjusting xi,ji: ', xi, yj
-        lret=pos_within_cell(grd, lon, lat, inm, jnm, xi, yj,explain=.true.)
-     else
-        call error_mesg('KID, adjust', 'Berg iterated many times without bouncing!', WARNING)
-     endif
+    if (abs(i-i0)+abs(j-j0)==0) then
+      if (use_roundoff_fix) then
+        ! This is a special case due to round off where is_point_in_cell()
+        ! returns false but xi and yj are between 0 and 1.
+        ! It occurs very rarely but often enough to have brought down
+        ! ESM2G four times since the spin-up began. (as of 8/10/2010)
+        ! This temporary fix arbitrarily moves the berg toward the
+        ! center of the current cell.
+        xi=(xi-0.5)*(1.-posn_eps)+0.5
+        yj=(yj-0.5)*(1.-posn_eps)+0.5
+      endif
+      call error_mesg('KID, adjust', 'Berg did not move or bounce during iterations AND was not in cell. Adjusting!', WARNING)
+      write(stderrunit,*) 'KID, adjust: The adjusting iceberg is: ', id,  mpp_pe()
+      write(stderrunit,*) 'KID, adjust: The adjusting lon,lat,u,v: ', lon, lat, uvel, vvel
+      write(stderrunit,*) 'KID, adjust: The adjusting xi,ji: ', xi, yj
+      lret=pos_within_cell(grd, lon, lat, inm, jnm, xi, yj,explain=.true.)
+    else
+      call error_mesg('KID, adjust', 'Berg iterated many times without bouncing!', WARNING)
+    endif
   endif
-  !  if (xi>1.) xi=1.-posn_eps    !Alon
+!  if (xi>1.) xi=1.-posn_eps    !Alon
   if (xi>=1.) xi=1.-posn_eps
   if (xi<0.) xi=posn_eps
   if (yj>1.) yj=1.-posn_eps
-  !  if (yj>1.) yj=1.-posn_eps
+!  if (yj>1.) yj=1.-posn_eps
   if (yj<=0.) yj=posn_eps        !Alon
   lon=bilin(grd, grd%lon, i, j, xi, yj)
   lat=bilin(grd, grd%lat, i, j, xi, yj)
   lret=pos_within_cell(grd, lon, lat, i, j, xi, yj) ! Update xi and yj
 
   if (.not. lret) then
-     write(0,*) 'i0, j0,=', i0,j0
-     write(0,*) 'xi0, yj0,=', xi0,yj0
-     write(0,*) 'grd%msk(i0, j0)=', grd%msk(i0,j0)
-     write(0,*) 'lon0, lat0,=', lon0,lat0
-     write(0,*) 'i,j,lon, lat,grd%msk(i,j)=', i,j,lon,lat,grd%msk(i,j)
-     write(stderrunit,*) 'KID, adjust: Should not get here! Berg is not in cell after adjustment', id, mpp_pe()
-     if (debug) error=.true.
+    write(0,*) 'i0, j0,=', i0,j0
+    write(0,*) 'xi0, yj0,=', xi0,yj0
+    write(0,*) 'grd%msk(i0, j0)=', grd%msk(i0,j0)
+    write(0,*) 'lon0, lat0,=', lon0,lat0
+    write(0,*) 'i,j,lon, lat,grd%msk(i,j)=', i,j,lon,lat,grd%msk(i,j)
+    write(stderrunit,*) 'KID, adjust: Should not get here! Berg is not in cell after adjustment', id, mpp_pe()
+    if (debug) error=.true.
   endif
-end subroutine adjust_index_and_ground
+ end subroutine adjust_index_and_ground
 
 !> Calculate longitude-latitude from tangent plane coordinates
 subroutine rotpos_to_tang(lon, lat, x, y, id_in)
