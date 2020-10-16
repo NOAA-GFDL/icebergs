@@ -54,6 +54,7 @@ integer :: nj=0 !< Global number of grid cells in j-direction (mandatory input)
 logical :: debug=.true. !< If true, do some debugging
 logical :: saverestart=.false. !< If true, save a berg restart file at the end
 logical :: collision_test=.false.
+logical :: chaotic_test=.false.
 integer :: halo=1 !< Width of halo in parallel decomposition
 real :: ibdt=3600.0
 real :: ibuo=0.1
@@ -64,7 +65,7 @@ real :: gridres=1.e3
 integer :: ibhrs=2
 integer :: nmax = 2000000000 !<max number of iteration
 namelist /icebergs_driver_nml/ debug, ni, nj, halo, ibhrs, ibdt, ibuo, ibvo, nmax, &
-       saverestart,ibui,ibvi,collision_test,gridres
+       saverestart,ibui,ibvi,collision_test,chaotic_test,gridres
 ! For loops
 integer :: isc !< Start of i-index for computational domain (used for loops)
 integer :: iec !< End of i-index for computational domain (used for loops)
@@ -185,6 +186,14 @@ do j = jsd, jed
   enddo
 enddo
 
+if (chaotic_test) then
+  !assign land cells at the N and S portions of the domain.
+  !input.nml: set coastal drift parameter to prevent grounding
+  do j=jsd,jed; do i=isd,ied
+    if (lat(i,j)<=0.0+2*gridres .or. lat(i,j)>=1000.e3-2*gridres) wet(i,j)=0.0
+  enddo;enddo
+endif
+
 call set_calendar_type(THIRTY_DAY_MONTHS)
 time = set_date(1,1,1,0,0,0)
 dt = ibdt
@@ -229,6 +238,26 @@ if (collision_test) then
       vo(i,j)=0.0
     else
       if (lat(i,j)>10.e3) then
+        vo(i,j)=-ibvo
+      else
+        vo(i,j)=ibvo
+      endif
+    endif
+  enddo;enddo
+endif
+
+if (chaotic_test) then
+  do j=jsd,jed; do i=isd,ied
+    if (lat(i,j)==500.e3 .or. lon(i,j)==500.e3) then
+      vo(i,j)=0.0
+    elseif (lon(i,j)>500.e3) then
+      if (lat(i,j)>500.e3) then
+        vo(i,j)=0.5*ibvo
+      else
+        vo(i,j)=-0.5*ibvo
+      endif
+    else
+      if (lat(i,j)>500.e3) then
         vo(i,j)=-ibvo
       else
         vo(i,j)=ibvo

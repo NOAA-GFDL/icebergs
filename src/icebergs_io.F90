@@ -1258,7 +1258,7 @@ integer :: lonid, latid, yearid, dayid, uvelid, vvelid, idcntid, idijid
 integer :: uvelpid,vvelpid
 integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid, sssid
 integer :: cnid, hiid, hsid
-integer :: mid, did, wid, lid, mbid, hdid
+integer :: mid, did, wid, lid, mbid, hdid, cid
 character(len=37) :: filename
 character(len=7) :: pe_name
 type(xyt), pointer :: this, next
@@ -1399,6 +1399,7 @@ logical :: io_is_in_append_mode
         hiid = inq_varid(ncid, 'hi')
         hsid = inq_varid(ncid, 'halo_berg')
         if (mts) then
+          cid = inq_varid(ncid, 'conglom_id')
           uvelpid = inq_varid(ncid, 'uvel_prev')
           vvelpid = inq_varid(ncid, 'vvel_prev')
         endif
@@ -1438,6 +1439,7 @@ logical :: io_is_in_append_mode
         hiid = def_var(ncid, 'hi', NF_DOUBLE, i_dim)
         hsid = def_var(ncid, 'halo_berg', NF_DOUBLE, i_dim)
         if (mts) then
+          cid = def_var(ncid, 'conglom_id', NF_INT, i_dim)
           uvelpid = def_var(ncid, 'uvel_prev', NF_DOUBLE, i_dim)
           vvelpid = def_var(ncid, 'vvel_prev', NF_DOUBLE, i_dim)
         endif
@@ -1503,6 +1505,8 @@ logical :: io_is_in_append_mode
         call put_att(ncid, hsid, 'long_name', 'halo status')
         call put_att(ncid, hsid, 'units', 'non-dim')
         if (mts) then
+          call put_att(ncid, cid, 'long_name', 'conglomerate id')
+          call put_att(ncid, cid, 'units', 'dimensionless')
           call put_att(ncid, uvelpid, 'long_name', 'zonal speed mts')
           call put_att(ncid, uvelpid, 'units', 'm/s')
           call put_att(ncid, vvelpid, 'long_name', 'meridional speed mts')
@@ -1552,8 +1556,11 @@ logical :: io_is_in_append_mode
         call put_double(ncid, cnid, i, this%cn)
         call put_double(ncid, hiid, i, this%hi)
         call put_double(ncid, hsid, i, this%halo_berg)
-        call put_double(ncid, uvelpid, i, this%uvel_prev)
-        call put_double(ncid, vvelpid, i, this%vvel_prev)
+        if (mts) then
+          call put_int(ncid, cid, i, this%conglom_id)
+          call put_double(ncid, uvelpid, i, this%uvel_prev)
+          call put_double(ncid, vvelpid, i, this%vvel_prev)
+        endif
       endif
       next=>this%next
       deallocate(this)

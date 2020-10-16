@@ -25,7 +25,7 @@ def parseCommandLine():
 
 
 def main(args):
-    
+
     print('reading file')
 
     filename=args.fname
@@ -45,7 +45,7 @@ def main(args):
     num_frames = len(ud)
     movie_len = 5.0 #seconds
     frame_len = 1000.0*movie_len/num_frames
-    
+
     xmin = 0 #np.floor(min(min(x),min(y),0))
     xmax = 20 #np.ceil(max(max(x),max(y),20))
     ymin = xmin
@@ -58,11 +58,11 @@ def main(args):
         x1 = x[day == ud[i]]
         y1 = y[day == ud[i]]
         data = np.hstack((x1[:,np.newaxis],y1[:,np.newaxis]))
-           
+
         scat.set_offsets(data)
-        
+
         t = ud[i]
-        time_text.set_text('time = %.1f days' % t )        
+        time_text.set_text('time = %.1f days' % t )
         return scat,time_text
 
     def init():
@@ -76,8 +76,8 @@ def main(args):
             anim_running = False
         else:
             ani.event_source.start()
-            anim_running = True       
-    
+            anim_running = True
+
     # Now we can do the plotting!
     f = plt.figure(figsize=(5,5))
     f.tight_layout()
@@ -100,7 +100,7 @@ def main(args):
     ax1.set_xlabel('x (km)')
     ax1.set_ylabel('y (km)')
     ax1.set_title('Iceberg trajectory')
- 
+
     f.canvas.mpl_connect('button_press_event', onClick)
 
     ani = FuncAnimation(
@@ -119,11 +119,3 @@ if __name__ == '__main__':
     optCmdLineArgs=	parseCommandLine()
     anim_running = True
     main(optCmdLineArgs)
-
-
-
-
-
-
-
-

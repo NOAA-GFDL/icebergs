@@ -10,7 +10,7 @@ use fms_mod, only: stdlog, stderr, error_mesg, FATAL, WARNING
 use fms_mod, only: write_version_number, read_data, write_data, file_exist
 use mosaic_mod, only: get_mosaic_ntiles, get_mosaic_ncontacts
 use mpp_mod, only: mpp_npes, mpp_pe, mpp_root_pe, mpp_sum, mpp_min, mpp_max, NULL_PE
-use mpp_mod, only: mpp_send, mpp_recv, mpp_sync_self, mpp_chksum
+use mpp_mod, only: mpp_send, mpp_recv, mpp_sync_self, mpp_chksum, mpp_sync
 use mpp_mod, only: mpp_clock_begin, mpp_clock_end, mpp_clock_id
 use mpp_mod, only: CLOCK_COMPONENT, CLOCK_SUBCOMPONENT, CLOCK_LOOP
 use random_numbers_mod, only: initializeRandomNumberStream, getRandomNumbers, randomNumberStream
@@ -45,6 +45,8 @@ use ice_bergs_framework, only: is_point_within_xi_yj_bounds
 use ice_bergs_framework, only: test_check_for_duplicate_ids_in_list
 use ice_bergs_framework, only: generate_id
 use ice_bergs_framework, only: update_latlon
+use ice_bergs_framework, only: set_conglom_ids
+use ice_bergs_framework, only: transfer_mts_bergs
 
 use ice_bergs_io,        only: ice_bergs_io_init, write_restart, write_trajectory
 use ice_bergs_io,        only: read_restart_bergs, read_restart_calving
@@ -148,8 +150,12 @@ subroutine icebergs_init(bergs, &
     else
       call read_restart_bonds(bergs,Time)
     endif
-    call update_halo_icebergs(bergs)
-    call connect_all_bonds(bergs)
+    if (bergs%mts) then
+      call transfer_mts_bergs(bergs)
+    else
+      call update_halo_icebergs(bergs)
+      call connect_all_bonds(bergs)
+    endif
     nbonds=0
     check_bond_quality=.True.
     call count_bonds(bergs, nbonds,check_bond_quality)
@@ -333,6 +339,7 @@ subroutine initialize_iceberg_bonds(bergs)
   real :: dlon,dlat
   real :: dx_dlon,dy_dlat, lat_ref
   real :: r_dist_x, r_dist_y, r_dist
+  real :: radius
   integer :: grdi_outer, grdj_outer
   integer :: grdi_inner, grdj_inner
 
@@ -367,8 +374,11 @@ subroutine initialize_iceberg_bonds(bergs)
             r_dist_y=dlat*dy_dlat
             r_dist=sqrt( (r_dist_x**2) + (r_dist_y**2) )
 
-            ! If the bergs are closer than bergs%length_for_manually_initialize_bonds, then form a bond -Alex
-            if (r_dist.lt.bergs%length_for_manually_initialize_bonds) then
+            if (bergs%manually_initialize_bonds_from_radii) then
+              radius=sqrt(min(berg%length*berg%width,other_berg%length*other_berg%width))
+              if (r_dist.lt.1.25*radius) call form_a_bond(berg, other_berg%id, other_berg%ine, other_berg%jne, other_berg)
+            elseif (r_dist.lt.bergs%length_for_manually_initialize_bonds) then
+              ! If the bergs are closer than bergs%length_for_manually_initialize_bonds, then form a bond -Alex
               call form_a_bond(berg, other_berg%id, other_berg%ine, other_berg%jne, other_berg)
             endif
           endif
@@ -443,9 +453,9 @@ subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
   integer :: grdi, grdj
   logical :: iceberg_bonds_on
   logical :: bonded
-  integer :: nc
+  integer :: nc_x,nc_y
 
-  nc=bergs%num_contact_cells
+  nc_x=bergs%contact_cells_lon; nc_y=bergs%contact_cells_lat
   iceberg_bonds_on=bergs%iceberg_bonds_on
 
   IA_x=0.
@@ -476,21 +486,18 @@ subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
     ! Interactions for non-bonded berg elements only. For the mts scheme, this is only called if mts_part==1
     if (.not. (bergs%mts .and. bergs%mts_part .eq. 3)) then
       bonded=.false. ! Interactions for non-bonded berg elements
-      call mark_conglomerate_bergs(berg,1)
-      berg%id=abs(berg%id)
-      do grdj = max(berg%jne-nc,bergs%grd%jsd+1),min(berg%jne+nc,bergs%grd%jed);&
-        do grdi = max(berg%ine-nc,bergs%grd%isd+1),min(berg%ine+nc,bergs%grd%ied)
+      do grdj = max(berg%jne-nc_y,bergs%grd%jsd+1),min(berg%jne+nc_y,bergs%grd%jed);&
+        do grdi = max(berg%ine-nc_x,bergs%grd%isd+1),min(berg%ine+nc_x,bergs%grd%ied)
 
         other_berg=>bergs%list(grdi,grdj)%first
         do while (associated(other_berg)) ! loop over all other bergs
-          if (other_berg%id>0) then !no bond with other_berg
+          if (other_berg%conglom_id.ne.berg%conglom_id) then
             call calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1,  &
               P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y,bonded)
           endif
           other_berg=>other_berg%next
         enddo
       enddo; enddo
-      call mark_conglomerate_bergs(berg,2)
     endif
 
   else
@@ -522,42 +529,6 @@ subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
     endif
   endif
 end subroutine interactive_force
-
-!> Marks conglomerate icebergs with negative their id
-recursive subroutine mark_conglomerate_bergs(berg,mark_or_unmark)
-  type(iceberg), pointer :: berg
-  type(iceberg), pointer :: other_berg
-  type(bond) , pointer :: current_bond
-  integer :: mark_or_unmark
-
-  if (mark_or_unmark==1) then
-    if (berg%id>0) berg%id=-berg%id
-    current_bond=>berg%first_bond
-    do while (associated(current_bond))
-      if  (associated(current_bond%other_berg)) then
-        other_berg=>current_bond%other_berg
-        if (other_berg%id>0) then
-          call mark_conglomerate_bergs(other_berg,1)
-        end if
-      end if
-      current_bond=>current_bond%next_bond
-    enddo
-  else
-    if (berg%id<0) berg%id=-berg%id
-    current_bond=>berg%first_bond
-    do while (associated(current_bond))
-      if  (associated(current_bond%other_berg)) then
-        other_berg=>current_bond%other_berg
-        if (other_berg%id<0) then
-          call mark_conglomerate_bergs(other_berg,2)
-        end if
-      end if
-      current_bond=>current_bond%next_bond
-    enddo
-  endif
-
-end subroutine mark_conglomerate_bergs
-
 
 !> Calculate interactive forces between two bergs
 subroutine calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, &
@@ -1105,24 +1076,32 @@ subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, r
 
   dumpit=.false.
   if (abs(uveln)>vel_lim.or.abs(vveln)>vel_lim) then
-    dumpit=.true.
-    write(stderrunit,'("pe=",i3,x,a)') mpp_pe(),'Dump triggered by excessive velocity'
+    if (debug) then
+      dumpit=.true.
+      write(stderrunit,'("pe=",i3,x,a)') mpp_pe(),'Dump triggered by excessive velocity'
+    else
+      write(stderrunit,'("pe=",i3,x,a)') mpp_pe(),'Excessive velocity detected'
+    endif
   endif
   if (abs(ax)>accel_lim.or.abs(ay)>accel_lim) then
-    dumpit=.true.
-    write(stderrunit,'("pe=",i3,x,a)') mpp_pe(),'Dump triggered by excessive acceleration'
+    if (debug) then
+      dumpit=.true.
+      write(stderrunit,'("pe=",i3,x,a)') mpp_pe(),'Dump triggered by excessive acceleration'
+    else
+      write(stderrunit,'("pe=",i3,x,a)') mpp_pe(),'Excessive acceleration detected'
+    endif
   endif
   if (present(debug_flag)) then
     if (debug_flag) dumpit=.true.
     write(stderrunit,'("pe=",i3,x,a)') mpp_pe(),'Debug dump flagged by arguments'
   endif
   if (dumpit) then
- 100 format('pe=',i3,a15,9(x,a8,es12.3))
- 200 format('pe=',i3,a15,(x,a8,i12),9(x,a8,es12.3))
-    write(stderrunit,200) mpp_pe(),'Starting pars:', &
+100 format('pe=',i3,a15,9(x,a8,es12.3))
+200 format('pe=',i3,a5,i14,(a8,i5),(a7,es12.3))
+    write(stderrunit,200) mpp_pe(),'id0=',berg%id, &
       'yr0=',berg%start_year, 'day0=',berg%start_day, &
       'lon0=',berg%start_lon, 'lat0=',berg%start_lat, 'mass0=',berg%start_mass, &
-      'sclng=',berg%mass_scaling, 'id0=',berg%id
+      'sclng=',berg%mass_scaling
     write(stderrunit,100) mpp_pe(),'Geometry:', &
       'M=',M, 'T=',T, 'D=',D, 'F=',F, 'W=',W, 'L=',L
     write(stderrunit,100) mpp_pe(),'delta U:', &
@@ -1537,7 +1516,7 @@ subroutine thermodynamics(bergs)
 
       ! Did berg completely melt?
       if (Mnew<=0.) then ! Delete the berg
-        call move_trajectory(bergs, this)
+        if (.not. bergs%debug_write) call move_trajectory(bergs, this)
         call delete_iceberg_from_list(bergs%list(grdi,grdj)%first, this)
         bergs%nbergs_melted=bergs%nbergs_melted+1
       endif
@@ -3089,7 +3068,7 @@ subroutine calculate_mass_on_ocean(bergs, with_diagnostics)
   do grdj = grd%jsc-1,grd%jec+1 ; do grdi = grd%isc-1,grd%iec+1
     berg=>bergs%list(grdi,grdj)%first
     do while(associated(berg))
-      if (berg%halo_berg<1 .or. .not. bergs%mts) then
+      if (berg%halo_berg<2 .or. .not. bergs%mts) then
         i=berg%ine  ;     j=berg%jne
         if (grd%area(i,j) > 0.) then
 
@@ -3455,14 +3434,9 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
     Visited=.true.
     if (bergs%mts) then
       call interp_gridded_fields_to_bergs(bergs)
-      if ((bergs%interactive_icebergs_on) .or. (bergs%iceberg_bonds_on)) then
-        call update_halo_icebergs(bergs)
-        if (bergs%iceberg_bonds_on) then
-          call connect_all_bonds(bergs)
-        else
-          if (grd%Lx>0.) call update_latlon(bergs)
-        endif
-      endif
+      call transfer_mts_bergs(bergs)
+    elseif ((bergs%contact_distance>0.) .or. (bergs%contact_spring_coef .ne. bergs%spring_coef)) then
+        call set_conglom_ids(bergs)
     endif
   endif
 
@@ -3509,15 +3483,22 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
   if (bergs%iceberg_bonds_on)  call  bond_address_update(bergs)
 
   call send_bergs_to_other_pes(bergs)
-  if (bergs%mts) call interp_gridded_fields_to_bergs(bergs)
   if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'icebergs_run, after send_bergs() ')
-  if ((bergs%interactive_icebergs_on) .or. (bergs%iceberg_bonds_on)) then
-    call update_halo_icebergs(bergs)
-    if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'icebergs_run, after update_halo()')
-    if (bergs%iceberg_bonds_on) then
-      call connect_all_bonds(bergs)
-    else
-      if (grd%Lx>0.) call update_latlon(bergs)
+  if (bergs%mts) then
+    call interp_gridded_fields_to_bergs(bergs)
+    call transfer_mts_bergs(bergs)
+  else
+    if ((bergs%interactive_icebergs_on) .or. (bergs%iceberg_bonds_on)) then
+      call update_halo_icebergs(bergs)
+      if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'icebergs_run, after update_halo()')
+      if (bergs%iceberg_bonds_on) then
+        call connect_all_bonds(bergs)
+      else
+        if (grd%Lx>0.) call update_latlon(bergs)
+      endif
+      if ((bergs%contact_distance>0.) .or. (bergs%contact_spring_coef .ne. bergs%spring_coef)) then
+        call set_conglom_ids(bergs)
+      endif
     endif
   endif
   if (debug) call bergs_chksum(bergs, 'run bergs (exchanged)')
@@ -3550,11 +3531,17 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
 
   ! For each berg, record
   call mpp_clock_begin(bergs%clock_dia)
-  if (sample_traj) call record_posn(bergs)
-  if (write_traj) then
+  if (sample_traj .or. bergs%writeandstop) call record_posn(bergs)
+  if (write_traj .or. bergs%writeandstop) then
     call move_all_trajectories(bergs)
     call write_trajectory(bergs%trajectories, bergs%save_short_traj)
   endif
+
+  if (bergs%writeandstop) then
+    call mpp_sync()
+    call error_mesg('KID', 'WRITE AND STOP!!!', FATAL)
+  endif
+
 
   ! Gridded diagnostics
   if (grd%id_uo>0) &
@@ -4266,6 +4253,7 @@ subroutine calve_icebergs(bergs)
           newberg%start_lat=newberg%lat
           newberg%start_year=bergs%current_year
           newberg%id = generate_id(grd, i, j)
+          newberg%conglom_id=0
           newberg%start_day=bergs%current_yearday+ddt/86400.
           newberg%start_mass=bergs%initial_mass(k)
           newberg%mass_scaling=bergs%mass_scaling(k)
@@ -4374,7 +4362,9 @@ subroutine evolve_icebergs_mts(bergs)
   do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
     berg=>bergs%list(grdi,grdj)%first
     do while (associated(berg)) ! loop over all bergs
-      if (berg%static_berg .lt. 0.5 .and. berg%halo_berg<10) then
+      !if (berg%static_berg .lt. 0.5 .and. berg%halo_berg<10) then
+      !only evolve non-static bergs that overlap, or are part of a conglom that overlaps, the computational domain:
+      if (berg%static_berg .lt. 0.5 .and. berg%conglom_id.ne.0) then
         latn = berg%lat ;   lonn = berg%lon
         uvel1=berg%uvel_prev ;   vvel1=berg%vvel_prev !V_n (previous cycle)
         !subroutine accel expects uvel1=berg%uvel_prev, and calculates ustar=uvel1+axn*dt_2.
@@ -4410,7 +4400,8 @@ subroutine evolve_icebergs_mts(bergs)
   do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
     berg=>bergs%list(grdi,grdj)%first
     do while (associated(berg)) ! loop over all bergs
-      if (berg%static_berg .lt. 0.5 .and. berg%halo_berg<10) then
+      !if (berg%static_berg .lt. 0.5 .and. berg%halo_berg<10) then
+      if (berg%static_berg .lt. 0.5 .and. berg%conglom_id.ne.0) then
         ! if (berg%id==4294967382 .and. berg%halo_berg==0) then
         !   print *,'berg check 2',mpp_pe(),berg%id, berg%uvel, berg%vvel, &
         !     berg%lat, berg%lon, berg%axn, berg%ayn, berg%bxn, berg%byn
@@ -4446,7 +4437,8 @@ subroutine evolve_icebergs_mts(bergs)
     do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied ! update positions
       berg=>bergs%list(grdi,grdj)%first
       do while (associated(berg)) ! loop over all bergs
-        if (berg%static_berg .lt. 0.5 .and. berg%halo_berg<10) then
+        !if (berg%static_berg .lt. 0.5 .and. berg%halo_berg<10) then
+        if (berg%static_berg .lt. 0.5 .and. berg%conglom_id.ne.0) then
 
           on_tangential_plane=.false.
           if ((berg%lat>89.) .and. (grd%grid_is_latlon)) on_tangential_plane=.true.
@@ -4488,7 +4480,8 @@ subroutine evolve_icebergs_mts(bergs)
     do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
       berg=>bergs%list(grdi,grdj)%first
       do while (associated(berg)) ! loop over all bergs
-        if (berg%static_berg .lt. 0.5 .and. berg%halo_berg<10) then
+        !if (berg%static_berg .lt. 0.5 .and. berg%halo_berg<10) then
+        if (berg%static_berg .lt. 0.5 .and. berg%conglom_id.ne.0) then
 
           latn = berg%lat ;   lonn = berg%lon
           axn  = berg%axn_fast ;   ayn  = berg%ayn_fast
@@ -4530,7 +4523,8 @@ subroutine evolve_icebergs_mts(bergs)
     do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
       berg=>bergs%list(grdi,grdj)%first
       do while (associated(berg)) ! loop over all bergs
-        if (berg%static_berg .lt. 0.5 .and. berg%halo_berg<10) then
+        !if (berg%static_berg .lt. 0.5 .and. berg%halo_berg<10) then
+        if (berg%static_berg .lt. 0.5 .and. berg%conglom_id.ne.0) then
           berg%uvel_old=berg%uvel; berg%vvel_old=berg%vvel
         endif
         berg=>berg%next

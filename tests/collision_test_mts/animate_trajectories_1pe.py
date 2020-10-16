@@ -67,7 +67,7 @@ def main(args):
         cstring=[]
         for j in range(len(hstat)):
             if (hstat[j]<0):
-                cstring.append("y")
+                cstring.append("m")
             elif (hstat[j]==0):                 
                 cstring.append("b")
             elif (hstat[j]==1):
@@ -76,10 +76,10 @@ def main(args):
                 cstring.append("g")
             elif (hstat[j]==3):
                 cstring.append("k")
-            elif (hstat[j]==4):
-                cstring.append("m")
-            else:
+            elif (hstat[j]==10):
                 cstring.append("c")
+            else:
+                cstring.append("y")
                                                            
         scat.set_offsets(data)
         scat.set_color(cstring)

@@ -24,7 +24,7 @@ def parseCommandLine():
 
 
 
-def main(args):
+def main(args ):
 
     print('reading file')
 
@@ -34,8 +34,8 @@ def main(args):
     field2 = 'lat'
 
     with nc.Dataset(filename) as file:
-        x = file.variables['lon'][:]/1.e3
-        y = file.variables['lat'][:]/1.e3
+        x = file.variables['lon'][:]/1.e4
+        y = file.variables['lat'][:]/1.e4 #10km
         day = file.variables['day'][:]
 
     ud = np.unique(day)
@@ -47,7 +47,7 @@ def main(args):
     frame_len = 1000.0*movie_len/num_frames
 
     xmin = 0 #np.floor(min(min(x),min(y),0))
-    xmax = 20 #np.ceil(max(max(x),max(y),20))
+    xmax = 100 #20 #np.ceil(max(max(x),max(y),20))
     ymin = xmin
     ymax = xmax
 
@@ -82,23 +82,23 @@ def main(args):
     f = plt.figure(figsize=(5,5))
     f.tight_layout()
     ax1 = plt.subplot(111,xlim=(xmin, xmax), ylim=(ymin, ymax))
-    scat = ax1.scatter([],[],marker='o',facecolor='w',s=100,edgecolor='red')
+    scat = ax1.scatter([],[],marker='o',facecolor='w',s=10,edgecolor='red')
     time_text = ax1.text(0.02, 0.95, '', transform=ax1.transAxes)
 
-    # Change major ticks to show every 20.
-    ax1.xaxis.set_major_locator(MultipleLocator(5))
-    ax1.yaxis.set_major_locator(MultipleLocator(5))
+    # Change major ticks 
+    ax1.xaxis.set_major_locator(MultipleLocator(10))
+    ax1.yaxis.set_major_locator(MultipleLocator(10))
 
-    ax1.xaxis.set_minor_locator(MultipleLocator(1))
-    ax1.yaxis.set_minor_locator(MultipleLocator(1))
+    ax1.xaxis.set_minor_locator(MultipleLocator(5))
+    ax1.yaxis.set_minor_locator(MultipleLocator(5))
 
     # Turn grid on for both major and minor ticks and style minor slightly
     # differently.
     ax1.grid(which='major', color='#CCCCCC', linestyle=':')
     ax1.grid(which='minor', color='#CCCCCC', linestyle=':')
 
-    ax1.set_xlabel('x (km)')
-    ax1.set_ylabel('y (km)')
+    ax1.set_xlabel('x (10 km)')
+    ax1.set_ylabel('y (10 km)')
     ax1.set_title('Iceberg trajectory')
 
     f.canvas.mpl_connect('button_press_event', onClick)
