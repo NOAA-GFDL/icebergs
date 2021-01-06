@@ -1,6 +1,7 @@
 *.out
 *~
 *.nc
+*.csv
 core
 single_test/
 size_test_tab/

@@ -36,6 +36,9 @@ def parseCommandLine():
 	#p.add_argument('-b',type='bool')  # do not use 'type=bool'
 
 	#Flags
+	parser.add_argument('-grounding_test', type='bool', default=False,
+		          help=''' old: displace 500 m S. new: get rid of SE element ''')
+        
 	parser.add_argument('-collision_test', type='bool', default=False,
 		          help=''' symmetry for berg around y=10 km ''')
         
@@ -777,7 +780,7 @@ def remove_stationary_bergs(dx_berg, dy_berg,iceberg_num,width,Number_of_bergs,s
 def Create_icebergs(lon_init,lat_init,Radius,R_earth, x, y,ice_mask,h_ice,Convert_to_lat_lon,rho_ice,\
 		element_type,scale_the_grid_to_lat_lon,lat_ref,adjust_lat_ref,Interpolate_from_four_corners,\
 		Fill_in_the_boundaries,set_all_bergs_static_by_default,break_some_bonds,Remove_stationary_bergs,\
-                set_some_bergs_static_by_default,collision_test):
+                set_some_bergs_static_by_default,collision_test,grounding_test):
 	print 'Starting to create icebergs...'
 	dx_berg=[]  #x distance in cartesian of berg from lon_init
 	dy_berg=[]  #y distance in cartesian of berg from lat_init
@@ -832,21 +835,33 @@ def Create_icebergs(lon_init,lat_init,Radius,R_earth, x, y,ice_mask,h_ice,Conver
 			x_start=((2/np.sqrt(3))*Radius)
 			x_val=x_start + (np.sqrt(3)*Radius*i)
 
-		for j in range(M):
-		#for i in range(M):
-			#x_val=x_start+(2*i*Radius)  ; y_val=y_start
-			y_val=y_start+(2*j*Radius)  ;# x_val=x_start + (np.sqrt(3)*Radius*i)
-			if check_if_it_is_in_domain(x_val,y_val,X_min,X_max,Y_min,Y_max,R_earth,lat_init,adjust_lat_ref,dx,dy):
-			#if True:
-				#R_val=np.sqrt(((x_val-x0)**2) +((y_val-y0)**2))
-				if check_if_it_is_ice(x_val,y_val,ice_mask,dx):
-					#Don't allow points closer than R from the boundary (these are sorted out later)
-					#if abs(y_val-Ly)<Radius or  ((abs(x_val-Lx)<((2/np.sqrt(3))*Radius)) and element_type=='hexagon') or ((abs(x_val-Lx)<Radius) and element_type=='square'):
-					berg_count=berg_count+1
-					iceberg_num.append(berg_count)
-					dx_berg.append(x_val)
-					dy_berg.append(y_val)
-					width.append(np.sqrt(element_area))
+                if grounding_test:
+                        for j in range(M):
+                                y_val=y_start+(2*j*Radius)  ;
+                                if check_if_it_is_in_domain(x_val,y_val,X_min,X_max,Y_min,Y_max,R_earth,lat_init,adjust_lat_ref,dx,dy):
+                                        if check_if_it_is_ice(x_val,y_val,ice_mask,dx):
+                                                if not (x_val>5.5e3 and (y_val<12.0e3 or y_val>19.5e3)):
+                                                        berg_count=berg_count+1
+                                                        iceberg_num.append(berg_count)
+                                                        dx_berg.append(x_val)
+                                                        dy_berg.append(y_val)
+                                                        width.append(np.sqrt(element_area))
+                else:
+                        for j in range(M):
+                                #for i in range(M):
+                                #x_val=x_start+(2*i*Radius)  ; y_val=y_start
+                                y_val=y_start+(2*j*Radius)  ;# x_val=x_start + (np.sqrt(3)*Radius*i)
+                                if check_if_it_is_in_domain(x_val,y_val,X_min,X_max,Y_min,Y_max,R_earth,lat_init,adjust_lat_ref,dx,dy):
+                                        #if True:
+                                        #R_val=np.sqrt(((x_val-x0)**2) +((y_val-y0)**2))
+                                        if check_if_it_is_ice(x_val,y_val,ice_mask,dx):
+                                                #Don't allow points closer than R from the boundary (these are sorted out later)
+                                                #if abs(y_val-Ly)<Radius or  ((abs(x_val-Lx)<((2/np.sqrt(3))*Radius)) and element_type=='hexagon') or ((abs(x_val-Lx)<Radius) and element_type=='square'):
+                                                berg_count=berg_count+1
+                                                iceberg_num.append(berg_count)
+                                                dx_berg.append(x_val)
+                                                dy_berg.append(y_val)
+                                                width.append(np.sqrt(element_area))
 
                                                
 	#print 'dx_berg',dx_berg
@@ -927,6 +942,10 @@ def Create_icebergs(lon_init,lat_init,Radius,R_earth, x, y,ice_mask,h_ice,Conver
 			dx=dx*Scale_up ;dy=dy*Scale_up
 		x=(x-np.min(x))+(dx/2) ; y=(y-np.min(y))+(dy/2)
 		lon=dx_berg  ; lat=dy_berg
+
+        if grounding_test:
+                for i in range(Number_of_bergs):
+                        lat[i]=lat[i]-0.0 #500.0
 	
 	#Note that static_berg calculations used to be here, after the conversion. I have moved them. I hope that this does not affect answers.
                         
@@ -1710,6 +1729,7 @@ def main(args):
 	Weddell_ice_geometry_filename=args.Weddell_ice_geometry_filename
 	Generic_ice_geometry_filename=args.Generic_ice_geometry_filename
         collision_test=args.collision_test
+        grounding_test=args.grounding_test
 
 	#Parameters
 	Radius=args.Radius
@@ -1786,7 +1806,7 @@ def main(args):
 	(Number_of_bergs,lon,lat,iceberg_num,dx_berg, dy_berg,thickness,mass,width,x,y,Radius,static_berg,N_bergs_before_bd)= Create_icebergs(lon_init,lat_init,\
 			Radius,R_earth, x, y,ice_mask,h_ice,Convert_to_lat_lon,rho_ice,element_type,scale_the_grid_to_lat_lon,lat_ref,adjust_lat_ref,\
 			Interpolate_from_four_corners,Fill_in_the_boundaries, set_all_bergs_static_by_default,break_some_bonds,Remove_stationary_bergs,\
-                        set_some_bergs_static_by_default,collision_test)
+                        set_some_bergs_static_by_default,collision_test,grounding_test)
 
 	print 'Maximum thickness:', np.max(thickness), np.min(thickness)
 	#Define the positions of the iceberg bonds

@@ -1,0 +1,13 @@
+Collision and subsequent fracture of two conglomerate bergs. For testing a scheme where the MTS solution is iterated to convergence in order to help conserve momentum conservation when collisions occur. Also for testing fracture scheme (e.g. effects of particle size, fracture thresholds, sensitivity to violation of momentum conservation).
+
+Iterative scheme options:
+Option 1: Set the number of iterations (>1) for each long/short step using imp_loop_iters_long and imp_loop_iters_short, respectively. Force_convergence must be set false. (this option uses subroutine evolve_icebergs_mts)
+Option 2: Set force_convergence to true and specify a convergence tolerance. Iterations will stop once convergence tolerance is reached. (this option, or if both imp_loop_iters==1, uses subroutine evolve_icebergs_mts2)
+
+Unlike in energy_test2, this test will not conserve momentum sufficiently during collision unless the iterative scheme is used.
+
+1. Make the iceberg input files: cd makeberg; ./RUN; cd .. 
+2.(optional) edit input.nml
+3. run the model: ./RUN
+4, animate the results: animate_trajectories.py
+

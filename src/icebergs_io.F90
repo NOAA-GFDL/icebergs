@@ -25,7 +25,7 @@ use fms_mod,    only : clock_flag_default
 
 use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 
-use ice_bergs_framework, only: icebergs_gridded, xyt, iceberg, icebergs, buffer, bond
+use ice_bergs_framework, only: icebergs_gridded, xyt, bond_xyt, iceberg, icebergs, buffer, bond
 use ice_bergs_framework, only: pack_traj_into_buffer2,unpack_traj_from_buffer2
 use ice_bergs_framework, only: find_cell,find_cell_by_search,count_bergs,is_point_in_cell,pos_within_cell,append_posn
 use ice_bergs_framework, only: count_bonds, form_a_bond, find_individual_iceberg
@@ -34,20 +34,23 @@ use ice_bergs_framework, only: add_new_berg_to_list,destroy_iceberg
 use ice_bergs_framework, only: increase_ibuffer,grd_chksum2,grd_chksum3
 use ice_bergs_framework, only: sum_mass,sum_heat,bilin
 !params !Niki: write a subroutine to get these
-use ice_bergs_framework, only: nclasses, buffer_width, buffer_width_traj
+use ice_bergs_framework, only: nclasses, buffer_width, buffer_width_traj, buffer_width_bond_traj
 use ice_bergs_framework, only: verbose, really_debug, debug, restart_input_dir,make_calving_reproduce
 use ice_bergs_framework, only: ignore_ij_restart, use_slow_find,generate_test_icebergs,print_berg
 use ice_bergs_framework, only: force_all_pes_traj
 use ice_bergs_framework, only: check_for_duplicates_in_parallel
 use ice_bergs_framework, only: split_id, id_from_2_ints, generate_id
-use ice_bergs_framework, only: mts !-Alex
+use ice_bergs_framework, only: mts,save_bond_traj !-Alex
+use ice_bergs_framework, only: push_bond_posn, append_bond_posn !-Alex
+use ice_bergs_framework, only: pack_bond_traj_into_buffer2,unpack_bond_traj_from_buffer2 !-Alex
+use ice_bergs_framework, only: monitor_energy
 
 implicit none ; private
 
 include 'netcdf.inc'
 
 public ice_bergs_io_init
-public read_restart_bergs, write_restart, write_trajectory
+public read_restart_bergs, write_restart, write_trajectory, write_bond_trajectory
 public read_restart_calving, read_restart_bonds
 public read_ocean_depth
 
@@ -61,6 +64,7 @@ integer, allocatable,save :: io_tile_pelist(:)
 logical :: is_io_tile_root_pe = .true.
 
 integer :: clock_trw,clock_trp
+integer :: clock_btrw,clock_btrp !bond trajectories
 
 #ifdef _FILE_VERSION
   character(len=128) :: version = _FILE_VERSION
@@ -98,6 +102,8 @@ integer :: stdlogunit, stderrunit
 
   clock_trw=mpp_clock_id( 'Icebergs-traj write', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
   clock_trp=mpp_clock_id( 'Icebergs-traj prepare', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+  clock_btrw=mpp_clock_id( 'Iceberg-bonds-traj write', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+  clock_btrp=mpp_clock_id( 'Iceberg-bonds-traj prepare', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
 
 end subroutine ice_bergs_io_init
 
@@ -619,6 +625,8 @@ integer, allocatable, dimension(:) :: ine,        &
       localberg%vvel_old=vvel(k) !Alon
       localberg%lon_old=lon(k) !Alon
       localberg%lat_old=lat(k) !Alon
+      localberg%lon_prev=lon(k)
+      localberg%lat_prev=lat(k)
       localberg%bxn=bxn(k) !Alon
       localberg%byn=byn(k) !Alon
       localberg%thickness=thickness(k)
@@ -787,6 +795,8 @@ logical :: lres
       localberg%lat=grd%latc(i,j)
       localberg%lon_old=localberg%lon
       localberg%lat_old=localberg%lat
+      localberg%lon_prev=localberg%lon
+      localberg%lat_prev=localberg%lat
       localberg%mass=bergs%initial_mass(1)
       localberg%thickness=bergs%initial_thickness(1)
       localberg%width=bergs%initial_width(1)
@@ -1258,7 +1268,9 @@ integer :: lonid, latid, yearid, dayid, uvelid, vvelid, idcntid, idijid
 integer :: uvelpid,vvelpid
 integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid, sssid
 integer :: cnid, hiid, hsid
-integer :: mid, did, wid, lid, mbid, hdid, cid
+integer :: mid, did, wid, lid, mbid, hdid, nbid, odid, abrid
+integer :: axnid,aynid,bxnid,bynid,axnfid,aynfid,bxnfid,bynfid
+integer :: eecid,edcid,eeid,edid,aeid,efid !energy vars
 character(len=37) :: filename
 character(len=7) :: pe_name
 type(xyt), pointer :: this, next
@@ -1379,6 +1391,8 @@ logical :: io_is_in_append_mode
       if (.not.save_short_traj) then
         uvelid = inq_varid(ncid, 'uvel')
         vvelid = inq_varid(ncid, 'vvel')
+        uvelpid = inq_varid(ncid, 'uvel_prev')
+        vvelpid = inq_varid(ncid, 'vvel_prev')
         uoid = inq_varid(ncid, 'uo')
         void = inq_varid(ncid, 'vo')
         uiid = inq_varid(ncid, 'ui')
@@ -1397,11 +1411,29 @@ logical :: io_is_in_append_mode
         sssid = inq_varid(ncid, 'sss')
         cnid = inq_varid(ncid, 'cn')
         hiid = inq_varid(ncid, 'hi')
+        axnid = inq_varid(ncid, 'axn')
+        aynid = inq_varid(ncid, 'ayn')
+        bxnid = inq_varid(ncid, 'bxn')
+        bynid = inq_varid(ncid, 'byn')
         hsid = inq_varid(ncid, 'halo_berg')
+        odid = inq_varid(ncid, 'od')
+        nbid = inq_varid(ncid, 'n_bonds')
+        abrid = inq_varid(ncid, 'accum_bond_rotation')
+
         if (mts) then
-          cid = inq_varid(ncid, 'conglom_id')
-          uvelpid = inq_varid(ncid, 'uvel_prev')
-          vvelpid = inq_varid(ncid, 'vvel_prev')
+          axnfid = inq_varid(ncid, 'axn_fast')
+          aynfid = inq_varid(ncid, 'ayn_fast')
+          bxnfid = inq_varid(ncid, 'bxn_fast')
+          bynfid = inq_varid(ncid, 'byn_fast')
+        endif
+
+        if (monitor_energy) then
+          eeid = inq_varid(ncid, 'Ee')
+          edid = inq_varid(ncid, 'Ed')
+          aeid = inq_varid(ncid, 'Eext')
+          eecid = inq_varid(ncid, 'Ee_contact')
+          edcid = inq_varid(ncid, 'Ed_contact')
+          efid =  inq_varid(ncid, 'Efrac')
         endif
       endif
     else
@@ -1419,6 +1451,8 @@ logical :: io_is_in_append_mode
       if (.not. save_short_traj) then
         uvelid = def_var(ncid, 'uvel', NF_DOUBLE, i_dim)
         vvelid = def_var(ncid, 'vvel', NF_DOUBLE, i_dim)
+        uvelpid = def_var(ncid, 'uvel_prev', NF_DOUBLE, i_dim)
+        vvelpid = def_var(ncid, 'vvel_prev', NF_DOUBLE, i_dim)
         uoid = def_var(ncid, 'uo', NF_DOUBLE, i_dim)
         void = def_var(ncid, 'vo', NF_DOUBLE, i_dim)
         uiid = def_var(ncid, 'ui', NF_DOUBLE, i_dim)
@@ -1437,11 +1471,29 @@ logical :: io_is_in_append_mode
         sssid = def_var(ncid, 'sss', NF_DOUBLE, i_dim)
         cnid = def_var(ncid, 'cn', NF_DOUBLE, i_dim)
         hiid = def_var(ncid, 'hi', NF_DOUBLE, i_dim)
+        axnid = def_var(ncid, 'axn', NF_DOUBLE, i_dim)
+        aynid = def_var(ncid, 'ayn', NF_DOUBLE, i_dim)
+        bxnid = def_var(ncid, 'bxn', NF_DOUBLE, i_dim)
+        bynid = def_var(ncid, 'byn', NF_DOUBLE, i_dim)
         hsid = def_var(ncid, 'halo_berg', NF_DOUBLE, i_dim)
+        odid = def_var(ncid, 'od', NF_DOUBLE, i_dim)
+        nbid = def_var(ncid, 'n_bonds', NF_INT, i_dim)
+        abrid = def_var(ncid, 'accum_bond_rotation', NF_DOUBLE, i_dim)
+
         if (mts) then
-          cid = def_var(ncid, 'conglom_id', NF_INT, i_dim)
-          uvelpid = def_var(ncid, 'uvel_prev', NF_DOUBLE, i_dim)
-          vvelpid = def_var(ncid, 'vvel_prev', NF_DOUBLE, i_dim)
+          axnfid = def_var(ncid, 'axn_fast', NF_DOUBLE, i_dim)
+          aynfid = def_var(ncid, 'ayn_fast', NF_DOUBLE, i_dim)
+          bxnfid = def_var(ncid, 'bxn_fast', NF_DOUBLE, i_dim)
+          bynfid = def_var(ncid, 'byn_fast', NF_DOUBLE, i_dim)
+        endif
+
+        if (monitor_energy) then
+          eeid = def_var(ncid, 'Ee', NF_DOUBLE, i_dim)
+          edid = def_var(ncid, 'Ed', NF_DOUBLE, i_dim)
+          aeid = def_var(ncid, 'Eext', NF_DOUBLE, i_dim)
+          eecid = def_var(ncid, 'Ee_contact', NF_DOUBLE, i_dim)
+          edcid = def_var(ncid, 'Ed_contact', NF_DOUBLE, i_dim)
+          efid = def_var(ncid, 'Efrac', NF_DOUBLE, i_dim)
         endif
       endif
 
@@ -1502,15 +1554,49 @@ logical :: io_is_in_append_mode
         call put_att(ncid, cnid, 'units', 'none')
         call put_att(ncid, hiid, 'long_name', 'sea ice thickness')
         call put_att(ncid, hiid, 'units', 'm')
+        call put_att(ncid, axnid, 'long_name', 'explicit zonal acceleration')
+        call put_att(ncid, axnid, 'units', 'm')
+        call put_att(ncid, aynid, 'long_name', 'explicit meridional acceleration')
+        call put_att(ncid, aynid, 'units', 'm')
+        call put_att(ncid, bxnid, 'long_name', 'implicit zonal acceleration')
+        call put_att(ncid, bxnid, 'units', 'm')
+        call put_att(ncid, bynid, 'long_name', 'implicit meridional acceleration')
+        call put_att(ncid, bynid, 'units', 'm')
         call put_att(ncid, hsid, 'long_name', 'halo status')
         call put_att(ncid, hsid, 'units', 'non-dim')
+        call put_att(ncid, odid, 'long_name', 'ocean_depth')
+        call put_att(ncid, odid, 'units', 'm')
+        call put_att(ncid, nbid, 'long_name', 'number of bonds')
+        call put_att(ncid, nbid, 'units', 'dimensionless')
+        call put_att(ncid, abrid, 'long_name', 'accumulated bond rotation')
+        call put_att(ncid, abrid, 'units', 'radians')
         if (mts) then
-          call put_att(ncid, cid, 'long_name', 'conglomerate id')
-          call put_att(ncid, cid, 'units', 'dimensionless')
           call put_att(ncid, uvelpid, 'long_name', 'zonal speed mts')
           call put_att(ncid, uvelpid, 'units', 'm/s')
           call put_att(ncid, vvelpid, 'long_name', 'meridional speed mts')
           call put_att(ncid, vvelpid, 'units', 'm/s')
+          call put_att(ncid, axnfid, 'long_name', 'explicit fast step zonal acceleration')
+          call put_att(ncid, axnfid, 'units', 'm')
+          call put_att(ncid, aynfid, 'long_name', 'explicit fast step meridional acceleration')
+          call put_att(ncid, aynfid, 'units', 'm')
+          call put_att(ncid, bxnfid, 'long_name', 'implicit fast step zonal acceleration')
+          call put_att(ncid, bxnfid, 'units', 'm')
+          call put_att(ncid, bynfid, 'long_name', 'implicit fast step meridional acceleration')
+          call put_att(ncid, bynfid, 'units', 'm')
+        endif
+        if (monitor_energy) then
+          call put_att(ncid, eeid, 'long_name', 'bonded elastic energy')
+          call put_att(ncid, eeid, 'units', 'J')
+          call put_att(ncid, edid, 'long_name', 'bonded damping energy')
+          call put_att(ncid, edid, 'units', 'J')
+          call put_att(ncid, aeid, 'long_name', 'external energy')
+          call put_att(ncid, aeid, 'units', 'J')
+          call put_att(ncid, eecid, 'long_name', 'contact elastic energy')
+          call put_att(ncid, eecid, 'units', 'J')
+          call put_att(ncid, edcid, 'long_name', 'contact damping energy')
+          call put_att(ncid, edcid, 'units', 'J')
+          call put_att(ncid, efid, 'long_name', 'dissipated fracture energy')
+          call put_att(ncid, efid, 'units', 'J')
         endif
       endif
     endif
@@ -1538,6 +1624,8 @@ logical :: io_is_in_append_mode
       if (.not. save_short_traj) then
         call put_double(ncid, uvelid, i, this%uvel)
         call put_double(ncid, vvelid, i, this%vvel)
+        call put_double(ncid, uvelpid, i, this%uvel_prev)
+        call put_double(ncid, vvelpid, i, this%vvel_prev)
         call put_double(ncid, uoid, i, this%uo)
         call put_double(ncid, void, i, this%vo)
         call put_double(ncid, uiid, i, this%ui)
@@ -1555,12 +1643,31 @@ logical :: io_is_in_append_mode
         call put_double(ncid, sssid, i, this%sss)
         call put_double(ncid, cnid, i, this%cn)
         call put_double(ncid, hiid, i, this%hi)
+        call put_double(ncid, axnid, i, this%axn)
+        call put_double(ncid, aynid, i, this%ayn)
+        call put_double(ncid, bxnid, i, this%bxn)
+        call put_double(ncid, bynid, i, this%byn)
         call put_double(ncid, hsid, i, this%halo_berg)
+        call put_double(ncid, odid, i, this%od)
+        call put_int(ncid, nbid, i, this%n_bonds)
+        call put_double(ncid, abrid, i, this%accum_bond_rotation)
+
         if (mts) then
-          call put_int(ncid, cid, i, this%conglom_id)
-          call put_double(ncid, uvelpid, i, this%uvel_prev)
-          call put_double(ncid, vvelpid, i, this%vvel_prev)
+          call put_double(ncid, axnfid, i, this%axn_fast)
+          call put_double(ncid, aynfid, i, this%ayn_fast)
+          call put_double(ncid, bxnfid, i, this%bxn_fast)
+          call put_double(ncid, bynfid, i, this%byn_fast)
         endif
+
+        if (monitor_energy) then
+          call put_double(ncid, eeid, i, this%Ee)
+          call put_double(ncid, edid, i, this%Ed)
+          call put_double(ncid, aeid, i, this%Eext)
+          call put_double(ncid, eecid, i, this%Ee_contact)
+          call put_double(ncid, edcid, i, this%Ed_contact)
+          call put_double(ncid, efid, i, this%Efrac)
+        endif
+
       endif
       next=>this%next
       deallocate(this)
@@ -1575,6 +1682,238 @@ logical :: io_is_in_append_mode
   call mpp_clock_end(clock_trw)
 
 end subroutine write_trajectory
+
+!> Write a trajectory-based diagnostics file for bonds
+subroutine write_bond_trajectory(trajectory)
+! Arguments
+type(bond_xyt), pointer :: trajectory !< An iceberg bond trajectory
+! Local variables
+integer :: iret, ncid, i_dim, i
+integer :: lonid, latid, yearid, dayid, lenid,n1id, n2id
+integer :: rotid,rrotid,nsid,nsrid
+integer :: idcnt1_id, idcnt2_id, idij1_id, idij2_id, eeid, edid
+character(len=34) :: filename
+character(len=7) :: pe_name
+type(bond_xyt), pointer :: this, next
+integer :: stderrunit, cnt, ij
+!I/O vars
+type(bond_xyt), pointer :: traj4io=>null()
+integer :: ntrajs_sent_io,ntrajs_rcvd_io
+integer :: from_pe,np
+type(buffer), pointer :: obuffer_io=>null(), ibuffer_io=>null()
+logical :: io_is_in_append_mode
+
+  stderrunit=stderr()  ! Get the stderr unit number
+  traj4io=>null()
+  ibuffer_io=>null(); obuffer_io=>null()
+
+  !Assemble the list of trajectories from all pes in this I/O tile
+  call mpp_clock_begin(clock_btrp)
+
+  !First add the trajs on the io_tile_root_pe (if any) to the I/O list
+  if(is_io_tile_root_pe .OR. force_all_pes_traj ) then
+    if(associated(trajectory)) then
+      this=>trajectory
+      do while (associated(this))
+        call append_bond_posn(traj4io, this)
+        this=>this%next
+      enddo
+      trajectory => null()
+    endif
+  endif
+
+  if(.NOT. force_all_pes_traj ) then
+    !Now gather and append the bergs from all pes in the io_tile to the list on corresponding io_tile_root_pe
+    ntrajs_sent_io =0; ntrajs_rcvd_io =0
+
+    if(is_io_tile_root_pe) then
+      !Receive trajs from all pes in this I/O tile !FRAGILE!SCARY!
+      do np=2,size(io_tile_pelist) ! Note: np starts from 2 to exclude self
+        from_pe=io_tile_pelist(np)
+        call mpp_recv(ntrajs_rcvd_io, glen=1, from_pe=from_pe, tag=COMM_TAG_11)
+        if (ntrajs_rcvd_io .gt. 0) then
+          call increase_ibuffer(ibuffer_io, ntrajs_rcvd_io,buffer_width_bond_traj)
+          call mpp_recv(ibuffer_io%data, ntrajs_rcvd_io*buffer_width_bond_traj,from_pe=from_pe, tag=COMM_TAG_12)
+          do i=1, ntrajs_rcvd_io
+            call unpack_bond_traj_from_buffer2(traj4io, ibuffer_io, i)
+          enddo
+        endif
+      enddo
+    else
+      ! Pack and send trajectories to the root PE for this I/O tile
+      do while (associated(trajectory))
+        ntrajs_sent_io = ntrajs_sent_io +1
+        call pack_bond_traj_into_buffer2(trajectory, obuffer_io, ntrajs_sent_io)
+        this => trajectory ! Need to keep pointer in order to free up the links memory
+        trajectory => trajectory%next ! This will eventually result in trajectory => null()
+        deallocate(this) ! Delete the link from memory
+      enddo
+
+      call mpp_send(ntrajs_sent_io, plen=1, to_pe=io_tile_root_pe, tag=COMM_TAG_11)
+      if (ntrajs_sent_io .gt. 0) then
+        call mpp_send(obuffer_io%data, ntrajs_sent_io*buffer_width_bond_traj, to_pe=io_tile_root_pe, tag=COMM_TAG_12)
+      endif
+    endif
+  endif !.NOT. force_all_pes_traj
+
+  call mpp_clock_end(clock_btrp)
+
+  !Now start writing in the io_tile_root_pe if there are any bergs in the I/O list
+  call mpp_clock_begin(clock_btrw)
+
+  if((force_all_pes_traj .OR. is_io_tile_root_pe) .AND. associated(traj4io)) then
+
+    call get_instance_filename("bond_trajectories.nc", filename)
+    if(io_tile_id(1) .ge. 0 .AND. .NOT. force_all_pes_traj) then !io_tile_root_pes write
+      if(io_npes .gt. 1) then !attach tile_id  to filename only if there is more than one I/O pe
+        if (io_tile_id(1)<10000) then
+          write(filename,'(A,".",I4.4)') trim(filename), io_tile_id(1)
+        else
+          write(filename,'(A,".",I6.6)') trim(filename), io_tile_id(1)
+        endif
+      endif
+    else !All pes write, attach pe# to filename
+      if (mpp_npes()<10000) then
+        write(filename,'(A,".",I4.4)') trim(filename), mpp_pe()
+      else
+        write(filename,'(A,".",I6.6)') trim(filename), mpp_pe()
+      endif
+    endif
+
+    io_is_in_append_mode = .false.
+    iret = nf_create(filename, NF_NOCLOBBER, ncid)
+    if (iret .ne. NF_NOERR) then
+      iret = nf_open(filename, NF_WRITE, ncid)
+      io_is_in_append_mode = .true.
+      if (iret .ne. NF_NOERR) write(stderrunit,*) 'KID, write_bond_trajectory: nf_open failed'
+    endif
+    if (verbose) then
+      if (io_is_in_append_mode) then
+        write(*,'(2a)') 'KID, write_bond_trajectory: appending to ',filename
+      else
+        write(*,'(2a)') 'KID, write_bond_trajectory: creating ',filename
+      endif
+    endif
+
+    if (io_is_in_append_mode) then
+      iret = nf_inq_dimid(ncid, 'i', i_dim)
+      if (iret .ne. NF_NOERR) write(stderrunit,*) 'KID, write_bond_trajectory: nf_inq_dimid i failed'
+      lonid = inq_varid(ncid, 'lon');         latid = inq_varid(ncid, 'lat')
+      yearid = inq_varid(ncid, 'year');       dayid = inq_varid(ncid, 'day')
+      lenid = inq_varid(ncid, 'length');
+      n1id = inq_varid(ncid, 'n1');           n2id = inq_varid(ncid, 'n2')
+
+      !fracture params
+      rotid = inq_varid(ncid, 'rotation');    rrotid = inq_varid(ncid, 'rel_rotation')
+      nsid = inq_varid(ncid, 'n_strain');     nsrid = inq_varid(ncid, 'n_strain_rate')
+
+      idcnt1_id = inq_varid(ncid, 'id_cnt1'); idij1_id = inq_varid(ncid, 'id_ij1')
+      idcnt2_id = inq_varid(ncid, 'id_cnt2'); idij2_id = inq_varid(ncid, 'id_ij2')
+
+      if (monitor_energy) then
+        eeid = inq_varid(ncid, 'Ee'); edid = inq_varid(ncid, 'Ed')
+      endif
+
+    else
+      ! Dimensions
+      iret = nf_def_dim(ncid, 'i', NF_UNLIMITED, i_dim)
+      if (iret .ne. NF_NOERR) write(stderrunit,*) 'KID, write_bond_trajectory: nf_def_dim i failed'
+
+      ! Variables
+      lonid = def_var(ncid, 'lon', NF_DOUBLE, i_dim);      latid = def_var(ncid, 'lat', NF_DOUBLE, i_dim)
+      yearid = def_var(ncid, 'year', NF_INT, i_dim);       dayid = def_var(ncid, 'day', NF_DOUBLE, i_dim)
+      lenid = def_var(ncid, 'length', NF_DOUBLE, i_dim);
+      n1id = def_var(ncid, 'n1', NF_DOUBLE, i_dim);        n2id = def_var(ncid, 'n2', NF_DOUBLE, i_dim)
+
+      !fracture params
+      rotid = def_var(ncid, 'rotation', NF_DOUBLE, i_dim); rrotid = def_var(ncid, 'rel_rotation', NF_DOUBLE, i_dim)
+      nsid = def_var(ncid, 'n_strain', NF_DOUBLE, i_dim);  nsrid = def_var(ncid, 'n_strain_rate', NF_DOUBLE, i_dim)
+
+      idcnt1_id = def_var(ncid, 'id_cnt1', NF_INT, i_dim); idij1_id = def_var(ncid, 'id_ij1', NF_INT, i_dim)
+      idcnt2_id = def_var(ncid, 'id_cnt2', NF_INT, i_dim); idij2_id = def_var(ncid, 'id_ij2', NF_INT, i_dim)
+
+      if (monitor_energy) then
+        eeid = def_var(ncid, 'Ee', NF_DOUBLE, i_dim); edid = def_var(ncid, 'Ed', NF_DOUBLE, i_dim)
+      endif
+
+      ! Attributes
+      iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_major_version', NF_INT, 1, 0)
+      iret = nf_put_att_int(ncid, NCGLOBAL, 'file_format_minor_version', NF_INT, 1, 1)
+      call put_att(ncid, lonid, 'long_name', 'longitude');    call put_att(ncid, lonid, 'units', 'degrees_E')
+      call put_att(ncid, latid, 'long_name', 'latitude');     call put_att(ncid, latid, 'units', 'degrees_N')
+      call put_att(ncid, yearid, 'long_name', 'year');        call put_att(ncid, yearid, 'units', 'years')
+      call put_att(ncid, dayid, 'long_name', 'year day');     call put_att(ncid, dayid, 'units', 'days')
+      call put_att(ncid, lenid, 'long_name', 'length');       call put_att(ncid, lenid, 'units', 'm')
+      call put_att(ncid, n1id, 'long_name', 'unit vector 1'); call put_att(ncid, n1id, 'units', 'non-dim')
+      call put_att(ncid, n2id, 'long_name', 'unit vector 2'); call put_att(ncid, n2id, 'units', 'non-dim')
+
+      !fracture params
+      call put_att(ncid, rotid, 'long_name', 'rotation');           call put_att(ncid, rotid, 'units', 'rad')
+      call put_att(ncid, rrotid, 'long_name', 'relative rotation'); call put_att(ncid, rrotid, 'units', 'rad')
+      call put_att(ncid, nsid, 'long_name', 'normal strain');       call put_att(ncid, nsid, 'units', 'non-dim')
+      call put_att(ncid, nsrid, 'long_name', 'normal strain-rate'); call put_att(ncid, nsrid, 'units', '1/seconds')
+
+      call put_att(ncid, idcnt1_id, 'long_name', 'counter component of first connected iceberg id')
+      call put_att(ncid, idcnt1_id, 'units', 'dimensionless')
+      call put_att(ncid, idij1_id, 'long_name', 'position component of first connected iceberg id')
+      call put_att(ncid, idij1_id, 'units', 'dimensionless')
+      call put_att(ncid, idcnt2_id, 'long_name', 'counter component of second connected iceberg id')
+      call put_att(ncid, idcnt2_id, 'units', 'dimensionless')
+      call put_att(ncid, idij2_id, 'long_name', 'position component of second connected iceberg id')
+      call put_att(ncid, idij2_id, 'units', 'dimensionless')
+
+      if (monitor_energy) then
+        call put_att(ncid, eeid, 'long_name', 'elastic energy')
+        call put_att(ncid, eeid, 'units', 'J')
+        call put_att(ncid, edid, 'long_name', 'damping energy')
+        call put_att(ncid, edid, 'units', 'J')
+      endif
+    endif
+
+    ! End define mode
+    iret = nf_enddef(ncid)
+
+    ! Write variables
+    this=>traj4io
+    if (io_is_in_append_mode) then
+      iret = nf_inq_dimlen(ncid, i_dim, i)
+      if (iret .ne. NF_NOERR) write(stderrunit,*) 'KID, write_bond_trajectory: nf_inq_dimlen i failed'
+    else
+      i = 0
+    endif
+    do while (associated(this))
+      i=i+1
+      call put_double(ncid, lonid, i, this%lon);    call put_double(ncid, latid, i, this%lat)
+      call put_int(ncid, yearid, i, this%year);     call put_double(ncid, dayid, i, this%day)
+      call put_double(ncid, lenid, i, this%length);
+      call put_double(ncid, n1id, i, this%n1);      call put_double(ncid, n2id, i, this%n2)
+
+      !fracture params
+      call put_double(ncid,rotid,i,this%rotation);  call put_double(ncid,rrotid,i,this%rel_rotation)
+      call put_double(ncid,nsid,i,this%n_strain);   call put_double(ncid,nsrid,i,this%n_strain_rate)
+
+      call split_id(this%id1, cnt, ij)
+      call put_int(ncid, idcnt1_id, i, cnt);        call put_int(ncid, idij1_id, i, ij)
+      call split_id(this%id2, cnt, ij)
+      call put_int(ncid, idcnt2_id, i, cnt);        call put_int(ncid, idij2_id, i, ij)
+
+      if (monitor_energy) then
+        call put_double(ncid,eeid,i,this%Ee);   call put_double(ncid,edid,i,this%Ed)
+      endif
+
+      next=>this%next
+      deallocate(this)
+      this=>next
+    enddo
+
+    ! Finish up
+    iret = nf_close(ncid)
+    if (iret .ne. NF_NOERR) write(stderrunit,*) 'KID, write_bond_trajectory: nf_close failed',mpp_pe(),filename
+
+  endif !(is_io_tile_root_pe .AND. associated(traj4io))
+  call mpp_clock_end(clock_btrw)
+
+end subroutine write_bond_trajectory
 
 !> Returns netcdf id of variable
 integer function inq_var(ncid, var, unsafe)

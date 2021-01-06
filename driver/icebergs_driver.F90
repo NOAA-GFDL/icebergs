@@ -1,5 +1,6 @@
 program icebergs_driver
 
+use constants_mod, only: pi
 use fms_mod, only : fms_init
 use fms_mod, only : fms_end
 use fms_mod, only : open_namelist_file
@@ -55,6 +56,7 @@ logical :: debug=.true. !< If true, do some debugging
 logical :: saverestart=.false. !< If true, save a berg restart file at the end
 logical :: collision_test=.false.
 logical :: chaotic_test=.false.
+logical :: grounding_test=.false.
 integer :: halo=1 !< Width of halo in parallel decomposition
 real :: ibdt=3600.0
 real :: ibuo=0.1
@@ -62,10 +64,13 @@ real :: ibvo=0.0
 real :: ibui=0.0
 real :: ibvi=0.0
 real :: gridres=1.e3
+real :: bump_deptht=0
 integer :: ibhrs=2
 integer :: nmax = 2000000000 !<max number of iteration
+integer :: write_time_inc=1
 namelist /icebergs_driver_nml/ debug, ni, nj, halo, ibhrs, ibdt, ibuo, ibvo, nmax, &
-       saverestart,ibui,ibvi,collision_test,chaotic_test,gridres
+  saverestart,ibui,ibvi,collision_test,chaotic_test,grounding_test,&
+  gridres,write_time_inc,bump_depth
 ! For loops
 integer :: isc !< Start of i-index for computational domain (used for loops)
 integer :: iec !< End of i-index for computational domain (used for loops)
@@ -108,6 +113,10 @@ real, dimension(:,:), allocatable :: sss !< Sea-surface salinity (1e-3)
 real, dimension(:,:), pointer :: mass_berg !< Mass of bergs (kg)
 real, dimension(:,:), pointer  :: ustar_berg !< Friction velocity on base of bergs (m/s)
 real, dimension(:,:), pointer :: area_berg !< Area of bergs (m2)
+!grounding_test
+real :: a,bx,by,c,xc,yc !gaussian params
+!grounding/collision tests
+real :: mid
 
 call cpu_time(time_begin)
 
@@ -194,6 +203,27 @@ if (chaotic_test) then
   enddo;enddo
 endif
 
+if (grounding_test) then
+  lat(:,:)=lat(:,:)-15000.0
+  !assign land cells at the N and S portions of the domain.
+  !input.nml: set coastal drift parameter to prevent grounding
+  do j=jsd,jed; do i=isd,ied
+    if (lat(i,j)<=0.0+2*gridres .or. lat(i,j)>=30.e3-2*gridres) wet(i,j)=0.0
+  enddo;enddo
+
+  !introduce gaussian bump to bathymetry
+  a = 1000.0-bump_depth !max height(m)
+  c = 2.5e3; !controls width
+  bx = 15.e3; by = 15.e3
+  do j=jsd,jed; do i=isd,ied
+    xc=lon(i,j)-(gridres/2.); yc=lat(i,j)-(gridres/2.) !define at cell centers
+    depth(i,j)=a*exp(-((xc-bx)*(xc-bx)/(2.*c*c)+(yc-by)*(yc-by)/(2.*c*c)))
+  enddo; enddo
+  print *,'min, max depth',minval(depth(:,:)),maxval(depth(:,:))
+  depth = 1000.0-depth
+endif
+
+
 call set_calendar_type(THIRTY_DAY_MONTHS)
 time = set_date(1,1,1,0,0,0)
 dt = ibdt
@@ -232,12 +262,26 @@ cn = 0.0 !sea-ice concentration (nondim)
 hi = 0.0 !sea-ice thickness (m)
 calving_hflx = 0.0 !calving heat flux (W/m2)
 
-if (collision_test) then
+if (collision_test .or. grounding_test) then
+  if (grounding_test) then
+    mid=15.e3
+  else
+    mid=10.e3
+  endif
+
   do j=jsd,jed; do i=isd,ied
-    if (lon(i,j)>10.e3 .or. lon(i,j)<=0.0 .or. lat(i,j)==10.e3) then
+    if (lon(i,j)>mid .or. lon(i,j)<=0.0 .or. lat(i,j)==mid) then
       vo(i,j)=0.0
-    else
-      if (lat(i,j)>10.e3) then
+      ! if (grounding_test .and. lon(i,j)>mid+5.e3) then
+      !   if (lat(i,j)>mid) then
+      !     vo(i,j)=+ibvo
+      !   else
+      !     vo(i,j)=-ibvo
+      !   endif
+      ! endif
+
+     else
+      if (lat(i,j)>mid) then
         vo(i,j)=-ibvo
       else
         vo(i,j)=ibvo
@@ -284,7 +328,7 @@ ns = 1 !timestep counter
 Time_end = increment_date(Time,0,0,0,ibhrs,0,0)
 
 do while ((ns < nmax) .and. (Time < Time_end))
-  if (mpp_pe()==0 .and. debug) then
+  if (mpp_pe()==0 .and. debug .and. mod(ns-1,write_time_inc)==0) then
     call get_date(Time, iyr, imon, iday, ihr, imin, isec)
     write(*,*),''
     write(*,'(a)'),'-------------------------------------------'

@@ -1,53 +1,71 @@
-!chksum different than below after setting uvel0=u_star at start of accel_mts for bergs%MTS_part==1
-
-!TARGET CHKSUM (1 hr time increments, MTS w/ 20 sub-steps, contact at 1.5e3 m, contact spring 1.e-7, spring_coef 1.0e-5):
-!Total number of bonds is:           52
-!KID, bergs_chksum: write_restart berg chksum = -1984749888 chksum2= 2128479089 chksum3= 609798238  chksum4= 609798238  chksum5= 0            #= 16
-!KID, grd_chksum2 : # of bergs/cell chksum    = 0           chksum2= 0           min= 0.000000000E+00 max= 0.000000000E+00 mean= 0.000000000E+00 rms= 0.000000000E+00 sd= 0.000000000E+00
-!KID, grd_chksum3 : write stored_ice chksum   = -540079793  chksum2= -1237287029 min= 6.393358811E+05 max= 7.380127765E+11 mean= 8.033602570E+10 rms= 1.613270384E+11 sd= 1.399018810E+11
-!KID, grd_chksum2 : write stored_heat chksum  = 0           chksum2= 0           min= 0.000000000E+00 max= 0.000000000E+00 mean= 0.000000000E+00 rms= 0.000000000E+00 sd= 0.000000000E+00
+!KID, bergs_chksum: write_restart berg chksum=            -195625967 chksum2=            1455880446 chksum3=            -243405929 chksum4=            -243405929 chksum5=            -495829423 #=                    67
+!KID, grd_chksum2:    # of bergs/cell chksum=                     0 chksum2=                     0 min= 0.000000000E+00 max= 0.000000000E+00 mean= 0.000000000E+00 rms= 0.000000000E+00 sd= 0.000000000E+00
+! Total number of bonds is:          240 
+! All iceberg bonds are connected and working well
+!KID, grd_chksum3:   write stored_ice chksum=             859876028 chksum2=            -702294156 min= 0.000000000E+00 max= 7.389503907E+11 mean= 4.320307812E+10 rms= 1.148723635E+11 sd= 1.064384984E+11
 
 
 &icebergs_driver_nml
-  ni=20 !number of elements, x direction
-  nj=20 !number of elements, y direction
-  ibdt=3600.0 !seconds
-  ibuo=0.2 !ocean x velocity
-  ibvo=0.2 !ocean y velocity
+  ni=45 !30 !number of elements, x direction
+  nj=45 !30 !number of elements, y direction
+  ibdt=1800.0 !seconds
+  ibuo=0.1 !ocean x velocity
+  ibvo=0.0 !1 !2 !ocean y velocity
   ibui=0.0 !ice x velocity
   ibvi=0.0 !ice y velocity
-  ibhrs=48 !total simulation hours
-  nmax=99999999 !max number of timesteps
+  ibhrs=212!480 !20 days !1440 !960 !total simulation hours (60 !40 days)
+  write_time_inc = 48 !increment at which time is written to screen
+  nmax=999999999 !max number of timesteps
   saverestart=.true.
   halo=3
-  debug=.false.
-  collision_test=.true. !specific to the current test, must be true here
+  debug=.true.
+  collision_test=.false.
+  grounding_test=.true.
+  bump_depth=200.0 !(m) depth of top of gaussian bump below sea level 
 /
 
 &icebergs_nml
-
+!200 n:0.0278 vo=.1
+!200 n:0.0325 or 0.03 vo=0
     !defaults given in parentheses:
-    new_mts=.false.
     mts=.true. !(F) for using the Multiple Time Stepping Velocity Verlet scheme
-    mts_sub_steps=20 !1 !30 !(-1) # of mts sub-steps (-1=automatically determine # from spring const)
-    contact_distance=1.5e3 !(0) unbonded bergs contact at max(contact_dist,sum of their radii)
-    contact_spring_coef=1.e-7!(default=spring_coeff) Berg spring coeff for collisions
+    mts_sub_steps=10 !20 !(-1) # of mts sub-steps (-1=automatically determine # from spring const)
+    contact_distance=1.e3 !(0) unbonded bergs contact at max(contact_dist,sum of their radii)
+    contact_spring_coef=1.e-7 !!5.e-7!(default=spring_coeff) Berg spring coeff for collisions
     debug_write=.false. !(F)sets traj_sample_hours=traj_write_hours & includes halo bergs in write
-    remove_unused_bergs=.false. !(T) remove unneeded bergs after PEs transfers
+    cdrag_grounding=3.16e6 !200.0 !for power-law-type friction
+    h_to_init_grounding=200.0 !300.0 !150.0 !300.
+    ewsame=.false. !(F) set T if periodic and 2 PEs along the x (zonal) direction
+    remove_unused_bergs=.true. !(T) remove unneeded bergs after PEs transfers
+
+    fracture_criterion='strain' !('none') 'strain_rate','strain',or 'none'
+    !old !frac_thres_n strain, 200 m bd  0.045, 0.04, 
+    !old !frac_trhes_t strain, 200 m bd: 0.08 , 0.1 .
+    !old !frac_thres_n sr, 200 m bd: 2.5e-5 
+    !old !frac_thres_t sr, 200 m bd: 5.e-5
+    frac_thres_n= 0.025 !0.04 !0.0415 !0.045 !0.05
+    frac_thres_t= 0.0705 !0.095 !0.0925 !0.1 !0.09
+
+    !for scale_damping_by_pmag=.false.
+    !frac_thres_n = 0.018 !0.02
+    !frac_thres_t = 0.05076 !0.0564
 
     halo=3 !(4) halo width
-    Lx=20000. ! (360.) Length of X-domain. For periodicity (use a huge number for non-periodic)
+    Lx=45000. ! (360.) Length of X-domain. For periodicity (use a huge number for non-periodic)
     grid_is_latlon=.false. !(T) 'T'=lat/lon grid, uses earth radius to convert to distance
-    grid_is_regular=.True. !(T) Point in cell can be found assuming regular Cartesian grid
+    grid_is_regular=.true. !(T) Point in cell can be found assuming regular Cartesian grid
     hexagonal_icebergs=.true. !(F)'T'=bergs are rectangles,'F'=bergs are hex (for mass spread)
     Static_icebergs=.False. ! (T) True=icebergs do no move
 
     rho_bergs=850. ! (850) iceberg density
     spring_coef=1.e-5 !(1.e-8) Spring const for berg interactions (dflt~highest stable value)
+    !tangent_spring_coef=3.85e-6 !10 !6
     bond_coef=1.e-8 ! (1.e-8) Spring const for berg bonds - not being used right now
     radial_damping_coef=1.e-4 ! (1.e-4) Coeff for rel berg motion damping (radial component)
-    tangental_damping_coef=2.e-5 !(2.e-5) Coeff for rel berg motion damping (tangential comp.)
+    tangental_damping_coef=0.0!2.e-5 !(2.e-5) Coeff for rel berg motion damping (tangential comp.)
+    scale_damping_by_pmag=.true. !(T) Scales damping by mag of (proj matrix \cdot relvel)
     critical_interaction_damping_on=.true. !(T) Sets damping on rel berg vel to crit val
+    tang_crit_int_damp_on=.true. !(F) critical interaction tamping for tangential component?
     LoW_ratio=1.5 ! (1.5) Initial ratio L/W for newly calved icebergs
     bergy_bit_erosion_fraction=0. ! (0.) Fraction of erosion melt flux to divert to bergy bits
     sicn_shift=0. ! (0) Shift of sea-ice concent. in erosion flux modulation (0<sicn_shift<1)
@@ -67,7 +85,7 @@
     tau_calving=0. ! (0.) Time scale (yrs) for smoothing out calving field
     tip_parameter=0. !(0.)For override berg rolling crit ratio (0.=get param from rhoi&rhoo)
     grounding_fraction=0. ! (0.) Fraction of water column depth at which grounding occurs
-    coastal_drift=0.4 !(0.)Vel added to currents to cause bergs to drift away from land cells
+    coastal_drift=1.0 !(0.)Vel added to currents to cause bergs to drift away from land cells
     tidal_drift=0. !(0.)Amp of stoch. tidal vel added to currents to cause random berg drift
     Runge_not_Verlet=.false. !(T) True=Runge Kutta, False=Verlet.
     use_mixed_melting=.false.!(F) 'T' partly determ. melt frm 3eq model(uses BergParams&Bond #)
@@ -96,13 +114,14 @@
     input_freq_distribution=.false. !(F)input dist is: 'T' freq dist or 'F' mass dist
     use_old_spreading=.false. !(T)spreads berg mass as if  berg is 1 grid cell wide (for rect)
     max_bonds=6 ! (6) Max # of bonds passed between processors
-    internal_bergs_for_drag=.false. !(F) True reduces side drag for bonded bergs in momentum eqn.
+    internal_bergs_for_drag=.true. !(F) True reduces side drag for bonded bergs in momentum eqn.
 
-    verbose=.true. !(F) Be verbose to stderr
-    verbose_hrs=24 ! (24) Period between verbose messages
-    traj_sample_hrs=0.5 !1 !(24) sampling period for trajectory storage
-    traj_write_hrs=0 ! (480) Period for writing sampled trajectories to disk
-    budget=.true. !(T) Calculate budgets
+    verbose=.false. !(F) Be verbose to stderr
+    verbose_hrs=24000 ! (24) Period between verbose messages
+    traj_sample_hrs=6 !(24) sampling period for trajectory storage
+    traj_write_hrs=6 !(480) Period for writing sampled trajectories to disk
+    save_bond_traj=.true. !(F) If T, saves bond trajectories in a separate file
+    budget=.false. !(T) Calculate budgets
     debug=.false. !(F) Turn on debugging
     really_debug=.false. !(F) Turn on debugging
     halo_debugging=.false. ! (F) Use for debugging halos (remove when its working)
