@@ -1508,7 +1508,7 @@ logical :: halo_debugging
     do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
       this=>bergs%list(grdi,grdj)%first
       do while (associated(this))
-          write(stderrunit,'(a,5i)') 'A', this%id, mpp_pe(), int(this%halo_berg), grdi, grdj
+        write(stderrunit,'(a,5i8)') 'A', this%id, mpp_pe(), int(this%halo_berg), grdi, grdj
         this=>this%next
       enddo
     enddo; enddo
@@ -1554,9 +1554,9 @@ logical :: halo_debugging
   if (halo_debugging) then
     do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
       this=>bergs%list(grdi,grdj)%first
-        do while (associated(this))
-        write(stderrunit,'(a,5i)') 'B', this%id, mpp_pe(), int(this%halo_berg), grdi, grdj
-      this=>this%next
+      do while (associated(this))
+        write(stderrunit,'(a,5i8)') 'B', this%id, mpp_pe(), int(this%halo_berg), grdi, grdj
+        this=>this%next
       enddo
     enddo; enddo
   endif
@@ -1758,7 +1758,7 @@ logical :: halo_debugging
     do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
       this=>bergs%list(grdi,grdj)%first
       do while (associated(this))
-        write(stderrunit,'(a,5i)')  'C', this%id, mpp_pe(), int(this%halo_berg),  grdi, grdj
+        write(stderrunit,'(a,5i8)') 'C', this%id, mpp_pe(), int(this%halo_berg),  grdi, grdj
         this=>this%next
       enddo
     enddo; enddo
@@ -1885,7 +1885,7 @@ integer :: nbergs_to_send_n, nbergs_to_send_s
     do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
       this=>bergs%list(grdi,grdj)%first
       do while (associated(this))
-        write(stderrunit,'(a,5i)')  'transfer_mts_bergs', this%id, mpp_pe(), int(this%halo_berg),  grdi, grdj
+        write(stderrunit,'(a,5i8)') 'transfer_mts_bergs', this%id, mpp_pe(), int(this%halo_berg),  grdi, grdj
         this=>this%next
       enddo
     enddo; enddo
@@ -2150,7 +2150,8 @@ recursive subroutine mts_pack_contact_bergs(bergs,berg,dir,pfix,nbergs_to_send,i
   type(icebergs_gridded), pointer :: grd
   type(iceberg), pointer :: other_berg
   integer :: nc_x,nc_y,grdj,grdi,js,je,is,ie
-  integer :: current_conglom_id,radial_contact
+  integer :: current_conglom_id
+  logical :: radial_contact
   real :: R1,R2,dlon,dlat,lat_ref,dx_dlon,dy_dlat,r_dist,crit_dist,current_halo_id
   real :: rdenom
   logical :: pack_contacts
@@ -4650,7 +4651,7 @@ type(bond) , pointer :: current_bond
           if (current_bond%other_berg%id .ne. current_bond%other_id) then
             !print *, 'Bond matching', berg%id,current_bond%other_berg%id, current_bond%other_id,&
             !  berg%halo_berg,current_bond%other_berg%halo_berg ,mpp_pe()
-            write(*,'(a,3i,2i3,i4)')'Bond matching :',berg%id,current_bond%other_berg%id, current_bond%other_id,&
+            write(*,'(a,3i8,2i3,i4)')'Bond matching :',berg%id,current_bond%other_berg%id, current_bond%other_id,&
               int(berg%halo_berg),current_bond%other_berg%halo_berg ,mpp_pe()
             call error_mesg('KID, show all bonds:', 'The bonds are not matching properly!', FATAL)
           endif
@@ -4814,7 +4815,7 @@ subroutine update_latlon(bergs)
       do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
         berg=>bergs%list(grdi,grdj)%first
         do while (associated(berg))
-          if ((.not. bergs%mts) .or. (abs(berg%halo_berg .le. 1))) then
+          if ((.not. bergs%mts) .or. (berg%halo_berg .le. 1)) then
             !for bergs%mts skip halo elements that only exist due to their
             !inclusion in a conglomerate (berg%halo_berg > 1). Their coords have
             !already been corrected (if needed), as the scheme below would fail.
