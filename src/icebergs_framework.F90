@@ -2150,7 +2150,8 @@ recursive subroutine mts_pack_contact_bergs(bergs,berg,dir,pfix,nbergs_to_send,i
   type(icebergs_gridded), pointer :: grd
   type(iceberg), pointer :: other_berg
   integer :: nc_x,nc_y,grdj,grdi,js,je,is,ie
-  integer :: current_conglom_id,radial_contact
+  integer :: current_conglom_id
+  logical :: radial_contact
   real :: R1,R2,dlon,dlat,lat_ref,dx_dlon,dy_dlat,r_dist,crit_dist,current_halo_id
   real :: rdenom
   logical :: pack_contacts
