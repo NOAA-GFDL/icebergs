@@ -4814,7 +4814,7 @@ subroutine update_latlon(bergs)
       do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
         berg=>bergs%list(grdi,grdj)%first
         do while (associated(berg))
-          if ((.not. bergs%mts) .or. (abs(berg%halo_berg .le. 1))) then
+          if ((.not. bergs%mts) .or. (berg%halo_berg .le. 1)) then
             !for bergs%mts skip halo elements that only exist due to their
             !inclusion in a conglomerate (berg%halo_berg > 1). Their coords have
             !already been corrected (if needed), as the scheme below would fail.
