@@ -330,13 +330,13 @@ Time_end = increment_date(Time,0,0,0,ibhrs,0,0)
 do while ((ns < nmax) .and. (Time < Time_end))
   if (mpp_pe()==0 .and. debug .and. mod(ns-1,write_time_inc)==0) then
     call get_date(Time, iyr, imon, iday, ihr, imin, isec)
-    write(*,*),''
-    write(*,'(a)'),'-------------------------------------------'
+    write(*,*) ''
+    write(*,'(a)') '-------------------------------------------'
     write(*,'(a,i5)')' Timestep   ',ns
     write(*,'(a,i5,a,i5,a,i5)')' year',iyr,'  month ',imon,'  day   ',iday
     write(*,'(a,i5,a,i5,a,i5)')' hour',ihr,'  minute',imin,'  second',isec
-    write(*,'(a)'),'-------------------------------------------'
-    write(*,*),''
+    write(*,'(a)') '-------------------------------------------'
+    write(*,*) ''
   end if
 
   ! The main driver the steps updates icebergs
