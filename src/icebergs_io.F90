@@ -581,7 +581,7 @@ integer, allocatable, dimension(:) :: ine,        &
        call read_int_vector(filename,'id_ij',id_ij,grd%domain)
      endif
      call read_real_vector(filename,'static_berg',static_berg,grd%domain,value_if_not_in_file=0.)
-  else
+  elseif (bergs%require_restart) then
      stop 'read_restart_bergs, RESTART NOT FOUND!'
   endif
 

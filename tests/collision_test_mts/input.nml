@@ -113,6 +113,7 @@
     ignore_traj=.false. ! (F) If true, then model does not track trajectory data at all
 
     ignore_missing_restart_bergs=.False. !(F) 'T'=ignore missing bergs in restart
+    require_restart=.true. !(F) 'T'=fail if the restart file is not present at start
     use_slow_find=.true. !(T) Use slow, but robust, find_cell for reading restarts
     manually_initialize_bonds=.true. ! (F) True= Bonds are initialize manually.
     length_for_manually_initialize_bonds=800.0 !(1e3)Dist b/w bergs to init bonds manually
