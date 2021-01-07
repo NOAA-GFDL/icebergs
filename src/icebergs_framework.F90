@@ -1508,7 +1508,7 @@ logical :: halo_debugging
     do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
       this=>bergs%list(grdi,grdj)%first
       do while (associated(this))
-          write(stderrunit,'(a,5i)') 'A', this%id, mpp_pe(), int(this%halo_berg), grdi, grdj
+        write(stderrunit,'(a,5i8)') 'A', this%id, mpp_pe(), int(this%halo_berg), grdi, grdj
         this=>this%next
       enddo
     enddo; enddo
@@ -1554,9 +1554,9 @@ logical :: halo_debugging
   if (halo_debugging) then
     do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
       this=>bergs%list(grdi,grdj)%first
-        do while (associated(this))
-        write(stderrunit,'(a,5i)') 'B', this%id, mpp_pe(), int(this%halo_berg), grdi, grdj
-      this=>this%next
+      do while (associated(this))
+        write(stderrunit,'(a,5i8)') 'B', this%id, mpp_pe(), int(this%halo_berg), grdi, grdj
+        this=>this%next
       enddo
     enddo; enddo
   endif
@@ -1758,7 +1758,7 @@ logical :: halo_debugging
     do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
       this=>bergs%list(grdi,grdj)%first
       do while (associated(this))
-        write(stderrunit,'(a,5i)')  'C', this%id, mpp_pe(), int(this%halo_berg),  grdi, grdj
+        write(stderrunit,'(a,5i8)') 'C', this%id, mpp_pe(), int(this%halo_berg),  grdi, grdj
         this=>this%next
       enddo
     enddo; enddo
@@ -1885,7 +1885,7 @@ integer :: nbergs_to_send_n, nbergs_to_send_s
     do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
       this=>bergs%list(grdi,grdj)%first
       do while (associated(this))
-        write(stderrunit,'(a,5i)')  'transfer_mts_bergs', this%id, mpp_pe(), int(this%halo_berg),  grdi, grdj
+        write(stderrunit,'(a,5i8)') 'transfer_mts_bergs', this%id, mpp_pe(), int(this%halo_berg),  grdi, grdj
         this=>this%next
       enddo
     enddo; enddo
@@ -4650,7 +4650,7 @@ type(bond) , pointer :: current_bond
           if (current_bond%other_berg%id .ne. current_bond%other_id) then
             !print *, 'Bond matching', berg%id,current_bond%other_berg%id, current_bond%other_id,&
             !  berg%halo_berg,current_bond%other_berg%halo_berg ,mpp_pe()
-            write(*,'(a,3i,2i3,i4)')'Bond matching :',berg%id,current_bond%other_berg%id, current_bond%other_id,&
+            write(*,'(a,3i8,2i3,i4)')'Bond matching :',berg%id,current_bond%other_berg%id, current_bond%other_id,&
               int(berg%halo_berg),current_bond%other_berg%halo_berg ,mpp_pe()
             call error_mesg('KID, show all bonds:', 'The bonds are not matching properly!', FATAL)
           endif
