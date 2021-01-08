@@ -435,6 +435,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   logical :: hexagonal_icebergs=.False. !< True treats icebergs as rectangles, False as hexagonal elements (for the purpose of mass spreading)
   logical :: allow_bergs_to_roll=.True. !< Allows icebergs to roll over when rolling conditions are met
   logical :: ignore_missing_restart_bergs=.False. !< True Allows the model to ignore icebergs missing in the restart.
+  logical :: require_restart=.false. !< If true, requires a restart file to be present when starting the model.
   logical :: Static_icebergs=.False. !< True= icebergs do no move
   logical :: only_interactive_forces=.False. !< Icebergs only feel interactive forces, and not ocean, wind...
   logical :: halo_debugging=.False. !< Use for debugging halos (remove when its working)
@@ -643,6 +644,7 @@ logical :: set_melt_rates_to_zero=.False. ! Sets all melt rates to zero, for tes
 logical :: allow_bergs_to_roll=.True. ! Allows icebergs to roll over when rolling conditions are met
 logical :: hexagonal_icebergs=.False. ! True treats icebergs as rectangles, False as hexagonal elements (for the purpose of mass spreading)
 logical :: ignore_missing_restart_bergs=.False. ! True Allows the model to ignore icebergs missing in the restart.
+logical :: require_restart=.false. ! If true, requires a restart file to be present when starting the model.
 logical :: Static_icebergs=.False. ! True= icebergs do no move
 logical :: only_interactive_forces=.False. ! Icebergs only feel interactive forces, and not ocean, wind...
 logical :: halo_debugging=.False. ! Use for debugging halos (remove when its working)
@@ -676,7 +678,7 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, iceberg_bonds_on, manually_initialize_bonds, ignore_missing_restart_bergs, &
          parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, halo_debugging, hexagonal_icebergs, &
          time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_icebergs_on, scale_damping_by_pmag,&
-         critical_interaction_damping_on, tang_crit_int_damp_on, &
+         critical_interaction_damping_on, tang_crit_int_damp_on, require_restart, &
          old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj, &
          allow_bergs_to_roll,set_melt_rates_to_zero,lat_ref,initial_orientation,rotate_icebergs_for_mass_spreading,grid_is_latlon,Lx,use_f_plane,use_old_spreading, &
          grid_is_regular,override_iceberg_velocities,u_override,v_override,add_iceberg_thickness_to_SSH,Iceberg_melt_without_decay,melt_icebergs_as_ice_shelf, &
@@ -1174,6 +1176,7 @@ endif
   bergs%allow_bergs_to_roll=allow_bergs_to_roll
   bergs%hexagonal_icebergs=hexagonal_icebergs
   bergs%ignore_missing_restart_bergs=ignore_missing_restart_bergs
+  bergs%require_restart=require_restart
   bergs%Static_icebergs=Static_icebergs
   bergs%only_interactive_forces=only_interactive_forces
   bergs%halo_debugging=halo_debugging
