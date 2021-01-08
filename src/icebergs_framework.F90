@@ -387,7 +387,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   real :: spring_coef !< Spring constant for bonded iceberg interactions
   real :: contact_spring_coef !<Spring coefficient for berg collisions -Alex
   character(len=11) :: fracture_criterion !<'strain_rate','strain',or 'none'
-  real :: cdrag_grounding
+  real :: cdrag_grounding=0.0 !< Drag coefficient against ocean bottom
   real :: h_to_init_grounding
   real :: frac_thres_n !normal fracture strain threshold
   real :: frac_thres_t !tangential fracture strain threshold
@@ -587,7 +587,7 @@ real :: rho_bergs=850. ! Density of icebergs
 real :: spring_coef=1.e-8 ! Spring constant for iceberg interactions (this seems to be the highest stable value)
 real :: contact_spring_coef=0. !Spring coef for berg collisions (is set to spring_coef if not specified)
 character(len=11) :: fracture_criterion='none' !<'strain_rate','strain',or 'none'
-real :: cdrag_grounding=20.0
+real :: cdrag_grounding=0.0 ! Drag coefficient against ocean bottom
 real :: h_to_init_grounding=100.0
 real :: frac_thres_n=0.0 !normal fracture strain threshold
 real :: frac_thres_t=0.0 !tangential fracture strain threshold
