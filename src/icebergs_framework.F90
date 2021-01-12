@@ -445,18 +445,18 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   logical :: manually_initialize_bonds=.False. !< True= Bonds are initialize manually.
   logical :: use_new_predictive_corrective =.False. !< Flag to use Bob's predictive corrective iceberg scheme- Added by Alon
   logical :: interactive_icebergs_on=.false. !< Turn on/off interactions between icebergs  - Added by Alon
-  logical :: scale_damping_by_pmag=.true. !<scales damping by magnitude of (projection matrix \cdot relative velocity)
+  logical :: scale_damping_by_pmag=.true. !< Scales damping by magnitude of (projection matrix dot relative velocity)
   logical :: critical_interaction_damping_on=.true. !< Sets the damping on relative iceberg velocity to critical value - Added by Alon
   logical :: tang_crit_int_damp_on=.true. !<crit interaction damping for tangential component?
   logical :: use_old_spreading=.true. !< If true, spreads iceberg mass as if the berg is one grid cell wide
   logical :: read_ocean_depth_from_file=.false. !< If true, ocean depth is read from a file.
   integer(kind=8) :: debug_iceberg_with_id = -1 !< If positive, monitors a berg with this id
 
-  real :: length_for_manually_initialize_bonds=1000.0 !<if manually init bonds, only  bond if dist between particles is .lt. this length -Added by Alex
-  logical :: manually_initialize_bonds_from_radii=.false. !<if manually init bonds, form bonds if dist between particles is < 1.25x the smaller radii-Alex
+  real :: length_for_manually_initialize_bonds=1000.0 !< If manually initialing bonds, only  bond if dist between particles is < this length -Added by Alex
+  logical :: manually_initialize_bonds_from_radii=.false. !< If manually initialing bonds, form bonds if dist between particles is < 1.25x the smaller radii-Alex
   real :: speed_limit=0. !< CFL speed limit for a berg [m/s]
   real :: tau_calving=0. !< Time scale for smoothing out calving field (years)
-  real :: tip_parameter=0. !< parameter to override iceberg rolling critical ratio (use zero to get parameter directly from ice and seawater densities)
+  real :: tip_parameter=0. !< If non-zero, overrides iceberg rolling critical ratio (use zero to get parameter directly from ice and seawater densities)
   real :: grounding_fraction=0. !< Fraction of water column depth at which grounding occurs
   type(buffer), pointer :: obuffer_n=>null() !< Buffer for outgoing bergs to the north
   type(buffer), pointer :: ibuffer_n=>null() !< Buffer for incoming bergs from the north
@@ -497,7 +497,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   integer :: nbonds=0
   integer, dimension(:), pointer :: nbergs_calved_by_class=>null()
   ! mts parameters - added by Alex
-  logical :: mts=.false. !use multiple timestepping scheme (substep size is automatically determined)
+  logical :: mts=.false. !< Use multiple timestepping scheme (substep size is automatically determined)
   integer :: mts_sub_steps
   real :: mts_fast_dt
   integer :: mts_part !for turning on/off berg interactions/collisions during different mts scheme
@@ -654,19 +654,19 @@ logical :: iceberg_bonds_on=.False. ! True=Allow icebergs to have bonds, False=d
 logical :: manually_initialize_bonds=.False. ! True= Bonds are initialize manually.
 logical :: use_new_predictive_corrective =.False. ! Flag to use Bob's predictive corrective iceberg scheme- Added by Alon
 logical :: interactive_icebergs_on=.false. ! Turn on/off interactions between icebergs  - Added by Alon
-logical :: scale_damping_by_pmag=.true. !<scales damping by magnitude of (projection matrix \cdot relative velocity)
+logical :: scale_damping_by_pmag=.true. ! Scales damping by magnitude of (projection matrix dot relative velocity)
 logical :: critical_interaction_damping_on=.true. ! Sets the damping on relative iceberg velocity to critical value - Added by Alon
-logical :: tang_crit_int_damp_on=.true. !crit interaction damping for tangential component?
+logical :: tang_crit_int_damp_on=.true. ! Critical interaction damping for tangential component?
 logical :: do_unit_tests=.false. ! Conduct some unit tests
 logical :: input_freq_distribution=.false. ! Flag to show if input distribution is freq or mass dist (=1 if input is a freq dist, =0 to use an input mass dist)
 logical :: read_old_restarts=.false. ! Legacy option that does nothing
 logical :: use_old_spreading=.true. ! If true, spreads iceberg mass as if the berg is one grid cell wide
 logical :: read_ocean_depth_from_file=.false. ! If true, ocean depth is read from a file.
-integer :: mts_sub_steps=-1 !if -1, the number of mts sub-steps will be automatically determined
-logical :: remove_unused_bergs=.true. !remove unneeded bergs after PEs transfers
-real :: contact_distance=0.0 !for unbonded berg interactions, collision is assumed at max(contact_distance,sum of the 2 bergs radii)
-logical :: force_convergence=.false. !experimental MTS convergence scheme that better preserves momentum during collisions
-real :: convergence_tolerance=1.e-8 !tolerance for the MTS force_convergence scheme
+integer :: mts_sub_steps=-1 ! If -1, the number of mts sub-steps will be automatically determined
+logical :: remove_unused_bergs=.true. ! Remove unneeded bergs after PEs transfers
+real :: contact_distance=0.0 ! For unbonded berg interactions, collision is assumed at max(contact_distance,sum of the 2 bergs radii)
+logical :: force_convergence=.false. ! Experimental MTS convergence scheme that better preserves momentum during collisions
+real :: convergence_tolerance=1.e-8 ! Tolerance for the MTS force_convergence scheme
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim) ,
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
@@ -1897,12 +1897,12 @@ integer :: nbergs_to_send_n, nbergs_to_send_s
 
 end subroutine transfer_mts_bergs
 
-!>For the MTS scheme, packs bergs for transfers between PEs to the N,S,E, and W
-subroutine mts_pack_in_dir(bergs,nbergs_to_send,dir)
+!> For the MTS scheme, packs bergs for transfers between PEs to the N,S,E, and W
+subroutine mts_pack_in_dir(bergs, nbergs_to_send, dir)
   ! Arguments
   type(icebergs), pointer :: bergs !< Container for all types and memory
-  integer :: nbergs_to_send !<counter for number of bergs to send
-  character(len=1) :: dir !<indicates PE to the north,south,east,or west
+  integer :: nbergs_to_send !< Counter for number of bergs to send
+  character(len=1) :: dir !< Indicates PE to the north,south,east,or west
   ! Local variables
   type(icebergs_gridded), pointer :: grd
   type(iceberg), pointer :: berg
@@ -2068,13 +2068,13 @@ subroutine mts_pack_in_dir(bergs,nbergs_to_send,dir)
   endif
 end subroutine mts_pack_in_dir
 
-!>find, mark, and pack the halo and conglomerate bergs
-recursive subroutine mts_mark_and_pack_halo_and_congloms(bergs,berg,dir,nbergs_to_send,pfix,rhc)
+!> Find, mark, and pack the halo and conglomerate bergs
+recursive subroutine mts_mark_and_pack_halo_and_congloms(bergs, berg, dir, nbergs_to_send,pfix, rhc)
   ! Arguments
   type(icebergs), pointer :: bergs !< Container for all types and memory
-  type(iceberg), pointer :: berg
-  character(len=1) :: dir
-  integer :: nbergs_to_send
+  type(iceberg), pointer :: berg !< Berg to pack ???
+  character(len=1) :: dir !< north,south,east,or west
+  integer :: nbergs_to_send !< Number of bergs to send
   real :: pfix !<for periodicity
   real :: rhc(4) !<lat/lon bounds of halo region for receiving cell
   ! Local variables
@@ -2139,15 +2139,18 @@ recursive subroutine mts_mark_and_pack_halo_and_congloms(bergs,berg,dir,nbergs_t
 
 end subroutine mts_mark_and_pack_halo_and_congloms
 
-!>pack the bergs within contact distance of conglom/halo bergs
-recursive subroutine mts_pack_contact_bergs(bergs,berg,dir,pfix,nbergs_to_send,inhs,inhe,jnhs,jnhe)
+!> Pack the bergs within contact distance of conglom/halo bergs
+recursive subroutine mts_pack_contact_bergs(bergs, berg, dir, pfix, nbergs_to_send, inhs, inhe, jnhs, jnhe)
   ! Arguments
   type(icebergs), pointer :: bergs !< Container for all types and memory
   type(iceberg), pointer :: berg !< Berg to find contact with
   character(len=1) :: dir !< north,south,east,or west
   real :: pfix !< for periodicity
-  integer :: nbergs_to_send
-  integer :: inhs,inhe,jnhs,jnhe !<bounds of non-halo domain, i.e. where contact bergs may exist
+  integer :: nbergs_to_send !< Number of bergs to send
+  integer :: inhs !< Start i bounds of non-halo domain, i.e. where contact bergs may exist
+  integer :: inhe !< End i bounds of non-halo domain, i.e. where contact bergs may exist
+  integer :: jnhs !< Start j bounds of non-halo domain, i.e. where contact bergs may exist
+  integer :: jnhe !< End j bounds of non-halo domain, i.e. where contact bergs may exist
   ! Local variables
   type(bond) , pointer :: current_bond
   type(icebergs_gridded), pointer :: grd
@@ -2255,11 +2258,11 @@ recursive subroutine mts_pack_contact_bergs(bergs,berg,dir,pfix,nbergs_to_send,i
   enddo
 end subroutine mts_pack_contact_bergs
 
-!>For MTS scheme, determines if a berg has been packed to send to the neighboring PE in a given direction
-!!based on its evolving conglom_id from subroutines transfer_mts_bergs and mts_pack_in_dir
-logical function mts_berg_sent(conglom_id,dir)
-  integer :: conglom_id
-  character(len=1) :: dir
+!> For MTS scheme, determines if a berg has been packed to send to the neighboring PE in a given direction
+!! based on its evolving conglom_id from subroutines transfer_mts_bergs and mts_pack_in_dir
+logical function mts_berg_sent(conglom_id, dir)
+  integer :: conglom_id !< Id of conglomerate
+  character(len=1) :: dir !< Direction for sending
 
   mts_berg_sent=.false.
   select case (dir)
@@ -2280,7 +2283,7 @@ logical function mts_berg_sent(conglom_id,dir)
   end select
 end function mts_berg_sent
 
-!>Clear and reassign conglom ids
+!> Clear and reassign conglom ids
 subroutine set_conglom_ids(bergs)
   ! Arguments
   type(icebergs), pointer :: bergs !< Container for all types and memory
@@ -2316,8 +2319,7 @@ subroutine set_conglom_ids(bergs)
 
 end subroutine set_conglom_ids
 
-
-!>Assign initial velocities and energies for energy tracking tests
+!> Assign initial velocities and energies for energy tracking tests
 subroutine energy_tests_init(bergs)
   ! Arguments
   type(icebergs), pointer :: bergs !< Container for all types and memory
@@ -2361,11 +2363,13 @@ subroutine energy_tests_init(bergs)
   enddo;enddo
 end subroutine energy_tests_init
 
-!>Identify all bergs in the same conglomerate as the given berg, and assign them the given conglom_id
-recursive subroutine label_conglomerates(berg,new_conglom_id)
-  type(iceberg), pointer :: berg,other_berg
+!> Identify all bergs in the same conglomerate as the given berg, and assign them the given conglom_id
+recursive subroutine label_conglomerates(berg, new_conglom_id)
+  type(iceberg), pointer :: berg !< Berg to start search from
+  integer :: new_conglom_id !< Conglomerate id to assign
+  ! Local variables
+  type(iceberg), pointer :: other_berg
   type(bond) , pointer :: current_bond
-  integer :: new_conglom_id
 
   current_bond=>berg%first_bond
   do while (associated(current_bond))
@@ -2381,8 +2385,8 @@ recursive subroutine label_conglomerates(berg,new_conglom_id)
   enddo
 end subroutine label_conglomerates
 
-!>Keep only the bergs which are part of, or within contact distance of, a conglomerate that overlaps
-!!the computational domain, or which are halo_berg=1
+!> Keep only the bergs which are part of, or within contact distance of, a conglomerate that overlaps
+!! the computational domain, or which are halo_berg=1
 subroutine mts_remove_unused_bergs(bergs)
   ! Arguments
   type(icebergs), pointer :: bergs !< Container for all types and memory
@@ -2475,11 +2479,14 @@ subroutine mts_remove_unused_bergs(bergs)
   enddo
 end subroutine mts_remove_unused_bergs
 
-!>for MTS velocity verlet, the send and receive call for for transfer_mts_bergs
-subroutine mts_send_and_receive(bergs,nbergs_to_send_e,nbergs_to_send_w,nbergs_to_send_n,nbergs_to_send_s)
+!> For MTS velocity verlet, the send and receive call for for transfer_mts_bergs
+subroutine mts_send_and_receive(bergs, nbergs_to_send_e, nbergs_to_send_w, nbergs_to_send_n, nbergs_to_send_s)
   ! Arguments
   type(icebergs), pointer :: bergs !< Container for all types and memory
-  integer :: nbergs_to_send_e, nbergs_to_send_w, nbergs_to_send_n, nbergs_to_send_s
+  integer :: nbergs_to_send_e !< Number of bergs to send to the east
+  integer :: nbergs_to_send_w !< Number of bergs to send to the west
+  integer :: nbergs_to_send_n !< Number of bergs to send to the north
+  integer :: nbergs_to_send_s !< Number of bergs to send to the south
   ! Local vars
   type(icebergs_gridded), pointer :: grd
   integer :: nbergs_rcvd_from_e, nbergs_rcvd_from_w, nbergs_rcvd_from_n, nbergs_rcvd_from_s
@@ -2894,7 +2901,7 @@ subroutine pack_berg_into_buffer2(berg, buff, n, max_bonds_in)
 type(iceberg), pointer :: berg !< Iceberg to pack into buffer
 type(buffer), pointer :: buff !< Buffer to pack berg into
 integer, intent(in) :: n !< Position in buffer to place berg
-integer, optional :: max_bonds_in !< <undocumented>
+integer, optional :: max_bonds_in !< undocumented
 !integer, intent(in) :: max_bonds  ! Change this later
 ! Local variables
 integer :: counter, k, max_bonds, id_cnt, id_ij
@@ -3125,8 +3132,8 @@ type(icebergs), pointer :: bergs !< Container for all types and memory
 type(buffer), pointer :: buff !< Buffer from which to unpack berg
 integer, intent(in) :: n !< Position in buffer to unpack
 type(icebergs_gridded), pointer :: grd !< Container for gridded fields
-logical, optional :: force_append !< <undocumented>
-integer, optional :: max_bonds_in !< <undocumented>
+logical, optional :: force_append !< undocumented
+integer, optional :: max_bonds_in !< undocumented
 ! Local variables
 !real :: lon, lat, uvel, vvel, xi, yj
 !real :: start_lon, start_lat, start_day, start_mass
@@ -3728,12 +3735,12 @@ integer :: grdi, grdj
 
 end subroutine count_out_of_order
 
-!>scans a single cell for duplicate bergs
+!> Scans a single cell for duplicate bergs
 subroutine unpack_duplicate_check(bergs,localberg,duplicate)
   ! Arguments
   type(icebergs), pointer :: bergs !< Container for all types and memory
-  type(iceberg) :: localberg !<input iceberg
-  logical :: duplicate
+  type(iceberg) :: localberg !< Input iceberg
+  logical :: duplicate !< True if a duplicate is detected
   ! Local variables
   type(iceberg), pointer :: this !<bergs for comparison
 
@@ -4672,11 +4679,13 @@ type(bond) , pointer :: current_bond
 
 end subroutine show_all_bonds
 
-subroutine connect_all_bonds(bergs,ignore_unmatched)
+!> Sweep across all bergs filling in bond data ???
+subroutine connect_all_bonds(bergs, ignore_unmatched)
 type(icebergs), pointer :: bergs !< Container for all types and memory
+logical,optional :: ignore_unmatched !< If true, skip error checking ???
+! Local variables
 type(iceberg), pointer :: other_berg, berg
 type(icebergs_gridded), pointer :: grd
-logical,optional :: ignore_unmatched
 integer :: i, j
 integer :: grdi, grdj
 integer :: grdi_inner, grdj_inner
@@ -4841,14 +4850,16 @@ subroutine update_latlon(bergs)
 
 end subroutine update_latlon
 
+!> Counts (and error checks) bonds
 subroutine count_bonds(bergs, number_of_bonds, check_bond_quality)
-
 type(icebergs), pointer :: bergs !< Container for all types and memory
+integer, intent(out) :: number_of_bonds !< Number of bonds
+logical, intent(inout), optional :: check_bond_quality !< If true, check bond quality
+! Local variables
 type(iceberg), pointer :: berg
 type(iceberg), pointer :: other_berg
 type(icebergs_gridded), pointer :: grd
 type(bond) , pointer :: current_bond, other_berg_bond
-integer, intent(out) :: number_of_bonds
 integer :: number_of_bonds_all_pe
 integer :: grdi, grdj
 logical :: bond_is_good
@@ -5252,7 +5263,7 @@ end subroutine move_trajectory
 subroutine move_bond_trajectory(bergs, current_bond)
 ! Arguments
 type(icebergs), pointer :: bergs !< Container for all types and memory
-type(bond) , pointer :: current_bond
+type(bond) , pointer :: current_bond !< Bond to break ???
 ! Local variables
 type(bond_xyt), pointer :: next, last
 type(bond_xyt) :: vals
@@ -5445,9 +5456,14 @@ real :: Lx
 
 end function find_cell_by_search
 
-real function dcost(x1, y1, x2, y2,Lx)
+!< A cost function with minimum when x2==x1 and y2==y1
+real function dcost(x1, y1, x2, y2, Lx)
   ! Arguments
-  real, intent(in) :: x1, x2, y1, y2,Lx
+  real, intent(in) :: x1 !< x-coordinate or point 1
+  real, intent(in) :: x2 !< x-coordinate or point 2
+  real, intent(in) :: y1 !< y-coordinate or point 1
+  real, intent(in) :: y2 !< y-coordinate or point 2
+  real, intent(in) :: Lx !< Periodicity of x-coordinate
   ! Local variables
   real :: x1m
 
@@ -5456,12 +5472,16 @@ real function dcost(x1, y1, x2, y2,Lx)
     dcost=(x2-x1m)**2+(y2-y1)**2
 end function dcost
 
+!> A better way to find the indices (oi,oj) or the cell containing position (x,y).
+!! Returns True if a cell is found and updates oi,oj.
 logical function find_better_min(grd, x, y, w, oi, oj)
   ! Arguments
   type(icebergs_gridded), intent(in) :: grd !< Container for gridded fields
-  real, intent(in) :: x, y
-  integer, intent(in) :: w
-  integer, intent(inout) :: oi, oj
+  real, intent(in) :: x !< x-coordinate being searched for
+  real, intent(in) :: y !< y-coordinate being searched for
+  integer, intent(in) :: w !< Width into halo to search ???
+  integer, intent(inout) :: oi !< i-index of cell containing x,y
+  integer, intent(inout) :: oj !< j-index of cell containing x,y
   ! Local variables
   integer :: i,j,xs,xe,ys,ye
   real :: dmin, dcst
@@ -5487,27 +5507,34 @@ logical function find_better_min(grd, x, y, w, oi, oj)
 
 end function find_better_min
 
+! Returns true and updates oi and oj, if a cell containing x,y is found within w cells of the input oi, oj
 logical function find_cell_loc(grd, x, y, is, ie, js, je, w, oi, oj)
   ! Arguments
   type(icebergs_gridded), intent(in) :: grd !< Container for gridded fields
-  real, intent(in) :: x, y
-  integer, intent(in) :: is, ie, js, je, w
-  integer, intent(inout) :: oi, oj
+  real, intent(in) :: x !< Longitude
+  real, intent(in) :: y !< Latitude
+  integer, intent(in) :: is !< Start i-index of computational grid
+  integer, intent(in) :: ie !< End i-index of computational grid
+  integer, intent(in) :: js !< Start j-index of computational grid
+  integer, intent(in) :: je !< End j-index of computational grid
+  integer, intent(in) :: w !< Width to search around
+  integer, intent(inout) :: oi !< Starting and updated i-index
+  integer, intent(inout) :: oj !< Starting and updated j-index
   ! Local variables
   integer :: i,j,xs,xe,ys,ye
 
-    xs=max(is, oi-w)
-    xe=min(ie, oi+w)
-    ys=max(js, oj-w)
-    ye=min(je, oj+w)
+  xs=max(is, oi-w)
+  xe=min(ie, oi+w)
+  ys=max(js, oj-w)
+  ye=min(je, oj+w)
 
-    find_cell_loc=.false.
-    do j=ys,ye; do i=xs,xe
-        if (is_point_in_cell(grd, x, y, i, j)) then
-          oi=i; oj=j; find_cell_loc=.true.
-          return
-        endif
-    enddo; enddo
+  find_cell_loc=.false.
+  do j=ys,ye; do i=xs,xe
+      if (is_point_in_cell(grd, x, y, i, j)) then
+        oi=i; oj=j; find_cell_loc=.true.
+        return
+      endif
+  enddo; enddo
 
 end function find_cell_loc
 
@@ -6462,7 +6489,7 @@ subroutine bergs_chksum(bergs, txt, ignore_halo_violation)
 ! Arguments
 type(icebergs), pointer :: bergs !< Container for all types and memory
 character(len=*), intent(in) :: txt !< Label to use in messages
-logical, optional :: ignore_halo_violation
+logical, optional :: ignore_halo_violation !< If true, skip error checking ???
 ! Local variables
 integer :: i, nbergs, ichk1, ichk2, ichk3, ichk4, ichk5, iberg
 real, allocatable :: fld(:,:), fld2(:,:)
