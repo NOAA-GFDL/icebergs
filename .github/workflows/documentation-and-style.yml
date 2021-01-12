@@ -10,6 +10,11 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
+    - name: Install packages used when generating documentation
+      run: |
+        sudo apt-get update
+        sudo apt-get install doxygen
+
     - name: Build doxygen HTML
       run: |
         cd docs
