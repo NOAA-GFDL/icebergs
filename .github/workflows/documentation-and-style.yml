@@ -5,7 +5,7 @@ on: [push, pull_request]
 jobs:
   doxygen:
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
 
     steps:
     - uses: actions/checkout@v2
@@ -13,7 +13,7 @@ jobs:
     - name: Install packages used when generating documentation
       run: |
         sudo apt-get update
-        sudo apt-get install doxygen dot
+        sudo apt-get install doxygen graphviz
 
     - name: Build doxygen HTML
       run: |
