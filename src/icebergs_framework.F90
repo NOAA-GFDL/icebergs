@@ -4863,7 +4863,6 @@ type(bond) , pointer :: current_bond, other_berg_bond
 integer :: number_of_bonds_all_pe
 integer :: grdi, grdj
 logical :: bond_is_good
-logical, intent(inout), optional :: check_bond_quality
 logical :: quality_check
 integer :: num_unmatched_bonds,num_unmatched_bonds_all_pe
 integer :: num_unassosiated_bond_pairs, num_unassosiated_bond_pairs_all_pe
