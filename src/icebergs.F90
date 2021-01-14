@@ -3705,7 +3705,7 @@ end subroutine rotate
 subroutine calculate_mass_on_ocean(bergs, with_diagnostics)
   ! Arguments
   type(icebergs), pointer :: bergs !< Container for all types and memory
-  logical, intent(in) :: with_diagnostics
+  logical, intent(in) :: with_diagnostics !< If true, calculate diagnostics
   ! Local variables
   type(iceberg), pointer :: berg
   type(icebergs_gridded), pointer :: grd
@@ -3800,8 +3800,8 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
   real, dimension(:,:), intent(in) :: sst !< Sea-surface temperature (C or K)
   real, dimension(:,:), intent(in) :: cn !< Sea-ice concentration (nondim)
   real, dimension(:,:), intent(in) :: hi !< Sea-ice thickness (m)
-  integer, optional, intent(in) :: stagger
-  integer, optional, intent(in) :: stress_stagger
+  integer, optional, intent(in) :: stagger !< Enumerated value indicating staggering of ocean/ice u,v variables
+  integer, optional, intent(in) :: stress_stagger !< Enumerated value indicating staggering of stress variables
   real, dimension(:,:), optional, intent(in) :: sss !< Sea-surface salinity (1e-3)
   real, dimension(:,:), optional, pointer :: mass_berg !< Mass of bergs (kg)
   real, dimension(:,:), optional, pointer :: ustar_berg !< Friction velocity on base of bergs (m/s)
@@ -5758,11 +5758,20 @@ subroutine evolve_icebergs_mts2(bergs)
 end subroutine evolve_icebergs_mts2
 
 !> Energy calculations for MTS_part==1
-subroutine mts_energy_part_1(bergs,berg,ax1,ay1,axn,ayn,bxn,byn,Fec_x,Fec_y,Fdc_x,Fdc_y)
+subroutine mts_energy_part_1(bergs, berg, ax1, ay1, axn, ayn, bxn, byn, Fec_x, Fec_y, Fdc_x, Fdc_y)
   ! Arguments
   type(icebergs), pointer :: bergs !< Container for all types and memory
-  type(iceberg), pointer :: berg
-  real, intent(in) :: ax1,ay1,axn,ayn,bxn,byn,Fec_x,Fec_y,Fdc_x,Fdc_y
+  type(iceberg), pointer :: berg !< Berg for which to do calculations
+  real, intent(in) :: ax1 !< x acceleration at beginning of step [m s-2] ???
+  real, intent(in) :: ay1 !< y acceleration at beginning of step [m s-2] ???
+  real, intent(in) :: axn !< x acceleration at end of step [m s-2] ???
+  real, intent(in) :: ayn !< y acceleration at end of step [m s-2] ???
+  real, intent(in) :: bxn !< x implicit acceleration [m s-2] ???
+  real, intent(in) :: byn !< y implicit acceleration [m s-2] ???
+  real, intent(in) :: Fec_x !< x component of some force [units ?] ???
+  real, intent(in) :: Fec_y !< y component of some force [units ?] ???
+  real, intent(in) :: Fdc_x !< x component of some other force [units ?] ???
+  real, intent(in) :: Fdc_y !< y component of some other force [units ?] ???
   ! Local
   real :: dt, M, Fex, Fey, Fex_i, Fey_i
   real :: uveln, vveln, uveln_star, vveln_star, ustar, vstar
@@ -5858,9 +5867,10 @@ end subroutine mts_energy_part_1
 subroutine mts_energy_part_3(bergs,berg,uvel3,vvel3,whichtime)
   ! Arguments
   type(icebergs), pointer :: bergs !< Container for all types and memory
-  type(iceberg), pointer :: berg
-  real,intent(in) :: uvel3,vvel3
-  integer,intent(in) :: whichtime
+  type(iceberg), pointer :: berg !< Berg to do calculations for
+  real,intent(in) :: uvel3 !< u-component of velocity [m s-1]  but why 3???
+  real,intent(in) :: vvel3 !< v-component of velocity [m s-1]  but why 3???
+  integer,intent(in) :: whichtime !< Time level ???
   ! Local
   real :: dt, M, Fex, Fey, Fdx, Fdy
 
