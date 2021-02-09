@@ -1689,7 +1689,7 @@ subroutine write_bond_trajectory(trajectory)
 type(bond_xyt), pointer :: trajectory !< An iceberg bond trajectory
 ! Local variables
 integer :: iret, ncid, i_dim, i
-integer :: lonid, latid, yearid, dayid, lenid,n1id, n2id
+integer :: lonid, latid, yearid, dayid, lenid,n1id, n2id, peid
 integer :: rotid,rrotid,nsid,nsrid
 integer :: idcnt1_id, idcnt2_id, idij1_id, idij2_id, eeid, edid
 character(len=34) :: filename
@@ -1806,6 +1806,7 @@ logical :: io_is_in_append_mode
       !fracture params
       rotid = inq_varid(ncid, 'rotation');    rrotid = inq_varid(ncid, 'rel_rotation')
       nsid = inq_varid(ncid, 'n_strain');     nsrid = inq_varid(ncid, 'n_strain_rate')
+      peid = inq_varid(ncid, 'spring_pe');
 
       idcnt1_id = inq_varid(ncid, 'id_cnt1'); idij1_id = inq_varid(ncid, 'id_ij1')
       idcnt2_id = inq_varid(ncid, 'id_cnt2'); idij2_id = inq_varid(ncid, 'id_ij2')
@@ -1828,6 +1829,7 @@ logical :: io_is_in_append_mode
       !fracture params
       rotid = def_var(ncid, 'rotation', NF_DOUBLE, i_dim); rrotid = def_var(ncid, 'rel_rotation', NF_DOUBLE, i_dim)
       nsid = def_var(ncid, 'n_strain', NF_DOUBLE, i_dim);  nsrid = def_var(ncid, 'n_strain_rate', NF_DOUBLE, i_dim)
+      peid = def_var(ncid, 'spring_pe', NF_DOUBLE, i_dim);
 
       idcnt1_id = def_var(ncid, 'id_cnt1', NF_INT, i_dim); idij1_id = def_var(ncid, 'id_ij1', NF_INT, i_dim)
       idcnt2_id = def_var(ncid, 'id_cnt2', NF_INT, i_dim); idij2_id = def_var(ncid, 'id_ij2', NF_INT, i_dim)
@@ -1852,6 +1854,7 @@ logical :: io_is_in_append_mode
       call put_att(ncid, rrotid, 'long_name', 'relative rotation'); call put_att(ncid, rrotid, 'units', 'rad')
       call put_att(ncid, nsid, 'long_name', 'normal strain');       call put_att(ncid, nsid, 'units', 'non-dim')
       call put_att(ncid, nsrid, 'long_name', 'normal strain-rate'); call put_att(ncid, nsrid, 'units', '1/seconds')
+      call put_att(ncid, peid, 'long_name', 'spring potential energy'); call put_att(ncid, peid, 'units', 'J')
 
       call put_att(ncid, idcnt1_id, 'long_name', 'counter component of first connected iceberg id')
       call put_att(ncid, idcnt1_id, 'units', 'dimensionless')
@@ -1891,6 +1894,7 @@ logical :: io_is_in_append_mode
       !fracture params
       call put_double(ncid,rotid,i,this%rotation);  call put_double(ncid,rrotid,i,this%rel_rotation)
       call put_double(ncid,nsid,i,this%n_strain);   call put_double(ncid,nsrid,i,this%n_strain_rate)
+      call put_double(ncid,peid,i,this%spring_pe)
 
       call split_id(this%id1, cnt, ij)
       call put_int(ncid, idcnt1_id, i, cnt);        call put_int(ncid, idij1_id, i, ij)

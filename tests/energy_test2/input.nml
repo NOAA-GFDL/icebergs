@@ -25,8 +25,7 @@
     new_mts=.true. !(F) If T, implicit accel is added 50% at the current time step and 50% at the next time step
     mts=.true. !(F) for using the Multiple Time Stepping Velocity Verlet scheme
     mts_sub_steps=20  !(-1) # of mts sub-steps (-1=automatically determine # from spring const)
-    imp_loop_iters_long=1 !(1) if >1, # of iterations for each long MTS step (alt to force_convergence)
-    imp_loop_iters_short=1!(1)if >1, # of iterations for each short MTS step (alt to force_convergence)
+
     force_convergence=.false. !(F) experimental MTS convergence scheme to better conserve momentum during collisions
     convergence_tolerance=1e-8 !(1.e-8) tolerance for the MTS force_convergence scheme
 

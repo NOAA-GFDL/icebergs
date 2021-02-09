@@ -1,0 +1,8 @@
+Testing of angular/rotational terms in DEM mode. In ./makeberg, a "1-D" conglomerate with 30 elements is initialized.
+There are two tests using this configuration, where the test is specified by setting dem_beam_test to either 3 or 4 in the nml. See nml for details.
+
+1. Make the iceberg input files: cd makeberg; ./RUN; cd .. 
+2.(optional) edit input.nml
+3. run the model: ./RUN
+4, animate the results: animate_trajectories.py
+

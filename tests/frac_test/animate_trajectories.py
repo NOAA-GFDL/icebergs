@@ -20,8 +20,7 @@ def parseCommandLine():
     parser.add_argument('-fname', type=str, default='iceberg_trajectories.nc',
                     help=''' provide filename to plot''')
     parser.add_argument('-s', type=int, default='4000',
-                    help='''plotted particle size''')
-    optCmdLineArgs = parser.parse_args()    
+                    help='''plotted particle size''')  
     optCmdLineArgs = parser.parse_args()
     return optCmdLineArgs
 

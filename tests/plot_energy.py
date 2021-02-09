@@ -59,9 +59,10 @@ def main(args):
         mass=mass[day<=tc]
         x=x[day<=tc]
         y=y[day<=tc]
-        day=day[day<=tc]
         vx2=vx2[day<=tc]
-        vy2=vy2[day<=tc]
+        vy2=vy2[day<=tc]       
+        day=day[day<=tc]
+
 
 
     # vx=np.copy(vx2); vy=np.copy(vy2)

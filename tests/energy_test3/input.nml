@@ -1,6 +1,12 @@
 !KID, bergs_chksum: write_restart berg chksum=           -1918812055 chksum2=             743944572 chksum3=             -78785014 chksum4=             -78785014 chksum5=                     0 #=                    71
 !KID, grd_chksum2:    # of bergs/cell chksum=                     0 chksum2=                     0 min= 0.000000000E+00 max= 0.000000000E+00 mean= 0.000000000E+00 rms= 0.000000000E+00 sd= 0.000000000E+00
+! Total number of bonds is:          276
+
+!test: replace uvel_old and vvel_old during damping with ustar and vstar
+!KID, bergs_chksum: write_restart berg chksum=           -1514198739 chksum2=            -764201033 chksum3=             -78785014 chksum4=             -78785014 chksum5=                     0 #=                    71
+!KID, grd_chksum2:    # of bergs/cell chksum=                     0 chksum2=                     0 min= 0.000000000E+00 max= 0.000000000E+00 mean= 0.000000000E+00 rms= 0.000000000E+00 sd= 0.000000000E+00
 ! Total number of bonds is:          276 
+
 
 &icebergs_driver_nml
   ni=45 !number of elements, x direction
@@ -24,15 +30,14 @@
 &icebergs_nml
 
     !defaults given in parentheses:
+    explicit_inner_mts=.false. !(F) If T, inner MTS iterations are treated explicitly
 
     monitor_energy=.true. !(F)save total elastic (spring+collision),external,dissipated,&fracture energy
     new_mts=.true. !(F) If T, implicit accel is added 50% at the current time step and 50% at the next time step
     mts=.true. !(F) for using the Multiple Time Stepping Velocity Verlet scheme
     mts_sub_steps=20  !(-1) # of mts sub-steps (-1=automatically determine # from spring const)
-    imp_loop_iters_long=1 !(1) if >1, # of iterations for each long MTS step (alt to force_convergence)
-    imp_loop_iters_short=1!(1)if >1, # of iterations for each short MTS step (alt to force_convergence)
     force_convergence=.true. !(F) experimental MTS convergence scheme to better conserve momentum during collisions
-    convergence_tolerance=1e-8 !(1.e-8) tolerance for the MTS force_convergence scheme
+    convergence_tolerance=1.e-8 !(1.e-8) tolerance for the MTS force_convergence scheme
 
     contact_distance=2000 !2500 !2500 !(0) unbonded bergs contact at max(contact_dist,sum of their radii)
     contact_spring_coef=1.e-8 !(default=spring_coeff) Berg spring coeff for collisions
@@ -42,11 +47,22 @@
     ewsame=.false. !(F) set T if periodic and 2 PEs along the x (zonal) direction
     remove_unused_bergs=.false. !(T) remove unneeded bergs after PEs transfers
 
-    fracture_criterion='strain' !('none') 'strain_rate','strain',or 'none'
+    fracture_criterion='strain' !('none') 'strain_rate','strain','stress',or 'none'
     !here, try setting scaling 1.0 if force_convergence=.false., 0.5 if force_convergence=.true.
     frac_thres_scaling = 0.5 !(1) scales frac_thres_n and frac_thres_t
     frac_thres_n = 0.018  !normal fracture strain threshold
     frac_thres_t = 0.05076 !tangential fracture strain threshold
+
+    !fracture_criterion='strain_rate' !('none') 'strain_rate','strain','stress',or 'none'
+    !frac_thres_scaling = 1 !(1) scales frac_thres_n and frac_thres_t
+    !frac_thres_n = 2.e-6  !normal fracture strain threshold
+    !frac_thres_t = 0!1.e-5 !tangential fracture strain threshold
+
+    !fracture_criterion='stress' !('none') 'strain_rate','strain','stress',or 'none'
+    !here, try setting scaling 1.0 if force_convergence=.false., 0.5 if force_convergence=.true.
+    !frac_thres_scaling = 1.0 !(1) scales frac_thres_n and frac_thres_t
+    !frac_thres_n = 8000.0  !normal fracture strain threshold
+    !frac_thres_t = 0.!12000.0 !0.05076 !tangential fracture strain threshold
 
     halo=3 !(4) halo width
     Lx=45000. ! (360.) Length of X-domain. For periodicity (use a huge number for non-periodic)

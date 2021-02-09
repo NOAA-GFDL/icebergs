@@ -5,10 +5,16 @@ from netCDF4 import Dataset
 from pylab import *
 #import pdb
 import netCDF4 as nc
+import argparse
 
-#
-# Initialize 2 iceberg elements, which can later be bonded in the fortran code if needed
-#
+def parseCommandLine():
+    parser = argparse.ArgumentParser(description=
+    '''Generate animation of iceberg trajectories.''',
+    epilog='Written by Alex Huth, 2020')
+    parser.add_argument('-t', type=int, default='1',
+                    help='''which test case''')
+    optCmdLineArgs = parser.parse_args()
+    return optCmdLineArgs
 
 def Create_iceberg_restart_file(Number_of_bergs, lon,lat,thickness,width,mass,mass_scaling,iceberg_num,Ice_geometry_source,static_berg,uvel,vvel):
 
@@ -64,13 +70,16 @@ def Create_iceberg_restart_file(Number_of_bergs, lon,lat,thickness,width,mass,ma
 			var[:]=0
 
                 if varname=='uvel':
-                        var[:]=uvel
+			for j in range(Number_of_bergs):
+				var[j]=uvel[j]
 
                 if varname=='vvel':
-                        var[:]=vvel
+			for j in range(Number_of_bergs):
+				var[j]=vvel[j]
 
 		if varname=='mass_scaling':
-			var[:]=mass_scaling
+			for j in range(Number_of_bergs):
+				var[j]=mass_scaling[j]
 
 		if varname=='thickness':
 			for j in range(Number_of_bergs):
@@ -241,137 +250,72 @@ def create_empty_iceberg_restart_file(Empty_restart_filename):
 	f.close()
 
 
+def main(args):
 
-#-----------------------------------#
-#               Main                #
-#-----------------------------------#
+    #SQUARE PACKING
 
-just2particles=False
-flip2ndconglom=True#False
-offset2ndconglom=True#False
+        test=args.t
+        grdres=20.e3
+        r=2500.0#/3.
 
-grdxmin=0; grdxmax=45000e3
-grdymin=0; grdymax=45000e3
-grdres=1000.0
-R_frac=0.45
-radius=(np.sqrt(3)/2.)*(R_frac*grdres) #S is < 0.5 grid res
-element_area=(3.*np.sqrt(3.)/2.)*((4./3.)*radius**2)
-width=np.sqrt(element_area)
-thickness1=300.0
-thickness2=300.0
-rho_ice=850.0
+        #start coords
+        xs=101.e3
+        ys=151.e3
 
-#mass
-mass=thickness1*element_area*rho_ice
-print('mass',mass)
+        h=4. #thickness
+        rho_ice=900.0
 
-nbergs=2 #number of conglomerates
 
-#center coords of each (rectangular) conglomerate berg (CB=conglomerate berg)
-CBxc=np.array([10500, 22500]); CByc=np.array([22500, 22500])
-#CBxc=np.array([9500, 17500]); CByc=np.array([22500, 22500])
+        if test==1:
+            #5 particles w/ large radius
+            nbergs=30#90
+            width=r*2.
+            length=r*2.
 
-#side lengths
-CBxl=np.array([2500, 7500]); CByl=np.array([7500, 2500])
-#CBxl=np.array([2500, 2500]); CByl=np.array([7500, 7500])
-#CBxl=np.array([3000, 3000]); CByl=np.array([3000, 3000])
-CByl=CByl.astype(int); CBxl=CBxl.astype(int)
+        #radii for evenly distrib cases
+        #element_area=(3.*np.sqrt(3.)/2.)*((4./3.)*r**2)
+        element_area=(2.*r)**2
 
-#--- xmax, xmin, ymax, ymin for each CB --
-CBxmin=CBxc-(0.5*CBxl); CBxmax=CBxc+(0.5*CBxl)
-CBymin=CByc-(0.5*CByl); CBymax=CByc+(0.5*CByl)
-#this shouldn't happen:
-CBxmin[CBxmin<grdxmin]=grdxmin; CBxmax[CBxmax>grdxmax]=grdxmax
-CBymin[CBxmin<grdymin]=grdymin; CBymax[CBymax>grdymax]=grdymax
-CBxc=0.5*(CBxmin+CBxmax); CByc=0.5*(CBymin+CBymax)
+        berg_x=[]; berg_y=[]
+        berg_id=[]; berg_static=[]
+        berg_width=[]; berg_bonds=[]
+        berg_h=[]; berg_mass_scaling=[]
+        berg_mass=[]
+        berg_uvel=[]; berg_vvel=[]
 
-#if just want one particle per CB
-if just2particles:
-        CBxmin=CBxc; CBxmax=CBxc
-        CBymin=CByc; CBymax=CByc
+        x=xs
+        y=ys#-2*r
 
-#--- min and max thicknesses for each CB ---
-h1=thickness1; h2=thickness2
-CBhmax=np.array([h1,h1]); CBhmin=np.array([h2,h2])
-
-#radii
-CBrad=np.array([radius,radius])
-
-berg_x=[]; berg_y=[]
-berg_id=[]; berg_static=[]
-berg_width=[]; berg_bonds=[]
-berg_h=[]; berg_mass_scaling=[]
-berg_mass=[]
-berg_uvel=[]; berg_vvel=[]
-
-berg_count=0
-
-for i in range(nbergs):
-        x_start=CBxmin[i]+(CBrad[i]*2./np.sqrt(3))
-
-        if flip2ndconglom and i>0:
-                x_start=CBxmax[i]-(CBrad[i]*2./np.sqrt(3))
-
-        #pdb.set_trace()
-        if x_start>CBxmax[i]:
-                x_start=CBxmax[i]
-        y_start0=CBymin[i]+CBrad[i]
-        if y_start0>CBymax[i]:
-                y_start0=CBymax[i]
-        element_area=(3.*np.sqrt(3.)/2.)*((4./3.)*(CBrad[i])**2)
-        #H (thickness) is a linear function of a berg element's position from the
-        #center of the CB. H=Hmax at the center of the CB and H=Hmin at a corner of the
-        #CB, where the dist of a corner from the center is:
-        cdistb=np.sqrt((CBxmin[i]-CBxc[i])**2+(CBymin[i]-CByc[i])**2)
-        j=0
-        x_val=x_start
-        offset=0.0
-        if (i==0):
-                uvel=0.05#0.075
-        else:
-                uvel=-0.15#-0.05
-                if (offset2ndconglom):
-                        offset=250.0
-        vvel=0.025#0.01
-        #berg_count_start=berg_count
-        while x_val<=CBxmax[i] and x_val>=CBxmin[i]:
-                y_start=y_start0+((j%2)*CBrad[i])+offset
-                k=0
-                y_val=y_start
-                while y_val<=(CBymax[i]+offset):
-                        berg_count=berg_count+1
-                        berg_id.append(berg_count)
-                        berg_x.append(x_val)
-                        berg_y.append(y_val)
-                        berg_width.append(sqrt(element_area))
-                        #dist of berg elem from center of CB
-                        bdistc=np.sqrt((x_val-CBxc[i])**2+(y_val-CByc[i])**2)
-                        bh=CBhmin[i]*bdistc/cdistb + CBhmax[i]*(1-bdistc/cdistb)
-                        if (just2particles):
-                                bh=h1
-                        berg_h.append(bh) #thickness
-                        berg_mass_scaling.append(1)
-                        berg_mass.append(bh*rho_ice*element_area)
-                        berg_static.append(0)
-                        berg_uvel.append(uvel)
-                        berg_vvel.append(vvel)
-                        # if (x_val<22000):
-                        #         berg_vvel.append(vvel)
-                        # else:
-                        #         berg_vvel.append(0.4)
-                        #berg_CBid.append(i)
-                        k=k+1
-                        y_val=y_start+(2*k*CBrad[i])
-                j=j+1
-                if flip2ndconglom and i>0:
-                        x_val=x_start-(np.sqrt(3)*CBrad[i]*j)
+        berg_count=0.
+        while berg_count<nbergs:
+                berg_count=berg_count+1
+                if berg_count==1:
+                    #x=xs
+                    y=y+2*r
+                    static=1
                 else:
-                        x_val=x_start+(np.sqrt(3)*CBrad[i]*j)
+                    static=0
+                    x=x+2*r
 
-print('Number of bergs',berg_count)
+                berg_x.append(x)
+                berg_y.append(y)
+                berg_width.append(sqrt(element_area))
+                berg_h.append(h)
+                berg_mass_scaling.append(1)
+                berg_mass.append(h*rho_ice*element_area)
+                berg_static.append(static)
+                berg_uvel.append(0)
+                berg_vvel.append(0)
+                berg_id.append(berg_count)
 
-#pdb.set_trace()
+        print('Number of bergs',berg_count)
 
-#Create iceberg restart file
-Ice_geometry_source='Generic'
-Create_iceberg_restart_file(berg_count,berg_x,berg_y,berg_h,berg_width,berg_mass,berg_mass_scaling,berg_id,Ice_geometry_source,berg_static,berg_uvel,berg_vvel)
+        #Create iceberg restart file
+        Ice_geometry_source='Generic'
+        Create_iceberg_restart_file(nbergs,berg_x,berg_y,berg_h,berg_width,berg_mass,berg_mass_scaling,berg_id,Ice_geometry_source,berg_static,berg_uvel,berg_vvel)
+
+
+if __name__ == '__main__':
+    optCmdLineArgs=	parseCommandLine()
+    anim_running = True
+    main(optCmdLineArgs)

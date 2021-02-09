@@ -246,35 +246,30 @@ def create_empty_iceberg_restart_file(Empty_restart_filename):
 #               Main                #
 #-----------------------------------#
 
-just2particles=False
-flip2ndconglom=True#False
-offset2ndconglom=True#False
+# just2particles=False
+# flip2ndconglom=True#False
+# offset2ndconglom=True#False
 
 grdxmin=0; grdxmax=45000e3
 grdymin=0; grdymax=45000e3
 grdres=1000.0
-R_frac=0.45
+R_frac=0.45 #1st option
+#R_frac=0.5*0.45 #2nd option
 radius=(np.sqrt(3)/2.)*(R_frac*grdres) #S is < 0.5 grid res
-element_area=(3.*np.sqrt(3.)/2.)*((4./3.)*radius**2)
-width=np.sqrt(element_area)
+#radius2=(np.sqrt(3)/2.)*(R_frac2*grdres) #S is < 0.5 grid res
 thickness1=300.0
 thickness2=300.0
 rho_ice=850.0
 
-#mass
-mass=thickness1*element_area*rho_ice
-print('mass',mass)
 
-nbergs=2 #number of conglomerates
+nbergs=1 #number of conglomerates
 
 #center coords of each (rectangular) conglomerate berg (CB=conglomerate berg)
-CBxc=np.array([10500, 22500]); CByc=np.array([22500, 22500])
-#CBxc=np.array([9500, 17500]); CByc=np.array([22500, 22500])
-
+CBxc=np.array([3500]); CByc=np.array([15000])
 #side lengths
-CBxl=np.array([2500, 7500]); CByl=np.array([7500, 2500])
-#CBxl=np.array([2500, 2500]); CByl=np.array([7500, 7500])
-#CBxl=np.array([3000, 3000]); CByl=np.array([3000, 3000])
+CBxl=np.array([4000]); CByl=np.array([8000])
+
+
 CByl=CByl.astype(int); CBxl=CBxl.astype(int)
 
 #--- xmax, xmin, ymax, ymin for each CB --
@@ -285,17 +280,19 @@ CBxmin[CBxmin<grdxmin]=grdxmin; CBxmax[CBxmax>grdxmax]=grdxmax
 CBymin[CBxmin<grdymin]=grdymin; CBymax[CBymax>grdymax]=grdymax
 CBxc=0.5*(CBxmin+CBxmax); CByc=0.5*(CBymin+CBymax)
 
-#if just want one particle per CB
-if just2particles:
-        CBxmin=CBxc; CBxmax=CBxc
-        CBymin=CByc; CBymax=CByc
+# #if just want one particle per CB
+# if just2particles:
+#         CBxmin=CBxc; CBxmax=CBxc
+#         CBymin=CByc; CBymax=CByc
 
 #--- min and max thicknesses for each CB ---
-h1=thickness1; h2=thickness2
-CBhmax=np.array([h1,h1]); CBhmin=np.array([h2,h2])
+h1=thickness1
+h2=thickness2
+CBhmax=np.array([h1]); CBhmin=np.array([h2])
 
 #radii
-CBrad=np.array([radius,radius])
+CBrad=np.array([radius])
+print('radii',CBrad)
 
 berg_x=[]; berg_y=[]
 berg_id=[]; berg_static=[]
@@ -309,8 +306,8 @@ berg_count=0
 for i in range(nbergs):
         x_start=CBxmin[i]+(CBrad[i]*2./np.sqrt(3))
 
-        if flip2ndconglom and i>0:
-                x_start=CBxmax[i]-(CBrad[i]*2./np.sqrt(3))
+        # if flip2ndconglom and i>0:
+        #         x_start=CBxmax[i]-(CBrad[i]*2./np.sqrt(3))
 
         #pdb.set_trace()
         if x_start>CBxmax[i]:
@@ -326,13 +323,14 @@ for i in range(nbergs):
         j=0
         x_val=x_start
         offset=0.0
-        if (i==0):
-                uvel=0.05#0.075
-        else:
-                uvel=-0.15#-0.05
-                if (offset2ndconglom):
-                        offset=250.0
-        vvel=0.025#0.01
+        # if (i==0):
+        uvel=0.#1
+        # else:
+        #         uvel=-0.15#-0.05
+        #         if (offset2ndconglom):
+        #                 offset=250.0
+        vvel=0.0#25
+        #uvel=0;vvel=0
         #berg_count_start=berg_count
         while x_val<=CBxmax[i] and x_val>=CBxmin[i]:
                 y_start=y_start0+((j%2)*CBrad[i])+offset
@@ -347,8 +345,8 @@ for i in range(nbergs):
                         #dist of berg elem from center of CB
                         bdistc=np.sqrt((x_val-CBxc[i])**2+(y_val-CByc[i])**2)
                         bh=CBhmin[i]*bdistc/cdistb + CBhmax[i]*(1-bdistc/cdistb)
-                        if (just2particles):
-                                bh=h1
+                        # if (just2particles):
+                        #         bh=h1
                         berg_h.append(bh) #thickness
                         berg_mass_scaling.append(1)
                         berg_mass.append(bh*rho_ice*element_area)
@@ -363,10 +361,10 @@ for i in range(nbergs):
                         k=k+1
                         y_val=y_start+(2*k*CBrad[i])
                 j=j+1
-                if flip2ndconglom and i>0:
-                        x_val=x_start-(np.sqrt(3)*CBrad[i]*j)
-                else:
-                        x_val=x_start+(np.sqrt(3)*CBrad[i]*j)
+                # if flip2ndconglom and i>0:
+                #         x_val=x_start-(np.sqrt(3)*CBrad[i]*j)
+                # else:
+                x_val=x_start+(np.sqrt(3)*CBrad[i]*j)
 
 print('Number of bergs',berg_count)
 

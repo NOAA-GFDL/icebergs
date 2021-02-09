@@ -1,15 +1,9 @@
-!For the 60 element test:
-!KID, bergs_chksum: write_restart berg chksum=            1143158595 chksum2=           -1591676389 chksum3=            1858541605 chksum4=            1858541605 chksum5=                     0 #=                    60
-!KID, grd_chksum2:    # of bergs/cell chksum=                     0 chksum2=                     0 min= 0.000000000E+00 max= 0.000000000E+00 mean= 0.000000000E+00 rms= 0.000000000E+00 sd= 0.000000000E+00
-!Total number of bonds is:          298 
-
-
 
 &icebergs_driver_nml
   ni=45 !30 !number of elements, x direction
   nj=45 !30 !number of elements, y direction
   ibdt=1800.0 !seconds
-  ibuo=0.0 !ocean x velocity
+  ibuo=0.1 !ocean x velocity
   ibvo=0.0 !ocean y velocity
   ibui=0.0 !ice x velocity
   ibvi=0.0 !ice y velocity
@@ -20,32 +14,45 @@
   halo=3
   debug=.true.
   collision_test=.false.
-  grounding_test=.false.
-  bump_depth=9999.0 !(m) depth of top of gaussian bump below sea level 
+  grounding_test=.true.
+  bump_depth=200.0 !(m) depth of top of gaussian bump below sea level 
 /
 
 &icebergs_nml
 
+
+    dem=.true.
+    poisson=0.3
+    dem_damping_coef=0.99
+    rho_bergs=850. ! (850) iceberg density
+    dem_spring_coef=1000.0
+    spring_coef=1.e-5 !(1.e-8) Spring const for berg interactions (dflt~highest stable value)
+
+
+    monitor_energy=.false.
     !defaults given in parentheses:
-    monitor_energy=.true. !(F)
     new_mts=.true.
     mts=.true. !(F) for using the Multiple Time Stepping Velocity Verlet scheme
-    mts_sub_steps=10 !(-1) # of mts sub-steps (-1=automatically determine # from spring const)
-
-    !force_convergence=.true. !(F) experimental MTS convergence scheme to better conserve momentum during collisions
-    !convergence_tolerance=1e-8 !(1.e-8) tolerance for the MTS force_convergence scheme
-
+    mts_sub_steps=500 !300 !1000 !(-1) # of mts sub-steps
+    !mts_sub_steps=10
+    force_convergence=.true. !(F) experimental MTS convergence scheme to better conserve momentum during collisions
+    convergence_tolerance=1e-8 !(1.e-8) tolerance for the MTS force_convergence scheme
+    
     contact_distance=1.e3 !(0) unbonded bergs contact at max(contact_dist,sum of their radii)
-    contact_spring_coef=1.e-7 !!5.e-7!(default=spring_coeff) Berg spring coeff for collisions
+    contact_spring_coef=1.e-7!(default=spring_coeff) Berg spring coeff for collisions
     debug_write=.false. !(F)sets traj_sample_hours=traj_write_hours & includes halo bergs in write
-    cdrag_grounding=3.16e6 !friction drag param
+    cdrag_grounding=3.16e6 !for power-law-type friction
     h_to_init_grounding=200.0
     ewsame=.false. !(F) set T if periodic and 2 PEs along the x (zonal) direction
     remove_unused_bergs=.true. !(T) remove unneeded bergs after PEs transfers
 
-    fracture_criterion='strain' !('none') 'strain_rate','strain',or 'none'
-    !frac_thres_n = 0.018
-    !frac_thres_t = 0.05076
+    fracture_criterion='stress' !('none') 'strain_rate','strain',or 'none'
+    frac_thres_n = 12.
+    frac_thres_t = 12.
+
+    !!fracture_criterion='strain'
+    !!frac_thres_n = 0.0162
+    !!frac_thres_t = 0.0457
 
     halo=3 !(4) halo width
     Lx=45000. ! (360.) Length of X-domain. For periodicity (use a huge number for non-periodic)
@@ -54,10 +61,8 @@
     hexagonal_icebergs=.true. !(F)'T'=bergs are rectangles,'F'=bergs are hex (for mass spread)
     Static_icebergs=.False. ! (T) True=icebergs do no move
 
-    rho_bergs=850. ! (850) iceberg density
-    spring_coef=1.e-5 !(1.e-8) Spring const for berg interactions (dflt~highest stable value)
     bond_coef=1.e-8 ! (1.e-8) Spring const for berg bonds - not being used right now
-    radial_damping_coef=0.0!1.e-4 ! (1.e-4) Coeff for rel berg motion damping (radial component)
+    radial_damping_coef=1.e-4 ! (1.e-4) Coeff for rel berg motion damping (radial component)
     tangental_damping_coef=0.0!2.e-5 !(2.e-5) Coeff for rel berg motion damping (tangential comp.)
     scale_damping_by_pmag=.false. !(T) Scales damping by mag of (proj matrix \cdot relvel)
     critical_interaction_damping_on=.true. !(T) Sets damping on rel berg vel to crit val
@@ -104,8 +109,8 @@
     set_melt_rates_to_zero=.true.!(F)For testing, thermodyn is run, but all melt rates=0
 
     iceberg_bonds_on=.true. ! (F) True=Allow icebergs to have bonds, False=don't allow.
-    interactive_icebergs_on=.true.!.true. ! (F) Turn on/off interactions between icebergs
-    only_interactive_forces=.true. !(F)Bergs only feel interactive forces, not ocean, wind...
+    interactive_icebergs_on=.true. ! (F) Turn on/off interactions between icebergs
+    only_interactive_forces=.false. !(F)Bergs only feel interactive forces, not ocean, wind...
     use_new_predictive_corrective =.true. ! (F) Flag to use Bob's pred-corr berg scheme
     input_freq_distribution=.false. !(F)input dist is: 'T' freq dist or 'F' mass dist
     use_old_spreading=.false. !(T)spreads berg mass as if  berg is 1 grid cell wide (for rect)
@@ -114,9 +119,9 @@
 
     verbose=.false. !(F) Be verbose to stderr
     verbose_hrs=24000 ! (24) Period between verbose messages
-    traj_sample_hrs=0!6 !(24) sampling period for trajectory storage
-    traj_write_hrs=0!6 !(480) Period for writing sampled trajectories to disk
-    save_bond_traj=.false.!.true. !(F) If T, saves bond trajectories in a separate file
+    traj_sample_hrs=0!0!6 !(24) sampling period for trajectory storage
+    traj_write_hrs=0!0!6 !(480) Period for writing sampled trajectories to disk
+    save_bond_traj=.false. !(F) If T, saves bond trajectories in a separate file
     budget=.false. !(T) Calculate budgets
     debug=.false. !(F) Turn on debugging
     really_debug=.false. !(F) Turn on debugging
@@ -131,7 +136,7 @@
     require_restart=.true. !(F) 'T'=fail if the restart file is not present at start
     use_slow_find=.true. !(T) Use slow, but robust, find_cell for reading restarts
     manually_initialize_bonds=.true. ! (F) True= Bonds are initialize manually.
-    manually_initialize_bonds_from_radii=.true.!(F) Init bond b/w bergs if dist<1.25*radius
+    manually_initialize_bonds_from_radii=.true.
     !length_for_manually_initialize_bonds=800.0 !(1e3)Dist b/w bergs to init bonds manually
     ignore_ij_restart=.true. !(F) ign. cell from restart,useful for restart on diff grid
     generate_test_icebergs=.false. ! (F) Create ergs in absence of a restart file

@@ -253,17 +253,14 @@ offset2ndconglom=True#False
 grdxmin=0; grdxmax=45000e3
 grdymin=0; grdymax=45000e3
 grdres=1000.0
-R_frac=0.45
+R_frac=0.3375 #225
+R_frac2=0.3375 #45
 radius=(np.sqrt(3)/2.)*(R_frac*grdres) #S is < 0.5 grid res
-element_area=(3.*np.sqrt(3.)/2.)*((4./3.)*radius**2)
-width=np.sqrt(element_area)
+radius2=(np.sqrt(3)/2.)*(R_frac2*grdres) #S is < 0.5 grid res
 thickness1=300.0
-thickness2=300.0
+thickness2=200.0
 rho_ice=850.0
 
-#mass
-mass=thickness1*element_area*rho_ice
-print('mass',mass)
 
 nbergs=2 #number of conglomerates
 
@@ -292,10 +289,11 @@ if just2particles:
 
 #--- min and max thicknesses for each CB ---
 h1=thickness1; h2=thickness2
-CBhmax=np.array([h1,h1]); CBhmin=np.array([h2,h2])
+CBhmax=np.array([h1,h2]); CBhmin=np.array([h1,h2])
 
 #radii
-CBrad=np.array([radius,radius])
+CBrad=np.array([radius,radius2])
+print('radii',CBrad)
 
 berg_x=[]; berg_y=[]
 berg_id=[]; berg_static=[]
@@ -333,6 +331,7 @@ for i in range(nbergs):
                 if (offset2ndconglom):
                         offset=250.0
         vvel=0.025#0.01
+        #uvel=0;vvel=0
         #berg_count_start=berg_count
         while x_val<=CBxmax[i] and x_val>=CBxmin[i]:
                 y_start=y_start0+((j%2)*CBrad[i])+offset
