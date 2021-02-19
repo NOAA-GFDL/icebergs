@@ -257,8 +257,8 @@ R_frac=0.45 #1st option
 #R_frac=0.5*0.45 #2nd option
 radius=(np.sqrt(3)/2.)*(R_frac*grdres) #S is < 0.5 grid res
 #radius2=(np.sqrt(3)/2.)*(R_frac2*grdres) #S is < 0.5 grid res
-thickness1=300.0
-thickness2=300.0
+thickness1=200.0
+thickness2=200.0
 rho_ice=850.0
 
 

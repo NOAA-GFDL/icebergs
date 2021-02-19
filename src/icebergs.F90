@@ -52,6 +52,8 @@ use ice_bergs_framework, only: update_bond_angles
 use ice_bergs_framework, only: monitor_energy, energy_tests_init, new_mts
 use ice_bergs_framework, only: dem_tests_init
 use ice_bergs_framework, only: dem, init_dem_params
+use ice_bergs_framework, only: set_constant_interaction_length_and_width
+use ice_bergs_framework, only: use_damage, damage_test_1_init
 
 use ice_bergs_io,        only: ice_bergs_io_init, write_restart, write_trajectory, write_bond_trajectory
 use ice_bergs_io,        only: read_restart_bergs, read_restart_calving
@@ -173,11 +175,15 @@ subroutine icebergs_init(bergs, &
     check_bond_quality=.True.
     call count_bonds(bergs, nbonds,check_bond_quality)
     call assign_n_bonds(bergs)
-    call fracture_testing_initialization(bergs)
+    !call fracture_testing_initialization(bergs)
   endif
 
   if (bergs%uniaxial_test .or. bergs%dem_beam_test>0) call dem_tests_init(bergs)
+  if (bergs%damage_test_1) call damage_test_1_init(bergs)
 
+  if (bergs%constant_interaction_LW .and. (bergs%constant_length==0. .or. bergs%constant_width==0.)) then
+    call set_constant_interaction_length_and_width(bergs)
+  endif
 end subroutine icebergs_init
 
 subroutine debugwriteandstop(bergs)
@@ -565,8 +571,6 @@ subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
 
         other_berg=>bergs%list(grdi,grdj)%first
         do while (associated(other_berg)) ! loop over all other bergs
-          !call contact_eligibility(berg,other_berg,contact_eligible,c_crit_dist)
-          !if (contact_eligible) then
           if (other_berg%conglom_id.ne.berg%conglom_id) then
             call calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1,  &
               P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y,bonded)
@@ -606,43 +610,6 @@ subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
   endif
 end subroutine interactive_force
 
-!>Determines whether two bergs interact via contact. If they are w/in the same conglomerate,
-!!returns a flag to set the crit dist for contact to the sum of their radii
-subroutine contact_eligibility(berg,other_berg,contact_eligible,c_crit_dist)
-  ! Arguments
-  type(iceberg), pointer :: berg !< Primary berg
-  type(iceberg), pointer :: other_berg !< Berg that primary is interacting with
-  logical, intent(out) :: contact_eligible !< Are the berg eligible for interaction via contact?
-  logical, intent(out) :: c_crit_dist !<Flag to use crit_dist=R1+R2 for contact bergs w/in the same conglom
-  ! Local variables
-  type(iceberg), pointer :: this
-  type(bond), pointer :: current_bond
-
-  if (other_berg%conglom_id.ne.berg%conglom_id) then
-    contact_eligible=.true. !Bergs are in different congloms. Contact eligible.
-    c_crit_dist=.false.
-  else
-    !Bergs in same conglom. Determine whether they are bonded:
-    current_bond=>berg%first_bond
-    do while (associated(current_bond))
-      this=>current_bond%other_berg
-      if (associated(this)) then
-        if (this%id .eq. other_berg%id) then !bergs are bonded and not eligible for contact
-          contact_eligible=.false.
-          c_crit_dist=.false.
-          return
-        endif
-      endif
-      current_bond=>current_bond%next_bond
-    enddo
-
-    !Bergs are not bonded are are contact eligible. The c_crit_dist flag sets the crit_dist to
-    !the sum of the two bergs' radii within calculate_force.
-    contact_eligible=.true.
-    c_crit_dist=.true.
-  endif
-end subroutine contact_eligibility
-
 
 !> Calculate interactive forces between two bergs
 subroutine calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, &
@@ -680,25 +647,28 @@ subroutine calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, 
 
   if (berg%id .ne. other_berg%id) then
     ! From Berg 1
-    L1=berg%length
-    W1=berg%width
     T1=berg%thickness
-    M1=berg%mass
-    A1=L1*W1
     lon1=berg%lon_old; lat1=berg%lat_old
     !call rotpos_to_tang(lon1,lat1,x1,y1)
 
     ! From Berg 2
-    L2=other_berg%length
-    W2=other_berg%width
     T2=other_berg%thickness
-    M2=other_berg%mass
-    u2=other_berg%uvel_old !Old values are used to make it order invariant
-    v2=other_berg%vvel_old !Old values are used to make it order invariant
-    A2=L2*W2
     lon2=other_berg%lon_old; lat2=other_berg%lat_old !Old values are used to make it order invariant
 
     !call rotpos_to_tang(lon2,lat2,x2,y2)
+    u2=other_berg%uvel_old;  v2=other_berg%vvel_old !Old values are used to make it order invariant
+
+    if (bergs%constant_interaction_LW) then
+      ! use constant length and width here, just for interactions
+      A1=bergs%constant_length*bergs%constant_width !Berg 1 area
+      M1=A1*T1*bergs%rho_bergs                      !Berg 1 mass
+      A2=A1                                         !Berg 2 area
+      M2=A2*T2*bergs%rho_bergs                      !Berg 2 mass
+    else
+      ! use actual length and width of bergs
+      L1=berg%length; W1=berg%width; M1=berg%mass; A1=L1*W1                   !From Berg 1
+      L2=other_berg%length; W2=other_berg%width; M2=other_berg%mass; A2=L2*W2 !From Berg 2
+    endif
 
     dlon=lon1-lon2
     dlat=lat1-lat2
@@ -857,8 +827,8 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
   real, intent(inout) :: T_d !< Net torque from damping (Nm)
   logical, intent(in) :: savestress !< Save stress/tangential displacement on bond or not
   ! Local variables
-  real :: T1,M1,u1,v1,lon1,lat1,R1 ! Current iceberg
-  real :: T2,M2,u2,v2,lon2,lat2,R2 ! Other iceberg
+  real :: A1,T1,M1,u1,v1,lon1,lat1,R1 ! Current iceberg
+  real :: A2,T2,M2,u2,v2,lon2,lat2,R2 ! Other iceberg
   real :: dlon, dlat, lat_ref, dx_dlon, dy_dlat
   real :: r_dist_x, r_dist_y, r_dist
   real :: Rmin, delta, L, l0, youngs, Thick, T_Rmin, n1, n2
@@ -880,13 +850,23 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
 
     ! From Berg 1
     T1=berg%thickness
-    M1=berg%mass
     lon1=berg%lon_old; lat1=berg%lat_old
 
     ! From Berg 2
     T2=other_berg%thickness
-    M2=other_berg%mass
-    lon2=other_berg%lon_old; lat2=other_berg%lat_old !Old values are used to make it order invariant
+    lon2=other_berg%lon_old; lat2=other_berg%lat_old
+
+    if (bergs%constant_interaction_LW) then
+      ! use constant length and width here, just for interactions
+      A1=bergs%constant_length*bergs%constant_width !Berg 1 area
+      M1=A1*T1*bergs%rho_bergs                      !Berg 1 mass
+      A2=A1                                         !Berg 2 area
+      M2=A2*T2*bergs%rho_bergs                      !Berg 2 mass
+    else
+      ! use actual length and width of bergs
+      M1=berg%mass; A1=berg%length*berg%width                   !From Berg 1
+      M2=other_berg%mass; A2=other_berg%length*other_berg%width !From Berg 2
+    endif
 
     dlon=lon1-lon2; dlat=lat1-lat2
 
@@ -898,19 +878,20 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
     r_dist_x=dlon*dx_dlon
     r_dist_y=dlat*dy_dlat
     r_dist=sqrt( (r_dist_x**2) + (r_dist_y**2) ) !(Stern et al 2017, Eqn 3)
+    current_bond%length=r_dist
 
     !unit vec
     n1=r_dist_x/r_dist; n2=r_dist_y/r_dist
 
     !Stern et al 2017, Eqn 4: radius of circle inscribed within hexagon or square with area A1 or A2
     if (bergs%hexagonal_icebergs) then
-      R1=sqrt(berg%length*berg%width/(2.*sqrt(3.)))
-      R2=sqrt(other_berg%length*other_berg%width/(2.*sqrt(3.)))
+      R1=sqrt(A1/(2.*sqrt(3.)))
+      R2=sqrt(A2/(2.*sqrt(3.)))
     else !square packing
       !R1=sqrt(A1/pi) ! Interaction radius of the iceberg (assuming circular icebergs)
       !R2=sqrt(A2/pi) ! Interaction radius of the other iceberg
-      R1=0.5*sqrt(berg%length*berg%width)
-      R2=0.5*sqrt(other_berg%length*other_berg%width)
+      R1=0.5*sqrt(A1)
+      R2=0.5*sqrt(A2)
     endif
 
     !Rmin=min(R1,R2) !old
@@ -971,11 +952,11 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
 
       !add the new tangential displacement
       current_bond%tangd1=current_bond%tangd1+rtu*dt; current_bond%tangd2=current_bond%tangd2+rtv*dt
-      current_bond%length=r_dist
     endif
 
     !shear terms
     ss_factor=-L*Thick*youngs/(l0*2.0*(1.0+bergs%poisson))
+    if (bergs%ignore_tangential_force) ss_factor=0.
     Fs_x=ss_factor*current_bond%tangd1; Fs_y=ss_factor*current_bond%tangd2 !shear forces
     if (savestress) current_bond%sstress=sqrt(Fs_x**2+Fs_y**2)/(L*Thick) !shear stress
 
@@ -993,6 +974,10 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
 
     Fd_x = Fd_x-damping_coef*ur; Fd_y = Fd_y-damping_coef*vr  !linear damping force
     T_d  = T_d-damping_coef*(berg%ang_vel-other_berg%ang_vel) !damping torque
+
+    if (bergs%dem_shear_for_frac_only) then
+      Fs_x=0.; Fs_y=0.
+    endif
 
     !final forces
     T = T + (Ts + Tr) !torque
@@ -4351,14 +4336,14 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
   if ( (bergs%traj_sample_hrs>0)  .and. (.not. bergs%ignore_traj) ) then
     if (mod(60*60*24*iday+ 60*60*ihr + 60.*imin + isec ,60*60*bergs%traj_sample_hrs).eq.0) &
       sample_traj=.true.
-  elseif (bergs%traj_sample_hrs==0) then
+  elseif (bergs%traj_sample_hrs==-1) then
     sample_traj=.true.
   endif
   write_traj=.false.
   if ((bergs%traj_write_hrs>0) .and. (.not. bergs%ignore_traj))  then
      if (mod(60*60*24*iday+ 60*60*ihr + 60.*imin + isec ,60*60*bergs%traj_write_hrs).eq.0) &
        write_traj=.true.
-   elseif (bergs%traj_write_hrs==0) then
+   elseif (bergs%traj_write_hrs==-1) then
      write_traj=.true.
   endif
   lverbose=.false.
@@ -4569,7 +4554,7 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
     elseif ((bergs%contact_distance>0.) .or. (bergs%contact_spring_coef .ne. bergs%spring_coef)) then
       call set_conglom_ids(bergs)
     endif
-    call orig_bond_length(bergs)
+    if (bergs%iceberg_bonds_on) call orig_bond_length(bergs)
 
     if (monitor_energy) then
       call energy_tests_init(bergs)
@@ -4601,7 +4586,7 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
   call mpp_clock_begin(bergs%clock_mom)
 
   if (.not.bergs%Static_icebergs) then
-    if (.not. bergs%dem) call reset_bond_rotation(bergs)
+    if (bergs%iceberg_bonds_on .and. (.not. bergs%dem)) call reset_bond_rotation(bergs)
 
     if (bergs%mts) then
       call evolve_icebergs_mts(bergs)
@@ -5376,14 +5361,16 @@ subroutine calve_icebergs(bergs)
           newberg%vvel=0.
           newberg%uvel_prev=0.  !Added by Alex
           newberg%vvel_prev=0.  !Added by Alex
+          newberg%uvel_old=0.  !Added by Alex
+          newberg%vvel_old=0.  !Added by Alex
+          newberg%lon_prev=newberg%lon  !Added by Alex
+          newberg%lat_prev=newberg%lat  !Added by Alex
+          newberg%lon_old=newberg%lon  !Added by Alex
+          newberg%lat_old=newberg%lat  !Added by Alex
           newberg%axn=0. !Added by Alon
           newberg%ayn=0. !Added by Alon
           newberg%bxn=0. !Added by Alon
           newberg%byn=0. !Added by Alon
-          newberg%axn_fast=0. !Added by Alex
-          newberg%ayn_fast=0. !Added by Alex
-          newberg%bxn_fast=0. !Added by Alex
-          newberg%byn_fast=0. !Added by Alex
           newberg%mass=bergs%initial_mass(k)
           newberg%thickness=bergs%initial_thickness(k)
           newberg%width=bergs%initial_width(k)
@@ -5392,7 +5379,6 @@ subroutine calve_icebergs(bergs)
           newberg%start_lat=newberg%lat
           newberg%start_year=bergs%current_year
           newberg%id = generate_id(grd, i, j)
-          newberg%conglom_id=0
           newberg%start_day=bergs%current_yearday+ddt/86400.
           newberg%start_mass=bergs%initial_mass(k)
           newberg%mass_scaling=bergs%mass_scaling(k)
@@ -5400,6 +5386,35 @@ subroutine calve_icebergs(bergs)
           newberg%halo_berg=0.
           newberg%static_berg=0.
           newberg%heat_density=grd%stored_heat(i,j)/grd%stored_ice(i,j,k) ! This is in J/kg
+
+          if (bergs%mts) then
+            allocate(newberg%axn_fast,newberg%ayn_fast,newberg%bxn_fast,newberg%byn_fast,newberg%conglom_id)
+            newberg%axn_fast=0.; newberg%ayn_fast=0.; newberg%bxn_fast=0.; newberg%byn_fast=0.; newberg%conglom_id=0
+          endif
+
+          if (bergs%iceberg_bonds_on) then
+            allocate(newberg%n_bonds)
+            newberg%n_bonds=0
+          endif
+
+          if (bergs%dem) then
+            allocate(newberg%ang_vel,newberg%ang_accel,newberg%rot)
+            newberg%ang_vel=0.; newberg%ang_accel=0.; newberg%rot=0.
+          endif
+
+          if (monitor_energy) then
+            allocate(newberg%Ee,newberg%Ed,newberg%Eext,newberg%Ee_contact,newberg%Ed_contact,newberg%Efrac,&
+              newberg%Ee_temp,newberg%Ed_temp,newberg%Eext_temp,newberg%Ee_contact_temp,newberg%Ed_contact_temp)
+            newberg%Ee=0.; newberg%Ed=0.; newberg%Eext=0.; newberg%Ee_contact=0.; newberg%Ed_contact=0.
+            newberg%Efrac=0.; newberg%Ee_temp=0.; newberg%Ed_temp=0.;newberg%Eext_temp=0.;
+            newberg%Ee_contact_temp=0.; newberg%Ed_contact_temp =0.
+          endif
+
+          if (bergs%fracture_criterion .ne. 'none' .and. (.not. bergs%dem)) then
+            allocate(newberg%accum_bond_rotation)
+            newberg%accum_bond_rotation=0.
+          endif
+
           call add_new_berg_to_list(bergs%list(i,j)%first, newberg)
           calved_to_berg=bergs%initial_mass(k)*bergs%mass_scaling(k) ! Units of kg
           ! Heat content
