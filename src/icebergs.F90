@@ -654,7 +654,7 @@ subroutine calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, 
     !call rotpos_to_tang(lon2,lat2,x2,y2)
     u2=other_berg%uvel_old;  v2=other_berg%vvel_old !Old values are used to make it order invariant
 
-    if (bergs%constant_interaction_LW) then
+    if (bergs%constant_interaction_LW .and. bergs%mts .and. bonded) then
       ! use constant length and width here, just for interactions
       A1=bergs%constant_length*bergs%constant_width !Berg 1 area
       M1=A1*T1*bergs%rho_bergs                      !Berg 1 mass
@@ -893,10 +893,10 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
     !Rmin=min(R1,R2) !old
     if (R1<R2) then
       Rmin=R1
-      !T_Rmin=T1 !thickness of element w/ minimum radius
+      T_Rmin=T1 !thickness of element w/ minimum radius
     else
       Rmin=R2
-      !T_Rmin=T2
+      T_Rmin=T2
     endif
     l0=R1+R2
     delta=l0-r_dist
@@ -909,13 +909,15 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
     !bond width (determined at contact point)
     L=2.0*(Rmin+(Rmin-0.5*delta)*abs(R1-R2)/r_dist)
 
-    !Thick=T_Rmin+(Rmin-0.5*delta)*abs(T1-T2)/r_dist !the thickness (determined at contact point)
-    Thick=min(T1,T2) !minimum thickness makes more sense?
+    Thick=T_Rmin+(Rmin-0.5*delta)*abs(T1-T2)/r_dist !thickness as determined at contact point
+    !Thick=min(T1,T2) !minimum thickness
+    !Thick=0.5*(T1+T2) !average thickness
 
     youngs=bergs%dem_spring_coef
 
     !normal force:
     !Fn_x=youngs*Thick*delta*n1*L/l0 !Fn_y=youngs*Thick*delta*n2*L/l0
+    !normal stiffness is youngs*Thick*L/l0
     if (savestress) current_bond%nstress=-youngs*delta/l0 !normal stress
     Fn_x=youngs*Thick*delta*L/l0; Fn_y=Fn_x*n2; Fn_x=Fn_x*n1
 
@@ -951,7 +953,7 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
     endif
 
     !shear terms
-    ss_factor=-L*Thick*youngs/(l0*2.0*(1.0+bergs%poisson))
+    ss_factor=-L*Thick*youngs/(l0*2.0*(1.0+bergs%poisson)) !shear stiffness
     if (bergs%ignore_tangential_force) ss_factor=0.
     Fs_x=ss_factor*current_bond%tangd1; Fs_y=ss_factor*current_bond%tangd2 !shear forces
     if (savestress) current_bond%sstress=sqrt(Fs_x**2+Fs_y**2)/(L*Thick) !shear stress
@@ -1068,7 +1070,7 @@ subroutine accel_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, d
   real :: dragfrac, N_bonds, N_max, groundfrac, c_gnd, drag_gnd, scaling
   real :: minfricvel=3.17e-12 !m/s (~0.0001 m/a)
   type(bond), pointer :: current_bond
-  real :: IAd_x, IAd_y, sum_bond_Ee, sum_bond_Ed, oneoverkn
+  real :: IAd_x, IAd_y, sum_bond_Ee, sum_bond_Ed, oneoverkn, M2
   type(iceberg), pointer :: other_berg
 
   Runge_not_Verlet=bergs%Runge_not_Verlet  ! Loading directly from namelist/default , Alon
@@ -1309,7 +1311,14 @@ subroutine accel_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, d
     if (monitor_energy .or. bergs%fracture_criterion=='energy') then
       sum_bond_Ee=0.0
       sum_bond_Ed=0.0
-      M=berg%mass
+
+      if (bergs%constant_interaction_LW) then
+        ! mass according to constant length and width here, just for interactions
+        M=bergs%constant_length*bergs%constant_width*berg%thickness*bergs%rho_bergs
+      else
+        M=berg%mass
+      endif
+
       current_bond=>berg%first_bond
       do while (associated(current_bond)) ! loop over all bonds
         other_berg=>current_bond%other_berg
@@ -1338,6 +1347,13 @@ subroutine accel_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, d
 
         if (bergs%fracture_criterion=='energy') then
           oneoverkn = 1./bergs%spring_coef
+          if (bergs%constant_interaction_LW) then
+            ! other_berg mass according to constant length and width here, just for interactions
+            M2=bergs%constant_length*bergs%constant_width*other_berg%thickness*bergs%rho_bergs
+          else
+            M2=other_berg%mass
+          endif
+
           oneoverkn=oneoverkn*(M/min(M,other_berg%mass))
           current_bond%spring_pe = 0.5*((M*IA_x)**2+(M*IA_y)**2)*oneoverkn
         endif
@@ -1546,7 +1562,7 @@ subroutine accel_explicit_inner_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, 
   real :: P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y    !Added by Alon
   integer :: stderrunit
   type(bond), pointer :: current_bond
-  real :: IAd_x, IAd_y, sum_bond_Ee, sum_bond_Ed, oneoverkn
+  real :: IAd_x, IAd_y, sum_bond_Ee, sum_bond_Ed, oneoverkn, M2
   type(iceberg), pointer :: other_berg
   integer :: grdi,grdj
   logical :: bonded
@@ -1653,8 +1669,13 @@ subroutine accel_explicit_inner_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, 
       endif
     endif
 
-    !M=berg%thickness*(pi*R1**2)*bergs%rho_bergs
-    M=berg%mass
+    if (bergs%constant_interaction_LW) then
+      ! mass according to constant length and width here, just for interactions
+      M=bergs%constant_length*bergs%constant_width*berg%thickness*bergs%rho_bergs
+    else
+      M=berg%mass
+    endif
+
     IA_x=IA_x+F_x/M; IA_y=IA_y+F_y/M
     IAd_x=IAd_x+Fd_x/M; IAd_y=IAd_y+Fd_y/M
 
@@ -1677,7 +1698,6 @@ subroutine accel_explicit_inner_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, 
 
     !save bond energies
     if (monitor_energy .or. bergs%fracture_criterion=='energy') then
-      M=berg%mass
       current_bond=>berg%first_bond
       do while (associated(current_bond)) ! loop over all bonds
         other_berg=>current_bond%other_berg
@@ -1740,8 +1760,15 @@ subroutine accel_explicit_inner_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, 
         endif
 
         if (bergs%fracture_criterion=='energy') then
+          if (bergs%constant_interaction_LW) then
+            ! other_berg mass according to constant length and width here, just for interactions
+            M2=bergs%constant_length*bergs%constant_width*other_berg%thickness*bergs%rho_bergs
+          else
+            M2=other_berg%mass
+          endif
+
           oneoverkn = 1./bergs%spring_coef
-          oneoverkn=oneoverkn*(M/min(M,other_berg%mass))
+          oneoverkn=oneoverkn*(M/min(M,M2))
           current_bond%spring_pe = 0.5*((M*IA_x)**2+(M*IA_y)**2)*oneoverkn
         endif
 
@@ -5698,18 +5725,13 @@ subroutine evolve_icebergs_mts(bergs)
           berg%lon=lonn      ;  berg%lat=latn
           berg%lon_old=lonn  ;  berg%lat_old=latn
 
-          ! Set uvel_old to ustar for berg interactions?
-          ! if (new_mts) then
-          !   berg%uvel_old=berg%uvel+dt_2*(berg%axn_fast+berg%bxn_fast)
-          !   berg%vvel_old=berg%vvel+dt_2*(berg%ayn_fast+berg%bxn_fast)
-          ! else
-          !   berg%uvel_old=berg%uvel+dt_2*(berg%axn_fast)
-          !   berg%vvel_old=berg%vvel+dt_2*(berg%ayn_fast)
-          ! endif
-
-          if (bergs%dem) then
-            berg%ang_vel=berg%ang_vel+dt_2*berg%ang_accel
-            berg%rot=berg%rot+dt_2*berg%ang_vel
+          !Set uvel_old to ustar for berg interactions?
+          if (new_mts) then
+            berg%uvel_old=berg%uvel+dt_2*(berg%axn_fast+berg%bxn_fast)
+            berg%vvel_old=berg%vvel+dt_2*(berg%ayn_fast+berg%bxn_fast)
+          else
+            berg%uvel_old=berg%uvel+dt_2*(berg%axn_fast)
+            berg%vvel_old=berg%vvel+dt_2*(berg%ayn_fast)
           endif
         end if
         berg=>berg%next
@@ -5851,8 +5873,8 @@ subroutine evolve_icebergs_mts(bergs)
           berg%uvel_old=berg%uvel; berg%vvel_old=berg%vvel
 
           if (bergs%dem) then
-            berg%ang_vel=berg%ang_vel+dt_2*berg%ang_accel
-            berg%rot=berg%rot+dt_2*berg%ang_vel
+            berg%ang_vel=berg%ang_vel+dt*berg%ang_accel
+            berg%rot=berg%rot+dt*berg%ang_vel
           endif
 
           if (bergs%force_convergence) then

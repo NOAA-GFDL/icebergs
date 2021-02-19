@@ -24,9 +24,9 @@
     !damage_test_1=.true.
 
     dem=.true.
-    ignore_tangential_force=.true.
+    ignore_tangential_force=.false.!.true.
     poisson=0.3
-    dem_damping_coef=0. !1.0
+    dem_damping_coef=1.0
     rho_bergs=850. ! (850) iceberg density
     !dem_spring_coef=E=youngs. For hexagonal packing and a constant radius and density for all elements,
     !a dem_spring_coef equivalent to the spring_coef (k) used for non-DEM would be:
@@ -38,7 +38,7 @@
     !defaults given in parentheses:
     new_mts=.true.
     mts=.true. !(F) for using the Multiple Time Stepping Velocity Verlet scheme
-    mts_sub_steps=100!75 !(-1) # of mts sub-steps
+    mts_sub_steps=10!75 !(-1) # of mts sub-steps
     !mts_sub_steps=10
     force_convergence=.true. !(F) experimental MTS convergence scheme to better conserve momentum during collisions
     convergence_tolerance=1e-8 !(1.e-8) tolerance for the MTS force_convergence scheme
@@ -53,7 +53,7 @@
 
     fracture_criterion='stress' !('none') 'strain_rate','strain',or 'none'
     frac_thres_scaling = 1. 
-    frac_thres_n = 70. !2.1e4 !12.
+    frac_thres_n = 0.!70. !2.1e4 !12.
     frac_thres_t = 0. !12.
 
     !!fracture_criterion='strain'
@@ -141,8 +141,8 @@
     ignore_missing_restart_bergs=.False. !(F) 'T'=ignore missing bergs in restart
     require_restart=.true. !(F) 'T'=fail if the restart file is not present at start
     use_slow_find=.true. !(T) Use slow, but robust, find_cell for reading restarts
-    manually_initialize_bonds=.false.!.true. ! (F) True= Bonds are initialize manually.
-    manually_initialize_bonds_from_radii=.false.!.true.
+    manually_initialize_bonds=.true. ! (F) True= Bonds are initialize manually.
+    manually_initialize_bonds_from_radii=.true.
     !length_for_manually_initialize_bonds=800.0 !(1e3)Dist b/w bergs to init bonds manually
     ignore_ij_restart=.true. !(F) ign. cell from restart,useful for restart on diff grid
     generate_test_icebergs=.false. ! (F) Create ergs in absence of a restart file

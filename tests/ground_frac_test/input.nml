@@ -1,3 +1,4 @@
+!NOTE: this result is from when we did NOT set uvel_old to ustar for berg interactions
 !KID, bergs_chksum: write_restart berg chksum=              32083975 chksum2=            2055392101 chksum3=           -2018330166 chksum4=           -2018330166 chksum5=           -1470408987 #=                    67
 !KID, grd_chksum2:    # of bergs/cell chksum=                     0 chksum2=                     0 min= 0.000000000E+00 max= 0.000000000E+00 mean= 0.000000000E+00 rms= 0.000000000E+00 sd= 0.000000000E+00
 ! Total number of bonds is:          286 

@@ -1347,6 +1347,17 @@ endif
   bergs%constant_width=constant_width
   bergs%dem_shear_for_frac_only=dem_shear_for_frac_only
 
+  if (monitor_energy) then
+    if (bergs%constant_interaction_LW) then
+      call error_mesg('KID, ice_bergs_framework_init', &
+        'cannot use monitor_energy with constant_interaction_LW yet', FATAL)
+    endif
+    if (bergs%dem .and. .not. bergs%ignore_tangential_force) then
+      call error_mesg('KID, ice_bergs_framework_init', &
+        'monitor_energy does not yet account for dem tangential force terms', FATAL)
+    endif
+  endif
+
   if (bergs%contact_distance>0) then
     dx_dlon=1; dy_dlat=1
     if (grd%grid_is_latlon) dy_dlat=pi_180*Rearth
