@@ -1406,7 +1406,7 @@ integer(kind=8), allocatable, dimension(:) :: first_id,   &
             call form_a_bond(first_berg, other_id(k), other_berg_ine(k), other_berg_jne(k),  second_berg)
             number_perfect_bonds=number_perfect_bonds+1
 
-            current_bond=>this%first_bond
+            current_bond=>first_berg%first_bond
 
             if (dem) then
               current_bond%tangd1=tangd1(k)

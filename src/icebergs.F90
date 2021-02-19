@@ -160,11 +160,7 @@ subroutine icebergs_init(bergs, &
       call read_restart_bonds(bergs,Time)
     endif
     call update_halo_icebergs(bergs)
-    if (bergs%manually_initialize_bonds) then
-      call initialize_iceberg_bonds(bergs)
-    else
-      call read_restart_bonds(bergs,Time)
-    endif
+    if (bergs%manually_initialize_bonds) call initialize_iceberg_bonds(bergs)
     if (bergs%mts) then
       call transfer_mts_bergs(bergs)
     else

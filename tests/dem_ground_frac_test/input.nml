@@ -141,8 +141,8 @@
     ignore_missing_restart_bergs=.False. !(F) 'T'=ignore missing bergs in restart
     require_restart=.true. !(F) 'T'=fail if the restart file is not present at start
     use_slow_find=.true. !(T) Use slow, but robust, find_cell for reading restarts
-    manually_initialize_bonds=.true. ! (F) True= Bonds are initialize manually.
-    manually_initialize_bonds_from_radii=.true.
+    manually_initialize_bonds=.false.!.true. ! (F) True= Bonds are initialize manually.
+    manually_initialize_bonds_from_radii=.false.!.true.
     !length_for_manually_initialize_bonds=800.0 !(1e3)Dist b/w bergs to init bonds manually
     ignore_ij_restart=.true. !(F) ign. cell from restart,useful for restart on diff grid
     generate_test_icebergs=.false. ! (F) Create ergs in absence of a restart file
