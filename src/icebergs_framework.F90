@@ -52,7 +52,7 @@ logical :: ewsame=.false. !<(F) set T if periodic and 2 PEs along the x directio
 logical :: monitor_energy=.false. !<monitors energies: elastic (spring+collision), external, dissipated, fracture
 logical :: iceberg_bonds_on=.False. ! True=Allow icebergs to have bonds, False=don't allow.
 logical :: dem=.false. !< If T, run in DEM-mode with angular terms, variable stiffness, etc
-character(len=11) :: fracture_criterion !<'energy','stress','strain_rate','strain',or 'none'
+character(len=11) :: fracture_criterion='none' !<'energy','stress','strain_rate','strain',or 'none'
 logical :: use_damage=.false. !< Damage on bonds. Can evolve and serve as fracture criterion, or just to represent weaker bond
 
 !Public params !Niki: write a subroutine to expose these
