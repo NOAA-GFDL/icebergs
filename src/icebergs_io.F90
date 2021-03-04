@@ -141,6 +141,7 @@ real, allocatable, dimension(:) :: lon,          &
                                    thickness,    &
                                    width,        &
                                    length,       &
+                                   fl_k,         &
                                    start_lon,    &
                                    start_lat,    &
                                    start_day,    &
@@ -216,6 +217,7 @@ integer :: grdi, grdj
    allocate(thickness(nbergs))
    allocate(width(nbergs))
    allocate(length(nbergs))
+   allocate(fl_k(nbergs))
    allocate(start_lon(nbergs))
    allocate(start_lat(nbergs))
    allocate(start_day(nbergs))
@@ -273,6 +275,7 @@ integer :: grdi, grdj
   id = register_restart_field(bergs_restart,filename,'thickness',thickness,longname='thickness',units='m')
   id = register_restart_field(bergs_restart,filename,'width',width,longname='width',units='m')
   id = register_restart_field(bergs_restart,filename,'length',length,longname='length',units='m')
+  id = register_restart_field(bergs_restart,filename,'fl_k',fl_k,longname='footloose calving k',units='m')
   id = register_restart_field(bergs_restart,filename,'start_lon',start_lon, &
                                             longname='longitude of calving location',units='degrees_E')
   id = register_restart_field(bergs_restart,filename,'start_lat',start_lat, &
@@ -347,6 +350,7 @@ integer :: grdi, grdj
       axn(i) = this%axn; ayn(i) = this%ayn !Added by Alon
       bxn(i) = this%bxn; byn(i) = this%byn !Added by Alon
       width(i) = this%width; length(i) = this%length
+      fl_k(i) = this%fl_k
       start_lon(i) = this%start_lon; start_lat(i) = this%start_lat
       start_year(i) = this%start_year; start_day(i) = this%start_day
       start_mass(i) = this%start_mass; mass_scaling(i) = this%mass_scaling
@@ -389,6 +393,7 @@ integer :: grdi, grdj
              thickness,    &
              width,        &
              length,       &
+             fl_k,         &
              start_lon,    &
              start_lat,    &
              start_day,    &
@@ -657,6 +662,7 @@ real, allocatable, dimension(:) :: lon,          &
                                    thickness,    &
                                    width,        &
                                    length,       &
+                                   fl_k,         &
                                    start_lon,    &
                                    start_lat,    &
                                    start_day,    &
@@ -716,6 +722,7 @@ integer, allocatable, dimension(:) :: ine,        &
      allocate(thickness(nbergs_in_file))
      allocate(width(nbergs_in_file))
      allocate(length(nbergs_in_file))
+     allocate(fl_k(nbergs_in_file))
      allocate(start_lon(nbergs_in_file))
      allocate(start_lat(nbergs_in_file))
      allocate(start_day(nbergs_in_file))
@@ -786,6 +793,7 @@ integer, allocatable, dimension(:) :: ine,        &
      call read_unlimited_axis(filename,'thickness',thickness,domain=grd%domain)
      call read_unlimited_axis(filename,'width',width,domain=grd%domain)
      call read_unlimited_axis(filename,'length',length,domain=grd%domain)
+     call read_real_vector(filename,'fl_k',fl_k,grd%domain,value_if_not_in_file=0.)
      call read_unlimited_axis(filename,'start_lon',start_lon,domain=grd%domain)
      call read_unlimited_axis(filename,'start_lat',start_lat,domain=grd%domain)
      call read_unlimited_axis(filename,'start_day',start_day,domain=grd%domain)
@@ -874,6 +882,7 @@ integer, allocatable, dimension(:) :: ine,        &
       localberg%thickness=thickness(k)
       localberg%width=width(k)
       localberg%length=length(k)
+      localberg%fl_k=fl_k(k)
       localberg%start_lon=start_lon(k)
       localberg%start_lat=start_lat(k)
       localberg%start_year=start_year(k)
@@ -940,6 +949,7 @@ integer, allocatable, dimension(:) :: ine,        &
                thickness,    &
                width,        &
                length,       &
+               fl_k,         &
                start_lon,    &
                start_lat,    &
                start_day,    &
@@ -1091,6 +1101,7 @@ logical :: lres
       localberg%thickness=bergs%initial_thickness(1)
       localberg%width=bergs%initial_width(1)
       localberg%length=bergs%initial_length(1)
+      localberg%fl_k=0.
       localberg%start_lon=localberg%lon
       localberg%start_lat=localberg%lat
       localberg%start_year=iyr
@@ -1648,7 +1659,7 @@ integer :: lonid, latid, yearid, dayid, uvelid, vvelid, idcntid, idijid
 integer :: uvelpid,vvelpid
 integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid, sssid
 integer :: cnid, hiid, hsid
-integer :: mid, did, wid, lid, mbid, hdid, nbid, odid
+integer :: mid, did, wid, lid, mbid, hdid, nbid, odid, flkid
 integer :: axnid,aynid,bxnid,bynid,axnfid,aynfid,bxnfid,bynfid
 integer :: eecid,edcid,eeid,edid,aeid,efid
 integer :: eectid, edctid, eetid, edtid, aetid
@@ -1787,6 +1798,7 @@ logical :: io_is_in_append_mode
         did = inq_varid(ncid, 'thickness')
         wid = inq_varid(ncid, 'width')
         lid = inq_varid(ncid, 'length')
+        flkid = inq_varid(ncid, 'fl_k')
         sshxid = inq_varid(ncid, 'ssh_x')
         sshyid = inq_varid(ncid, 'ssh_y')
         sstid = inq_varid(ncid, 'sst')
@@ -1863,6 +1875,7 @@ logical :: io_is_in_append_mode
         did = def_var(ncid, 'thickness', NF_DOUBLE, i_dim)
         wid = def_var(ncid, 'width', NF_DOUBLE, i_dim)
         lid = def_var(ncid, 'length', NF_DOUBLE, i_dim)
+        flkid = def_var(ncid, 'fl_k', NF_DOUBLE, i_dim)
         sshxid = def_var(ncid, 'ssh_x', NF_DOUBLE, i_dim)
         sshyid = def_var(ncid, 'ssh_y', NF_DOUBLE, i_dim)
         sstid = def_var(ncid, 'sst', NF_DOUBLE, i_dim)
@@ -1955,6 +1968,8 @@ logical :: io_is_in_append_mode
         call put_att(ncid, wid, 'units', 'm')
         call put_att(ncid, lid, 'long_name', 'length')
         call put_att(ncid, lid, 'units', 'm')
+        call put_att(ncid, flkid, 'long_name', 'footloose calving k')
+        call put_att(ncid, flkid, 'units', 'm')
         call put_att(ncid, sshxid, 'long_name', 'sea surface height gradient_x')
         call put_att(ncid, sshxid, 'units', 'non-dim')
         call put_att(ncid, sshyid, 'long_name', 'sea surface height gradient_y')
@@ -2075,6 +2090,7 @@ logical :: io_is_in_append_mode
         call put_double(ncid, did, i, this%thickness)
         call put_double(ncid, wid, i, this%width)
         call put_double(ncid, lid, i, this%length)
+        call put_double(ncid, flkid, i, this%fl_k)
         call put_double(ncid, sshxid, i, this%ssh_x)
         call put_double(ncid, sshyid, i, this%ssh_y)
         call put_double(ncid, sstid, i, this%sst)

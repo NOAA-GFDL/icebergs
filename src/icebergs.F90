@@ -14,6 +14,7 @@ use mpp_mod, only: mpp_send, mpp_recv, mpp_sync_self, mpp_chksum, mpp_sync
 use mpp_mod, only: mpp_clock_begin, mpp_clock_end, mpp_clock_id
 use mpp_mod, only: CLOCK_COMPONENT, CLOCK_SUBCOMPONENT, CLOCK_LOOP
 use random_numbers_mod, only: initializeRandomNumberStream, getRandomNumbers, randomNumberStream
+use random_numbers_mod, only: constructSeed
 use mpp_mod, only: mpp_gather
 use fms_mod, only: clock_flag_default
 use fms_io_mod, only: get_instance_filename
@@ -506,16 +507,19 @@ subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
   logical :: critical_interaction_damping_on
   integer :: grdi, grdj
   logical :: iceberg_bonds_on
-  logical :: bonded !,contact_eligible,c_crit_dist
+  logical :: bonded
   integer :: nc_x,nc_y
+
+  IA_x=0.; IA_y=0.
+  P_ia_11=0. ; P_ia_12=0. ;  P_ia_21=0.;  P_ia_22=0.
+  P_ia_times_u_x=0. ; P_ia_times_u_y=0.
+
+  !no interactive force allowed for footloose child bergs until they are out of contact range of any of other berg
+  !at least once.
+  if (berg%fl_k.eq.-1) return
 
   nc_x=bergs%contact_cells_lon; nc_y=bergs%contact_cells_lat
   iceberg_bonds_on=bergs%iceberg_bonds_on
-
-  IA_x=0.
-  IA_y=0.
-  P_ia_11=0. ; P_ia_12=0. ;  P_ia_21=0.;  P_ia_22=0.
-  P_ia_times_u_x=0. ; P_ia_times_u_y=0.
 
   if (bergs%mts .or. (bergs%contact_distance>0.) .or. (bergs%contact_spring_coef .ne. bergs%spring_coef) ) then
 
@@ -641,7 +645,7 @@ subroutine calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, 
   real :: spring_coef, accel_spring, radial_damping_coef, p_ia_coef, tangental_damping_coef, bond_coef
   real :: crit_dist, vr1,vr2,vn,vn1,vn2,vt1,vt2
 
-  if (berg%id .ne. other_berg%id) then
+  if ((berg%id .ne. other_berg%id) .and. (berg%fl_k.ne.-1) .and. (other_berg%fl_k.ne.-1)) then
     ! From Berg 1
     T1=berg%thickness
     lon1=berg%lon_old; lat1=berg%lat_old
@@ -842,7 +846,7 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
   !relative particle rotation. Forces and torques were further modified here to depend
   !on ice thickness.
 
-  if (berg%id .ne. other_berg%id) then
+  if ((berg%id .ne. other_berg%id) .and. (berg%fl_k.ne.-1) .and. (other_berg%fl_k.ne.-1)) then
 
     ! From Berg 1
     T1=berg%thickness
@@ -2371,6 +2375,276 @@ subroutine dump_locvel(grd, i0, j0, A, lbl)
   enddo
 end subroutine dump_locvel
 
+
+!> Footloose (FL) mechanism
+!> Based on England et al. (2020) Modeling the breakup of tabular icebergs. Sci. Adv.
+subroutine footloose_calving(bergs, time)
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  type(time_type), intent(in) :: time !< Model time
+  ! Local Variables
+  type(iceberg), pointer :: this
+  type(icebergs_gridded), pointer :: grd
+  type(bond), pointer :: current_bond
+  real, save :: N_max, youngs, poisson, l_c, lw_c, B_c, exp_nlambda
+  type(randomNumberStream),save :: rns ! Random numbers for stochastic tidal parameterization
+  logical, save :: Visited=.false.
+  integer :: grdi, grdj
+  integer, dimension(8) :: seed
+  real :: T, W, L, N_bonds, Ln, rn
+  real :: IC, max_k, k, Lr_fl, l_w, l_b, pu
+
+  ! For convenience
+  grd=>bergs%grd
+
+  if (.not. Visited) then
+    !define some constants:
+    !Maximum number of bonds that element can form based on shape
+    if (bergs%iceberg_bonds_on) then
+      if (bergs%hexagonal_icebergs) then
+        N_max=6.0
+      else
+        N_max=4.0
+      endif
+    else
+      N_max=0.0
+    endif
+
+    youngs=1.e8; poisson=0.3
+    l_c  = pi/(2.*sqrt(2.)) !for length-scale of child iceberg
+    lw_c = 1./(gravity*rho_seawater) !for buoyancy length
+    B_c  = youngs/(12.*(1.-poisson**2.)) !for bending stiffness
+    exp_nlambda=exp(-bergs%fl_r) !e^(-r*dt)
+    seed = constructSeed(1,1,time) !Seed random numbers for Poisson distribution
+    rns = initializeRandomNumberStream(seed)
+
+    Visited=.true.
+  endif
+
+  do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec !computational domain only
+    this=>bergs%list(grdi,grdj)%first
+    do while(associated(this))
+
+      !only non-static, non-footloose-child bergs are eligible for footloose calving:
+      if (.not. (this%static_berg.eq.1 .or. this%fl_k.lt.0)) then
+
+        T=this%thickness; W=this%width; L=this%length
+
+        N_bonds=0
+        if (bergs%iceberg_bonds_on) then
+          N_bonds=this%n_bonds
+          if (N_bonds>0) then
+            call error_mesg('KID,footloose_calving', &
+              'Bonded footloose calving not yet fully implemented!', FATAL)
+          endif
+        endif
+
+        l_w  = (lw_c*B_c*(T**3.))**0.25  !buoyancy length
+        l_b  = l_c*l_w                   !length of child icebergs
+
+
+        !---Determine k, the number of child bergs to calve via the footloose mechanism---!
+        !Bergs%fl_r is the average number of bergs to calve over the time increment
+        !given in seconds by bergs%fl_r_s. K is set according to a Poisson distribution
+        !or may be set directly equal to bergs%fl_r.
+        !England et al., 2020 used fl_r=4, fl_r_s= 86400 seconds (1 day), and daily
+        !timesteps, so that k (a whole number) gave the number of bergs to calve each
+        !timestep. Here, smaller timesteps are typically used, so k is scaled accordingly.
+        !Therefore, k is no longer a whole number, and is instead accumulated over time
+        !on this%fl_k. Then, floor(this%fl_k) child bergs are calved each timestep, after
+        !which, this number of child bergs is subtracted from this%fl_k
+
+        !A max possible number of child bergs to calve, max_k, is set to prevent footloose
+        !calving on very small icebergs or interior elements of bonded conglomerates:
+        if (bergs%iceberg_bonds_on .and. N_bonds>0.) then
+          if (N_bonds==N_max) then
+            max_k=0          !no FL calving allowed for interior bergs
+          else
+            call max_k_for_edge_elements
+          endif
+        else
+          !non-bonded berg must be larger than 3*(l_b) for FL calving. Set max_k accordingly.
+          max_k = max(floor((L - 3*(l_b**2.)/W))+1,0)
+        endif
+
+        if (max_k==0) then
+          k=0
+          this%fl_k=0
+        else
+          ! If sea ice concentration is <=50%, generate footloose child bergs
+          IC=min(1.,this%cn+bergs%sicn_shift)
+          if (.not. IC>0.5) then
+
+            if (bergs%fl_use_poisson_distribution) then
+              k=0; pu=1.0
+              do while (pu >= exp_nlambda)
+                call getRandomNumbers(rns, rn)
+                pu=pu*rn
+                k=k+1
+              enddo
+              k=k-1.0 !FL calving rate (per day or year)
+            else
+              k=bergs%fl_r
+            endif
+
+            !reduce FL calving rate based on number of bonds
+            if (bergs%iceberg_bonds_on) k=k*((N_max-N_bonds)/N_max)
+
+            k=k*(bergs%dt/bergs%fl_r_s) !scale k to dt
+            this%fl_k=this%fl_k+k       !update fl_k
+          endif
+
+          k=floor(this%fl_k)
+        endif
+
+
+        if (k>max_k) then
+          k=max_k
+          this%fl_k=0.
+        else
+          this%fl_k=this%fl_k-k !save the remainder for the next timestep
+        endif
+
+        !if there is footloose calving, create the new bergs and reduce length of parent berg
+        if (k>0) then
+
+          Lr_fl = k*3.*(l_b**2.)/W !FL mechanism length reduction for parent berg
+
+          call calve_fl_icebergs(bergs,this,k,l_b)
+
+          Ln=L-Lr_fl !new length
+          if (Ln .le. 0) then
+            if (N_bonds==0) then
+              call error_mesg('KID,footloose_calving', &
+                'non-edge element has fully calved from footloose mechanism', FATAL)
+            endif
+            this%fl_k=-3 !marks this berg to be deleted later
+          else
+            !update length, width, thickness,and mass of parent berg
+            if (bergs%allow_bergs_to_roll .and. N_bonds.eq.0.) call rolling(bergs,T,W,Ln)
+            this%thickness=T; this%width=min(W,Ln); this%length=max(W,Ln)
+            this%mass=this%length*this%width*this%thickness*bergs%rho_bergs
+          endif
+        endif
+      endif
+      this=>this%next
+    enddo
+  enddo; enddo
+
+contains
+
+  !TODO: finish this
+  subroutine max_k_for_edge_elements
+    max_k=huge(1.0)
+  end subroutine max_k_for_edge_elements
+
+end subroutine footloose_calving
+
+!> Delete any edge elements that fully calved from the footloose mechanism
+subroutine delete_fully_fl_calved_edge_elements(bergs)
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  ! Local Variables
+  type(iceberg), pointer :: this, kick_the_bucket
+  type(icebergs_gridded), pointer :: grd
+  integer :: grdi,grdj
+
+  ! For convenience
+  grd=>bergs%grd
+
+  do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this)) ! loop over all bergs
+      if (this%fl_k==-3) then
+        !berg is marked to delete
+        kick_the_bucket=>this
+        this=>this%next
+        print *,'deleting berg',this%id
+        call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
+      else
+        this=>this%next
+      endif
+    enddo
+  enddo; enddo
+end subroutine delete_fully_fl_calved_edge_elements
+
+!> Adjust footloose child bergs to be eligible for contact interactions once they are
+!> out of contact range of any other berg for the first time
+subroutine adjust_fl_berg_interactivity(bergs)
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  ! Local Variables
+  type(iceberg), pointer :: this, other_berg
+  type(icebergs_gridded), pointer :: grd
+  integer :: grdi, grdj, grdi2, grdj2, nc_x, nc_y
+  logical :: contact,radial_contact
+  real :: lat1,lat2,lon1,lon2,dlon,dlat,dx_dlon,dy_dlat,lat_ref
+  real :: r_dist,crit_dist,R1,R2,rdenom
+
+  ! For convenience
+  grd=>bergs%grd
+
+  nc_x=bergs%contact_cells_lon; nc_y=bergs%contact_cells_lat
+
+  if (nc_x.eq.1 .and. nc_y.eq.1) then
+    radial_contact=.true. !contact based on berg radii can occur
+    if (bergs%hexagonal_icebergs) then
+      rdenom=1./(2.*sqrt(3.))
+    else
+      !rdenom=1./pi
+      rdenom=1./4.
+    endif
+  else
+    radial_contact=.false.
+    crit_dist=bergs%contact_distance**2
+  endif
+
+  do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+      if (this%fl_k.eq.-1) then
+        !It is a non-interactive, footloose child berg. Test if within contact range of another berg
+        contact=.false.
+        lat1=this%lat; lon1=this%lon
+        if (radial_contact) R1=sqrt(this%length*this%width*rdenom) !radius of current berg
+        do grdj2=max(grdj-nc_y,grd%jsd+1),min(grdj+nc_y,grd%jed)
+          do grdi2=max(grdi-nc_x,grd%isd+1),min(grdi+nc_x,grd%ied)
+            other_berg=>bergs%list(grdi2,grdj2)%first
+            do while (associated(other_berg))
+              if (other_berg%id.ne.this%id) then
+                lat2=other_berg%lat; lon2=other_berg%lon
+                dlon=lon2-lon1; dlat=lat2-lat1
+                if (radial_contact) then
+                  R2=sqrt(other_berg%length*other_berg%width*rdenom)
+                  crit_dist=max(R1+R2,bergs%contact_distance)**2
+                endif
+                if (bergs%grd%grid_is_latlon) then
+                  lat_ref=0.5*(lat1+lat2)
+                  dx_dlon=pi_180*Rearth*cos(lat_ref*pi_180); dy_dlat=pi_180*Rearth
+                  r_dist=(dlon*dx_dlon)**2 + (dlat*dy_dlat)**2
+                else
+                  r_dist=dlon**2 + dlat**2
+                endif
+                if (r_dist<crit_dist) then
+                  contact=.true.
+                  exit
+                endif
+              endif
+              other_berg=>other_berg%next
+            enddo
+            if (contact) exit
+          enddo
+          if (contact) exit
+        enddo
+        !if outside of contact range, mark the berg eligible for future interaction/contact
+        if (.not. contact) this%fl_k=-2
+      endif
+      this=>this%next
+    enddo
+  enddo; enddo
+
+end subroutine adjust_fl_berg_interactivity
+
 !> Steps forward thermodynamic state of all bergs
 subroutine thermodynamics(bergs)
   ! Arguments
@@ -2382,9 +2656,7 @@ subroutine thermodynamics(bergs)
   real :: Mv, Me, Mb, melt, dvo, dva, dM, Ss, dMe, dMb, dMv
   real :: Mnew, Mnew1, Mnew2, Hocean
   real :: Mbits, nMbits, dMbitsE, dMbitsM, Lbits, Abits, Mbb
-  real :: tip_parameter
   real :: Ms, N_bonds, N_max !Ice shelf melt, Number of bonds, Max_number of bonds
-  real :: Delta, q
   integer :: i,j, stderrunit
   type(iceberg), pointer :: this, next
   real, parameter :: perday=1./86400.
@@ -2575,44 +2847,8 @@ subroutine thermodynamics(bergs)
         call error_mesg('KID, thermodynamics', 'berg appears to have grounded!', FATAL)
       endif
 
-      ! Rolling
-      !There are now 3 iceberg rolling schemes:
-      !1) Rolling based on aspect ratio threshold (iceberg of constant density)
-      !2) Rolling based on corrected Weeks and Mellor scheme
-      !3) Rolling based on incorrect Weeks and Mellor scheme - kept for legacy reasons
-      if (bergs%allow_bergs_to_roll .and. N_bonds.eq.0.) then !only allow non-bonded,non-static bergs to roll
-        Dn=(bergs%rho_bergs/rho_seawater)*Tn ! draught (keel depth)
-        if ( Dn>0. ) then
-          if ( (.not.bergs%use_updated_rolling_scheme) .and. (bergs%tip_parameter<999.) ) then    !Use Rolling Scheme 3
-              if ( max(Wn,Ln)<sqrt(0.92*(Dn**2)+58.32*Dn) ) then
-                call swap_variables(Tn,Wn)
-              endif
-          else
-            if (Wn>Ln) call swap_variables(Ln,Wn)  !Make sure that Wn is the smaller dimension
-
-            if ( (.not.bergs%use_updated_rolling_scheme) .and. (bergs%tip_parameter>=999.) ) then    !Use Rolling Scheme 2
-              q=bergs%rho_bergs/rho_seawater
-              Delta=6.0
-              if (Wn<sqrt((6.0*q*(1-q)*(Tn**2))-(12*Delta*q*Tn))) then
-                  call swap_variables(Tn,Wn)
-              endif
-            endif
-
-            if (bergs%use_updated_rolling_scheme) then    !Use Rolling Scheme 1
-              if (bergs%tip_parameter>0.) then
-                tip_parameter=bergs%tip_parameter
-              else
-                ! Equation 27 from Burton et al 2012, or equivolently, Weeks and Mellor 1979 with constant density
-                tip_parameter=sqrt(6*(bergs%rho_bergs/rho_seawater)*(1-(bergs%rho_bergs/rho_seawater)))   !using default values gives 0.92
-              endif
-              if ((tip_parameter*Tn)>Wn)  then     !note that we use the Thickness instead of the Draft
-                  call swap_variables(Tn,Wn)
-              endif
-            endif
-          endif
-          Dn=(bergs%rho_bergs/rho_seawater)*Tn ! re-calculate draught (keel depth) for grounding
-        endif
-      endif
+      if (bergs%allow_bergs_to_roll .and. N_bonds.eq.0.) call rolling(bergs,Tn,Wn,Ln)
+      !Dn=(bergs%rho_bergs/rho_seawater)*Tn ! re-calculate draught (keel depth) for grounding
 
       !This option allows iceberg melt fluxes to enter the ocean without the icebergs changing shape
       if (bergs%Iceberg_melt_without_decay) then
@@ -2655,8 +2891,57 @@ subroutine thermodynamics(bergs)
       this=>next
     enddo
   enddo ; enddo
+end subroutine thermodynamics
 
-  contains
+!> Rolling
+!> There are now 3 iceberg rolling schemes:
+!> 1) Rolling based on aspect ratio threshold (iceberg of constant density)
+!> 2) Rolling based on corrected Weeks and Mellor scheme
+!> 3) Rolling based on incorrect Weeks and Mellor scheme - kept for legacy reasons
+subroutine rolling(bergs,Tn,Wn,Ln)
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  real :: N_bonds !< Number of bonds
+  real :: Tn !< Berg thickness
+  real :: Wn !< Berg width
+  real :: Ln !< Berg length
+  ! Local variables
+  real, parameter :: Delta=6.0
+  real :: Dn, q, tip_parameter
+
+  Dn=(bergs%rho_bergs/rho_seawater)*Tn ! draught (keel depth)
+  if ( Dn>0. ) then
+    if ( (.not.bergs%use_updated_rolling_scheme) .and. (bergs%tip_parameter<999.) ) then    !Use Rolling Scheme 3
+      if ( max(Wn,Ln)<sqrt(0.92*(Dn**2)+58.32*Dn) ) then
+        call swap_variables(Tn,Wn)
+      endif
+    else
+      if (Wn>Ln) call swap_variables(Ln,Wn)  !Make sure that Wn is the smaller dimension
+
+      if ( (.not.bergs%use_updated_rolling_scheme) .and. (bergs%tip_parameter>=999.) ) then    !Use Rolling Scheme 2
+        q=bergs%rho_bergs/rho_seawater
+        if (Wn<sqrt((6.0*q*(1-q)*(Tn**2))-(12*Delta*q*Tn))) then
+          call swap_variables(Tn,Wn)
+        endif
+      endif
+
+      if (bergs%use_updated_rolling_scheme) then    !Use Rolling Scheme 1
+        if (bergs%tip_parameter>0.) then
+          tip_parameter=bergs%tip_parameter
+        else
+          ! Equation 27 from Burton et al 2012, or equivalently, Weeks and Mellor 1979 with constant density
+          ! Tip_parameter=0.92 if using default values
+          tip_parameter=sqrt(6*(bergs%rho_bergs/rho_seawater)*(1-(bergs%rho_bergs/rho_seawater)))
+        endif
+        if ((tip_parameter*Tn)>Wn)  then     !note that we use the Thickness instead of the Draft
+          call swap_variables(Tn,Wn)
+        endif
+      endif
+    endif
+    !Dn=(bergs%rho_bergs/rho_seawater)*Tn ! re-calculate draught (keel depth) for grounding
+  endif
+
+contains
 
   subroutine swap_variables(x,y)
     ! Arguments
@@ -2666,8 +2951,7 @@ subroutine thermodynamics(bergs)
     x=y
     y=temp
   end subroutine swap_variables
-
-end subroutine thermodynamics
+end subroutine rolling
 
 subroutine create_gridded_icebergs_fields(bergs)
 ! Arguments
@@ -4630,6 +4914,12 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
 
   call send_bergs_to_other_pes(bergs)
   if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'icebergs_run, after send_bergs() ')
+
+  ! Footloose mechanism part 1: calve the child icebergs
+  if (bergs%fl_r>0.) then
+    call footloose_calving(bergs, time)
+  endif
+
   if (bergs%mts) then
     call interp_gridded_fields_to_bergs(bergs)
     call transfer_mts_bergs(bergs)
@@ -4650,6 +4940,15 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
   if (debug) call bergs_chksum(bergs, 'run bergs (exchanged)')
   if (debug) call checksum_gridded(bergs%grd, 's/r run after exchange')
   call mpp_clock_end(bergs%clock_com)
+
+  ! Footloose mechanism part 2:
+  if (bergs%fl_r>0.) then
+    !delete any edge elements that have fully calved from the footloose mechanism
+    if (bergs%iceberg_bonds_on) call delete_fully_fl_calved_edge_elements(bergs)
+    !child bergs become interactive once they are out of contact range of any other
+    !berg for the first time
+    if (bergs%interactive_icebergs_on) call adjust_fl_berg_interactivity(bergs)
+  endif
 
   if (bergs%find_melt_using_spread_mass .or. bergs%mts) then
     call calculate_mass_on_ocean(bergs, with_diagnostics=.false.)
@@ -5382,18 +5681,22 @@ subroutine calve_icebergs(bergs)
           newberg%yj=yj
           newberg%uvel=0.
           newberg%vvel=0.
-          newberg%uvel_prev=0.  !Added by Alex
-          newberg%vvel_prev=0.  !Added by Alex
-          newberg%uvel_old=0.  !Added by Alex
-          newberg%vvel_old=0.  !Added by Alex
-          newberg%lon_prev=newberg%lon  !Added by Alex
-          newberg%lat_prev=newberg%lat  !Added by Alex
-          newberg%lon_old=newberg%lon  !Added by Alex
-          newberg%lat_old=newberg%lat  !Added by Alex
-          newberg%axn=0. !Added by Alon
-          newberg%ayn=0. !Added by Alon
-          newberg%bxn=0. !Added by Alon
-          newberg%byn=0. !Added by Alon
+          !--added by Alex:
+          newberg%uvel_prev=0.
+          newberg%vvel_prev=0.
+          newberg%uvel_old=0.
+          newberg%vvel_old=0.
+          newberg%lon_prev=newberg%lon
+          newberg%lat_prev=newberg%lat
+          newberg%lon_old=newberg%lon
+          newberg%lat_old=newberg%lat
+          newberg%fl_k=0.
+          !--added by Alon
+          newberg%axn=0.
+          newberg%ayn=0.
+          newberg%bxn=0.
+          newberg%byn=0.
+          !---
           newberg%mass=bergs%initial_mass(k)
           newberg%thickness=bergs%initial_thickness(k)
           newberg%width=bergs%initial_width(k)
@@ -5465,6 +5768,118 @@ subroutine calve_icebergs(bergs)
 
 end subroutine calve_icebergs
 
+  !> Calve footloose icebergs from parent berg
+subroutine calve_fl_icebergs(bergs,pberg,k,l_b)
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  type(iceberg), pointer :: pberg !< Parent berg
+  type(real),intent(in) :: k !< Number of child bergs to calve
+  type(real),intent(in) :: l_b !< The width, and 1/3 the length, of a child berg
+  ! Local variables
+  type(iceberg) :: cberg ! The new child berg
+  type(icebergs_gridded), pointer :: grd
+
+  ! For convenience
+  grd=>bergs%grd
+
+  !A new child berg (cberg) that calves from the footloose mechanism initially has same position as the parent berg.
+  !Initially, cberg%fl_k is set to -1 to mark the berg as a child berg.
+  !If fl_k<0, the berg will is not eligible to decay via footloose calving (see subroutine footloose_calving)
+  !If fl_k==-1, the berg will also not interact with other berg elements. This is necessary because the child berg
+  !will initially overlap its parent berg, which would otherwise result in unrealistic contact forces.
+  !However, if (bergs%interactive_icebergs_on), a berg with fl_k==-1 will be set to fl_k=-2 once it is out of
+  !contact range of any other berg. With fl_k=-2, interactive contact forces may now be applied
+
+  !Set variable values for the new child berg:
+
+  !different values from parent:
+  cberg%width        = l_b/3.
+  cberg%length       = l_b
+  cberg%mass         = cberg%width * cberg%length * pberg%thickness * bergs%rho_bergs
+  cberg%start_lon    = pberg%lon
+  cberg%start_lat    = pberg%lat
+  cberg%start_day    = bergs%current_yearday
+  cberg%start_mass   = cberg%mass
+  cberg%mass_scaling = k !k is the number of icebergs cberg represents
+  cberg%mass_of_bits = 0.0
+  cberg%fl_k         = -1.0
+  cberg%start_year   = bergs%current_year
+  cberg%id           = generate_id(grd, pberg%ine, pberg%jne)
+
+  !same values as parent:
+  cberg%thickness    = pberg%thickness
+  cberg%lon          = pberg%lon
+  cberg%lat          = pberg%lat
+  cberg%lon_prev     = pberg%lon_prev
+  cberg%lat_prev     = pberg%lat_prev
+  cberg%uvel         = pberg%uvel
+  cberg%vvel         = pberg%vvel
+  cberg%axn          = pberg%axn
+  cberg%ayn          = pberg%ayn
+  cberg%bxn          = pberg%bxn
+  cberg%byn          = pberg%byn
+  cberg%uvel_prev    = pberg%uvel_prev
+  cberg%vvel_prev    = pberg%vvel_prev
+  cberg%uvel_old     = pberg%uvel_old
+  cberg%vvel_old     = pberg%vvel_old
+  cberg%lon_old      = pberg%lon_old
+  cberg%lat_old      = pberg%lat_old
+  cberg%heat_density = pberg%heat_density
+  cberg%halo_berg    = pberg%halo_berg
+  cberg%static_berg  = pberg%static_berg
+  cberg%ine          = pberg%ine
+  cberg%jne          = pberg%jne
+  cberg%xi           = pberg%xi
+  cberg%yj           = pberg%yj
+  cberg%uo           = pberg%uo
+  cberg%vo           = pberg%vo
+  cberg%ui           = pberg%ui
+  cberg%vi           = pberg%vi
+  cberg%ua           = pberg%ua
+  cberg%va           = pberg%va
+  cberg%ssh_x        = pberg%ssh_x
+  cberg%ssh_y        = pberg%ssh_y
+  cberg%sst          = pberg%sst
+  cberg%sss          = pberg%sss
+  cberg%cn           = pberg%cn
+  cberg%hi           = pberg%hi
+  cberg%od           = pberg%od
+
+  !optional variables
+  if (bergs%mts) then
+    allocate(cberg%axn_fast,cberg%ayn_fast,cberg%bxn_fast,cberg%byn_fast,cberg%conglom_id)
+    cberg%axn_fast=pberg%axn_fast
+    cberg%ayn_fast=pberg%ayn_fast
+    cberg%bxn_fast=pberg%bxn_fast
+    cberg%byn_fast=pberg%byn_fast
+    cberg%conglom_id=pberg%conglom_id
+  endif
+
+  if (bergs%iceberg_bonds_on) then
+    allocate(cberg%n_bonds)
+    cberg%n_bonds=0
+  endif
+
+  if (bergs%dem) then
+    allocate(cberg%ang_vel,cberg%ang_accel,cberg%rot)
+    cberg%ang_vel=0.; cberg%ang_accel=0.; cberg%rot=0.
+  endif
+
+  if (monitor_energy) then
+    allocate(cberg%Ee,cberg%Ed,cberg%Eext,cberg%Ee_contact,cberg%Ed_contact,cberg%Efrac,&
+      cberg%Ee_temp,cberg%Ed_temp,cberg%Eext_temp,cberg%Ee_contact_temp,cberg%Ed_contact_temp)
+    cberg%Ee=0.; cberg%Ed=0.; cberg%Eext=0.; cberg%Ee_contact=0.; cberg%Ed_contact=0.
+    cberg%Efrac=0.; cberg%Ee_temp=0.; cberg%Ed_temp=0.;cberg%Eext_temp=0.;
+    cberg%Ee_contact_temp=0.; cberg%Ed_contact_temp =0.
+  endif
+
+  if (bergs%fracture_criterion .ne. 'none' .and. (.not. bergs%dem)) then
+    allocate(cberg%accum_bond_rotation)
+    cberg%accum_bond_rotation=0.
+  endif
+
+  call add_new_berg_to_list(bergs%list(cberg%ine,cberg%jne)%first, cberg)
+end subroutine calve_fl_icebergs
 
 !> Evolves icebergs forward by updating velocity and position with a multiple-time-step Velocity Verlet
 !! scheme. Experimental option: each short/long step can be iterated until a given convergence tolerance

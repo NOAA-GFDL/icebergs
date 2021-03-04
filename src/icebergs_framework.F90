@@ -18,8 +18,8 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 
 implicit none ; private
 
-integer :: buffer_width=33 ! This should be a parameter
-integer :: buffer_width_traj=35 ! This should be a parameter
+integer :: buffer_width=34 ! This should be a parameter
+integer :: buffer_width_traj=36 ! This should be a parameter
 integer :: buffer_width_bond_traj=11 !This should be a parameter
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 
@@ -221,6 +221,7 @@ type :: xyt
   real :: byn
   real :: uvel_prev
   real :: vvel_prev
+  real :: fl_k
   real :: uo !< Zonal velocity of ocean (m/s)
   real :: vo !< Meridional velocity of ocean (m/s)
   real :: ui !< Zonal velocity of ice (m/s)
@@ -300,6 +301,7 @@ type :: iceberg
   real :: start_mass !< Mass berg had when created (kg)
   real :: mass_scaling !< Multiplier to scale mass when interpreting berg as a cloud of bergs (nondim)
   real :: mass_of_bits !< Mass of bergy bits following berg (kg)
+  real :: fl_k !< Cumulative number of footloose bergs to calve
   real :: heat_density !< Heat density of berg (J/kg)
   real :: halo_berg  ! Equal to zero for bergs on computational domain, and =1 for bergs on the halo
   real :: static_berg  ! Equal to 1 for icebergs which are static (not allowed to move). Might be extended to grounding later.
@@ -593,7 +595,9 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   real :: constant_length=0.!< If constant_interaction_LW, the constant length. If 0, will be set to max initial length
   real :: constant_width=0. !< If constant_interaction_LW, the constant width.  If 0, will be set to max initial width
   ! Footloose calving parameters [England et al (2020) Modeling the breakup of tabular icebergs. Sci. Adv.]
-  !real ::
+  logical :: fl_use_poisson_distribution=.true. !< fl_r is (T) mean of Poisson distribution to determine k, or (F) k=fl_r
+  real :: fl_r=0. !< footloose average number of bergs calved per fl_r_s
+  real :: fl_r_s=0. !< seconds over which fl_r footloose bergs calve
 end type icebergs
 
 !> Read original restarts. Needs to be module global so can be public to icebergs_mod.
@@ -774,6 +778,10 @@ integer :: dem_beam_test=0 !1=Simply supported beam,2=cantilever beam,3=angular 
 logical :: constant_interaction_LW=.false. !< Always use the initial, globally constant, element length & width during berg interactions
 real :: constant_length=0. !< If constant_interaction_LW, the constant length used. If zero in the nml, will be set to max initial L
 real :: constant_width=0. !< If constant_interaction_LW, the constant width used. If zero in the nml, will be set to max initial W
+! Footloose calving parameters [England et al (2020) Modeling the breakup of tabular icebergs. Sci. Adv.]
+logical :: fl_use_poisson_distribution=.true. !< fl_r is (T) mean of Poisson distribution to determine k, or (F) k=fl_r
+real :: fl_r=0. !< footloose average number of bergs calved per fl_r_s
+real :: fl_r_s=0. !< seconds over which fl_r footloose bergs calve
 
 namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,Static_icebergs,  &
          distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef, radial_damping_coef, tangental_damping_coef, only_interactive_forces, &
@@ -790,7 +798,7 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          mts,new_mts,ewsame,monitor_energy,mts_sub_steps,contact_distance,length_for_manually_initialize_bonds,manually_initialize_bonds_from_radii,contact_spring_coef,&
          fracture_criterion, damage_test_1, uniaxial_test, debug_write,cdrag_grounding,h_to_init_grounding,frac_thres_scaling,frac_thres_n,frac_thres_t,save_bond_traj,remove_unused_bergs,&
          force_convergence,explicit_inner_mts,convergence_tolerance,&
-         dem,ignore_tangential_force,poisson,dem_spring_coef,dem_damping_coef,dem_beam_test,constant_interaction_LW,constant_length,constant_width,dem_shear_for_frac_only,use_damage
+         dem,ignore_tangential_force,poisson,dem_spring_coef,dem_damping_coef,dem_beam_test,constant_interaction_LW,constant_length,constant_width,dem_shear_for_frac_only,use_damage, fl_use_poisson_distribution, fl_r, fl_r_s
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -1346,6 +1354,10 @@ endif
   bergs%constant_length=constant_length
   bergs%constant_width=constant_width
   bergs%dem_shear_for_frac_only=dem_shear_for_frac_only
+  ! Footloose calving parameters
+  bergs%fl_use_poisson_distribution=fl_use_poisson_distribution
+  bergs%fl_r=fl_r
+  bergs%fl_r_s=fl_r_s
 
   if (monitor_energy) then
     if (bergs%constant_interaction_LW) then
@@ -3084,6 +3096,7 @@ type(bond), pointer :: current_bond
   call push_buffer_value(buff%data(:,n), counter, berg%thickness)
   call push_buffer_value(buff%data(:,n), counter, berg%width)
   call push_buffer_value(buff%data(:,n), counter, berg%length)
+  call push_buffer_value(buff%data(:,n), counter, berg%fl_k)
   call push_buffer_value(buff%data(:,n), counter, berg%mass_scaling)
   call push_buffer_value(buff%data(:,n), counter, berg%mass_of_bits)
   call push_buffer_value(buff%data(:,n), counter, berg%heat_density)
@@ -3305,6 +3318,9 @@ stderrunit = stderr()
           !write(stderrunit,*) , 'Clearing', berg%id, matching_bond%other_id,other_berg%id, mpp_pe()
           matching_bond%other_berg=>null()
           matching_bond=>null()
+          if (iceberg_bonds_on) then !should not find bonds unless they are on anyway, but just to be safe...
+            if (other_berg%n_bonds>0) other_berg%n_bonds=other_berg%n_bonds-1
+          endif
         else
           matching_bond=>matching_bond%next_bond
         endif
@@ -3390,6 +3406,7 @@ real :: temp_lon,temp_lat,length
   call pull_buffer_value(buff%data(:,n), counter, localberg%thickness)
   call pull_buffer_value(buff%data(:,n), counter, localberg%width)
   call pull_buffer_value(buff%data(:,n), counter, localberg%length)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%fl_k)
   call pull_buffer_value(buff%data(:,n), counter, localberg%mass_scaling)
   call pull_buffer_value(buff%data(:,n), counter, localberg%mass_of_bits)
   call pull_buffer_value(buff%data(:,n), counter, localberg%heat_density)
@@ -3680,6 +3697,7 @@ subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj)
     call push_buffer_value(buff%data(:,n),counter,traj%thickness)
     call push_buffer_value(buff%data(:,n),counter,traj%width)
     call push_buffer_value(buff%data(:,n),counter,traj%length)
+    call push_buffer_value(buff%data(:,n),counter,traj%fl_k)
     call push_buffer_value(buff%data(:,n),counter,traj%uo)
     call push_buffer_value(buff%data(:,n),counter,traj%vo)
     call push_buffer_value(buff%data(:,n),counter,traj%ui)
@@ -3787,6 +3805,7 @@ subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj)
     call pull_buffer_value(buff%data(:,n),counter,traj%thickness)
     call pull_buffer_value(buff%data(:,n),counter,traj%width)
     call pull_buffer_value(buff%data(:,n),counter,traj%length)
+    call pull_buffer_value(buff%data(:,n),counter,traj%fl_k)
     call pull_buffer_value(buff%data(:,n),counter,traj%uo)
     call pull_buffer_value(buff%data(:,n),counter,traj%vo)
     call pull_buffer_value(buff%data(:,n),counter,traj%ui)
@@ -5678,6 +5697,7 @@ endif
         posn%thickness=this%thickness
         posn%width=this%width
         posn%length=this%length
+        posn%fl_k=this%fl_k
         posn%uo=this%uo
         posn%vo=this%vo
         posn%ui=this%ui
