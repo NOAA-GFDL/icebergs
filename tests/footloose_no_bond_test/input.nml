@@ -2,7 +2,7 @@
 !>iceberg_bonds_on=.true.
 !>interactive_icebergs_on=.false.
 !>manually_initialize_bonds=.true.
-!>length_for_manually_initialize_bonds<1
+!>length_for_manually_initialize_bonds<0
 
 
 &icebergs_driver_nml
