@@ -2901,7 +2901,6 @@ end subroutine thermodynamics
 subroutine rolling(bergs,Tn,Wn,Ln)
   ! Arguments
   type(icebergs), pointer :: bergs !< Container for all types and memory
-  real :: N_bonds !< Number of bonds
   real :: Tn !< Berg thickness
   real :: Wn !< Berg width
   real :: Ln !< Berg length
@@ -5800,7 +5799,7 @@ subroutine calve_fl_icebergs(bergs,pberg,k,l_b)
   cberg%start_lat    = pberg%lat
   cberg%start_day    = bergs%current_yearday
   cberg%start_mass   = cberg%mass
-  cberg%mass_scaling = k !k is the number of icebergs cberg represents
+  cberg%mass_scaling = pberg%mass_scaling * k !k is the number of icebergs cberg represents
   cberg%mass_of_bits = 0.0
   cberg%fl_k         = -1.0
   cberg%start_year   = bergs%current_year
