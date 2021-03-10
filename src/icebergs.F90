@@ -5792,7 +5792,7 @@ subroutine calve_fl_icebergs(bergs,pberg,k,l_b)
   !Set variable values for the new child berg:
 
   !different values from parent:
-  cberg%width        = l_b/3.
+  cberg%width        = l_b*3.
   cberg%length       = l_b
   cberg%mass         = cberg%width * cberg%length * pberg%thickness * bergs%rho_bergs
   cberg%start_lon    = pberg%lon
