@@ -77,7 +77,7 @@ public insert_berg_into_list, create_iceberg, delete_iceberg_from_list, destroy_
 public print_fld,print_berg, print_bergs,record_posn, push_posn, append_posn, check_position
 public move_trajectory, move_all_trajectories
 public form_a_bond, connect_all_bonds, show_all_bonds, bond_address_update
-public find_cell, find_cell_by_search, count_bergs, is_point_in_cell, pos_within_cell, count_bonds
+public find_cell, find_cell_by_search, find_cell_wide, count_bergs, is_point_in_cell, pos_within_cell, count_bonds
 public sum_mass, sum_heat, bilin, yearday, bergs_chksum, list_chksum, count_bergs_in_list
 public checksum_gridded
 public grd_chksum2,grd_chksum3
@@ -598,6 +598,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   logical :: fl_use_poisson_distribution=.true. !< fl_r is (T) mean of Poisson distribution to determine k, or (F) k=fl_r
   real :: fl_r=0. !< footloose average number of bergs calved per fl_r_s
   real :: fl_r_s=0. !< seconds over which fl_r footloose bergs calve
+  logical :: displace_fl_bergs=.true. !< footloose berg positions are assigned to a corner of parent berg
 end type icebergs
 
 !> Read original restarts. Needs to be module global so can be public to icebergs_mod.
@@ -782,6 +783,7 @@ real :: constant_width=0. !< If constant_interaction_LW, the constant width used
 logical :: fl_use_poisson_distribution=.true. !< fl_r is (T) mean of Poisson distribution to determine k, or (F) k=fl_r
 real :: fl_r=0. !< footloose average number of bergs calved per fl_r_s
 real :: fl_r_s=0. !< seconds over which fl_r footloose bergs calve
+logical :: displace_fl_bergs=.true. !< footloose berg positions are assigned to a corner of parent berg
 
 namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,Static_icebergs,  &
          distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef, radial_damping_coef, tangental_damping_coef, only_interactive_forces, &
@@ -798,7 +800,7 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          mts,new_mts,ewsame,monitor_energy,mts_sub_steps,contact_distance,length_for_manually_initialize_bonds,manually_initialize_bonds_from_radii,contact_spring_coef,&
          fracture_criterion, damage_test_1, uniaxial_test, debug_write,cdrag_grounding,h_to_init_grounding,frac_thres_scaling,frac_thres_n,frac_thres_t,save_bond_traj,remove_unused_bergs,&
          force_convergence,explicit_inner_mts,convergence_tolerance,&
-         dem,ignore_tangential_force,poisson,dem_spring_coef,dem_damping_coef,dem_beam_test,constant_interaction_LW,constant_length,constant_width,dem_shear_for_frac_only,use_damage, fl_use_poisson_distribution, fl_r, fl_r_s
+         dem,ignore_tangential_force,poisson,dem_spring_coef,dem_damping_coef,dem_beam_test,constant_interaction_LW,constant_length,constant_width,dem_shear_for_frac_only,use_damage, fl_use_poisson_distribution, fl_r, fl_r_s, displace_fl_bergs
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -1358,6 +1360,7 @@ endif
   bergs%fl_use_poisson_distribution=fl_use_poisson_distribution
   bergs%fl_r=fl_r
   bergs%fl_r_s=fl_r_s
+  bergs%displace_fl_bergs=displace_fl_bergs
 
   if (monitor_energy) then
     if (bergs%constant_interaction_LW) then

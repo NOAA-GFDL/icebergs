@@ -29,7 +29,7 @@ use diag_manager_mod, only: diag_axis_init
 use ice_bergs_framework, only: ice_bergs_framework_init
 use ice_bergs_framework, only: icebergs_gridded, xyt, iceberg, icebergs, buffer, bond
 use ice_bergs_framework, only: verbose, really_debug,debug,old_bug_rotated_weights,budget,use_roundoff_fix
-use ice_bergs_framework, only: find_cell,find_cell_by_search,count_bergs,is_point_in_cell,pos_within_cell
+use ice_bergs_framework, only: find_cell,find_cell_by_search,find_cell_wide,count_bergs,is_point_in_cell,pos_within_cell
 use ice_bergs_framework, only: count_bonds, form_a_bond,connect_all_bonds,show_all_bonds, bond_address_update
 use ice_bergs_framework, only: nclasses,old_bug_bilin
 use ice_bergs_framework, only: sum_mass,sum_heat,bilin,yearday,count_bergs,bergs_chksum,count_bergs_in_list
@@ -2393,6 +2393,7 @@ subroutine footloose_calving(bergs, time)
   integer, dimension(8) :: seed
   real :: T, W, L, N_bonds, Ln, rn
   real :: IC, max_k, k, Lr_fl, l_w, l_b, pu
+  real :: fl_disp_x, fl_disp_y
 
   ! For convenience
   grd=>bergs%grd
@@ -2420,6 +2421,8 @@ subroutine footloose_calving(bergs, time)
 
     Visited=.true.
   endif
+
+
 
   do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec !computational domain only
     this=>bergs%list(grdi,grdj)%first
@@ -2510,7 +2513,22 @@ subroutine footloose_calving(bergs, time)
 
           Lr_fl = k*3.*(l_b**2.)/W !FL mechanism length reduction for parent berg
 
-          call calve_fl_icebergs(bergs,this,k,l_b)
+          !if (bergs%displace_fl_bergs), new FL bergs are positioned at a randomly assigned corner of the parent berg.
+
+          if (.not. bergs%displace_fl_bergs) then
+            fl_disp_x=0.0; fl_disp_y=0.0
+          else
+            !call assign_fl_disp
+            fl_disp_x=0.5*this%length; fl_disp_y=0.5*this%width
+            if (rn<0.5) then
+              fl_disp_x=-fl_disp_x
+              if (rn<0.25) fl_disp_y=-fl_disp_y
+            elseif (rn<0.75) then
+              fl_disp_y=-fl_disp_y
+            end if
+          endif
+
+          call calve_fl_icebergs(bergs,this,k,l_b,fl_disp_x,fl_disp_y)
 
           Ln=L-Lr_fl !new length
           if (Ln .le. 0) then
@@ -2535,9 +2553,9 @@ contains
 
   !TODO: finish this
   subroutine max_k_for_edge_elements
+    !for most edge elements, maxk=huge(1.0). If the k
     max_k=huge(1.0)
   end subroutine max_k_for_edge_elements
-
 end subroutine footloose_calving
 
 !> Delete any edge elements that fully calved from the footloose mechanism
@@ -4911,13 +4929,13 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
   call mpp_clock_begin(bergs%clock_com)
   if (bergs%iceberg_bonds_on)  call  bond_address_update(bergs)
 
-  call send_bergs_to_other_pes(bergs)
-  if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'icebergs_run, after send_bergs() ')
-
   ! Footloose mechanism part 1: calve the child icebergs
   if (bergs%fl_r>0.) then
     call footloose_calving(bergs, time)
   endif
+
+  call send_bergs_to_other_pes(bergs)
+  if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'icebergs_run, after send_bergs() ')
 
   if (bergs%mts) then
     call interp_gridded_fields_to_bergs(bergs)
@@ -5768,35 +5786,71 @@ subroutine calve_icebergs(bergs)
 end subroutine calve_icebergs
 
   !> Calve footloose icebergs from parent berg
-subroutine calve_fl_icebergs(bergs,pberg,k,l_b)
+subroutine calve_fl_icebergs(bergs,pberg,k,l_b,fl_disp_x,fl_disp_y)
   ! Arguments
   type(icebergs), pointer :: bergs !< Container for all types and memory
   type(iceberg), pointer :: pberg !< Parent berg
   type(real),intent(in) :: k !< Number of child bergs to calve
   type(real),intent(in) :: l_b !< The width, and 1/3 the length, of a child berg
+  type(real),intent(in) :: fl_disp_x !< Child berg x-displacement from parent berg
+  type(real),intent(in) :: fl_disp_y !< Child berg x-displacement from parent berg
   ! Local variables
   type(iceberg) :: cberg ! The new child berg
   type(icebergs_gridded), pointer :: grd
+  logical :: lres
 
   ! For convenience
   grd=>bergs%grd
 
-  !A new child berg (cberg) that calves from the footloose mechanism initially has same position as the parent berg.
   !Initially, cberg%fl_k is set to -1 to mark the berg as a child berg.
-  !If fl_k<0, the berg will is not eligible to decay via footloose calving (see subroutine footloose_calving)
+  !If fl_k<0, the berg is not eligible to decay via footloose calving (see subroutine footloose_calving)
   !If fl_k==-1, the berg will also not interact with other berg elements. This is necessary because the child berg
-  !will initially overlap its parent berg, which would otherwise result in unrealistic contact forces.
+  !may initially overlap its parent berg, which would otherwise result in unrealistic contact forces.
   !However, if (bergs%interactive_icebergs_on), a berg with fl_k==-1 will be set to fl_k=-2 once it is out of
   !contact range of any other berg. With fl_k=-2, interactive contact forces may now be applied
 
   !Set variable values for the new child berg:
 
-  !different values from parent:
+  !Lat/lon and cell position for new berg:
+  if (bergs%displace_fl_bergs) then
+    cberg%lon = pberg%lon + fl_disp_x
+    cberg%lat = pberg%lat + fl_disp_y
+    lres= find_cell_wide(grd, cberg%lon, cberg%lat, cberg%ine, cberg%jne)
+    if (lres) then       !child berg is located on the data domain of the current PE
+      lres=pos_within_cell(grd, cberg%lon, cberg%lat, cberg%ine, cberg%jne, cberg%xi, cberg%yj)
+    else
+      !child berg is NOT located on the data domain of the current PE. Assign it to the closest halo element for now.
+      !It will later be transferred to the neighboring PE and reassigned to the correct cell
+      if (cberg%lon > grd%lon(grd%ied,grd%jed)) then
+        cberg%ine = grd%ied
+      elseif (cberg%lon < grd%lon(grd%isd,grd%jsd)) then
+        cberg%ine = grd%isd+1
+      endif
+      if (cberg%lat > grd%lat(grd%ied,grd%jed)) then
+        cberg%jne = grd%jed
+      elseif (cberg%lat < grd%lat(grd%isd,grd%jsd)) then
+        cberg%jne = grd%jsd+1
+      endif
+      cberg%xi=0.5; cberg%yj=0.5 !fake values. Will be updated on new PE.
+    endif
+  else
+    cberg%lon = pberg%lon
+    cberg%lat = pberg%lat
+    cberg%ine = pberg%ine
+    cberg%jne = pberg%jne
+    cberg%xi  = pberg%xi
+    cberg%yj  = pberg%yj
+  endif
+
   cberg%width        = l_b*3.
   cberg%length       = l_b
   cberg%mass         = cberg%width * cberg%length * pberg%thickness * bergs%rho_bergs
-  cberg%start_lon    = pberg%lon
-  cberg%start_lat    = pberg%lat
+  cberg%start_lon    = cberg%lon
+  cberg%start_lat    = cberg%lat
+  cberg%lon_prev     = pberg%lon_prev + fl_disp_x
+  cberg%lat_prev     = pberg%lat_prev + fl_disp_y
+  cberg%lon_old      = pberg%lon_old  + fl_disp_x
+  cberg%lat_old      = pberg%lat_old  + fl_disp_y
   cberg%start_day    = bergs%current_yearday
   cberg%start_mass   = cberg%mass
   cberg%mass_scaling = pberg%mass_scaling * k !k is the number of icebergs cberg represents
@@ -5804,13 +5858,10 @@ subroutine calve_fl_icebergs(bergs,pberg,k,l_b)
   cberg%fl_k         = -1.0
   cberg%start_year   = bergs%current_year
   cberg%id           = generate_id(grd, pberg%ine, pberg%jne)
+  cberg%halo_berg    = 0.0
 
-  !same values as parent:
+  !always same values as parent:
   cberg%thickness    = pberg%thickness
-  cberg%lon          = pberg%lon
-  cberg%lat          = pberg%lat
-  cberg%lon_prev     = pberg%lon_prev
-  cberg%lat_prev     = pberg%lat_prev
   cberg%uvel         = pberg%uvel
   cberg%vvel         = pberg%vvel
   cberg%axn          = pberg%axn
@@ -5821,15 +5872,8 @@ subroutine calve_fl_icebergs(bergs,pberg,k,l_b)
   cberg%vvel_prev    = pberg%vvel_prev
   cberg%uvel_old     = pberg%uvel_old
   cberg%vvel_old     = pberg%vvel_old
-  cberg%lon_old      = pberg%lon_old
-  cberg%lat_old      = pberg%lat_old
   cberg%heat_density = pberg%heat_density
-  cberg%halo_berg    = pberg%halo_berg
   cberg%static_berg  = pberg%static_berg
-  cberg%ine          = pberg%ine
-  cberg%jne          = pberg%jne
-  cberg%xi           = pberg%xi
-  cberg%yj           = pberg%yj
   cberg%uo           = pberg%uo
   cberg%vo           = pberg%vo
   cberg%ui           = pberg%ui
