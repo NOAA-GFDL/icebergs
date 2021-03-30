@@ -598,7 +598,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   logical :: fl_use_poisson_distribution=.true. !< fl_r is (T) mean of Poisson distribution to determine k, or (F) k=fl_r
   real :: fl_r=0. !< footloose average number of bergs calved per fl_r_s
   real :: fl_r_s=0. !< seconds over which fl_r footloose bergs calve
-  logical :: displace_fl_bergs=.true. !< footloose berg positions are assigned to a corner of parent berg
+  logical :: displace_fl_bergs=.true. !< footloose berg positions are randomly assigned along edges of parent berg
 end type icebergs
 
 !> Read original restarts. Needs to be module global so can be public to icebergs_mod.
@@ -783,7 +783,7 @@ real :: constant_width=0. !< If constant_interaction_LW, the constant width used
 logical :: fl_use_poisson_distribution=.true. !< fl_r is (T) mean of Poisson distribution to determine k, or (F) k=fl_r
 real :: fl_r=0. !< footloose average number of bergs calved per fl_r_s
 real :: fl_r_s=0. !< seconds over which fl_r footloose bergs calve
-logical :: displace_fl_bergs=.true. !< footloose berg positions are assigned to a corner of parent berg
+logical :: displace_fl_bergs=.true. !< footloose berg positions are randomly assigned along edges of parent berg
 
 namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,Static_icebergs,  &
          distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef, radial_damping_coef, tangental_damping_coef, only_interactive_forces, &

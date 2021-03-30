@@ -2393,7 +2393,7 @@ subroutine footloose_calving(bergs, time)
   integer, dimension(8) :: seed
   real :: T, W, L, N_bonds, Ln, rn
   real :: IC, max_k, k, Lr_fl, l_w, l_b, pu
-  real :: fl_disp_x, fl_disp_y
+  real :: fl_disp_x, fl_disp_y, interp_loc
 
   ! For convenience
   grd=>bergs%grd
@@ -2513,19 +2513,39 @@ subroutine footloose_calving(bergs, time)
 
           Lr_fl = k*3.*(l_b**2.)/W !FL mechanism length reduction for parent berg
 
-          !if (bergs%displace_fl_bergs), new FL bergs are positioned at a randomly assigned corner of the parent berg.
+          !if (bergs%displace_fl_bergs), new FL bergs are positioned at a randomly assigned
+          !locations on edges of parent berg.
 
           if (.not. bergs%displace_fl_bergs) then
             fl_disp_x=0.0; fl_disp_y=0.0
           else
-            !call assign_fl_disp
-            fl_disp_x=0.5*this%length; fl_disp_y=0.5*this%width
-            if (rn<0.5) then
-              fl_disp_x=-fl_disp_x
-              if (rn<0.25) fl_disp_y=-fl_disp_y
-            elseif (rn<0.75) then
-              fl_disp_y=-fl_disp_y
-            end if
+            !get displace to a random location along one of the sides of the square berg
+            if (rn<0.25) then !north side
+              interp_loc=4.*rn
+              fl_disp_x=this%length*(interp_loc-0.5)
+              fl_disp_y=0.5*this%width
+            elseif (rn<0.5) then !east side
+              interp_loc=4.*(rn-0.25)
+              fl_disp_x=0.5*this%length
+              fl_disp_y=this%width*(interp_loc-0.5)
+            elseif (rn<0.75) then !south side
+              interp_loc=4.*(rn-0.5)
+              fl_disp_x=this%length*(interp_loc-0.5)
+              fl_disp_y=-0.5*this%width
+            else !west side
+              interp_loc=4.*(rn-0.75)
+              fl_disp_x=-0.5*this%length
+              fl_disp_y=0.5*this%width*(interp_loc-0.5)
+            endif
+
+            ! Old version, assigning to corners
+            ! fl_disp_x=0.5*this%length; fl_disp_y=0.5*this%width
+            ! if (rn<0.5) then
+            !   fl_disp_x=-fl_disp_x
+            !   if (rn<0.25) fl_disp_y=-fl_disp_y
+            ! elseif (rn<0.75) then
+            !   fl_disp_y=-fl_disp_y
+            ! end if
           endif
 
           call calve_fl_icebergs(bergs,this,k,l_b,fl_disp_x,fl_disp_y)
@@ -2553,7 +2573,7 @@ contains
 
   !TODO: finish this
   subroutine max_k_for_edge_elements
-    !for most edge elements, maxk=huge(1.0). If the k
+    !for most edge elements, maxk=huge(1.0)
     max_k=huge(1.0)
   end subroutine max_k_for_edge_elements
 end subroutine footloose_calving

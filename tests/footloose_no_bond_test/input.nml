@@ -29,7 +29,7 @@
 
     fl_r=4        !(4) average number of footloose bergs to calve per fl_r_s seconds
     fl_r_s=86400  !(86400) time in s over which to calve, on average, fl_r footloose bergs
-    displace_fl_bergs=.true. !(T) randomly assign FL berg positions to a corner of parent berg
+    displace_fl_bergs=.true. !(T) randomly assign FL berg positions to sides of parent berg
 
     mts=.false. !(F) for using the Multiple Time Stepping Velocity Verlet scheme
     mts_sub_steps=1 !(-1) # of mts sub-steps (-1=automatically determine # from spring const)
