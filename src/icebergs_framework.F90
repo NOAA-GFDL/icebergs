@@ -1402,7 +1402,7 @@ endif
     bergs%contact_cells_lat = 1
   endif
 
-  print *,'# contact cells lon/lat',bergs%contact_cells_lon,bergs%contact_cells_lat
+  !print *,'# contact cells lon/lat',bergs%contact_cells_lon,bergs%contact_cells_lat
 
   !necessary?
   if (.not. mts) then

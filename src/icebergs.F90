@@ -2513,39 +2513,12 @@ subroutine footloose_calving(bergs, time)
 
           Lr_fl = k*3.*(l_b**2.)/W !FL mechanism length reduction for parent berg
 
-          !if (bergs%displace_fl_bergs), new FL bergs are positioned at a randomly assigned
-          !locations on edges of parent berg.
-
           if (.not. bergs%displace_fl_bergs) then
+            !newly calved FL bergs take same position as parent berg
             fl_disp_x=0.0; fl_disp_y=0.0
           else
-            !get displace to a random location along one of the sides of the square berg
-            if (rn<0.25) then !north side
-              interp_loc=4.*rn
-              fl_disp_x=this%length*(interp_loc-0.5)
-              fl_disp_y=0.5*this%width
-            elseif (rn<0.5) then !east side
-              interp_loc=4.*(rn-0.25)
-              fl_disp_x=0.5*this%length
-              fl_disp_y=this%width*(interp_loc-0.5)
-            elseif (rn<0.75) then !south side
-              interp_loc=4.*(rn-0.5)
-              fl_disp_x=this%length*(interp_loc-0.5)
-              fl_disp_y=-0.5*this%width
-            else !west side
-              interp_loc=4.*(rn-0.75)
-              fl_disp_x=-0.5*this%length
-              fl_disp_y=0.5*this%width*(interp_loc-0.5)
-            endif
-
-            ! Old version, assigning to corners
-            ! fl_disp_x=0.5*this%length; fl_disp_y=0.5*this%width
-            ! if (rn<0.5) then
-            !   fl_disp_x=-fl_disp_x
-            !   if (rn<0.25) fl_disp_y=-fl_disp_y
-            ! elseif (rn<0.75) then
-            !   fl_disp_y=-fl_disp_y
-            ! end if
+            !newly calved FL bergs are randomly assigned positions along the edges of the parent berg
+            call get_footloose_displacement
           endif
 
           call calve_fl_icebergs(bergs,this,k,l_b,fl_disp_x,fl_disp_y)
@@ -2576,6 +2549,47 @@ contains
     !for most edge elements, maxk=huge(1.0)
     max_k=huge(1.0)
   end subroutine max_k_for_edge_elements
+
+  subroutine get_footloose_displacement
+    real :: lon1,lat1,x1,y1,dxdl1,dydl,xdot2,ydot2
+    logical :: on_tangential_plane
+
+    !displace child berg to a random location along one of the sides of the rectangular berg
+    if (rn<0.25) then !north side
+      interp_loc=4.*rn
+      fl_disp_x=this%length*(interp_loc-0.5)
+      fl_disp_y=0.5*this%width
+    elseif (rn<0.5) then !east side
+      interp_loc=4.*(rn-0.25)
+      fl_disp_x=0.5*this%length
+      fl_disp_y=this%width*(interp_loc-0.5)
+    elseif (rn<0.75) then !south side
+      interp_loc=4.*(rn-0.5)
+      fl_disp_x=this%length*(interp_loc-0.5)
+      fl_disp_y=-0.5*this%width
+    else !west side
+      interp_loc=4.*(rn-0.75)
+      fl_disp_x=-0.5*this%length
+      fl_disp_y=0.5*this%width*(interp_loc-0.5)
+    endif
+
+    if (grd%grid_is_latlon) then
+      on_tangential_plane=.false.
+      if ((this%lat>89.) .and. (grd%grid_is_latlon)) on_tangential_plane=.true.
+      lon1=this%lon; lat1=this%lat
+      if (on_tangential_plane) call rotpos_to_tang(lon1,lat1,x1,y1,this%id)
+      call convert_from_meters_to_grid(lat1,grd%grid_is_latlon,dxdl1,dydl)
+      if (on_tangential_plane) then
+        call rotvec_to_tang(lon1,fl_disp_x,fl_disp_y,xdot2,ydot2)
+        x1=x1+xdot2; y1=y1+ydot2
+        call rotpos_from_tang(x1,y1,lon1,lat1) !lon1 & lat1 = new FL berg position
+      else
+        lon1=lon1+fl_disp_x*dxdl1; lat1=lat1+fl_disp_y*dydl !new FL berg position
+      endif
+      fl_disp_x=lon1-this%lon; fl_disp_y=lat1-this%lat !convert back to displacement from parent berg
+    endif
+
+  end subroutine get_footloose_displacement
 end subroutine footloose_calving
 
 !> Delete any edge elements that fully calved from the footloose mechanism
