@@ -148,6 +148,7 @@ real, allocatable, dimension(:) :: lon,          &
                                    start_mass,   &
                                    mass_scaling, &
                                    mass_of_bits, &
+                                   mass_of_fl_bits, &
                                    static_berg,  &
                                    heat_density, &
                                    axn_fast,     &
@@ -224,6 +225,7 @@ integer :: grdi, grdj
    allocate(start_mass(nbergs))
    allocate(mass_scaling(nbergs))
    allocate(mass_of_bits(nbergs))
+   allocate(mass_of_fl_bits(nbergs))
    allocate(heat_density(nbergs))
    allocate(static_berg(nbergs))
 
@@ -293,7 +295,9 @@ integer :: grdi, grdj
   id = register_restart_field(bergs_restart,filename,'mass_scaling',mass_scaling, &
                                             longname='scaling factor for mass of calving berg',units='none')
   id = register_restart_field(bergs_restart,filename,'mass_of_bits',mass_of_bits, &
-                                            longname='mass of bergy bits',units='kg')
+    longname='mass of bergy bits',units='kg')
+  id = register_restart_field(bergs_restart,filename,'mass_of_fl_bits',mass_of_fl_bits, &
+                                            longname='mass of footloose bits',units='kg')
   id = register_restart_field(bergs_restart,filename,'heat_density',heat_density, &
                                             longname='heat density',units='J/kg')
 
@@ -356,7 +360,8 @@ integer :: grdi, grdj
       start_mass(i) = this%start_mass; mass_scaling(i) = this%mass_scaling
       static_berg(i) = this%static_berg
       call split_id(this%id, id_cnt(i), id_ij(i))
-      mass_of_bits(i) = this%mass_of_bits; heat_density(i) = this%heat_density
+      mass_of_bits(i) = this%mass_of_bits; mass_of_fl_bits(i) = this%mass_of_fl_bits
+      heat_density(i) = this%heat_density
       if (mts) then
         axn_fast(i) = this%axn_fast
         ayn_fast(i) = this%ayn_fast
@@ -400,6 +405,7 @@ integer :: grdi, grdj
              start_mass,   &
              mass_scaling, &
              mass_of_bits, &
+             mass_of_fl_bits, &
              static_berg,  &
              heat_density)
   if (mts) then
@@ -669,6 +675,7 @@ real, allocatable, dimension(:) :: lon,          &
                                    start_mass,   &
                                    mass_scaling, &
                                    mass_of_bits, &
+                                   mass_of_fl_bits, &
                                    static_berg,  &
                                    heat_density, &
                                    axn_fast,     &
@@ -729,6 +736,7 @@ integer, allocatable, dimension(:) :: ine,        &
      allocate(start_mass(nbergs_in_file))
      allocate(mass_scaling(nbergs_in_file))
      allocate(mass_of_bits(nbergs_in_file))
+     allocate(mass_of_fl_bits(nbergs_in_file))
      allocate(static_berg(nbergs_in_file))
      allocate(heat_density(nbergs_in_file))
      allocate(ine(nbergs_in_file))
@@ -800,6 +808,7 @@ integer, allocatable, dimension(:) :: ine,        &
      call read_unlimited_axis(filename,'start_mass',start_mass,domain=grd%domain)
      call read_unlimited_axis(filename,'mass_scaling',mass_scaling,domain=grd%domain)
      call read_real_vector(filename,'mass_of_bits',mass_of_bits,domain=grd%domain,value_if_not_in_file=0.)
+     call read_real_vector(filename,'mass_of_fl_bits',mass_of_fl_bits,domain=grd%domain,value_if_not_in_file=0.)
      call read_real_vector(filename,'heat_density',heat_density,domain=grd%domain,value_if_not_in_file=0.)
      call read_unlimited_axis(filename,'ine',ine,domain=grd%domain)
      call read_unlimited_axis(filename,'jne',jne,domain=grd%domain)
@@ -895,6 +904,7 @@ integer, allocatable, dimension(:) :: ine,        &
       localberg%start_mass=start_mass(k)
       localberg%mass_scaling=mass_scaling(k)
       localberg%mass_of_bits=mass_of_bits(k)
+      localberg%mass_of_fl_bits=mass_of_fl_bits(k)
       localberg%halo_berg=0.
       localberg%static_berg=static_berg(k)
       localberg%heat_density=heat_density(k)
@@ -956,6 +966,7 @@ integer, allocatable, dimension(:) :: ine,        &
                start_mass,   &
                mass_scaling, &
                mass_of_bits, &
+               mass_of_fl_bits, &
                static_berg,  &
                heat_density, &
                ine,          &
@@ -1109,6 +1120,7 @@ logical :: lres
       localberg%start_mass=localberg%mass
       localberg%mass_scaling=bergs%mass_scaling(1)
       localberg%mass_of_bits=0.
+      localberg%mass_of_fl_bits=0.
       localberg%halo_berg=0.
       localberg%static_berg=0.
       localberg%heat_density=0.
@@ -1659,7 +1671,7 @@ integer :: lonid, latid, yearid, dayid, uvelid, vvelid, idcntid, idijid
 integer :: uvelpid,vvelpid
 integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid, sssid
 integer :: cnid, hiid, hsid
-integer :: mid, did, wid, lid, mbid, hdid, nbid, odid, flkid
+integer :: mid, did, wid, lid, mbid, mflbid, hdid, nbid, odid, flkid
 integer :: axnid,aynid,bxnid,bynid,axnfid,aynfid,bxnfid,bynfid
 integer :: eecid,edcid,eeid,edid,aeid,efid
 integer :: eectid, edctid, eetid, edtid, aetid
@@ -1794,6 +1806,7 @@ logical :: io_is_in_append_mode
         vaid = inq_varid(ncid, 'va')
         mid = inq_varid(ncid, 'mass')
         mbid = inq_varid(ncid, 'mass_of_bits')
+        mflbid = inq_varid(ncid, 'mass_of_fl_bits')
         hdid = inq_varid(ncid, 'heat_density')
         did = inq_varid(ncid, 'thickness')
         wid = inq_varid(ncid, 'width')
@@ -1871,6 +1884,7 @@ logical :: io_is_in_append_mode
         vaid = def_var(ncid, 'va', NF_DOUBLE, i_dim)
         mid = def_var(ncid, 'mass', NF_DOUBLE, i_dim)
         mbid = def_var(ncid, 'mass_of_bits', NF_DOUBLE, i_dim)
+        mflbid = def_var(ncid, 'mass_of_fl_bits', NF_DOUBLE, i_dim)
         hdid = def_var(ncid, 'heat_density', NF_DOUBLE, i_dim)
         did = def_var(ncid, 'thickness', NF_DOUBLE, i_dim)
         wid = def_var(ncid, 'width', NF_DOUBLE, i_dim)
@@ -1960,6 +1974,8 @@ logical :: io_is_in_append_mode
         call put_att(ncid, mid, 'units', 'kg')
         call put_att(ncid, mbid, 'long_name', 'mass_of_bits')
         call put_att(ncid, mbid, 'units', 'kg')
+        call put_att(ncid, mflbid, 'long_name', 'mass_of_fl_bits')
+        call put_att(ncid, mflbid, 'units', 'kg')
         call put_att(ncid, hdid, 'long_name', 'heat_density')
         call put_att(ncid, hdid, 'units', 'J/kg')
         call put_att(ncid, did, 'long_name', 'thickness')

@@ -2416,7 +2416,7 @@ subroutine footloose_calving(bergs, time)
     lw_c = 1./(gravity*rho_seawater) !for buoyancy length
     B_c  = youngs/(12.*(1.-poisson**2.)) !for bending stiffness
     exp_nlambda=exp(-bergs%fl_r) !e^(-r*dt)
-    seed = constructSeed(1,1,time) !Seed random numbers for Poisson distribution
+    seed = constructSeed(mpp_pe(),mpp_pe(),time) !Seed random numbers for Poisson distribution
     rns = initializeRandomNumberStream(seed)
 
     Visited=.true.
@@ -2521,7 +2521,15 @@ subroutine footloose_calving(bergs, time)
             call get_footloose_displacement
           endif
 
-          call calve_fl_icebergs(bergs,this,k,l_b,fl_disp_x,fl_disp_y)
+          if (bergs%fl_style.eq.'bergy_bits') then
+            this%mass_of_bits=this%mass_of_bits+(bergs%rho_bergs*W*T*(L-Lr_fl))
+          elseif (bergs%fl_style.eq.'fl_bits') then
+            call error_mesg('KID,footloose_calving', &
+              'fl_style = "fl_bits" not yet fully implemented!', FATAL)
+            this%mass_of_fl_bits=this%mass_of_fl_bits+(bergs%rho_bergs*W*T*(L-Lr_fl))
+          else
+            call calve_fl_icebergs(bergs,this,k,l_b,fl_disp_x,fl_disp_y)
+          endif
 
           Ln=L-Lr_fl !new length
           if (Ln .le. 0) then
@@ -5826,12 +5834,12 @@ subroutine calve_fl_icebergs(bergs,pberg,k,l_b,fl_disp_x,fl_disp_y)
   type(iceberg), pointer :: pberg !< Parent berg
   type(real),intent(in) :: k !< Number of child bergs to calve
   type(real),intent(in) :: l_b !< The width, and 1/3 the length, of a child berg
-  type(real),intent(in) :: fl_disp_x !< Child berg x-displacement from parent berg
-  type(real),intent(in) :: fl_disp_y !< Child berg x-displacement from parent berg
+  type(real) :: fl_disp_x !< Child berg x-displacement from parent berg
+  type(real) :: fl_disp_y !< Child berg x-displacement from parent berg
   ! Local variables
   type(iceberg) :: cberg ! The new child berg
   type(icebergs_gridded), pointer :: grd
-  logical :: lres
+  logical :: lres, displace
 
   ! For convenience
   grd=>bergs%grd
@@ -5845,29 +5853,41 @@ subroutine calve_fl_icebergs(bergs,pberg,k,l_b,fl_disp_x,fl_disp_y)
 
   !Set variable values for the new child berg:
 
+  displace=bergs%displace_fl_bergs
   !Lat/lon and cell position for new berg:
-  if (bergs%displace_fl_bergs) then
+  if (displace) then
     cberg%lon = pberg%lon + fl_disp_x
     cberg%lat = pberg%lat + fl_disp_y
     lres= find_cell_wide(grd, cberg%lon, cberg%lat, cberg%ine, cberg%jne)
-    if (lres) then       !child berg is located on the data domain of the current PE
-      lres=pos_within_cell(grd, cberg%lon, cberg%lat, cberg%ine, cberg%jne, cberg%xi, cberg%yj)
-    else
-      !child berg is NOT located on the data domain of the current PE. Assign it to the closest halo element for now.
-      !It will later be transferred to the neighboring PE and reassigned to the correct cell
+
+    !If new berg is not on current PE, correct it so that it is. This correction is just a
+    !safety measure to make sure it is not within a grounded cell on the other PE.
+    if (.not. lres) then
+      !The choice of 75% and 25% weighting here is completely arbitrary...
       if (cberg%lon > grd%lon(grd%ied,grd%jed)) then
-        cberg%ine = grd%ied
+        cberg%lon = 0.75*grd%lon(grd%ied,grd%jed) + 0.25*pberg%lon
       elseif (cberg%lon < grd%lon(grd%isd,grd%jsd)) then
-        cberg%ine = grd%isd+1
+        cberg%lon = 0.75*grd%lon(grd%isd,grd%jsd) + 0.25*pberg%lon
       endif
       if (cberg%lat > grd%lat(grd%ied,grd%jed)) then
-        cberg%jne = grd%jed
+        cberg%lat = 0.75*grd%lat(grd%ied,grd%jed) + 0.25*pberg%lat
       elseif (cberg%lat < grd%lat(grd%isd,grd%jsd)) then
-        cberg%jne = grd%jsd+1
+        cberg%lat = 0.75*grd%lat(grd%isd,grd%jsd) + 0.25*pberg%lat
       endif
-      cberg%xi=0.5; cberg%yj=0.5 !fake values. Will be updated on new PE.
+      lres= find_cell_wide(grd, cberg%lon, cberg%lat, cberg%ine, cberg%jne)
+      if (.not. lres) call error_mesg('KID, calve_fl_icebergs', &
+        'corrected new berg position still not on current PE!', FATAL)
     endif
-  else
+
+    !if new berg is located within a grounded cell, change its position to the same as the parent berg
+    if (grd%area(cberg%ine,cberg%jne).eq.0.) then
+      fl_disp_x=0.0; fl_disp_y=0.0; displace=.false.
+    else
+      lres=pos_within_cell(grd, cberg%lon, cberg%lat, cberg%ine, cberg%jne, cberg%xi, cberg%yj)
+    endif
+  endif
+
+  if (.not. displace) then
     cberg%lon = pberg%lon
     cberg%lat = pberg%lat
     cberg%ine = pberg%ine
@@ -5881,6 +5901,9 @@ subroutine calve_fl_icebergs(bergs,pberg,k,l_b,fl_disp_x,fl_disp_y)
   cberg%mass         = cberg%width * cberg%length * pberg%thickness * bergs%rho_bergs
   cberg%start_lon    = cberg%lon
   cberg%start_lat    = cberg%lat
+  !pberg%lon is saved on cberg%lon_prev in case the displacement of the new FL child berg causes it to ground,
+  !so that cberg%lon can then be corrected back to equal pberg%lon (same process for lat)
+  !Note lon_prev is otherwise only used for updating bond angles for fracture (not applicable to child bergs)
   cberg%lon_prev     = pberg%lon_prev + fl_disp_x
   cberg%lat_prev     = pberg%lat_prev + fl_disp_y
   cberg%lon_old      = pberg%lon_old  + fl_disp_x
