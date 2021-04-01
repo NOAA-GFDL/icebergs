@@ -2524,9 +2524,7 @@ subroutine footloose_calving(bergs, time)
           if (bergs%fl_style.eq.'bergy_bits') then
             this%mass_of_bits=this%mass_of_bits+(bergs%rho_bergs*W*T*Lr_fl)
           elseif (bergs%fl_style.eq.'fl_bits') then
-            call error_mesg('KID,footloose_calving', &
-              'fl_style = "fl_bits" not yet fully implemented!', FATAL)
-            !this%mass_of_fl_bits=this%mass_of_fl_bits+(bergs%rho_bergs*W*T*Lr_fl)
+            this%mass_of_fl_bits=this%mass_of_fl_bits+(bergs%rho_bergs*W*T*Lr_fl)
           else
             call calve_fl_icebergs(bergs,this,k,l_b,fl_disp_x,fl_disp_y)
           endif
@@ -2722,9 +2720,25 @@ subroutine thermodynamics(bergs)
   real, parameter :: perday=1./86400.
   integer :: grdi, grdj
   real :: SSS !Temporarily here
+  ! Footloose bits stuff
+  real :: youngs,poisson
+  real, save :: l_c, lw_c, B_c
+  logical, save :: Visited=.false.
+  real :: l_w,l_b,L_fl,W_fl,T_fl,M_fl,Vol_fl,Mb_fl,Tn_fl,nVol_fl,Mnew1_fl,dMb_fl
+  real :: Ln_fl,Wn_fl,Mnew2_fl,dMv_fl,Mnew_fl,dMe_fl,dM_fl
 
   ! For convenience
   grd=>bergs%grd
+
+  if (bergs%fl_style.eq.'fl_bits' .and. .not. Visited) then
+    !define some constants for footloose bits:
+    youngs=1.e8; poisson=0.3
+    l_c  = pi/(2.*sqrt(2.)) !for length-scale of child iceberg
+    lw_c = 1./(gravity*rho_seawater) !for buoyancy length
+    B_c  = youngs/(12.*(1.-poisson**2.)) !for bending stiffness
+    Visited=.true.
+  endif
+
 
   !Initializing
   grd%Uvel_on_ocean(:,:,:)=0.
@@ -2849,6 +2863,53 @@ subroutine thermodynamics(bergs)
         dMv=(M/Vol)*(T*(W+L))*Mv*bergs%dt ! approx. mass loss to buoyant convection (kg)
       endif
 
+      ! Footloose bits (FL bits). Uses operator splitting.
+      ! For now, FL bits do not spawn bergy bits.
+      if (bergs%fl_style.eq.'fl_bits') then
+        !dimensions
+        l_w  = (lw_c*B_c*(T**3.))**0.25  !buoyancy length
+        l_b  = l_c*l_w !length of a freshly calved footloose child berg
+
+        !Estimate the dimenstions of a representative FL berg that will give roughly the same
+        !freshwater flux as the actual group of FL bergs of all different sizes:
+        !this may not be appropriate for very small FL bergs or dense sea ice cover
+        L_fl = 3.*l_b; W_fl=l_b; T_fl=T
+        call rolling(bergs,T_fl,W_fl,L_fl)
+        L_fl = L_fl*0.8; W_fl=W_fl*0.45; T_fl=T_fl*0.65
+        M_fl=this%mass_of_fl_bits; Vol_fl=L_fl*W_fl*T_fl
+
+        !FL bits melt rates in m/s
+        Mb_fl=max( 0.58*(dvo**0.8)*(SST+4.0)/(L_fl**0.2), 0.) *perday ! Basal turbulent melting
+        !Mv and Me are the same as above
+
+        Tn_fl=max(T_fl-Mb_fl*bergs%dt,0.) ! new total thickness (m)
+        nVol_fl=Tn_fl*W_fl*L_fl ! new volume (m^3)
+        Mnew1_fl=(nVol_fl/Vol_fl)*M_fl ! new mass (kg)
+        dMb_fl=M_fl-Mnew1_fl ! mass lost to basal melting (>0) (kg)
+
+        Ln_fl=max(L_fl-Mv*bergs%dt,0.) ! new length (m)
+        Wn_fl=max(W_fl-Mv*bergs%dt,0.) ! new width (m)
+        nVol_fl=Tn_fl*Wn_fl*Ln_fl ! new volume (m^3)
+        Mnew2_fl=(nVol_fl/Vol_fl)*M_fl ! new mass (kg)
+        dMv_fl=Mnew1_fl-Mnew2_fl ! mass lost to buoyant convection (>0) (kg)
+
+        Ln_fl=max(Ln_fl-Me*bergs%dt,0.) ! new length (m)
+        Wn_fl=max(Wn_fl-Me*bergs%dt,0.) ! new width (m)
+        nVol_fl=Tn_fl*Wn_fl*Ln_fl ! new volume (m^3)
+        Mnew_fl=(nVol_fl/Vol_fl)*M_fl ! new mass (kg)
+        dMe_fl=Mnew2_fl-Mnew_fl ! mass lost to erosion (>0) (kg)
+        dM_fl=M_fl-Mnew_fl ! mass lost to all erosion and melting (>0) (kg)
+
+        !Add FL mass loss terms to total mass loss terms
+        dMb=dMb+dMb_fl !from basal melt
+        dMv=dMv+dMv_fl !from buoyant convection
+        dMe=dMe+dMe_fl !from erosion
+        dM=dM+dM_fl    !overall mass loss
+      else
+        dM_fl=0.
+        Mnew_fl=0.
+      endif
+
       ! Bergy bits
       if (bergs%bergy_bit_erosion_fraction>0.) then
         Mbits=this%mass_of_bits ! mass of bergy bits (kg)
@@ -2918,7 +2979,7 @@ subroutine thermodynamics(bergs)
         !before reseting
         if (bergs%find_melt_using_spread_mass) then
           if (Mnew>0.) then !If the berg still exists
-            call spread_mass_across_ocean_cells(bergs,this, i, j, this%xi, this%yj,Mnew , nMbits, this%mass_scaling, Ln*Wn,  Tn)
+            call spread_mass_across_ocean_cells(bergs,this, i, j, this%xi, this%yj,Mnew+Mnew_fl , nMbits, this%mass_scaling, Ln*Wn,  Tn)
           endif
         endif
         !Reset all the values
@@ -2936,6 +2997,7 @@ subroutine thermodynamics(bergs)
         ! Store the new state of iceberg (with L>W)
         this%mass=Mnew
         this%mass_of_bits=nMbits
+        this%mass_of_fl_bits=Mnew_fl
         this%thickness=Tn
         this%width=min(Wn,Ln)
         this%length=max(Wn,Ln)
@@ -5896,8 +5958,8 @@ subroutine calve_fl_icebergs(bergs,pberg,k,l_b,fl_disp_x,fl_disp_y)
     cberg%yj  = pberg%yj
   endif
 
-  cberg%width        = l_b*3.
-  cberg%length       = l_b
+  cberg%length       = l_b*3.
+  cberg%width        = l_b
   cberg%mass         = cberg%width * cberg%length * pberg%thickness * bergs%rho_bergs
   cberg%start_lon    = cberg%lon
   cberg%start_lat    = cberg%lat
