@@ -2522,11 +2522,11 @@ subroutine footloose_calving(bergs, time)
           endif
 
           if (bergs%fl_style.eq.'bergy_bits') then
-            this%mass_of_bits=this%mass_of_bits+(bergs%rho_bergs*W*T*(L-Lr_fl))
+            this%mass_of_bits=this%mass_of_bits+(bergs%rho_bergs*W*T*Lr_fl)
           elseif (bergs%fl_style.eq.'fl_bits') then
             call error_mesg('KID,footloose_calving', &
               'fl_style = "fl_bits" not yet fully implemented!', FATAL)
-            this%mass_of_fl_bits=this%mass_of_fl_bits+(bergs%rho_bergs*W*T*(L-Lr_fl))
+            !this%mass_of_fl_bits=this%mass_of_fl_bits+(bergs%rho_bergs*W*T*Lr_fl)
           else
             call calve_fl_icebergs(bergs,this,k,l_b,fl_disp_x,fl_disp_y)
           endif
