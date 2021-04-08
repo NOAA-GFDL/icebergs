@@ -2393,7 +2393,7 @@ subroutine footloose_calving(bergs, time)
   integer, dimension(8) :: seed
   real :: T, W, L, N_bonds, Ln, rn
   real :: IC, max_k, k, Lr_fl, l_w, l_b, pu
-  real :: fl_disp_x, fl_disp_y, interp_loc
+  real :: fl_disp_x, fl_disp_y, interp_loc, dM_fl_bits
 
   ! For convenience
   grd=>bergs%grd
@@ -2421,8 +2421,6 @@ subroutine footloose_calving(bergs, time)
 
     Visited=.true.
   endif
-
-
 
   do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec !computational domain only
     this=>bergs%list(grdi,grdj)%first
@@ -2500,7 +2498,6 @@ subroutine footloose_calving(bergs, time)
           k=floor(this%fl_k)
         endif
 
-
         if (k>max_k) then
           k=max_k
           this%fl_k=0.
@@ -2513,20 +2510,23 @@ subroutine footloose_calving(bergs, time)
 
           Lr_fl = k*3.*(l_b**2.)/W !FL mechanism length reduction for parent berg
 
-          if (.not. bergs%displace_fl_bergs) then
-            !newly calved FL bergs take same position as parent berg
-            fl_disp_x=0.0; fl_disp_y=0.0
-          else
-            !newly calved FL bergs are randomly assigned positions along the edges of the parent berg
-            call get_footloose_displacement
-          endif
-
-          if (bergs%fl_style.eq.'bergy_bits') then
-            this%mass_of_bits=this%mass_of_bits+(bergs%rho_bergs*W*T*Lr_fl)
-          elseif (bergs%fl_style.eq.'fl_bits') then
-            this%mass_of_fl_bits=this%mass_of_fl_bits+(bergs%rho_bergs*W*T*Lr_fl)
-          else
+          if (bergs%fl_style.eq.'new_bergs') then
+            !calve and track footloose bergs
+            if (.not. bergs%displace_fl_bergs) then
+              fl_disp_x=0.0; fl_disp_y=0.0    !new FL bergs take same position as parent berg
+            else
+              call get_footloose_displacement !new FL bergs given random position along parent berg edges
+            endif
             call calve_fl_icebergs(bergs,this,k,l_b,fl_disp_x,fl_disp_y)
+          else
+            !put FL berg mass in footloose bergs bits.
+            dM_fl_bits=bergs%rho_bergs*W*T*Lr_fl
+            this%mass_of_fl_bits=this%mass_of_fl_bits+dM_fl_bits
+            ! mass flux into fl bits (kg/m2/s)
+            if (grd%area(grdi,grdj).ne.0.) then
+              grd%fl_bits_src(grdi,grdj)=grd%fl_bits_src(grdi,grdj)+&
+                dM_fl_bits/(bergs%dt*grd%area(grdi,grdj))*this%mass_scaling
+            endif
           endif
 
           Ln=L-Lr_fl !new length
@@ -2721,24 +2721,10 @@ subroutine thermodynamics(bergs)
   integer :: grdi, grdj
   real :: SSS !Temporarily here
   ! Footloose bits stuff
-  real :: youngs,poisson
-  real, save :: l_c, lw_c, B_c
-  logical, save :: Visited=.false.
-  real :: l_w,l_b,L_fl,W_fl,T_fl,M_fl,Vol_fl,Mb_fl,Tn_fl,nVol_fl,Mnew1_fl,dMb_fl
-  real :: Ln_fl,Wn_fl,Mnew2_fl,dMv_fl,Mnew_fl,dMe_fl,dM_fl
+  real :: Lfl, Wfl, Tfl, Mfl, Afl, Mb_fl, dMfl, nMfl, Volfl, Lnfl, Wnfl, Tnfl, nVolfl
 
   ! For convenience
   grd=>bergs%grd
-
-  if (bergs%fl_style.eq.'fl_bits' .and. .not. Visited) then
-    !define some constants for footloose bits:
-    youngs=1.e8; poisson=0.3
-    l_c  = pi/(2.*sqrt(2.)) !for length-scale of child iceberg
-    lw_c = 1./(gravity*rho_seawater) !for buoyancy length
-    B_c  = youngs/(12.*(1.-poisson**2.)) !for bending stiffness
-    Visited=.true.
-  endif
-
 
   !Initializing
   grd%Uvel_on_ocean(:,:,:)=0.
@@ -2863,51 +2849,36 @@ subroutine thermodynamics(bergs)
         dMv=(M/Vol)*(T*(W+L))*Mv*bergs%dt ! approx. mass loss to buoyant convection (kg)
       endif
 
-      ! Footloose bits (FL bits). Uses operator splitting.
-      ! For now, FL bits do not spawn bergy bits.
+      ! Footloose bits (FL bits). For now, FL bits do not erode into bergy bits.
       if (bergs%fl_style.eq.'fl_bits') then
-        !dimensions
-        l_w  = (lw_c*B_c*(T**3.))**0.25  !buoyancy length
-        l_b  = l_c*l_w !length of a freshly calved footloose child berg
 
-        !Estimate the dimenstions of a representative FL berg that will give roughly the same
-        !freshwater flux as the actual group of FL bergs of all different sizes:
-        !this may not be appropriate for very small FL bergs or dense sea ice cover
-        L_fl = 3.*l_b; W_fl=l_b; T_fl=T
-        call rolling(bergs,T_fl,W_fl,L_fl)
-        L_fl = L_fl*0.8; W_fl=W_fl*0.45; T_fl=T_fl*0.65
-        M_fl=this%mass_of_fl_bits; Vol_fl=L_fl*W_fl*T_fl
+        call fl_bits_dimensions(bergs,this,Lfl,Wfl,Tfl)
+        Mfl=this%mass_of_fl_bits
 
-        !FL bits melt rates in m/s
-        Mb_fl=max( 0.58*(dvo**0.8)*(SST+4.0)/(L_fl**0.2), 0.) *perday ! Basal turbulent melting
-        !Mv and Me are the same as above
-
-        Tn_fl=max(T_fl-Mb_fl*bergs%dt,0.) ! new total thickness (m)
-        nVol_fl=Tn_fl*W_fl*L_fl ! new volume (m^3)
-        Mnew1_fl=(nVol_fl/Vol_fl)*M_fl ! new mass (kg)
-        dMb_fl=M_fl-Mnew1_fl ! mass lost to basal melting (>0) (kg)
-
-        Ln_fl=max(L_fl-Mv*bergs%dt,0.) ! new length (m)
-        Wn_fl=max(W_fl-Mv*bergs%dt,0.) ! new width (m)
-        nVol_fl=Tn_fl*Wn_fl*Ln_fl ! new volume (m^3)
-        Mnew2_fl=(nVol_fl/Vol_fl)*M_fl ! new mass (kg)
-        dMv_fl=Mnew1_fl-Mnew2_fl ! mass lost to buoyant convection (>0) (kg)
-
-        Ln_fl=max(Ln_fl-Me*bergs%dt,0.) ! new length (m)
-        Wn_fl=max(Wn_fl-Me*bergs%dt,0.) ! new width (m)
-        nVol_fl=Tn_fl*Wn_fl*Ln_fl ! new volume (m^3)
-        Mnew_fl=(nVol_fl/Vol_fl)*M_fl ! new mass (kg)
-        dMe_fl=Mnew2_fl-Mnew_fl ! mass lost to erosion (>0) (kg)
-        dM_fl=M_fl-Mnew_fl ! mass lost to all erosion and melting (>0) (kg)
-
-        !Add FL mass loss terms to total mass loss terms
-        dMb=dMb+dMb_fl !from basal melt
-        dMv=dMv+dMv_fl !from buoyant convection
-        dMe=dMe+dMe_fl !from erosion
-        dM=dM+dM_fl    !overall mass loss
+        if (bergs%fl_melt_as_bergy_bits) then
+          Afl=(Mfl/bergs%rho_bergs)/Lfl
+          Mb_fl=max( 0.58*(dvo**0.8)*(SST+2.0)/(Lfl**0.2), 0.) *perday ! FL bits basal turbulent melting
+          Mb_fl=bergs%rho_bergs*Afl*Mb_fl ! in kg/s
+          dMfl=min(Mb_fl*bergs%dt,Mfl) ! bergy bits mass lost to melting (kg)
+          nMfl=Mfl-dMfl ! remove mass lost to bergy bits melt
+        else
+          Volfl=Lfl*Wfl*Tfl
+          Mb_fl=max( 0.58*(dvo**0.8)*(SST+4.0)/(Lfl**0.2), 0.) *perday  ! FL bits basal turbulent melting
+          Lnfl=max(Lfl-(Mv+Me)*bergs%dt,0.) ! (m)
+          Wnfl=max(Wfl-(Mv+Me)*bergs%dt,0.) ! (m)
+          Tnfl=max(Tfl-  Mb_fl*bergs%dt,0.) ! (m)
+          ! Update volume and mass of footloose berg
+          nVolfl=Tnfl*Wnfl*Lnfl ! (m^3)
+          nMfl=(nVolfl/Volfl)*Mfl ! (kg)
+          dMfl=Mfl-nMfl ! total footloose mass lost
+        endif
+        if (Mnew==0.) then ! if parent berg has completely melted then
+          dMfl= Mfl ! instantly melt all the bergy bits
+          nMfl=0.
+        endif
       else
-        dM_fl=0.
-        Mnew_fl=0.
+        dMfl=0.
+        nMfl=this%mass_of_fl_bits ! retain previous value incase non-zero
       endif
 
       ! Bergy bits
@@ -2946,6 +2917,8 @@ subroutine thermodynamics(bergs)
         grd%bergy_src(i,j)=grd%bergy_src(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
         melt=dMbitsM/bergs%dt ! melt rate of bergy bits in kg/s
         grd%bergy_melt(i,j)=grd%bergy_melt(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
+        melt=dMfl/bergs%dt ! melt+erosion rate of fl bits in kg/s
+        grd%fl_bits_melt(i,j)=grd%fl_bits_melt(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
         if(grd%id_melt_buoy>0) then
           melt=dMb/bergs%dt ! melt rate due to buoyancy term in kg/s
           grd%melt_buoy(i,j)=grd%melt_buoy(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
@@ -2979,7 +2952,7 @@ subroutine thermodynamics(bergs)
         !before reseting
         if (bergs%find_melt_using_spread_mass) then
           if (Mnew>0.) then !If the berg still exists
-            call spread_mass_across_ocean_cells(bergs,this, i, j, this%xi, this%yj,Mnew+Mnew_fl , nMbits, this%mass_scaling, Ln*Wn,  Tn)
+            call spread_mass_across_ocean_cells(bergs,this, i, j, this%xi, this%yj,Mnew , nMbits+nMfl, this%mass_scaling, Ln*Wn,  Tn)
           endif
         endif
         !Reset all the values
@@ -2993,11 +2966,13 @@ subroutine thermodynamics(bergs)
           Lbits=min(L,W,T,40.) ! assume bergy bits are smallest dimension or 40 meters
           Abits=(Mbits/bergs%rho_bergs)/Lbits ! Effective bottom area (assuming T=Lbits)
         endif
+        nMfl=this%mass_of_fl_bits
+        Mfl=this%mass_of_fl_bits
       else
         ! Store the new state of iceberg (with L>W)
         this%mass=Mnew
         this%mass_of_bits=nMbits
-        this%mass_of_fl_bits=Mnew_fl
+        this%mass_of_fl_bits=nMfl
         this%thickness=Tn
         this%width=min(Wn,Ln)
         this%length=max(Wn,Ln)
@@ -3073,6 +3048,36 @@ contains
     y=temp
   end subroutine swap_variables
 end subroutine rolling
+
+!> Estimate the dimenstions of a representative FL berg that will give roughly the same
+!! freshwater flux as the actual group of FL bergs of all different sizes:
+!! this may not be appropriate for very small FL bergs or dense sea ice cover
+subroutine fl_bits_dimensions(bergs,this,L_fl,W_fl,T_fl)
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  type(iceberg), pointer :: this
+  real :: L_fl !< Footloose berg bits length
+  real :: W_fl !< Footloose berg bits width
+  real :: T_fl !< Footloose berg bits thickness
+  ! Local variables
+  real,parameter :: l_c=pi/(2.*sqrt(2.)), lw_c = 1./(gravity*rho_seawater)
+  real,parameter :: B_c=1.e8/(12.*(1.-0.3**2.)) !youngs=1.e8, poisson=0.3
+  real :: l_w,l_b
+
+  if (bergs%fl_melt_as_bergy_bits) then
+    L_fl=min(this%length,this%width,this%thickness,40.)
+    T_fl=L_fl; W_fl=(this%mass_of_fl_bits/bergs%rho_bergs)/(L_fl*T_fl)
+  else
+    l_w  = (lw_c*B_c*(this%thickness**3.))**0.25  !buoyancy length
+    l_b  = l_c*l_w !length of a freshly calved footloose child berg
+    L_fl = 3.*l_b; W_fl=l_b; T_fl=this%thickness
+    call rolling(bergs,T_fl,W_fl,L_fl)
+    L_fl = bergs%fl_bits_scale_l*L_fl
+    W_fl = bergs%fl_bits_scale_w*W_fl
+    T_fl = bergs%fl_bits_scale_t*T_fl
+  endif
+end subroutine fl_bits_dimensions
+
 
 subroutine create_gridded_icebergs_fields(bergs)
 ! Arguments
@@ -3588,7 +3593,7 @@ subroutine spread_mass_across_ocean_cells(bergs, berg, i, j, x, y, Mberg, Mbits,
   real, intent(in) :: x !< Longitude of berg (degree E)
   real, intent(in) :: y !< Latitude of berg (degree N)
   real, intent(in) :: Mberg !< Mass of berg (kg)
-  real, intent(in) :: Mbits !< Mass of bergy bits (kg)
+  real, intent(in) :: Mbits !< Combined mass of bergy and footloose bits (kg)
   real, intent(in) :: scaling !< Multiplier to scale mass (nondim)
   real, intent(in) :: Area !< Area of berg (m2)
   real, intent(in) :: Tn !< Thickness of berg (m)
@@ -4618,7 +4623,7 @@ subroutine calculate_mass_on_ocean(bergs, with_diagnostics)
 
           !Increasing Mass on ocean
           if ((bergs%add_weight_to_ocean .and. .not. bergs%time_average_weight) .or.(bergs%find_melt_using_spread_mass)) then
-            call spread_mass_across_ocean_cells(bergs, berg, berg%ine, berg%jne, berg%xi, berg%yj, berg%mass,berg%mass_of_bits, berg%mass_scaling, &
+            call spread_mass_across_ocean_cells(bergs, berg, berg%ine, berg%jne, berg%xi, berg%yj, berg%mass,berg%mass_of_bits+berg%mass_of_fl_bits, berg%mass_scaling, &
               berg%length*berg%width, berg%thickness)
           endif
 
@@ -4642,7 +4647,8 @@ subroutine calculate_sum_over_bergs_diagnositcs(bergs, grd, berg, i, j)
   integer, intent(in) :: i !< i-index of cell containing berg
   integer, intent(in) :: j !< j-index of cell containing berg
   ! Local variables
-  real ::  Abits, Lbits, Mbits
+  real ::  Abits, Abits_fl, Lbits, Mbits
+  real :: L_fl,W_fl,T_fl
 
   !Virtual area diagnostic
   if (grd%id_virtual_area>0) then
@@ -4652,7 +4658,13 @@ subroutine calculate_sum_over_bergs_diagnositcs(bergs, grd, berg, i, j)
     else
       Abits=0.0
     endif
-    grd%virtual_area(i,j)=grd%virtual_area(i,j)+(berg%width*berg%length+Abits)*berg%mass_scaling ! m^2
+    if (bergs%fl_style.eq.'fl_bits') then
+      call fl_bits_dimensions(bergs,berg,L_fl,W_fl,T_fl)
+      Abits_fl=(berg%mass_of_fl_bits/bergs%rho_bergs)/T_fl ! Effective bottom area
+    else
+      Abits_fl=0.0
+    endif
+    grd%virtual_area(i,j)=grd%virtual_area(i,j)+(berg%width*berg%length+Abits+Abits_fl)*berg%mass_scaling ! m^2
   endif
 
   !Mass diagnostic (also used in u_iceberg, v_iceberg
@@ -4667,7 +4679,11 @@ subroutine calculate_sum_over_bergs_diagnositcs(bergs, grd, berg, i, j)
 
   !Mass of bergy bits
   if (grd%id_bergy_mass>0 .or. bergs%add_weight_to_ocean)&
-       & grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+berg%mass_of_bits/grd%area(i,j)*berg%mass_scaling ! kg/m2
+    & grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+berg%mass_of_bits/grd%area(i,j)*berg%mass_scaling ! kg/m2
+
+  !Mass of footloose bits
+  if (grd%id_fl_bits_mass>0 .or. bergs%add_weight_to_ocean)&
+    & grd%fl_bits_mass(i,j)=grd%fl_bits_mass(i,j)+berg%mass_of_fl_bits/grd%area(i,j)*berg%mass_scaling ! kg/m2
 end subroutine calculate_sum_over_bergs_diagnositcs
 
 !> The main driver the steps updates icebergs
@@ -4698,7 +4714,7 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
   integer :: iyr, imon, iday, ihr, imin, isec, k
   type(icebergs_gridded), pointer :: grd
   logical :: lerr, sample_traj, write_traj, lbudget, lverbose, check_bond_quality
-  real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass,grdd_spread_mass, grdd_spread_area
+  real :: unused_calving, tmpsum, grdd_berg_mass, grdd_bergy_mass, grdd_fl_bits_mass, grdd_spread_mass, grdd_spread_area
   real :: grdd_u_iceberg, grdd_v_iceberg, grdd_ustar_iceberg, grdd_spread_uvel, grdd_spread_vvel
   integer :: i, j, Iu, ju, iv, Jv, Iu_off, ju_off, iv_off, Jv_off
   real :: mask, max_SST
@@ -4730,6 +4746,9 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
   grd%bergy_src(:,:)=0.
   grd%bergy_melt(:,:)=0.
   grd%bergy_mass(:,:)=0.
+  grd%fl_bits_src(:,:)=0.
+  grd%fl_bits_melt(:,:)=0.
+  grd%fl_bits_mass(:,:)=0.
   grd%spread_mass_old(:,:)=0.
   !grd%spread_mass(:,:)=0.  !Don't zero this out yet, because we can first use this an add it onto the SSH
   grd%spread_area(:,:)=0.
@@ -5033,13 +5052,11 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
   call mpp_clock_begin(bergs%clock_com)
   if (bergs%iceberg_bonds_on)  call  bond_address_update(bergs)
 
-  ! Footloose mechanism part 1: calve the child icebergs
-  if (bergs%fl_r>0.) then
-    call footloose_calving(bergs, time)
-  endif
-
   call send_bergs_to_other_pes(bergs)
   if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'icebergs_run, after send_bergs() ')
+
+  ! Footloose mechanism part 1: calve the child icebergs
+  if (bergs%fl_r>0.) call footloose_calving(bergs, time)
 
   if (bergs%mts) then
     call interp_gridded_fields_to_bergs(bergs)
@@ -5151,6 +5168,12 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
     lerr=send_data(grd%id_bergy_melt, grd%bergy_melt(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_bergy_mass>0) &
     lerr=send_data(grd%id_bergy_mass, grd%bergy_mass(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (grd%id_fl_bits_src>0) &
+    lerr=send_data(grd%id_fl_bits_src, grd%fl_bits_src(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (grd%id_fl_bits_melt>0) &
+    lerr=send_data(grd%id_fl_bits_melt, grd%fl_bits_melt(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
+  if (grd%id_fl_bits_mass>0) &
+    lerr=send_data(grd%id_fl_bits_mass, grd%fl_bits_mass(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_spread_mass>0) &
     lerr=send_data(grd%id_spread_mass, grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
   if (grd%id_spread_area>0) &
@@ -5256,6 +5279,10 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
   bergs%bergy_src=bergs%bergy_src+tmpsum*bergs%dt
   tmpsum=sum( grd%bergy_melt(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
   bergs%bergy_melt=bergs%bergy_melt+tmpsum*bergs%dt
+  tmpsum=sum( grd%fl_bits_src(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
+  bergs%fl_bits_src=bergs%fl_bits_src+tmpsum*bergs%dt
+  tmpsum=sum( grd%fl_bits_melt(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
+  bergs%fl_bits_melt=bergs%fl_bits_melt+tmpsum*bergs%dt
   tmpsum=sum( calving(:,:)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
   bergs%net_calving_returned=bergs%net_calving_returned+tmpsum*bergs%dt
   tmpsum=sum( grd%calving_hflx(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
@@ -5268,6 +5295,7 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
     bergs%floating_mass_end=sum_mass(bergs)
     bergs%icebergs_mass_end=sum_mass(bergs,justbergs=.true.)
     bergs%bergy_mass_end=sum_mass(bergs,justbits=.true.)
+    bergs%fl_bits_mass_end=sum_mass(bergs,justflbits=.true.)
     !bergs%spread_mass_end=sum_mass(bergs) !Not sure what this is
     !bergs%spread_area_end=sum_mass(bergs) !Not sure what this is
     !bergs%u_iceberg_end=sum_mass(bergs) !Not sure what this is
@@ -5290,6 +5318,7 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
     call mpp_sum(bergs%floating_mass_end)
     call mpp_sum(bergs%icebergs_mass_end)
     call mpp_sum(bergs%bergy_mass_end)
+    call mpp_sum(bergs%fl_bits_mass_end)
     call mpp_sum(bergs%spread_mass_end)
     call mpp_sum(bergs%spread_area_end)
     call mpp_sum(bergs%u_iceberg_end)
@@ -5319,10 +5348,14 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
     call mpp_sum(bergs%berg_melt)
     call mpp_sum(bergs%bergy_src)
     call mpp_sum(bergs%bergy_melt)
+    call mpp_sum(bergs%fl_bits_src)
+    call mpp_sum(bergs%fl_bits_melt)
     grdd_berg_mass=sum( grd%mass(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
     call mpp_sum(grdd_berg_mass)
     grdd_bergy_mass=sum( grd%bergy_mass(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
     call mpp_sum(grdd_bergy_mass)
+    grdd_fl_bits_mass=sum( grd%fl_bits_mass(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
+    call mpp_sum(grdd_fl_bits_mass)
     grdd_spread_mass=sum( grd%spread_mass(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
     call mpp_sum(grdd_spread_mass)
     grdd_spread_area=sum( grd%spread_area(grd%isc:grd%iec,grd%jsc:grd%jec)*grd%area(grd%isc:grd%iec,grd%jsc:grd%jec) )
@@ -5334,6 +5367,7 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
       call report_state('floating','kg','',bergs%floating_mass_start,'',bergs%floating_mass_end,'',bergs%nbergs_end)
       call report_state('icebergs','kg','',bergs%icebergs_mass_start,'',bergs%icebergs_mass_end,'')
       call report_state('bits','kg','',bergs%bergy_mass_start,'',bergs%bergy_mass_end,'')
+      call report_state('fl_bits','kg','',bergs%fl_bits_mass_start,'',bergs%fl_bits_mass_end,'')
       call report_state('spread icebergs','kg','',bergs%spread_mass_start,'',bergs%spread_mass_end,'')
       call report_state('spread icebergs','m^2','',bergs%spread_area_start,'',bergs%spread_area_end,'')
       call report_istate('berg #','',bergs%nbergs_start,'',bergs%nbergs_end,'')
@@ -5352,6 +5386,9 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
       call report_budget('bits mass','kg','eros used',bergs%bergy_src, &
                                           'bergs',bergs%bergy_melt, &
                                           'stored mass',bergs%bergy_mass_start,bergs%bergy_mass_end)
+      call report_budget('fl bits mass','kg','fl calving',bergs%fl_bits_src, &
+                                          'fl melt+eros',bergs%fl_bits_melt, &
+                                          'fl mass',bergs%fl_bits_mass_start,bergs%fl_bits_mass_end)
       call report_budget('net mass','kg','recvd',bergs%net_calving_received, &
                                          'rtrnd',bergs%net_calving_returned, &
                                          'net mass',bergs%stored_start+bergs%floating_mass_start, &
@@ -5360,6 +5397,7 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
       call report_consistant('spread mass','kg','gridded',grdd_spread_mass,'bergs',bergs%spread_mass_end)
       call report_consistant('spread area','kg','gridded',grdd_spread_area,'bergs',bergs%spread_area_end)
       call report_consistant('bits mass','kg','gridded',grdd_bergy_mass,'bits',bergs%bergy_mass_end)
+      call report_consistant('fl bits mass','kg','gridded',grdd_fl_bits_mass,'fl bits',bergs%fl_bits_mass_end)
       call report_consistant('wieght','kg','returned',bergs%returned_mass_on_ocean,'floating',bergs%floating_mass_end)
       call report_state('net heat','J','',bergs%stored_heat_start+bergs%floating_heat_start,'',&
            & bergs%stored_heat_end+bergs%floating_heat_end,'')
@@ -5394,6 +5432,7 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
     bergs%floating_mass_start=bergs%floating_mass_end
     bergs%icebergs_mass_start=bergs%icebergs_mass_end
     bergs%bergy_mass_start=bergs%bergy_mass_end
+    bergs%fl_bits_mass_start=bergs%fl_bits_mass_end
     bergs%spread_mass_start=bergs%spread_mass_end
     bergs%spread_area_start=bergs%spread_area_end
     bergs%net_calving_used=0.
@@ -5411,6 +5450,8 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
     bergs%berg_melt=0.
     bergs%bergy_melt=0.
     bergs%bergy_src=0.
+    bergs%fl_bits_melt=0.
+    bergs%fl_bits_src=0.
 
     if (bergs%iceberg_bonds_on) then
       check_bond_quality=.true.
@@ -5830,6 +5871,7 @@ subroutine calve_icebergs(bergs)
           newberg%start_mass=bergs%initial_mass(k)
           newberg%mass_scaling=bergs%mass_scaling(k)
           newberg%mass_of_bits=0.
+          newberg%mass_of_fl_bits=0.
           newberg%halo_berg=0.
           newberg%static_berg=0.
           newberg%heat_density=grd%stored_heat(i,j)/grd%stored_ice(i,j,k) ! This is in J/kg
@@ -5922,8 +5964,7 @@ subroutine calve_fl_icebergs(bergs,pberg,k,l_b,fl_disp_x,fl_disp_y)
     cberg%lat = pberg%lat + fl_disp_y
     lres= find_cell_wide(grd, cberg%lon, cberg%lat, cberg%ine, cberg%jne)
 
-    !If new berg is not on current PE, correct it so that it is. This correction is just a
-    !safety measure to make sure it is not within a grounded cell on the other PE.
+    !If new berg is not on current PE, correct it so that it is.
     if (.not. lres) then
       !The choice of 75% and 25% weighting here is completely arbitrary...
       if (cberg%lon > grd%lon(grd%ied,grd%jed)) then
@@ -5939,6 +5980,7 @@ subroutine calve_fl_icebergs(bergs,pberg,k,l_b,fl_disp_x,fl_disp_y)
       lres= find_cell_wide(grd, cberg%lon, cberg%lat, cberg%ine, cberg%jne)
       if (.not. lres) call error_mesg('KID, calve_fl_icebergs', &
         'corrected new berg position still not on current PE!', FATAL)
+      fl_disp_x=pberg%lon-cberg%lon; fl_disp_y=pberg%lat-cberg%lat
     endif
 
     !if new berg is located within a grounded cell, change its position to the same as the parent berg
@@ -5963,9 +6005,6 @@ subroutine calve_fl_icebergs(bergs,pberg,k,l_b,fl_disp_x,fl_disp_y)
   cberg%mass         = cberg%width * cberg%length * pberg%thickness * bergs%rho_bergs
   cberg%start_lon    = cberg%lon
   cberg%start_lat    = cberg%lat
-  !pberg%lon is saved on cberg%lon_prev in case the displacement of the new FL child berg causes it to ground,
-  !so that cberg%lon can then be corrected back to equal pberg%lon (same process for lat)
-  !Note lon_prev is otherwise only used for updating bond angles for fracture (not applicable to child bergs)
   cberg%lon_prev     = pberg%lon_prev + fl_disp_x
   cberg%lat_prev     = pberg%lat_prev + fl_disp_y
   cberg%lon_old      = pberg%lon_old  + fl_disp_x
@@ -5974,6 +6013,7 @@ subroutine calve_fl_icebergs(bergs,pberg,k,l_b,fl_disp_x,fl_disp_y)
   cberg%start_mass   = cberg%mass
   cberg%mass_scaling = pberg%mass_scaling * k !k is the number of icebergs cberg represents
   cberg%mass_of_bits = 0.0
+  cberg%mass_of_fl_bits = 0.0
   cberg%fl_k         = -1.0
   cberg%start_year   = bergs%current_year
   cberg%id           = generate_id(grd, pberg%ine, pberg%jne)
@@ -6815,7 +6855,7 @@ subroutine verlet_stepping(bergs,berg, axn, ayn, bxn, byn, uveln, vveln, rx, ry)
   ! Note, the mass scaling is equal to 1 (rather than 0.25 as in RK), since
   ! this is only called once in Verlet stepping.
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 1.0*berg%mass_scaling,berg%length*berg%width, berg%thickness)
+    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits+berg%mass_of_fl_bits, 1.0*berg%mass_scaling,berg%length*berg%width, berg%thickness)
 
   ! Calling the acceleration   (note that the velocity is converted to u_star inside the accel script)
   call accel(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, rx, ry, ax1, ay1, axn, ayn, bxn, byn) !axn, ayn, bxn, byn - Added by Alon
@@ -6945,7 +6985,7 @@ subroutine Runge_Kutta_stepping(bergs, berg, axn, ayn, bxn, byn, uveln, vveln, l
   if ((berg%lat>89.) .and. (bergs%grd%grid_is_latlon)) on_tangential_plane=.true.
   i1=i;j1=j
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
+    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits+berg%mass_of_fl_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
 
   ! Loading past accelerations - Alon
   axn=berg%axn; ayn=berg%ayn !Alon
@@ -6983,7 +7023,7 @@ subroutine Runge_Kutta_stepping(bergs, berg, axn, ayn, bxn, byn, uveln, vveln, l
   call adjust_index_and_ground(grd, lon2, lat2, uvel2, vvel2, i, j, xi, yj, bounced, error_flag, berg%id)
   i2=i; j2=j
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
+    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits+berg%mass_of_fl_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
   ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon2,lat2,x2,y2)
   if (.not.error_flag) then
     if (debug .and. .not. is_point_in_cell(bergs%grd, lon2, lat2, i, j)) error_flag=.true.
@@ -7040,7 +7080,7 @@ subroutine Runge_Kutta_stepping(bergs, berg, axn, ayn, bxn, byn, uveln, vveln, l
   call adjust_index_and_ground(grd, lon3, lat3, uvel3, vvel3, i, j, xi, yj, bounced, error_flag, berg%id)
   i3=i; j3=j
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
+    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits+berg%mass_of_fl_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
   ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon3,lat3,x3,y3)
   if (.not.error_flag) then
     if (debug .and. .not. is_point_in_cell(bergs%grd, lon3, lat3, i, j)) error_flag=.true.
@@ -7170,7 +7210,7 @@ subroutine Runge_Kutta_stepping(bergs, berg, axn, ayn, bxn, byn, uveln, vveln, l
   i=i1;j=j1;xi=berg%xi;yj=berg%yj
   call adjust_index_and_ground(grd, lonn, latn, uveln, vveln, i, j, xi, yj, bounced, error_flag, berg%id)
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
+    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits+berg%mass_of_fl_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
 
   if (.not.error_flag) then
     if (.not. is_point_in_cell(bergs%grd, lonn, latn, i, j)) error_flag=.true.
@@ -7746,6 +7786,9 @@ subroutine icebergs_end(bergs)
   deallocate(bergs%grd%bergy_src)
   deallocate(bergs%grd%bergy_melt)
   deallocate(bergs%grd%bergy_mass)
+  deallocate(bergs%grd%fl_bits_src)
+  deallocate(bergs%grd%fl_bits_melt)
+  deallocate(bergs%grd%fl_bits_mass)
   deallocate(bergs%grd%spread_mass)
   deallocate(bergs%grd%spread_mass_old)
   deallocate(bergs%grd%spread_area)

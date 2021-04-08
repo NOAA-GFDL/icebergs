@@ -1032,6 +1032,8 @@ integer, allocatable, dimension(:) :: ine,        &
   call mpp_sum( bergs%icebergs_mass_start )
   bergs%bergy_mass_start=sum_mass(bergs,justbits=.true.)
   call mpp_sum( bergs%bergy_mass_start )
+  bergs%fl_bits_mass_start=sum_mass(bergs,justflbits=.true.)
+  call mpp_sum( bergs%fl_bits_mass_start )
   if (mpp_pe().eq.mpp_root_pe().and.verbose) write(*,'(a)') 'KID, read_restart_bergs: completed'
 
 end subroutine read_restart_bergs

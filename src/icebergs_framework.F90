@@ -155,6 +155,9 @@ type :: icebergs_gridded
   real, dimension(:,:), pointer :: bergy_src=>null() !< Mass flux from berg erosion into bergy bits (kg/s/m^2)
   real, dimension(:,:), pointer :: bergy_melt=>null() !< Melting rate of bergy bits (kg/s/m^2)
   real, dimension(:,:), pointer :: bergy_mass=>null() !< Mass distribution of bergy bits (kg/s/m^2)
+  real, dimension(:,:), pointer :: fl_bits_src=>null() !< Mass flux from berg into footloose bits (kg/s/m^2)
+  real, dimension(:,:), pointer :: fl_bits_melt=>null() !< Melting rate of footloose bits (kg/s/m^2)
+  real, dimension(:,:), pointer :: fl_bits_mass=>null() !< Mass distribution of footloose bits (kg/s/m^2)
   real, dimension(:,:), pointer :: spread_mass=>null() !< Mass of icebergs after spreading (kg/m^2)
   real, dimension(:,:), pointer :: spread_mass_old=>null() !< Mass of icebergs after spreading old (kg/m^2)
   real, dimension(:,:), pointer :: spread_area=>null() !< Area of icebergs after spreading (m^2/m^2)
@@ -191,6 +194,7 @@ type :: icebergs_gridded
   integer :: id_calving_hflx_in=-1, id_stored_heat=-1, id_melt_hflx=-1, id_heat_content=-1
   integer :: id_mass=-1, id_ui=-1, id_vi=-1, id_ua=-1, id_va=-1, id_sst=-1, id_cn=-1, id_hi=-1
   integer :: id_bergy_src=-1, id_bergy_melt=-1, id_bergy_mass=-1, id_berg_melt=-1
+  integer :: id_fl_bits_src=-1, id_fl_bits_melt=-1, id_fl_bits_mass=-1
   integer :: id_rmean_calving=-1, id_rmean_calving_hflx=-1
   integer :: id_spread_mass=-1, id_spread_area=-1
   integer :: id_ssh=-1, id_fax=-1, id_fay=-1
@@ -555,6 +559,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   real :: floating_heat_start=0., floating_heat_end=0.
   real :: icebergs_mass_start=0., icebergs_mass_end=0.
   real :: bergy_mass_start=0., bergy_mass_end=0.
+  real :: fl_bits_mass_start=0., fl_bits_mass_end=0.
   real :: spread_mass_start=0., spread_mass_end=0.
   real :: spread_area_start=0., spread_area_end=0.
   real :: u_iceberg_start=0., u_iceberg_end=0.
@@ -565,6 +570,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   real :: returned_mass_on_ocean=0.
   real :: returned_area_on_ocean=0.
   real :: net_melt=0., berg_melt=0., bergy_src=0., bergy_melt=0.
+  real :: fl_bits_src=0., fl_bits_melt=0.
   integer :: nbergs_calved=0, nbergs_melted=0, nbergs_start=0, nbergs_end=0
   integer :: nspeeding_tickets=0
   integer :: nbonds=0
@@ -601,7 +607,11 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   real :: fl_r=0. !< footloose average number of bergs calved per fl_r_s
   real :: fl_r_s=0. !< seconds over which fl_r footloose bergs calve
   logical :: displace_fl_bergs=.true. !< footloose berg positions are randomly assigned along edges of parent berg
-  character(len=11) :: fl_style='new_bergs' !< Evolve footloose bergs individually as 'new_bergs', or as a group with size 'bergy_bits' or 'fl_bits'
+  character(len=11) :: fl_style='new_bergs' !< Evolve footloose bergs individually as 'new_bergs', or as a group with size 'fl_bits'
+  logical :: fl_melt_as_bergy_bits=.false. !< Melt footloose bits as bergy_bits
+  real :: fl_bits_scale_l=0.8  !< For determining dimensions of FL bits berg; FL_bits length = fl_bits_scale_l*3*l_b
+  real :: fl_bits_scale_w=0.45 !< For determining dimensions of FL bits berg; FL_bits width = fl_bits_scale_l*3*l_b
+  real :: fl_bits_scale_t=0.65 !< For determining dimensions of FL bits berg; FL_bits thickness = fl_bits_scale_l*T
 end type icebergs
 
 !> Read original restarts. Needs to be module global so can be public to icebergs_mod.
@@ -788,6 +798,10 @@ real :: fl_r=0. !< footloose average number of bergs calved per fl_r_s
 real :: fl_r_s=0. !< seconds over which fl_r footloose bergs calve
 logical :: displace_fl_bergs=.true. !< footloose berg positions are randomly assigned along edges of parent berg
 character(len=11) :: fl_style='new_bergs' !< Evolve footloose bergs individually as 'fl_bits', or as a group with size 'bergy_bits' or 'mean_size'
+logical :: fl_melt_as_bergy_bits=.false. !< Melt footloose bits as bergy_bits
+real :: fl_bits_scale_l=0.8 !< For determining dimensions of FL bits berg; FL_bits length = fl_bits_scale_l*3*l_b
+real :: fl_bits_scale_w=0.45 !< For determining dimensions of FL bits berg; FL_bits width = fl_bits_scale_l*3*l_b
+real :: fl_bits_scale_t=0.65 !< For determining dimensions of FL bits berg; FL_bits thickness = fl_bits_scale_l*T
 
 namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,Static_icebergs,  &
          distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef, radial_damping_coef, tangental_damping_coef, only_interactive_forces, &
@@ -804,7 +818,8 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          mts,new_mts,ewsame,monitor_energy,mts_sub_steps,contact_distance,length_for_manually_initialize_bonds,manually_initialize_bonds_from_radii,contact_spring_coef,&
          fracture_criterion, damage_test_1, uniaxial_test, debug_write,cdrag_grounding,h_to_init_grounding,frac_thres_scaling,frac_thres_n,frac_thres_t,save_bond_traj,remove_unused_bergs,&
          force_convergence,explicit_inner_mts,convergence_tolerance,&
-         dem,ignore_tangential_force,poisson,dem_spring_coef,dem_damping_coef,dem_beam_test,constant_interaction_LW,constant_length,constant_width,dem_shear_for_frac_only,use_damage, fl_use_poisson_distribution, fl_r, fl_r_s, displace_fl_bergs,fl_style
+         dem,ignore_tangential_force,poisson,dem_spring_coef,dem_damping_coef,dem_beam_test,constant_interaction_LW,constant_length,constant_width,dem_shear_for_frac_only,use_damage, fl_use_poisson_distribution, fl_r, fl_r_s, displace_fl_bergs,fl_style,&
+         fl_melt_as_bergy_bits,fl_bits_scale_l,fl_bits_scale_w,fl_bits_scale_t
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -921,6 +936,9 @@ real :: dx,dy,dx_dlon,dy_dlat,lat_ref2,lon_ref
   allocate( grd%bergy_src(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_src(:,:)=0.
   allocate( grd%bergy_melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_melt(:,:)=0.
   allocate( grd%bergy_mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_mass(:,:)=0.
+  allocate( grd%fl_bits_src(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%fl_bits_src(:,:)=0.
+  allocate( grd%fl_bits_melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%fl_bits_melt(:,:)=0.
+  allocate( grd%fl_bits_mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%fl_bits_mass(:,:)=0.
   allocate( grd%spread_mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_mass(:,:)=0.
   allocate( grd%spread_mass_old(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_mass_old(:,:)=0.
   allocate( grd%spread_area(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_area(:,:)=0.
@@ -1366,6 +1384,14 @@ endif
   bergs%fl_r_s=fl_r_s
   bergs%displace_fl_bergs=displace_fl_bergs
   bergs%fl_style=fl_style
+  bergs%fl_melt_as_bergy_bits=fl_melt_as_bergy_bits
+  if (fl_style.ne.'new_bergs') then
+    displace_fl_bergs=.false.
+    bergs%fl_melt_as_bergy_bits=.false.
+  endif
+  bergs%fl_bits_scale_l=fl_bits_scale_l
+  bergs%fl_bits_scale_w=fl_bits_scale_w
+  bergs%fl_bits_scale_t=fl_bits_scale_t
 
   if (monitor_energy) then
     if (bergs%constant_interaction_LW) then
@@ -1470,7 +1496,13 @@ endif
   grd%id_bergy_melt=register_diag_field('icebergs', 'bergy_melt', axes, Time, &
      'Melt rate of bergy bits', 'kg/(m^2*s)')
   grd%id_bergy_mass=register_diag_field('icebergs', 'bergy_mass', axes, Time, &
-     'Bergy bit density field', 'kg/(m^2)')
+    'Bergy bit density field', 'kg/(m^2)')
+  grd%id_fl_bits_src=register_diag_field('icebergs', 'fl_bits_src', axes, Time, &
+     'Mass source of footloose bits', 'kg/(m^2*s)')
+  grd%id_fl_bits_melt=register_diag_field('icebergs', 'fl_bits_melt', axes, Time, &
+     'Melt rate of footloose bits', 'kg/(m^2*s)')
+  grd%id_fl_bits_mass=register_diag_field('icebergs', 'fl_bits_mass', axes, Time, &
+    'Footloose bits density field', 'kg/(m^2)')
   grd%id_spread_mass=register_diag_field('icebergs', 'spread_mass', axes, Time, &
      'Iceberg mass after spreading', 'kg/(m^2)')
   grd%id_spread_area=register_diag_field('icebergs', 'spread_area', axes, Time, &
@@ -6971,10 +7003,11 @@ integer :: stderrunit
 end subroutine check_position
 
 !> Add up the mass of bergs and/or bergy bits
-real function sum_mass(bergs, justbits, justbergs)
+real function sum_mass(bergs, justbits, justflbits, justbergs)
 ! Arguments
 type(icebergs), pointer :: bergs !< Container for all types and memory
 logical, intent(in), optional :: justbits !< If present, add up mass of just bergy bits
+logical, intent(in), optional :: justflbits !< If present, add up mass of just footloose bits
 logical, intent(in), optional :: justbergs !< If present, add up mass of just bergs
 ! Local variables
 type(iceberg), pointer :: this
@@ -6987,7 +7020,9 @@ integer :: grdi, grdj
       if (present(justbergs)) then
         sum_mass=sum_mass+this%mass*this%mass_scaling
       elseif (present(justbits)) then
-        sum_mass=sum_mass+(this%mass_of_bits+this%mass_of_fl_bits)*this%mass_scaling
+        sum_mass=sum_mass+this%mass_of_bits*this%mass_scaling
+      elseif (present(justflbits)) then
+        sum_mass=sum_mass+this%mass_of_fl_bits*this%mass_scaling
       else
         sum_mass=sum_mass+(this%mass+this%mass_of_bits+this%mass_of_fl_bits)*this%mass_scaling
       endif
@@ -6998,10 +7033,11 @@ integer :: grdi, grdj
 end function sum_mass
 
 !> Add up the heat content of bergs and/or bergy bits
-real function sum_heat(bergs,justbits,justbergs)
+real function sum_heat(bergs,justbits,justflbits, justbergs)
 ! Arguments
 type(icebergs), pointer :: bergs !< Container for all types and memory
 logical, intent(in), optional :: justbits !< If present, add up heat content of just bergy bits
+logical, intent(in), optional :: justflbits !< If present, add up mass of just footloose bits
 logical, intent(in), optional :: justbergs !< If present, add up heat content of just bergs
 ! Local variables
 type(iceberg), pointer :: this
@@ -7016,7 +7052,9 @@ integer :: grdi, grdj
       if (present(justbergs)) then
         dm=this%mass*this%mass_scaling
       elseif (present(justbits)) then
-        dm=(this%mass_of_bits+this%mass_of_fl_bits)*this%mass_scaling
+        dm=this%mass_of_bits*this%mass_scaling
+      elseif (present(justflbits)) then
+        dm=this%mass_of_fl_bits*this%mass_scaling
       else
         dm=(this%mass+this%mass_of_bits+this%mass_of_fl_bits)*this%mass_scaling
       endif
@@ -7083,6 +7121,9 @@ character(len=*) :: label !< Label to use in messages
   call grd_chksum2(grd, grd%bergy_src, 'bergy_src')
   call grd_chksum2(grd, grd%bergy_melt, 'bergy_melt')
   call grd_chksum2(grd, grd%bergy_mass, 'bergy_mass')
+  call grd_chksum2(grd, grd%fl_bits_src, 'fl_bits_src')
+  call grd_chksum2(grd, grd%fl_bits_melt, 'fl_bits_melt')
+  call grd_chksum2(grd, grd%fl_bits_mass, 'fl_bits_mass')
   call grd_chksum2(grd, grd%spread_mass, 'spread_mass')
   call grd_chksum2(grd, grd%spread_area, 'spread_area')
   call grd_chksum2(grd, grd%u_iceberg, 'u_iceberg')
