@@ -64,13 +64,14 @@ real :: ibvo=0.0
 real :: ibui=0.0
 real :: ibvi=0.0
 real :: gridres=1.e3
-real :: bump_deptht=0
+real :: bump_depth=0
+real :: sst=-2
 integer :: ibhrs=2
 integer :: nmax = 2000000000 !<max number of iteration
 integer :: write_time_inc=1
 namelist /icebergs_driver_nml/ debug, ni, nj, halo, ibhrs, ibdt, ibuo, ibvo, nmax, &
   saverestart,ibui,ibvi,collision_test,chaotic_test,grounding_test,&
-  gridres,write_time_inc,bump_depth
+  gridres,write_time_inc,bump_depth, sst
 ! For loops
 integer :: isc !< Start of i-index for computational domain (used for loops)
 integer :: iec !< End of i-index for computational domain (used for loops)
@@ -104,7 +105,7 @@ real, dimension(:,:), allocatable :: uo,vo !<zonal and meridonal ocean velocitie
 real, dimension(:,:), allocatable :: ui,vi !<zonal and meridonal ice velocities (m/s)
 real, dimension(:,:), allocatable :: tauxa,tauya !< Zonal and meridonal wind stress (Pa)
 real, dimension(:,:), allocatable :: ssh !< Effective sea-surface height (m)
-real, dimension(:,:), allocatable :: sst !< Sea-surface temperature (C or K)
+real, dimension(:,:), allocatable :: sstemp !< Sea-surface temperature (C or K)
 real, dimension(:,:), allocatable :: cn !< Sea-ice concentration (nondim)
 real, dimension(:,:), allocatable :: hi !< Sea-ice thickness (m)
 real, dimension(:,:), allocatable :: calving_hflx !< Calving heat flux (W/m2)
@@ -244,7 +245,7 @@ allocate( vi(isd:ied,jsd:jed) )
 allocate( tauxa(isd:ied,jsd:jed) )
 allocate( tauya(isd:ied,jsd:jed) )
 allocate( ssh(isd:ied,jsd:jed) )
-allocate( sst(isd:ied,jsd:jed) )
+allocate( sstemp(isd:ied,jsd:jed) )
 allocate( cn(isd:ied,jsd:jed) )
 allocate( hi(isd:ied,jsd:jed) )
 allocate( calving_hflx(isd:ied,jsd:jed) )
@@ -257,7 +258,7 @@ vi = ibvi !meridonal ice velocities (m/s)
 tauxa = 0.0 !zonal wind stress (Pa)
 tauya = 0.0 !meridonal wind stress (Pa)
 ssh = 0.0 !eff sea-surf height
-sst = -2.0 !sea surface temperature (C or K; if K, will automatically adjust to C)
+sstemp = sst !sea surface temperature (C or K; if K, will automatically adjust to C)
 cn = 0.0 !sea-ice concentration (nondim)
 hi = 0.0 !sea-ice thickness (m)
 calving_hflx = 0.0 !calving heat flux (W/m2)
@@ -344,12 +345,12 @@ do while ((ns < nmax) .and. (Time < Time_end))
                     uo(isc-1:iec+1,jsc-1:jec+1), vo(isc-1:iec+1,jsc-1:jec+1), &
                     ui(isc-1:iec+1,jsc-1:jec+1), vi(isc-1:iec+1,jsc-1:jec+1), &
                     tauxa(isc:iec,jsc:jec), tauya(isc:iec,jsc:jec), &
-                    ssh(isc-1:iec+1,jsc-1:jec+1), sst(isc:iec,jsc:jec), &
+                    ssh(isc-1:iec+1,jsc-1:jec+1), sstemp(isc:iec,jsc:jec), &
                     calving_hflx(isc:iec,jsc:jec), &
                     cn(isc-1:iec+1,jsc-1:jec+1), hi(isc-1:iec+1,jsc-1:jec+1))
 
   ! full form, with optional vars:
-  ! call icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh, sst, &
+  ! call icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh, sstemp, &
   ! calving_hflx, cn, hi,stagger, stress_stagger, sss, mass_berg, ustar_berg, area_berg)
 
   Time = Time + real_to_time_type(dt)

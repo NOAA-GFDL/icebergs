@@ -19,6 +19,7 @@
   halo=3
   debug=.false.
   gridres=1000.
+  sst=-2
   collision_test=.false. !specific to the current test, must be true here
 /
 
@@ -29,7 +30,7 @@
 
     fl_r=4        !(4) average number of footloose bergs to calve per fl_r_s seconds
     fl_r_s=86400  !(86400) time in s over which to calve, on average, fl_r footloose bergs
-    displace_fl_bergs=.true. !(T) randomly assign FL berg positions to sides of parent berg
+    displace_fl_bergs=.false. !(T) randomly assign FL berg positions to sides of parent berg
     fl_style='fl_bits' !('new_bergs'). Can also group FL bergs into 'fl_bits'
     fl_melt_as_bergy_bits=.false.!true. !(F) If fl_style==fl_bits, melt the fl_bits as bergy bits
 
@@ -64,7 +65,7 @@
     const_gamma=.false. ! (T) 'T' = constant heat transfer coeff, used to calc salt transfer
     use_operator_splitting=.true. ! (T) Use 1st order operator splitting for thermodynamics
     add_weight_to_ocean=.false. ! (T) Add weight of icebergs + bits to ocean
-    passive_mode=.false. ! (F) Add weight of icebergs + bits to ocean
+    passive_mode=.true. ! (F) Add weight of icebergs + bits to ocean
     time_average_weight=.false. ! (F) Time average the weight on the ocean
     speed_limit=0. ! (0.) CFL speed limit for a berg
     tau_calving=0. ! (0.) Time scale (yrs) for smoothing out calving field
@@ -93,7 +94,7 @@
     set_melt_rates_to_zero=.true.!(F)For testing, thermodyn is run, but all melt rates=0
 
     iceberg_bonds_on=.true. ! (F) True=Allow icebergs to have bonds, False=don't allow.
-    interactive_icebergs_on=.true.!.false. ! (F) Turn on/off interactions between icebergs
+    interactive_icebergs_on=.false.!.true.!.false. ! (F) Turn on/off interactions between icebergs
     only_interactive_forces=.false. !(F)Bergs only feel interactive forces, not ocean, wind...
     use_new_predictive_corrective =.true. ! (F) Flag to use Bob's pred-corr berg scheme
     input_freq_distribution=.false. !(F)input dist is: 'T' freq dist or 'F' mass dist

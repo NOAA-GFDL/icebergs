@@ -2906,7 +2906,7 @@ subroutine thermodynamics(bergs)
 
       ! Add melting to the grid and field diagnostics
       if (grd%area(i,j).ne.0.) then
-        melt=(dM-(dMbitsE-dMbitsM))/bergs%dt ! kg/s
+        melt=(dM+dMfl-(dMbitsE-dMbitsM))/bergs%dt ! kg/s
         grd%floating_melt(i,j)=grd%floating_melt(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
         melt=melt*this%heat_density ! kg/s x J/kg = J/s
         grd%calving_hflx(i,j)=grd%calving_hflx(i,j)+melt/grd%area(i,j)*this%mass_scaling ! W/m2
@@ -5381,7 +5381,7 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
                                               'bergs',bergs%net_melt, &
                                               'stored mass',bergs%floating_mass_start,bergs%floating_mass_end)
       call report_budget('berg mass','kg','calving',bergs%net_calving_to_bergs, &
-                                          'melt+eros',bergs%berg_melt, &
+                                          'melt+eros+fl',bergs%berg_melt+bergs%fl_bits_src, &
                                           'berg mass',bergs%icebergs_mass_start,bergs%icebergs_mass_end)
       call report_budget('bits mass','kg','eros used',bergs%bergy_src, &
                                           'bergs',bergs%bergy_melt, &
