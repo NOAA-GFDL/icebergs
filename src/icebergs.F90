@@ -2721,7 +2721,7 @@ subroutine thermodynamics(bergs)
   integer :: grdi, grdj
   real :: SSS !Temporarily here
   ! Footloose bits stuff
-  real :: Lfl, Wfl, Tfl, Mfl, Afl, Mb_fl, dMfl, nMfl, Volfl, Lnfl, Wnfl, Tnfl, nVolfl
+  real :: Lfl, Wfl, Tfl, Mfl, Afl, Me_fl, Mv_fl, Mb_fl, dMfl, nMfl, Volfl, Lnfl, Wnfl, Tnfl, nVolfl
 
   ! For convenience
   grd=>bergs%grd
@@ -2772,6 +2772,12 @@ subroutine thermodynamics(bergs)
           *perday ! convert to m/s
       Me=max( 1./12.*(SST+2.)*Ss*(1+cos(pi*(IC**3))) ,0.) &! Wave erosion
           *perday ! convert to m/s
+
+      !same these values Mv and Me separately for footloose bits,
+      !in case Mv and Me change later due to number of bonds:
+      if (this%mass_of_fl_bits>0.) then
+        Mv_fl=Mv; Me_fl=Me !Note: Mb_fl is calculated below
+      endif
 
         if (bergs%use_mixed_melting .or. bergs%allow_bergs_to_roll) then
           N_bonds=0.
@@ -2850,7 +2856,7 @@ subroutine thermodynamics(bergs)
       endif
 
       ! Footloose bits (FL bits). For now, FL bits do not erode into bergy bits.
-      if (bergs%fl_style.eq.'fl_bits') then
+      if (this%mass_of_fl_bits>0.) then
 
         call fl_bits_dimensions(bergs,this,Lfl,Wfl,Tfl)
         Mfl=this%mass_of_fl_bits
@@ -2864,8 +2870,8 @@ subroutine thermodynamics(bergs)
         else
           Volfl=Lfl*Wfl*Tfl
           Mb_fl=max( 0.58*(dvo**0.8)*(SST+4.0)/(Lfl**0.2), 0.) *perday  ! FL bits basal turbulent melting
-          Lnfl=max(Lfl-(Mv+Me)*bergs%dt,0.) ! (m)
-          Wnfl=max(Wfl-(Mv+Me)*bergs%dt,0.) ! (m)
+          Lnfl=max(Lfl-(Mv_fl+Me_fl)*bergs%dt,0.) ! (m)
+          Wnfl=max(Wfl-(Mv_fl+Me_fl)*bergs%dt,0.) ! (m)
           Tnfl=max(Tfl-  Mb_fl*bergs%dt,0.) ! (m)
           ! Update volume and mass of footloose berg
           nVolfl=Tnfl*Wnfl*Lnfl ! (m^3)
@@ -2952,7 +2958,7 @@ subroutine thermodynamics(bergs)
         !before reseting
         if (bergs%find_melt_using_spread_mass) then
           if (Mnew>0.) then !If the berg still exists
-            call spread_mass_across_ocean_cells(bergs,this, i, j, this%xi, this%yj,Mnew , nMbits+nMfl, this%mass_scaling, Ln*Wn,  Tn)
+            call spread_mass_across_ocean_cells(bergs,this, i, j, this%xi, this%yj,Mnew , nMbits+nMfl, this%mass_scaling, Ln*Wn+nMfl/(Tn*bergs%rho_bergs),  Tn)
           endif
         endif
         !Reset all the values
@@ -3062,7 +3068,7 @@ subroutine fl_bits_dimensions(bergs,this,L_fl,W_fl,T_fl)
   ! Local variables
   real,parameter :: l_c=pi/(2.*sqrt(2.)), lw_c = 1./(gravity*rho_seawater)
   real,parameter :: B_c=1.e8/(12.*(1.-0.3**2.)) !youngs=1.e8, poisson=0.3
-  real :: l_w,l_b
+  real :: l_w,l_b,L_fl_temp
 
   if (bergs%fl_melt_as_bergy_bits) then
     L_fl=min(this%length,this%width,this%thickness,40.)
@@ -3072,8 +3078,9 @@ subroutine fl_bits_dimensions(bergs,this,L_fl,W_fl,T_fl)
     l_b  = l_c*l_w !length of a freshly calved footloose child berg
     L_fl = 3.*l_b; W_fl=l_b; T_fl=this%thickness
     call rolling(bergs,T_fl,W_fl,L_fl)
-    L_fl = bergs%fl_bits_scale_l*L_fl
-    W_fl = bergs%fl_bits_scale_w*W_fl
+    L_fl_temp = bergs%fl_bits_scale_l*max(L_fl,W_fl)
+    W_fl = bergs%fl_bits_scale_w*min(W_fl,L_fl)
+    L_fl = max(L_fl_temp,W_fl); W_fl=min(L_fl_temp,W_fl)
     T_fl = bergs%fl_bits_scale_t*T_fl
   endif
 end subroutine fl_bits_dimensions
@@ -4624,7 +4631,7 @@ subroutine calculate_mass_on_ocean(bergs, with_diagnostics)
           !Increasing Mass on ocean
           if ((bergs%add_weight_to_ocean .and. .not. bergs%time_average_weight) .or.(bergs%find_melt_using_spread_mass)) then
             call spread_mass_across_ocean_cells(bergs, berg, berg%ine, berg%jne, berg%xi, berg%yj, berg%mass,berg%mass_of_bits+berg%mass_of_fl_bits, berg%mass_scaling, &
-              berg%length*berg%width, berg%thickness)
+              berg%length*berg%width+berg%mass_of_fl_bits/(berg%thickness*bergs%rho_bergs), berg%thickness)
           endif
 
           !Calculated some iceberg diagnositcs
@@ -6855,7 +6862,7 @@ subroutine verlet_stepping(bergs,berg, axn, ayn, bxn, byn, uveln, vveln, rx, ry)
   ! Note, the mass scaling is equal to 1 (rather than 0.25 as in RK), since
   ! this is only called once in Verlet stepping.
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits+berg%mass_of_fl_bits, 1.0*berg%mass_scaling,berg%length*berg%width, berg%thickness)
+    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits+berg%mass_of_fl_bits, 1.0*berg%mass_scaling,berg%length*berg%width+berg%mass_of_fl_bits/(berg%thickness*bergs%rho_bergs), berg%thickness)
 
   ! Calling the acceleration   (note that the velocity is converted to u_star inside the accel script)
   call accel(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, rx, ry, ax1, ay1, axn, ayn, bxn, byn) !axn, ayn, bxn, byn - Added by Alon
@@ -6985,7 +6992,7 @@ subroutine Runge_Kutta_stepping(bergs, berg, axn, ayn, bxn, byn, uveln, vveln, l
   if ((berg%lat>89.) .and. (bergs%grd%grid_is_latlon)) on_tangential_plane=.true.
   i1=i;j1=j
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits+berg%mass_of_fl_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
+    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits+berg%mass_of_fl_bits, 0.25*berg%mass_scaling,berg%length*berg%width+berg%mass_of_fl_bits/(berg%thickness*bergs%rho_bergs), berg%thickness)
 
   ! Loading past accelerations - Alon
   axn=berg%axn; ayn=berg%ayn !Alon
@@ -7023,7 +7030,7 @@ subroutine Runge_Kutta_stepping(bergs, berg, axn, ayn, bxn, byn, uveln, vveln, l
   call adjust_index_and_ground(grd, lon2, lat2, uvel2, vvel2, i, j, xi, yj, bounced, error_flag, berg%id)
   i2=i; j2=j
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits+berg%mass_of_fl_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
+    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits+berg%mass_of_fl_bits, 0.25*berg%mass_scaling,berg%length*berg%width+berg%mass_of_fl_bits/(berg%thickness*bergs%rho_bergs), berg%thickness)
   ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon2,lat2,x2,y2)
   if (.not.error_flag) then
     if (debug .and. .not. is_point_in_cell(bergs%grd, lon2, lat2, i, j)) error_flag=.true.
@@ -7080,7 +7087,7 @@ subroutine Runge_Kutta_stepping(bergs, berg, axn, ayn, bxn, byn, uveln, vveln, l
   call adjust_index_and_ground(grd, lon3, lat3, uvel3, vvel3, i, j, xi, yj, bounced, error_flag, berg%id)
   i3=i; j3=j
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits+berg%mass_of_fl_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
+    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits+berg%mass_of_fl_bits, 0.25*berg%mass_scaling,berg%length*berg%width+berg%mass_of_fl_bits/(berg%thickness*bergs%rho_bergs), berg%thickness)
   ! if (bounced.and.on_tangential_plane) call rotpos_to_tang(lon3,lat3,x3,y3)
   if (.not.error_flag) then
     if (debug .and. .not. is_point_in_cell(bergs%grd, lon3, lat3, i, j)) error_flag=.true.
@@ -7210,7 +7217,7 @@ subroutine Runge_Kutta_stepping(bergs, berg, axn, ayn, bxn, byn, uveln, vveln, l
   i=i1;j=j1;xi=berg%xi;yj=berg%yj
   call adjust_index_and_ground(grd, lonn, latn, uveln, vveln, i, j, xi, yj, bounced, error_flag, berg%id)
   if (bergs%add_weight_to_ocean .and. bergs%time_average_weight) &
-    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits+berg%mass_of_fl_bits, 0.25*berg%mass_scaling,berg%length*berg%width, berg%thickness)
+    call spread_mass_across_ocean_cells(bergs, berg, i, j, xi, yj, berg%mass, berg%mass_of_bits+berg%mass_of_fl_bits, 0.25*berg%mass_scaling,berg%length*berg%width+berg%mass_of_fl_bits/(berg%thickness*bergs%rho_bergs), berg%thickness)
 
   if (.not.error_flag) then
     if (.not. is_point_in_cell(bergs%grd, lonn, latn, i, j)) error_flag=.true.
