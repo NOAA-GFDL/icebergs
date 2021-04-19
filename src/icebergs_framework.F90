@@ -485,8 +485,11 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   real :: Gamma_T_3EQ=0.022 !< Non-dimensional heat-transfer coefficient
   real :: melt_cutoff=-1.0 !< Minimum ocean thickness for melting to occur (is not applied for values < 0)
   logical :: const_gamma=.True. !< If true uses a constant heat transfer coefficient, from which the salt transfer is calculated
-  real, dimension(:), pointer :: initial_mass, distribution, mass_scaling
-  real, dimension(:), pointer :: initial_thickness, initial_width, initial_length
+  real, dimension(:), pointer :: initial_mass_s, distribution_s, mass_scaling_s !< Southern hemisphere
+  real, dimension(:), pointer :: initial_thickness_s, initial_width_s, initial_length_s !< Southern hemisphere
+  logical :: separate_distrib_for_n_hemisphere=.False. ! Flag to use a separate berg distribution/mass/mass scaling/init thickness for N hemisphere
+  real, dimension(:), pointer :: initial_mass_n, distribution_n, mass_scaling_n !< Northern hemisphere
+  real, dimension(:), pointer :: initial_thickness_n, initial_width_n, initial_length_n !< Northern hemisphere
   logical :: restarted=.false. !< Indicate whether we read state from a restart or not
   logical :: use_operator_splitting=.true. !< Use first order operator splitting for thermodynamics
   logical :: add_weight_to_ocean=.true. !< Add weight of bergs to ocean
@@ -574,7 +577,8 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   integer :: nbergs_calved=0, nbergs_melted=0, nbergs_start=0, nbergs_end=0
   integer :: nspeeding_tickets=0
   integer :: nbonds=0
-  integer, dimension(:), pointer :: nbergs_calved_by_class=>null()
+  integer, dimension(:), pointer :: nbergs_calved_by_class_s=>null()
+  integer, dimension(:), pointer :: nbergs_calved_by_class_n=>null()
   ! mts parameters - added by Alex
   logical :: mts=.false. !< Use multiple timestepping scheme (substep size is automatically determined)
   integer :: mts_sub_steps
@@ -609,6 +613,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   logical :: displace_fl_bergs=.true. !< footloose berg positions are randomly assigned along edges of parent berg
   character(len=11) :: fl_style='new_bergs' !< Evolve footloose bergs individually as 'new_bergs', or as a group with size 'fl_bits'
   logical :: fl_melt_as_bergy_bits=.false. !< Melt footloose bits as bergy_bits
+  logical :: fl_bits_erosion_to_bergy_bits=.true. !< Erosion from footloose bits becomes bergy bits
   real :: fl_bits_scale_l=0.8  !< For determining dimensions of FL bits berg; FL_bits length = fl_bits_scale_l*3*l_b
   real :: fl_bits_scale_w=0.45 !< For determining dimensions of FL bits berg; FL_bits width = fl_bits_scale_l*3*l_b
   real :: fl_bits_scale_t=0.65 !< For determining dimensions of FL bits berg; FL_bits thickness = fl_bits_scale_l*T
@@ -775,10 +780,17 @@ real :: contact_distance=0.0 ! For unbonded berg interactions, collision is assu
 logical :: force_convergence=.false. ! Experimental MTS convergence scheme that better preserves momentum during collisions
 logical :: explicit_inner_mts=.false. !If T, inner MTS iterations are treated explicitly
 real :: convergence_tolerance=1.e-8 ! Tolerance for the MTS force_convergence scheme
+! Initial mass, distribution, scaling, thickness at calving. Default is gladstone et al 2001 for Southern hemisphere:
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim) ,
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
 real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
+!Default is Bigg et al 1997 for Northern hemisphere:
+logical :: separate_distrib_for_n_hemisphere=.False. ! Flag to use a separate berg distribution/mass/mass scaling/init thickness for N hemisphere
+real, dimension(nclasses) :: initial_mass_n=(/4.58e8, 3.61e9, 1.22e10, 2.91e10, 5.09e10, 7.34e10, 1.15e11, 1.65e11, 2.94e11, 5.59e11/) !for N hemisphere
+real, dimension(nclasses) :: distribution_n=(/0.14, 0.15, 0.20, 0.15, 0.08, 0.07, 0.05, 0.05, 0.05, 0.05/) ! for N hemisphere
+real, dimension(nclasses) :: mass_scaling_n=(/200, 50, 25, 13, 8, 5, 2, 1, 1, 1/) ! for N hemisphere
+real, dimension(nclasses) :: initial_thickness_n=(/80, 159.5, 240, 320, 360, 360, 360, 360, 360/) ! for N hemisphere
 integer(kind=8) :: debug_iceberg_with_id = -1 ! If positive, monitors a berg with this id
 ! DEM-mode parameters
 !logical :: dem=.false. !if T, run in DEM-mode with angular terms, variable stiffness, etc
@@ -799,8 +811,9 @@ real :: fl_r_s=0. !< seconds over which fl_r footloose bergs calve
 logical :: displace_fl_bergs=.true. !< footloose berg positions are randomly assigned along edges of parent berg
 character(len=11) :: fl_style='new_bergs' !< Evolve footloose bergs individually as 'fl_bits', or as a group with size 'bergy_bits' or 'mean_size'
 logical :: fl_melt_as_bergy_bits=.false. !< Melt footloose bits as bergy_bits
+logical :: fl_bits_erosion_to_bergy_bits=.true. !< Erosion from footloose bits becomes bergy bits
 real :: fl_bits_scale_l=0.8 !< For determining dimensions of FL bits berg; FL_bits length = fl_bits_scale_l*3*l_b
-real :: fl_bits_scale_w=0.45 !< For determining dimensions of FL bits berg; FL_bits width = fl_bits_scale_l*3*l_b
+real :: fl_bits_scale_w=0.45 !< For determining dimensions of FL bits berg; FL_bits width = fl_bits_scale_l*l_b
 real :: fl_bits_scale_t=0.65 !< For determining dimensions of FL bits berg; FL_bits thickness = fl_bits_scale_l*T
 
 namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,Static_icebergs,  &
@@ -819,7 +832,8 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          fracture_criterion, damage_test_1, uniaxial_test, debug_write,cdrag_grounding,h_to_init_grounding,frac_thres_scaling,frac_thres_n,frac_thres_t,save_bond_traj,remove_unused_bergs,&
          force_convergence,explicit_inner_mts,convergence_tolerance,&
          dem,ignore_tangential_force,poisson,dem_spring_coef,dem_damping_coef,dem_beam_test,constant_interaction_LW,constant_length,constant_width,dem_shear_for_frac_only,use_damage, fl_use_poisson_distribution, fl_r, fl_r_s, displace_fl_bergs,fl_style,&
-         fl_melt_as_bergy_bits,fl_bits_scale_l,fl_bits_scale_w,fl_bits_scale_t
+         fl_melt_as_bergy_bits,fl_bits_erosion_to_bergy_bits,fl_bits_scale_l,fl_bits_scale_w,fl_bits_scale_t,&
+         separate_distrib_for_n_hemisphere, initial_mass_n, distribution_n, mass_scaling_n, initial_thickness_n
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -827,7 +841,7 @@ type(icebergs_gridded), pointer :: grd
 real :: lon_mod, big_number
 logical :: lerr
 integer :: stdlogunit, stderrunit
-real :: Total_mass  !Added by Alon
+real :: Total_mass_s, Total_mass_n
 real :: mts_fast_dt=0.0 !Added by Alex
 real :: maxlon_c,minlon_c !Added by Alex, for mts verlet periodicity
 integer :: k,maxk
@@ -970,7 +984,8 @@ real :: dx,dy,dx_dlon,dy_dlat,lat_ref2,lon_ref
   allocate( grd%hi(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%hi(:,:)=0.
   allocate( grd%tmp(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%tmp(:,:)=0.
   allocate( grd%tmpc(grd%isc:grd%iec, grd%jsc:grd%jec) ); grd%tmpc(:,:)=0.
-  allocate( bergs%nbergs_calved_by_class(nclasses) ); bergs%nbergs_calved_by_class(:)=0
+  allocate( bergs%nbergs_calved_by_class_s(nclasses) ); bergs%nbergs_calved_by_class_s(:)=0
+  allocate( bergs%nbergs_calved_by_class_n(nclasses) ); bergs%nbergs_calved_by_class_n(:)=0
   allocate( grd%parity_x(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_x(:,:)=1.
   allocate( grd%parity_y(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_y(:,:)=1.
   allocate( grd%iceberg_counter_grd(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%iceberg_counter_grd(:,:)=0
@@ -1163,14 +1178,24 @@ real :: dx,dy,dx_dlon,dy_dlat,lat_ref2,lon_ref
   enddo; enddo
 
 
+  ! If a separate calving distribution for the northern hemisphere is not used, the following northern
+  ! hemisphere parameters inherit the values of their respective southern hemisphere parameters
+  if (.not. bergs%separate_distrib_for_n_hemisphere) then
+    initial_mass_n=initial_mass; distribution_n=distribution
+    mass_scaling_n=mass_scaling; initial_thickness_n=initial_thickness
+  endif
+
+
 !Added by Alon  - If a freq distribution is input, we have to convert the freq distribution to a mass flux distribution)
 if (input_freq_distribution) then
-     Total_mass=0.
+     Total_mass_s=0.; Total_mass_n=0.
      do j=1,nclasses
-          Total_mass=Total_mass+(distribution(j)*initial_mass(j))
+          Total_mass_s=Total_mass_s+(distribution(j)*initial_mass(j))
+          Total_mass_n=Total_mass_n+(distribution_n(j)*initial_mass_n(j))
      enddo
      do j=1,nclasses
-           distribution(j)=(distribution(j)*initial_mass(j))/Total_mass
+           distribution(j)=(distribution(j)*initial_mass(j))/Total_mass_s
+           distribution_n(j)=(distribution_n(j)*initial_mass_n(j))/Total_mass_n
      enddo
 endif
 
@@ -1301,6 +1326,7 @@ endif
   bergs%radial_damping_coef=radial_damping_coef
   bergs%tangental_damping_coef=tangental_damping_coef
   bergs%LoW_ratio=LoW_ratio
+  bergs%separate_distrib_for_n_hemisphere=separate_distrib_for_n_hemisphere
   bergs%use_operator_splitting=use_operator_splitting
   bergs%bergy_bit_erosion_fraction=bergy_bit_erosion_fraction
   bergs%sicn_shift=sicn_shift
@@ -1385,6 +1411,7 @@ endif
   bergs%displace_fl_bergs=displace_fl_bergs
   bergs%fl_style=fl_style
   bergs%fl_melt_as_bergy_bits=fl_melt_as_bergy_bits
+  bergs%fl_bits_erosion_to_bergy_bits=fl_bits_erosion_to_bergy_bits
   if (fl_style.ne.'new_bergs') then
     displace_fl_bergs=.false.
     bergs%fl_melt_as_bergy_bits=.false.
@@ -1448,14 +1475,24 @@ endif
       endif
     endif
   endif
-  allocate( bergs%initial_mass(nclasses) ); bergs%initial_mass(:)=initial_mass(:)
-  allocate( bergs%distribution(nclasses) ); bergs%distribution(:)=distribution(:)
-  allocate( bergs%mass_scaling(nclasses) ); bergs%mass_scaling(:)=mass_scaling(:)
-  allocate( bergs%initial_thickness(nclasses) ); bergs%initial_thickness(:)=initial_thickness(:)
-  allocate( bergs%initial_width(nclasses) )
-  allocate( bergs%initial_length(nclasses) )
-  bergs%initial_width(:)=sqrt(initial_mass(:)/(LoW_ratio*rho_bergs*initial_thickness(:)))
-  bergs%initial_length(:)=LoW_ratio*bergs%initial_width(:)
+  allocate( bergs%initial_mass_s(nclasses) ); bergs%initial_mass_s(:)=initial_mass(:)
+  allocate( bergs%distribution_s(nclasses) ); bergs%distribution_s(:)=distribution(:)
+  allocate( bergs%mass_scaling_s(nclasses) ); bergs%mass_scaling_s(:)=mass_scaling(:)
+  allocate( bergs%initial_thickness_s(nclasses) ); bergs%initial_thickness_s(:)=initial_thickness(:)
+  allocate( bergs%initial_width_s(nclasses) )
+  allocate( bergs%initial_length_s(nclasses) )
+  bergs%initial_width_s(:)=sqrt(initial_mass(:)/(LoW_ratio*rho_bergs*initial_thickness(:)))
+  bergs%initial_length_s(:)=LoW_ratio*bergs%initial_width_s(:)
+
+  allocate( bergs%initial_mass_n(nclasses) ); bergs%initial_mass_n(:)=initial_mass_n(:)
+  allocate( bergs%distribution_n(nclasses) ); bergs%distribution_n(:)=distribution_n(:)
+  allocate( bergs%mass_scaling_n(nclasses) ); bergs%mass_scaling_n(:)=mass_scaling_n(:)
+  allocate( bergs%initial_thickness_n(nclasses) ); bergs%initial_thickness_n(:)=initial_thickness_n(:)
+  allocate( bergs%initial_width_n(nclasses) )
+  allocate( bergs%initial_length_n(nclasses) )
+  bergs%initial_width_n(:)=sqrt(initial_mass_n(:)/(LoW_ratio*rho_bergs*initial_thickness_n(:)))
+  bergs%initial_length_n(:)=LoW_ratio*bergs%initial_width_n(:)
+
   bergs%writeandstop=.false.
   grd%coastal_drift = coastal_drift
   grd%tidal_drift = tidal_drift

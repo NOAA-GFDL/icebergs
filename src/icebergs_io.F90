@@ -1110,17 +1110,17 @@ logical :: lres
       localberg%lat=grd%latc(i,j)
       localberg%lon_old=localberg%lon
       localberg%lat_old=localberg%lat
-      localberg%mass=bergs%initial_mass(1)
-      localberg%thickness=bergs%initial_thickness(1)
-      localberg%width=bergs%initial_width(1)
-      localberg%length=bergs%initial_length(1)
+      localberg%mass=bergs%initial_mass_s(1)
+      localberg%thickness=bergs%initial_thickness_s(1)
+      localberg%width=bergs%initial_width_s(1)
+      localberg%length=bergs%initial_length_s(1)
       localberg%fl_k=0.
       localberg%start_lon=localberg%lon
       localberg%start_lat=localberg%lat
       localberg%start_year=iyr
       localberg%start_day=float(iday)+(float(ihr)+float(imin)/60.)/24.
       localberg%start_mass=localberg%mass
-      localberg%mass_scaling=bergs%mass_scaling(1)
+      localberg%mass_scaling=bergs%mass_scaling_s(1)
       localberg%mass_of_bits=0.
       localberg%mass_of_fl_bits=0.
       localberg%halo_berg=0.
@@ -1599,7 +1599,11 @@ type(randomNumberStream) :: rns
              rns=initializeRandomNumberStream(i+10000*j)
              call getRandomNumbers(rns,randnum(1,:))
              do k=1, nclasses
-                grd%stored_ice(i,j,k)=randnum(1,k) * grd%msk(i,j) * bergs%initial_mass(k) * bergs%mass_scaling(k)
+               if (grd%lon(i,j)<0.) then
+                 grd%stored_ice(i,j,k)=randnum(1,k) * grd%msk(i,j) * bergs%initial_mass_s(k) * bergs%mass_scaling_s(k)
+               else
+                 grd%stored_ice(i,j,k)=randnum(1,k) * grd%msk(i,j) * bergs%initial_mass_n(k) * bergs%mass_scaling_n(k)
+               endif
              end do
           end do
        end do
@@ -1609,8 +1613,13 @@ type(randomNumberStream) :: rns
           rns = initializeRandomNumberStream(i)
           call getRandomNumbers(rns,randnum)
           do k=1, nclasses
+            where (grd%lon(i,grd%jsc:grd%jec)<0.)
              grd%stored_ice(i,grd%jsc:grd%jec,k) = randnum(:,k) * grd%msk(i,grd%jsc:grd%jec) * &
-                  & bergs%initial_mass(k) * bergs%mass_scaling(k)
+               & bergs%initial_mass_s(k) * bergs%mass_scaling_s(k)
+           elsewhere
+             grd%stored_ice(i,grd%jsc:grd%jec,k) = randnum(:,k) * grd%msk(i,grd%jsc:grd%jec) * &
+               & bergs%initial_mass_n(k) * bergs%mass_scaling_n(k)
+           end where
           end do
        end do
     end if

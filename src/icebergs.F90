@@ -2721,7 +2721,8 @@ subroutine thermodynamics(bergs)
   integer :: grdi, grdj
   real :: SSS !Temporarily here
   ! Footloose bits stuff
-  real :: Lfl, Wfl, Tfl, Mfl, Afl, Me_fl, Mv_fl, Mb_fl, dMfl, nMfl, Volfl, Lnfl, Wnfl, Tnfl, nVolfl
+  real :: Lfl, Wfl, Tfl, Mfl, Afl, Me_fl, Mv_fl, Mb_fl, dMfl, nMfl
+  real :: Volfl, Lnfl, Wnfl, Tnfl, nVolfl, nMfl2, dMe_fl
 
   ! For convenience
   grd=>bergs%grd
@@ -2865,32 +2866,50 @@ subroutine thermodynamics(bergs)
           Afl=(Mfl/bergs%rho_bergs)/Lfl
           Mb_fl=max( 0.58*(dvo**0.8)*(SST+2.0)/(Lfl**0.2), 0.) *perday ! FL bits basal turbulent melting
           Mb_fl=bergs%rho_bergs*Afl*Mb_fl ! in kg/s
-          dMfl=min(Mb_fl*bergs%dt,Mfl) ! bergy bits mass lost to melting (kg)
-          nMfl=Mfl-dMfl ! remove mass lost to bergy bits melt
+          dMfl=min(Mb_fl*bergs%dt,Mfl) ! FL bergy bits mass lost to melting (kg)
+          nMfl=Mfl-dMfl ! remove mass lost to FL bergy bits melt
+          dMe_fl=0.
         else
           Volfl=Lfl*Wfl*Tfl
-          Mb_fl=max( 0.58*(dvo**0.8)*(SST+4.0)/(Lfl**0.2), 0.) *perday  ! FL bits basal turbulent melting
-          Lnfl=max(Lfl-(Mv_fl+Me_fl)*bergs%dt,0.) ! (m)
-          Wnfl=max(Wfl-(Mv_fl+Me_fl)*bergs%dt,0.) ! (m)
-          Tnfl=max(Tfl-  Mb_fl*bergs%dt,0.) ! (m)
-          ! Update volume and mass of footloose berg
-          nVolfl=Tnfl*Wnfl*Lnfl ! (m^3)
-          nMfl=(nVolfl/Volfl)*Mfl ! (kg)
-          dMfl=Mfl-nMfl ! total footloose mass lost
+          !basal turbulent melting
+          Mb_fl=max( 0.58*(dvo**0.8)*(SST+4.0)/(Lfl**0.2), 0.) *perday
+          Tnfl=max(Tfl-  Mb_fl*bergs%dt,0.) ! new FL thickness (m)
+          nVolfl=Tnfl*Wnfl*Lnfl ! new footloose volume (m^
+          if (bergs%use_operator_splitting) then
+            !buoyant convection
+            Lnfl=max(Lfl-Mv_fl*bergs%dt,0.) ! new FL length (m)
+            Wnfl=max(Wfl-Mv_fl*bergs%dt,0.) ! new FL width (m)
+            nVolfl=Tnfl*Wnfl*Lnfl ! new footloose volume (m^3)
+            nMfl2=(nVolfl/Volfl)*Mfl !new FL mass (kg), after buoyant convection
+            !erosion
+            Lnfl=max(Lfl-Me_fl*bergs%dt,0.) ! new FL length (m)
+            Wnfl=max(Wfl-Me_fl*bergs%dt,0.) ! new FL width (m)
+            nVolfl=Tnfl*Wnfl*Lnfl ! new footloose volume (m^3)
+            nMfl=(nVolfl/Volfl)*Mfl !new FL mass (kg), after all melt and erosion
+            dMe_fl=nMfl2-nMfl !FL mass lost to erosion (>0) (kg)
+          else
+            Lnfl=max(Lfl-(Mv_fl+Me_fl)*bergs%dt,0.) ! (m)
+            Wnfl=max(Wfl-(Mv_fl+Me_fl)*bergs%dt,0.) ! (m)
+            nVolfl=Tnfl*Wnfl*Lnfl ! new footloose volume (m^3)
+            nMfl=(nVolfl/Volfl)*Mfl ! new footloose mass (kg)
+            dMe_fl=(Mfl/Volfl)*(Tfl*(Wfl+Lfl))*Me_fl*bergs%dt !approx. FL mass loss to erosion
+          endif
+          dMfl=Mfl-nMfl ! total footloose mass lost to all erosion and melting (>0) (kg)
+          if (.not. bergs%fl_bits_erosion_to_bergy_bits) dMe_fl=0.
         endif
         if (Mnew==0.) then ! if parent berg has completely melted then
-          dMfl= Mfl ! instantly melt all the bergy bits
+          dMfl= Mfl ! instantly melt all the footloose bergy bits
           nMfl=0.
         endif
       else
-        dMfl=0.
+        dMfl=0.; dMe_fl=0.
         nMfl=this%mass_of_fl_bits ! retain previous value incase non-zero
       endif
 
       ! Bergy bits
       if (bergs%bergy_bit_erosion_fraction>0.) then
         Mbits=this%mass_of_bits ! mass of bergy bits (kg)
-        dMbitsE=bergs%bergy_bit_erosion_fraction*dMe ! change in mass of bits (kg)
+        dMbitsE=bergs%bergy_bit_erosion_fraction*(dMe+dMe_fl) ! change in mass of bits (kg)
         nMbits=Mbits+dMbitsE ! add new bergy bits to mass (kg)
         Lbits=min(L,W,T,40.) ! assume bergy bits are smallest dimension or 40 meters
         Abits=(Mbits/bergs%rho_bergs)/Lbits ! Effective bottom area (assuming T=Lbits)
@@ -5337,7 +5356,8 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
     call mpp_sum(bergs%returned_mass_on_ocean)
     call mpp_sum(bergs%nbergs_end)
     call mpp_sum(bergs%nbergs_calved)
-    do k=1,nclasses; call mpp_sum(bergs%nbergs_calved_by_class(k)); enddo
+    do k=1,nclasses; call mpp_sum(bergs%nbergs_calved_by_class_s(k)); enddo
+    do k=1,nclasses; call mpp_sum(bergs%nbergs_calved_by_class_n(k)); enddo
     call mpp_sum(bergs%nbergs_melted)
     call mpp_sum(bergs%nspeeding_tickets)
     call mpp_sum(bergs%net_calving_returned)
@@ -5425,14 +5445,16 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
              & bergs%net_calving_received)
         call report_consistant('bot interface','kg','sent',bergs%net_outgoing_calving,'seen by SIS',bergs%net_calving_returned)
       endif
-      write(*,'("KID: calved by class = ",i4,20(",",i4))') (bergs%nbergs_calved_by_class(k),k=1,nclasses)
+      write(*,'("KID: calved by class S. hemisphere = ",i4,20(",",i4))') (bergs%nbergs_calved_by_class_s(k),k=1,nclasses)
+      write(*,'("KID: calved by class N. hemisphere = ",i4,20(",",i4))') (bergs%nbergs_calved_by_class_n(k),k=1,nclasses)
       if (bergs%nspeeding_tickets>0) write(*,'("KID: speeding tickets issued = ",i4)') bergs%nspeeding_tickets
     endif
     bergs%nbergs_start=bergs%nbergs_end
     bergs%stored_start=bergs%stored_end
     bergs%nbergs_melted=0
     bergs%nbergs_calved=0
-    bergs%nbergs_calved_by_class(:)=0
+    bergs%nbergs_calved_by_class_s(:)=0
+    bergs%nbergs_calved_by_class_n(:)=0
     bergs%nspeeding_tickets=0
     bergs%stored_heat_start=bergs%stored_heat_end
     bergs%floating_heat_start=bergs%floating_heat_end
@@ -5741,7 +5763,7 @@ subroutine accumulate_calving(bergs)
   type(icebergs), pointer :: bergs !< Container for all types and memory
   ! Local variables
   type(icebergs_gridded), pointer :: grd
-  real :: remaining_dist, net_calving_used
+  real :: remaining_dist_s, remaining_dist_n, net_calving_used
   integer :: k, i, j
   logical, save :: first_call=.true.
   integer :: stderrunit
@@ -5774,25 +5796,35 @@ subroutine accumulate_calving(bergs)
         'KID, accumulate_calving: initial stored heat=',bergs%stored_heat_start,' J'
    endif
 
-  remaining_dist=1.
+  remaining_dist_s=1.; remaining_dist_n=1.
   do k=1, nclasses
-    grd%stored_ice(:,:,k)=grd%stored_ice(:,:,k)+bergs%dt*grd%calving(:,:)*bergs%distribution(k)
-    remaining_dist=remaining_dist-bergs%distribution(k)
+    where (grd%lon<0.)
+      grd%stored_ice(:,:,k)=grd%stored_ice(:,:,k)+bergs%dt*grd%calving(:,:)*bergs%distribution_s(k)
+    elsewhere
+      grd%stored_ice(:,:,k)=grd%stored_ice(:,:,k)+bergs%dt*grd%calving(:,:)*bergs%distribution_n(k)
+    end where
+    remaining_dist_s=remaining_dist_s-bergs%distribution_s(k)
+    remaining_dist_n=remaining_dist_n-bergs%distribution_n(k)
   enddo
-  if (remaining_dist.lt.0.) then
-    write(stderrunit,*) 'KID, accumulate_calving: sum(distribution)>1!!!',remaining_dist
+  if (remaining_dist_s.lt.0. .or. remaining_dist_n.lt.0.) then
+    write(stderrunit,*) 'KID, accumulate_calving: sum(distribution)>1!!!',remaining_dist_s, remaining_dist_n
     call error_mesg('KID, accumulate_calving', 'calving is OVER distributed!', WARNING)
   endif
-  net_calving_used=sum( grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec) )*(1.-remaining_dist)
+  where (grd%lon<0.)
+    grd%tmp=remaining_dist_s
+  elsewhere
+    grd%tmp=remaining_dist_n
+  end where
+  net_calving_used=sum( grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec) *(1.-grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec)))
   bergs%net_calving_used=bergs%net_calving_used+net_calving_used*bergs%dt
   ! Remove the calving accounted for by accumulation
-  grd%calving(:,:)=grd%calving(:,:)*remaining_dist
+  grd%calving(:,:)=grd%calving(:,:)*grd%tmp(:,:)
 
   ! Do the same for heat (no separate classes needed)
-  grd%tmp(:,:)=bergs%dt*grd%calving_hflx(:,:)*grd%area(:,:)*(1.-remaining_dist)
+  grd%calving_hflx(:,:)=grd%calving_hflx(:,:)*grd%tmp(:,:)
+  grd%tmp(:,:)=bergs%dt*grd%calving_hflx(:,:)*grd%area(:,:)*(1.-grd%tmp(:,:))
   bergs%net_incoming_calving_heat_used=bergs%net_incoming_calving_heat_used+sum( grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec) )
   grd%stored_heat(:,:)=grd%stored_heat(:,:)+grd%tmp(:,:) ! +=bergs%dt*grd%calving_hflx(:,:)*grd%area(:,:)*(1.-remaining_dist)
-  grd%calving_hflx(:,:)=grd%calving_hflx(:,:)*remaining_dist
 
 end subroutine accumulate_calving
 
@@ -5808,6 +5840,7 @@ subroutine calve_icebergs(bergs)
   logical :: lret
   real :: xi, yj, ddt, calving_to_bergs, calved_to_berg, heat_to_bergs, heat_to_berg
   integer :: stderrunit
+  real, pointer :: initial_mass, mass_scaling, initial_thickness, initial_width, initial_length
 
   ! Get the stderr unit number
   stderrunit = stderr()
@@ -5827,7 +5860,16 @@ subroutine calve_icebergs(bergs)
     do j=grd%jsc, grd%jec
       do i=grd%isc, grd%iec
         ddt=0.; icnt=0
-        do while (grd%stored_ice(i,j,k).ge.bergs%initial_mass(k)*bergs%mass_scaling(k))
+        if (grd%lon(i,j)<0.) then
+          initial_mass=>bergs%initial_mass_s(k); mass_scaling=>bergs%mass_scaling_s(k)
+          initial_thickness=>bergs%initial_thickness_s(k)
+          initial_width=>bergs%initial_width_s(k); initial_length=>bergs%initial_length_s(k)
+        else
+          initial_mass=>bergs%initial_mass_n(k); mass_scaling=>bergs%mass_scaling_n(k)
+          initial_thickness=>bergs%initial_thickness_n(k)
+          initial_width=>bergs%initial_width_n(k); initial_length=>bergs%initial_length_n(k)
+        endif
+        do while (grd%stored_ice(i,j,k).ge.initial_mass*mass_scaling)
           newberg%lon=0.25*((grd%lon(i,j)+grd%lon(i-1,j-1))+(grd%lon(i-1,j)+grd%lon(i,j-1)))
           newberg%lat=0.25*((grd%lat(i,j)+grd%lat(i-1,j-1))+(grd%lat(i-1,j)+grd%lat(i,j-1)))
          !write(stderr(),*) 'KID, calve_icebergs: creating new iceberg at ',newberg%lon,newberg%lat
@@ -5866,17 +5908,17 @@ subroutine calve_icebergs(bergs)
           newberg%bxn=0.
           newberg%byn=0.
           !---
-          newberg%mass=bergs%initial_mass(k)
-          newberg%thickness=bergs%initial_thickness(k)
-          newberg%width=bergs%initial_width(k)
-          newberg%length=bergs%initial_length(k)
+          newberg%mass=initial_mass
+          newberg%thickness=initial_thickness
+          newberg%width=initial_width
+          newberg%length=initial_length
           newberg%start_lon=newberg%lon
           newberg%start_lat=newberg%lat
           newberg%start_year=bergs%current_year
           newberg%id = generate_id(grd, i, j)
           newberg%start_day=bergs%current_yearday+ddt/86400.
-          newberg%start_mass=bergs%initial_mass(k)
-          newberg%mass_scaling=bergs%mass_scaling(k)
+          newberg%start_mass=initial_mass
+          newberg%mass_scaling=mass_scaling
           newberg%mass_of_bits=0.
           newberg%mass_of_fl_bits=0.
           newberg%halo_berg=0.
@@ -5912,7 +5954,7 @@ subroutine calve_icebergs(bergs)
           endif
 
           call add_new_berg_to_list(bergs%list(i,j)%first, newberg)
-          calved_to_berg=bergs%initial_mass(k)*bergs%mass_scaling(k) ! Units of kg
+          calved_to_berg=initial_mass*mass_scaling ! Units of kg
           ! Heat content
           heat_to_berg=calved_to_berg*newberg%heat_density ! Units of J
           grd%stored_heat(i,j)=grd%stored_heat(i,j)-heat_to_berg
@@ -5924,7 +5966,11 @@ subroutine calve_icebergs(bergs)
           ddt=ddt-bergs%dt*2./17. ! Minor offset to start day (negative offsets)
           icnt=icnt+1
           bergs%nbergs_calved=bergs%nbergs_calved+1
-          bergs%nbergs_calved_by_class(k)=bergs%nbergs_calved_by_class(k)+1
+          if (grd%lon(i,j)<0.) then
+            bergs%nbergs_calved_by_class_s(k)=bergs%nbergs_calved_by_class_s(k)+1
+          else
+            bergs%nbergs_calved_by_class_n(k)=bergs%nbergs_calved_by_class_n(k)+1
+          endif
         enddo
         icntmax=max(icntmax,icnt)
       enddo
@@ -7822,11 +7868,16 @@ subroutine icebergs_end(bergs)
   deallocate(bergs%grd%hi)
   deallocate(bergs%grd%domain)
   deallocate(bergs%grd)
-  deallocate(bergs%initial_mass)
-  deallocate(bergs%distribution)
-  deallocate(bergs%initial_thickness)
-  deallocate(bergs%initial_width)
-  deallocate(bergs%initial_length)
+  deallocate(bergs%initial_mass_s)
+  deallocate(bergs%distribution_s)
+  deallocate(bergs%initial_thickness_s)
+  deallocate(bergs%initial_width_s)
+  deallocate(bergs%initial_length_s)
+  deallocate(bergs%initial_mass_n)
+  deallocate(bergs%distribution_n)
+  deallocate(bergs%initial_thickness_n)
+  deallocate(bergs%initial_width_n)
+  deallocate(bergs%initial_length_n)
   call dealloc_buffer(bergs%obuffer_n)
   call dealloc_buffer(bergs%obuffer_s)
   call dealloc_buffer(bergs%obuffer_e)
