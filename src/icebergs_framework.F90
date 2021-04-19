@@ -790,7 +790,7 @@ logical :: separate_distrib_for_n_hemisphere=.False. ! Flag to use a separate be
 real, dimension(nclasses) :: initial_mass_n=(/4.58e8, 3.61e9, 1.22e10, 2.91e10, 5.09e10, 7.34e10, 1.15e11, 1.65e11, 2.94e11, 5.59e11/) !for N hemisphere
 real, dimension(nclasses) :: distribution_n=(/0.14, 0.15, 0.20, 0.15, 0.08, 0.07, 0.05, 0.05, 0.05, 0.05/) ! for N hemisphere
 real, dimension(nclasses) :: mass_scaling_n=(/200, 50, 25, 13, 8, 5, 2, 1, 1, 1/) ! for N hemisphere
-real, dimension(nclasses) :: initial_thickness_n=(/80, 159.5, 240, 320, 360, 360, 360, 360, 360/) ! for N hemisphere
+real, dimension(nclasses) :: initial_thickness_n=(/80.4, 159.5, 240., 320., 360., 360., 360., 360., 360., 360./) ! for N hemisphere
 integer(kind=8) :: debug_iceberg_with_id = -1 ! If positive, monitors a berg with this id
 ! DEM-mode parameters
 !logical :: dem=.false. !if T, run in DEM-mode with angular terms, variable stiffness, etc

@@ -2874,7 +2874,6 @@ subroutine thermodynamics(bergs)
           !basal turbulent melting
           Mb_fl=max( 0.58*(dvo**0.8)*(SST+4.0)/(Lfl**0.2), 0.) *perday
           Tnfl=max(Tfl-  Mb_fl*bergs%dt,0.) ! new FL thickness (m)
-          nVolfl=Tnfl*Wnfl*Lnfl ! new footloose volume (m^
           if (bergs%use_operator_splitting) then
             !buoyant convection
             Lnfl=max(Lfl-Mv_fl*bergs%dt,0.) ! new FL length (m)
