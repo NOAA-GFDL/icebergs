@@ -2881,8 +2881,8 @@ subroutine thermodynamics(bergs)
             nVolfl=Tnfl*Wnfl*Lnfl ! new footloose volume (m^3)
             nMfl2=(nVolfl/Volfl)*Mfl !new FL mass (kg), after buoyant convection
             !erosion
-            Lnfl=max(Lfl-Me_fl*bergs%dt,0.) ! new FL length (m)
-            Wnfl=max(Wfl-Me_fl*bergs%dt,0.) ! new FL width (m)
+            Lnfl=max(Lnfl-Me_fl*bergs%dt,0.) ! new FL length (m)
+            Wnfl=max(Wnfl-Me_fl*bergs%dt,0.) ! new FL width (m)
             nVolfl=Tnfl*Wnfl*Lnfl ! new footloose volume (m^3)
             nMfl=(nVolfl/Volfl)*Mfl !new FL mass (kg), after all melt and erosion
             dMe_fl=nMfl2-nMfl !FL mass lost to erosion (>0) (kg)
