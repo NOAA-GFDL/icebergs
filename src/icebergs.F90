@@ -2863,6 +2863,7 @@ subroutine thermodynamics(bergs)
         Mfl=this%mass_of_fl_bits
 
         if (bergs%fl_melt_as_bergy_bits) then
+          Lfl=min(L,W,T,40.)
           Afl=(Mfl/bergs%rho_bergs)/Lfl
           Mb_fl=max( 0.58*(dvo**0.8)*(SST+2.0)/(Lfl**0.2), 0.) *perday ! FL bits basal turbulent melting
           Mb_fl=bergs%rho_bergs*Afl*Mb_fl ! in kg/s
@@ -3094,12 +3095,11 @@ subroutine fl_bits_dimensions(bergs,this,L_fl,W_fl,T_fl)
   else
     l_w  = (lw_c*B_c*(this%thickness**3.))**0.25  !buoyancy length
     l_b  = l_c*l_w !length of a freshly calved footloose child berg
-    L_fl = 3.*l_b; W_fl=l_b; T_fl=this%thickness
+    L_fl = bergs%fl_bits_scale_l*3.*l_b; W_fl=bergs%fl_bits_scale_w*l_b
+    T_fl=bergs%fl_bits_scale_t*this%thickness
     call rolling(bergs,T_fl,W_fl,L_fl)
-    L_fl_temp = bergs%fl_bits_scale_l*max(L_fl,W_fl)
-    W_fl = bergs%fl_bits_scale_w*min(W_fl,L_fl)
-    L_fl = max(L_fl_temp,W_fl); W_fl=min(L_fl_temp,W_fl)
-    T_fl = bergs%fl_bits_scale_t*T_fl
+    L_fl_temp = max(L_fl,W_fl)
+    W_fl = min(W_fl,L_fl); L_fl = L_fl_temp
   endif
 end subroutine fl_bits_dimensions
 
