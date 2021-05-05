@@ -2713,10 +2713,14 @@ subroutine footloose_calving(bergs, time)
       if (this%mass_of_fl_bits*this%mass_scaling > bergs%new_berg_from_fl_bits_mass_thres) then
         if (bergs%displace_fl_bergs .and. .not. bergs%fl_use_poisson_distribution) call getRandomNumbers(rns, rn)
         call get_footloose_displacement
-        k=1
+        k=floor(this%mass_of_fl_bits*this%mass_scaling/bergs%new_berg_from_fl_bits_mass_thres)
         call calve_fl_icebergs(bergs,this,k,l_b,fl_disp_x,fl_disp_y,berg_from_bits=.true.)
         bergs%nbergs_calved_fl=bergs%nbergs_calved_fl+1
-        this%mass_of_fl_bits=this%mass_of_fl_bits-bergs%new_berg_from_fl_bits_mass_thres/this%mass_scaling
+        this%mass_of_fl_bits=this%mass_of_fl_bits-k*bergs%new_berg_from_fl_bits_mass_thres/this%mass_scaling
+        if (grd%area(grdi,grdj).ne.0.) then
+          grd%fl_bits_src(grdi,grdj)=grd%fl_bits_src(grdi,grdj)-&
+            k*bergs%new_berg_from_fl_bits_mass_thres/(bergs%dt*grd%area(grdi,grdj))
+        endif
       endif
 
       this=>this%next
@@ -6286,7 +6290,7 @@ subroutine calve_fl_icebergs(bergs,pberg,k,l_b,fl_disp_x,fl_disp_y,berg_from_bit
     call fl_bits_dimensions(bergs,pberg,Lfl,Wfl,Tfl)
     cberg%length = Lfl; cberg%width = Wfl; cberg%thickness = Tfl
     cberg%mass = Tfl * Lfl * Wfl * bergs%rho_bergs
-    cberg%mass_scaling = bergs%new_berg_from_fl_bits_mass_thres/cberg%mass
+    cberg%mass_scaling = k*bergs%new_berg_from_fl_bits_mass_thres/cberg%mass
   else
     cberg%length       = l_b*3.
     cberg%width        = l_b
