@@ -2554,12 +2554,12 @@ subroutine footloose_calving(bergs, time)
   type(iceberg), pointer :: this
   type(icebergs_gridded), pointer :: grd
   type(bond), pointer :: current_bond
-  real, save :: N_max, youngs, poisson, l_c, lw_c, B_c, exp_nlambda
+  real, save :: N_max, youngs, poisson, l_c, lw_c, B_c, exp_nlambda, rn
   type(randomNumberStream),save :: rns ! Random numbers for stochastic tidal parameterization
   logical, save :: Visited=.false.
   integer :: grdi, grdj
   integer, dimension(8) :: seed
-  real :: T, W, L, N_bonds, Ln, rn
+  real :: T, W, L, N_bonds, Ln
   real :: IC, max_k, k, Lr_fl, l_w, l_b, pu
   real :: fl_disp_x, fl_disp_y, interp_loc, dM_fl_bits
 
@@ -2586,7 +2586,7 @@ subroutine footloose_calving(bergs, time)
     exp_nlambda=exp(-bergs%fl_r) !e^(-r*dt)
     seed = constructSeed(mpp_pe(),mpp_pe(),time) !Seed random numbers for Poisson distribution
     rns = initializeRandomNumberStream(seed)
-
+    call getRandomNumbers(rns, rn)
     Visited=.true.
   endif
 
@@ -2678,6 +2678,7 @@ subroutine footloose_calving(bergs, time)
 
           if (bergs%fl_style.eq.'new_bergs') then
             !calve and track footloose bergs
+            if (bergs%displace_fl_bergs .and. .not. bergs%fl_use_poisson_distribution) call getRandomNumbers(rns, rn)
             call get_footloose_displacement
             call calve_fl_icebergs(bergs,this,k,l_b,fl_disp_x,fl_disp_y)
             bergs%nbergs_calved_fl=bergs%nbergs_calved_fl+1
@@ -2710,6 +2711,7 @@ subroutine footloose_calving(bergs, time)
 
       !Optionally, create a new berg from the FL bits if their mass exceeds a threshold
       if (this%mass_of_fl_bits*this%mass_scaling > bergs%new_berg_from_fl_bits_mass_thres) then
+        if (bergs%displace_fl_bergs .and. .not. bergs%fl_use_poisson_distribution) call getRandomNumbers(rns, rn)
         call get_footloose_displacement
         k=1
         call calve_fl_icebergs(bergs,this,k,l_b,fl_disp_x,fl_disp_y,berg_from_bits=.true.)
@@ -6241,22 +6243,22 @@ subroutine calve_fl_icebergs(bergs,pberg,k,l_b,fl_disp_x,fl_disp_y,berg_from_bit
   if (displace) then
     cberg%lon = pberg%lon + fl_disp_x
     cberg%lat = pberg%lat + fl_disp_y
-    lres= find_cell_wide(grd, cberg%lon, cberg%lat, cberg%ine, cberg%jne)
+    lres= find_cell(grd, cberg%lon, cberg%lat, cberg%ine, cberg%jne)
 
-    !If new berg is not on current PE, correct it so that it is.
+    !If new berg is not on current PE (computational domain), correct it so that it is.
     if (.not. lres) then
       !The choice of 75% and 25% weighting here is completely arbitrary...
-      if (cberg%lon > grd%lon(grd%ied,grd%jed)) then
-        cberg%lon = 0.75*grd%lon(grd%ied,grd%jed) + 0.25*pberg%lon
-      elseif (cberg%lon < grd%lon(grd%isd,grd%jsd)) then
-        cberg%lon = 0.75*grd%lon(grd%isd,grd%jsd) + 0.25*pberg%lon
+      if (cberg%lon > grd%lon(grd%iec,grd%jec)) then
+        cberg%lon = 0.75*grd%lon(grd%iec,grd%jec) + 0.25*pberg%lon
+      elseif (cberg%lon < grd%lon(grd%isc-1,grd%jsc-1)) then
+        cberg%lon = 0.75*grd%lon(grd%isc-1,grd%jsc-1) + 0.25*pberg%lon
       endif
-      if (cberg%lat > grd%lat(grd%ied,grd%jed)) then
-        cberg%lat = 0.75*grd%lat(grd%ied,grd%jed) + 0.25*pberg%lat
-      elseif (cberg%lat < grd%lat(grd%isd,grd%jsd)) then
-        cberg%lat = 0.75*grd%lat(grd%isd,grd%jsd) + 0.25*pberg%lat
+      if (cberg%lat > grd%lat(grd%iec,grd%jec)) then
+        cberg%lat = 0.75*grd%lat(grd%iec,grd%jec) + 0.25*pberg%lat
+      elseif (cberg%lat < grd%lat(grd%isc-1,grd%jsc-1)) then
+        cberg%lat = 0.75*grd%lat(grd%isc-1,grd%jsc-1) + 0.25*pberg%lat
       endif
-      lres= find_cell_wide(grd, cberg%lon, cberg%lat, cberg%ine, cberg%jne)
+      lres= find_cell(grd, cberg%lon, cberg%lat, cberg%ine, cberg%jne)
       if (.not. lres) call error_mesg('KID, calve_fl_icebergs', &
         'corrected new berg position still not on current PE!', FATAL)
       fl_disp_x=pberg%lon-cberg%lon; fl_disp_y=pberg%lat-cberg%lat
