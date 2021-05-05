@@ -455,7 +455,8 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   integer :: max_bonds
   !>@{
   !! Handles for clocks
-  integer :: clock, clock_mom, clock_the, clock_int, clock_cal, clock_com, clock_ini, clock_ior, clock_iow, clock_dia
+  integer :: clock, clock_mom, clock_the, clock_int, clock_cal, clock_com1, clock_fl1, clock_com2, clock_fl2
+  integer :: clock_ini, clock_ior, clock_iow, clock_dia
   integer :: clock_trw, clock_trp
   integer :: clock_btrw, clock_btrp
   !>@}
@@ -574,7 +575,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   real :: returned_area_on_ocean=0.
   real :: net_melt=0., berg_melt=0., bergy_src=0., bergy_melt=0.
   real :: fl_bits_src=0., fl_bits_melt=0.
-  integer :: nbergs_calved=0, nbergs_melted=0, nbergs_start=0, nbergs_end=0
+  integer :: nbergs_calved=0, nbergs_calved_fl=0, nbergs_melted=0, nbergs_start=0, nbergs_end=0
   integer :: nspeeding_tickets=0
   integer :: nbonds=0
   integer, dimension(:), pointer :: nbergs_calved_by_class_s=>null()
@@ -606,14 +607,18 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   logical :: constant_interaction_LW=.false. !< Use a constant element length & width during berg interactions
   real :: constant_length=0.!< If constant_interaction_LW, the constant length. If 0, will be set to max initial length
   real :: constant_width=0. !< If constant_interaction_LW, the constant width.  If 0, will be set to max initial width
+  logical :: use_spring_for_land_contact=.false. !< Treat contact with masked (land) cells like contact with a static berg
   ! Footloose calving parameters [England et al (2020) Modeling the breakup of tabular icebergs. Sci. Adv.]
   logical :: fl_use_poisson_distribution=.true. !< fl_r is (T) mean of Poisson distribution to determine k, or (F) k=fl_r
+  logical :: fl_use_perimeter=.false. !< scale number of footloose bergs to calve by perimeter of the parent berg
   real :: fl_r=0. !< footloose average number of bergs calved per fl_r_s
   real :: fl_r_s=0. !< seconds over which fl_r footloose bergs calve
   logical :: displace_fl_bergs=.true. !< footloose berg positions are randomly assigned along edges of parent berg
   character(len=11) :: fl_style='new_bergs' !< Evolve footloose bergs individually as 'new_bergs', or as a group with size 'fl_bits'
   logical :: fl_melt_as_bergy_bits=.false. !< Melt footloose bits as bergy_bits
   logical :: fl_bits_erosion_to_bergy_bits=.true. !< Erosion from footloose bits becomes bergy bits
+  real :: fl_k_scale_by_perimeter=0 !< If greater than 0, scales FL k by (berg perimeter (m))/(this scaling (m))
+  real :: new_berg_from_fl_bits_mass_thres=huge(0.) ! Create a new berg from FL bits when mass_of_fl_bits exceeds this value
   real :: fl_bits_scale_l=0.8  !< For determining dimensions of FL bits berg; FL_bits length = fl_bits_scale_l*3*l_b
   real :: fl_bits_scale_w=0.45 !< For determining dimensions of FL bits berg; FL_bits width = fl_bits_scale_l*3*l_b
   real :: fl_bits_scale_t=0.65 !< For determining dimensions of FL bits berg; FL_bits thickness = fl_bits_scale_l*T
@@ -804,36 +809,48 @@ integer :: dem_beam_test=0 !1=Simply supported beam,2=cantilever beam,3=angular 
 logical :: constant_interaction_LW=.false. !< Always use the initial, globally constant, element length & width during berg interactions
 real :: constant_length=0. !< If constant_interaction_LW, the constant length used. If zero in the nml, will be set to max initial L
 real :: constant_width=0. !< If constant_interaction_LW, the constant width used. If zero in the nml, will be set to max initial W
+logical :: use_spring_for_land_contact=.false. !< Treat contact with masked (land) cells like contact with a static berg
 ! Footloose calving parameters [England et al (2020) Modeling the breakup of tabular icebergs. Sci. Adv.]
 logical :: fl_use_poisson_distribution=.true. !< fl_r is (T) mean of Poisson distribution to determine k, or (F) k=fl_r
+logical :: fl_use_perimeter=.false. !< scale number of footloose bergs to calve by perimeter of the parent berg
 real :: fl_r=0. !< footloose average number of bergs calved per fl_r_s
 real :: fl_r_s=0. !< seconds over which fl_r footloose bergs calve
 logical :: displace_fl_bergs=.true. !< footloose berg positions are randomly assigned along edges of parent berg
 character(len=11) :: fl_style='new_bergs' !< Evolve footloose bergs individually as 'fl_bits', or as a group with size 'bergy_bits' or 'mean_size'
 logical :: fl_melt_as_bergy_bits=.false. !< Melt footloose bits as bergy_bits
 logical :: fl_bits_erosion_to_bergy_bits=.true. !< Erosion from footloose bits becomes bergy bits
+real :: fl_k_scale_by_perimeter=0 !< If greater than 0, scales FL k by (berg perimeter (m))/(this scaling (m))
+real :: new_berg_from_fl_bits_mass_thres=huge(0.) ! Create a new berg from FL bits when mass_of_fl_bits exceeds this value
 real :: fl_bits_scale_l=0.8 !< For determining dimensions of FL bits berg; FL_bits length = fl_bits_scale_l*3*l_b
 real :: fl_bits_scale_w=0.45 !< For determining dimensions of FL bits berg; FL_bits width = fl_bits_scale_l*l_b
 real :: fl_bits_scale_t=0.65 !< For determining dimensions of FL bits berg; FL_bits thickness = fl_bits_scale_l*T
 
-namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,Static_icebergs,  &
-         distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef, radial_damping_coef, tangental_damping_coef, only_interactive_forces, &
-         rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, iceberg_bonds_on, manually_initialize_bonds, ignore_missing_restart_bergs, &
-         parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, halo_debugging, hexagonal_icebergs, &
-         time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_icebergs_on, scale_damping_by_pmag,&
-         critical_interaction_damping_on, tang_crit_int_damp_on, require_restart, &
-         old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj, &
-         allow_bergs_to_roll,set_melt_rates_to_zero,lat_ref,initial_orientation,rotate_icebergs_for_mass_spreading,grid_is_latlon,Lx,use_f_plane,use_old_spreading, &
-         grid_is_regular,override_iceberg_velocities,u_override,v_override,add_iceberg_thickness_to_SSH,Iceberg_melt_without_decay,melt_icebergs_as_ice_shelf, &
-         Use_three_equation_model,find_melt_using_spread_mass,use_mixed_layer_salinity_for_thermo,utide_icebergs,ustar_icebergs_bg,cdrag_icebergs, pass_fields_to_ocean_model, &
-         const_gamma, Gamma_T_3EQ, ignore_traj, debug_iceberg_with_id,use_updated_rolling_scheme, tip_parameter, read_old_restarts, tau_calving, read_ocean_depth_from_file, melt_cutoff,&
-         apply_thickness_cutoff_to_gridded_melt, apply_thickness_cutoff_to_bergs_melt, use_mixed_melting, internal_bergs_for_drag, coastal_drift, tidal_drift,&
-         mts,new_mts,ewsame,monitor_energy,mts_sub_steps,contact_distance,length_for_manually_initialize_bonds,manually_initialize_bonds_from_radii,contact_spring_coef,&
-         fracture_criterion, damage_test_1, uniaxial_test, debug_write,cdrag_grounding,h_to_init_grounding,frac_thres_scaling,frac_thres_n,frac_thres_t,save_bond_traj,remove_unused_bergs,&
-         force_convergence,explicit_inner_mts,convergence_tolerance,&
-         dem,ignore_tangential_force,poisson,dem_spring_coef,dem_damping_coef,dem_beam_test,constant_interaction_LW,constant_length,constant_width,dem_shear_for_frac_only,use_damage, fl_use_poisson_distribution, fl_r, fl_r_s, displace_fl_bergs,fl_style,&
-         fl_melt_as_bergy_bits,fl_bits_erosion_to_bergy_bits,fl_bits_scale_l,fl_bits_scale_w,fl_bits_scale_t,&
-         separate_distrib_for_n_hemisphere, initial_mass_n, distribution_n, mass_scaling_n, initial_thickness_n
+namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,&
+         Static_icebergs,distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef, &
+         radial_damping_coef, tangental_damping_coef, only_interactive_forces, rho_bergs, LoW_ratio, debug, really_debug, &
+         use_operator_splitting, bergy_bit_erosion_fraction, iceberg_bonds_on, manually_initialize_bonds, &
+         ignore_missing_restart_bergs,  parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, &
+         ignore_ij_restart, use_new_predictive_corrective, halo_debugging, hexagonal_icebergs, time_average_weight, &
+         generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_icebergs_on,&
+         scale_damping_by_pmag, critical_interaction_damping_on, tang_crit_int_damp_on, require_restart,&
+         old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,&
+         grounding_fraction, input_freq_distribution, force_all_pes_traj,allow_bergs_to_roll,set_melt_rates_to_zero,lat_ref,&
+         initial_orientation,rotate_icebergs_for_mass_spreading,grid_is_latlon,Lx,use_f_plane,use_old_spreading,&
+         grid_is_regular,override_iceberg_velocities,u_override,v_override,add_iceberg_thickness_to_SSH,&
+         Iceberg_melt_without_decay,melt_icebergs_as_ice_shelf, Use_three_equation_model,find_melt_using_spread_mass,&
+         use_mixed_layer_salinity_for_thermo,utide_icebergs,ustar_icebergs_bg,cdrag_icebergs, pass_fields_to_ocean_model, &
+         const_gamma, Gamma_T_3EQ, ignore_traj, debug_iceberg_with_id,use_updated_rolling_scheme, tip_parameter, &
+         read_old_restarts, tau_calving, read_ocean_depth_from_file, melt_cutoff,apply_thickness_cutoff_to_gridded_melt, &
+         apply_thickness_cutoff_to_bergs_melt, use_mixed_melting, internal_bergs_for_drag, coastal_drift, tidal_drift,&
+         mts,new_mts,ewsame,monitor_energy,mts_sub_steps,contact_distance,length_for_manually_initialize_bonds,&
+         manually_initialize_bonds_from_radii,contact_spring_coef,fracture_criterion, damage_test_1, uniaxial_test, &
+         debug_write,cdrag_grounding,h_to_init_grounding,frac_thres_scaling,frac_thres_n,frac_thres_t,save_bond_traj,&
+         remove_unused_bergs,force_convergence,explicit_inner_mts,convergence_tolerance,dem,ignore_tangential_force,poisson,&
+         dem_spring_coef,dem_damping_coef,dem_beam_test,constant_interaction_LW,constant_length,constant_width,&
+         dem_shear_for_frac_only,use_damage,fl_use_poisson_distribution, fl_use_perimeter, fl_r, fl_r_s,displace_fl_bergs,&
+         fl_style,fl_melt_as_bergy_bits,fl_bits_erosion_to_bergy_bits,fl_k_scale_by_perimeter,use_spring_for_land_contact,&
+         new_berg_from_fl_bits_mass_thres,fl_bits_scale_l,fl_bits_scale_w,fl_bits_scale_t,separate_distrib_for_n_hemisphere,&
+         initial_mass_n, distribution_n, mass_scaling_n, initial_thickness_n
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -882,7 +899,10 @@ real :: dx,dy,dx_dlon,dy_dlat,lat_ref2,lon_ref
   bergs%clock_the=mpp_clock_id( 'Icebergs-thermodyn', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
   bergs%clock_int=mpp_clock_id( 'Icebergs-interface', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
   bergs%clock_cal=mpp_clock_id( 'Icebergs-calving', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-  bergs%clock_com=mpp_clock_id( 'Icebergs-communication', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+  bergs%clock_com1=mpp_clock_id( 'Icebergs-communication1', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+  bergs%clock_fl1=mpp_clock_id( 'Icebergs-footloose1', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+  bergs%clock_com2=mpp_clock_id( 'Icebergs-communication2', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+  bergs%clock_fl2=mpp_clock_id( 'Icebergs-footloose2', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
   bergs%clock_ini=mpp_clock_id( 'Icebergs-initialization', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
   bergs%clock_ior=mpp_clock_id( 'Icebergs-I/O read', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
   bergs%clock_iow=mpp_clock_id( 'Icebergs-I/O write', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
@@ -1383,6 +1403,7 @@ endif
   bergs%add_weight_to_ocean=add_weight_to_ocean
   bergs%use_old_spreading=use_old_spreading
   bergs%debug_iceberg_with_id=debug_iceberg_with_id
+  bergs%use_spring_for_land_contact=use_spring_for_land_contact
   bergs%mts=mts
   bergs%mts_fast_dt = mts_fast_dt
   bergs%mts_sub_steps = mts_sub_steps
@@ -1406,6 +1427,8 @@ endif
   bergs%dem_shear_for_frac_only=dem_shear_for_frac_only
   ! Footloose calving parameters
   bergs%fl_use_poisson_distribution=fl_use_poisson_distribution
+  bergs%fl_use_perimeter=fl_use_perimeter
+  bergs%new_berg_from_fl_bits_mass_thres=new_berg_from_fl_bits_mass_thres
   bergs%fl_r=fl_r
   bergs%fl_r_s=fl_r_s
   bergs%displace_fl_bergs=displace_fl_bergs
@@ -1416,6 +1439,7 @@ endif
     displace_fl_bergs=.false.
     bergs%fl_melt_as_bergy_bits=.false.
   endif
+  bergs%fl_k_scale_by_perimeter=fl_k_scale_by_perimeter
   bergs%fl_bits_scale_l=fl_bits_scale_l
   bergs%fl_bits_scale_w=fl_bits_scale_w
   bergs%fl_bits_scale_t=fl_bits_scale_t
@@ -2426,8 +2450,11 @@ recursive subroutine mts_pack_contact_bergs(bergs, berg, dir, pfix, nbergs_to_se
     if (bergs%hexagonal_icebergs) then
       rdenom=1./(2.*sqrt(3.))
     else
-      !rdenom=1./pi
-      rdenom=1./4.
+      if (bergs%iceberg_bonds_on) then
+        rdenom=1./4.
+      else
+        rdenom=1./pi
+      endif
     endif
     if (nc_x.eq.1 .and. nc_y.eq.1) then
       radial_contact=.true. !contact based on berg radii can occur
@@ -2645,8 +2672,11 @@ subroutine mts_remove_unused_bergs(bergs)
     if (bergs%hexagonal_icebergs) then
       rdenom=1./(2.*sqrt(3.))
     else
-      !rdenom=1./pi
-      rdenom=1./4.
+      if (bergs%iceberg_bonds_on) then
+        rdenom=1./4.
+      else
+        rdenom=1./pi
+      endif
     endif
   else
     radial_contact=.false.
@@ -4992,8 +5022,11 @@ subroutine update_and_break_bonds(bergs)
   if (bergs%hexagonal_icebergs) then
     rdenom=1./(2.*sqrt(3.))
   else
-    !rdenom=1./pi
-    rdenom=1./4.
+    if (bergs%iceberg_bonds_on) then
+      rdenom=1./4.
+    else
+      rdenom=1./pi
+    endif
   endif
 
   grd=>bergs%grd
