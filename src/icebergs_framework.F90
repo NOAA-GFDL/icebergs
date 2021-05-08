@@ -19,7 +19,7 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 implicit none ; private
 
 integer :: buffer_width=36 ! This should be a parameter
-integer :: buffer_width_traj=38 ! This should be a parameter
+integer :: buffer_width_traj=39 ! This should be a parameter
 integer :: buffer_width_bond_traj=11 !This should be a parameter
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 
@@ -254,6 +254,7 @@ type :: xyt
   real :: mass_of_fl_bergy_bits !< Mass of bergy bits associated with the footloose bits (kg)
   real :: heat_density !< Heat density of berg (J/kg)
   real :: od !< Ocean depth
+  real :: start_mass
   integer :: year !< Year of this record (years)
   integer(kind=8) :: id = -1 !< Iceberg identifier
   type(xyt), pointer :: next=>null() !< Next link in list
@@ -1262,7 +1263,7 @@ if (.not. iceberg_bonds_on) then
 else
   buffer_width=buffer_width+(max_bonds*5) ! Increase buffer width to include bonds being passed between processors
 endif
-if (save_short_traj) buffer_width_traj=6 ! This is the length of the short buffer used for abrevated traj
+if (save_short_traj) buffer_width_traj=12 ! This is the length of the short buffer used for abrevated traj
 if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files should be ignored
 
 if (use_damage) then
@@ -3832,20 +3833,26 @@ subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj)
   call split_id(traj%id, cnt, ij)
   call push_buffer_value(buff%data(:,n),counter,cnt)
   call push_buffer_value(buff%data(:,n),counter,ij)
+  call push_buffer_value(buff%data(:,n),counter,traj%mass)
+  call push_buffer_value(buff%data(:,n),counter,traj%start_mass)
+  call push_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
+  call push_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bits)
+  call push_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bergy_bits)
+  call push_buffer_value(buff%data(:,n),counter,traj%fl_k)
   if (.not. save_short_traj) then
     call push_buffer_value(buff%data(:,n),counter,traj%uvel)
     call push_buffer_value(buff%data(:,n),counter,traj%vvel)
     call push_buffer_value(buff%data(:,n),counter,traj%uvel_prev)
     call push_buffer_value(buff%data(:,n),counter,traj%vvel_prev)
-    call push_buffer_value(buff%data(:,n),counter,traj%mass)
-    call push_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
-    call push_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bits)
-    call push_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bergy_bits)
+    ! call push_buffer_value(buff%data(:,n),counter,traj%mass)
+    ! call push_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
+    ! call push_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bits)
+    ! call push_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bergy_bits)
     call push_buffer_value(buff%data(:,n),counter,traj%heat_density)
     call push_buffer_value(buff%data(:,n),counter,traj%thickness)
     call push_buffer_value(buff%data(:,n),counter,traj%width)
     call push_buffer_value(buff%data(:,n),counter,traj%length)
-    call push_buffer_value(buff%data(:,n),counter,traj%fl_k)
+    ! call push_buffer_value(buff%data(:,n),counter,traj%fl_k)
     call push_buffer_value(buff%data(:,n),counter,traj%uo)
     call push_buffer_value(buff%data(:,n),counter,traj%vo)
     call push_buffer_value(buff%data(:,n),counter,traj%ui)
@@ -3942,20 +3949,26 @@ subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj)
   call pull_buffer_value(buff%data(:,n),counter,cnt)
   call pull_buffer_value(buff%data(:,n),counter,ij)
   traj%id = id_from_2_ints(cnt, ij)
+  call pull_buffer_value(buff%data(:,n),counter,traj%mass)
+  call pull_buffer_value(buff%data(:,n),counter,traj%start_mass)
+  call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
+  call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bits)
+  call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bergy_bits)
+  call pull_buffer_value(buff%data(:,n),counter,traj%fl_k)
   if (.not. save_short_traj) then
     call pull_buffer_value(buff%data(:,n),counter,traj%uvel)
     call pull_buffer_value(buff%data(:,n),counter,traj%vvel)
     call pull_buffer_value(buff%data(:,n),counter,traj%uvel_prev)
     call pull_buffer_value(buff%data(:,n),counter,traj%vvel_prev)
-    call pull_buffer_value(buff%data(:,n),counter,traj%mass)
-    call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
-    call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bits)
-    call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bergy_bits)
+    ! call pull_buffer_value(buff%data(:,n),counter,traj%mass)
+    ! call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
+    ! call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bits)
+    ! call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bergy_bits)
     call pull_buffer_value(buff%data(:,n),counter,traj%heat_density)
     call pull_buffer_value(buff%data(:,n),counter,traj%thickness)
     call pull_buffer_value(buff%data(:,n),counter,traj%width)
     call pull_buffer_value(buff%data(:,n),counter,traj%length)
-    call pull_buffer_value(buff%data(:,n),counter,traj%fl_k)
+    ! call pull_buffer_value(buff%data(:,n),counter,traj%fl_k)
     call pull_buffer_value(buff%data(:,n),counter,traj%uo)
     call pull_buffer_value(buff%data(:,n),counter,traj%vo)
     call pull_buffer_value(buff%data(:,n),counter,traj%ui)
@@ -5839,20 +5852,26 @@ endif
       posn%year=bergs%current_year
       posn%day=bergs%current_yearday
       posn%id=this%id
+      posn%mass=this%mass
+      posn%start_mass=this%start_mass
+      posn%mass_of_bits=this%mass_of_bits
+      posn%mass_of_fl_bits=this%mass_of_fl_bits
+      posn%mass_of_fl_bergy_bits=this%mass_of_fl_bergy_bits
+      posn%fl_k=this%fl_k
       if (.not. bergs%save_short_traj) then !Not totally sure that this is correct
         posn%uvel=this%uvel
         posn%vvel=this%vvel
         posn%uvel_prev=this%uvel_prev
         posn%vvel_prev=this%vvel_prev
-        posn%mass=this%mass
-        posn%mass_of_bits=this%mass_of_bits
-        posn%mass_of_fl_bits=this%mass_of_fl_bits
-        posn%mass_of_fl_bergy_bits=this%mass_of_fl_bergy_bits
+        ! posn%mass=this%mass
+        ! posn%mass_of_bits=this%mass_of_bits
+        ! posn%mass_of_fl_bits=this%mass_of_fl_bits
+        ! posn%mass_of_fl_bergy_bits=this%mass_of_fl_bergy_bits
         posn%heat_density=this%heat_density
         posn%thickness=this%thickness
         posn%width=this%width
         posn%length=this%length
-        posn%fl_k=this%fl_k
+        ! posn%fl_k=this%fl_k
         posn%uo=this%uo
         posn%vo=this%vo
         posn%ui=this%ui

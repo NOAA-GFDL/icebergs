@@ -2633,6 +2633,10 @@ subroutine footloose_calving(bergs, time)
         else
           !non-bonded berg must be larger than 3*(l_b) for FL calving. Set max_k accordingly.
           max_k = max(ceiling((L-3*l_b)*W/(3*l_b**2.)),0)
+
+          if (L-max_k*3.*(l_b**2.)/W<=0.) then
+            max_k = max_k-1
+          endif
         endif
 
         if (max_k==0) then
@@ -2696,6 +2700,7 @@ subroutine footloose_calving(bergs, time)
           Ln=L-Lr_fl !new length
           if (Ln .le. 0) then
             if (N_bonds==0) then
+              print *,'l_b,L,W,k,max_k',l_b,L,W,k,max_k
               call error_mesg('KID,footloose_calving', &
                 'non-edge element has fully calved from footloose mechanism', FATAL)
             endif
@@ -3322,6 +3327,10 @@ subroutine thermodynamics(bergs)
           this%fl_k=-1.
           this%start_year=bergs%current_year
           this%start_day=bergs%current_yearday
+          if (grd%area(i,j).ne.0.) then
+            grd%fl_bits_src(i,j)=grd%fl_bits_src(i,j)-&
+              this%mass*this%mass_scaling/(bergs%dt*grd%area(i,j))
+          endif
         else
           ! Delete the berg
           if (.not. bergs%debug_write) call move_trajectory(bergs, this)
@@ -5593,7 +5602,7 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
     lerr=send_data(grd%id_fax, tauxa(:,:), Time)
   if (grd%id_fay>0) &
     lerr=send_data(grd%id_fay, tauya(:,:), Time)
-  if (grd%id_melt_by_class<0) &
+  if (grd%id_melt_by_class>0) &
     lerr=send_data(grd%id_melt_by_class, grd%melt_by_class(grd%isc:grd%iec,grd%jsc:grd%jec,:), Time)
   if (grd%id_melt_buoy_fl>0) &
     lerr=send_data(grd%id_melt_buoy_fl, grd%melt_buoy_fl(grd%isc:grd%iec,grd%jsc:grd%jec), Time)
@@ -6434,28 +6443,41 @@ subroutine calve_fl_icebergs(bergs,pberg,k,l_b,fl_disp_x,fl_disp_y,berg_from_bit
 
     !If new berg is not on current PE (computational domain), correct it so that it is.
     if (.not. lres) then
-      !The choice of 75% and 25% weighting here is completely arbitrary...
-      if (cberg%lon > grd%lon(grd%iec,grd%jec)) then
-        cberg%lon = 0.75*grd%lon(grd%iec,grd%jec) + 0.25*pberg%lon
-      elseif (cberg%lon < grd%lon(grd%isc-1,grd%jsc-1)) then
-        cberg%lon = 0.75*grd%lon(grd%isc-1,grd%jsc-1) + 0.25*pberg%lon
-      endif
-      if (cberg%lat > grd%lat(grd%iec,grd%jec)) then
-        cberg%lat = 0.75*grd%lat(grd%iec,grd%jec) + 0.25*pberg%lat
-      elseif (cberg%lat < grd%lat(grd%isc-1,grd%jsc-1)) then
-        cberg%lat = 0.75*grd%lat(grd%isc-1,grd%jsc-1) + 0.25*pberg%lat
-      endif
+      !try the corners
+      cberg%lon = pberg%lon - 0.5*pberg%length
+      cberg%lat = pberg%lat - 0.5*pberg%width
       lres= find_cell(grd, cberg%lon, cberg%lat, cberg%ine, cberg%jne)
-      if (.not. lres) call error_mesg('KID, calve_fl_icebergs', &
-        'corrected new berg position still not on current PE!', FATAL)
-      fl_disp_x=pberg%lon-cberg%lon; fl_disp_y=pberg%lat-cberg%lat
+      if (.not. lres) then
+        cberg%lon = pberg%lon - 0.5*pberg%length
+        cberg%lat = pberg%lat + 0.5*pberg%width
+        lres= find_cell(grd, cberg%lon, cberg%lat, cberg%ine, cberg%jne)
+        if (.not. lres) then
+          cberg%lon = pberg%lon + 0.5*pberg%length
+          cberg%lat = pberg%lat + 0.5*pberg%width
+          lres= find_cell(grd, cberg%lon, cberg%lat, cberg%ine, cberg%jne)
+          if (.not. lres) then
+            cberg%lon = pberg%lon + 0.5*pberg%length
+            cberg%lat = pberg%lat - 0.5*pberg%width
+            lres= find_cell(grd, cberg%lon, cberg%lat, cberg%ine, cberg%jne)
+          endif
+        endif
+      endif
+      if (.not. lres) then
+        !if all else fails, give the child berg the same coords as the parent
+        fl_disp_x=0.0; fl_disp_y=0.0; displace=.false.
+        !call error_mesg('KID, calve_fl_icebergs', &
+        !'corrected new berg position still not on current PE!', FATAL)
+      else
+        fl_disp_x=pberg%lon-cberg%lon; fl_disp_y=pberg%lat-cberg%lat
+      endif
     endif
-
-    !if new berg is located within a grounded cell, change its position to the same as the parent berg
-    if (grd%area(cberg%ine,cberg%jne).eq.0.) then
-      fl_disp_x=0.0; fl_disp_y=0.0; displace=.false.
-    else
-      lres=pos_within_cell(grd, cberg%lon, cberg%lat, cberg%ine, cberg%jne, cberg%xi, cberg%yj)
+    if (displace) then
+      !if new berg is located within a grounded cell, change its position to the same as the parent berg
+      if (grd%area(cberg%ine,cberg%jne).eq.0.) then
+        fl_disp_x=0.0; fl_disp_y=0.0; displace=.false.
+      else
+        lres=pos_within_cell(grd, cberg%lon, cberg%lat, cberg%ine, cberg%jne, cberg%xi, cberg%yj)
+      endif
     endif
   endif
 
@@ -6495,7 +6517,7 @@ subroutine calve_fl_icebergs(bergs,pberg,k,l_b,fl_disp_x,fl_disp_y,berg_from_bit
   cberg%lon_old      = pberg%lon_old  + fl_disp_x
   cberg%lat_old      = pberg%lat_old  + fl_disp_y
   cberg%start_day    = bergs%current_yearday
-  cberg%start_mass   = pberg%mass !used for tracking the different size classes calved from grounded ice, so set to pberg.
+
   cberg%mass_of_fl_bits = 0.0
   cberg%mass_of_fl_bergy_bits = 0.0
   cberg%fl_k         = -1.0
@@ -6504,6 +6526,7 @@ subroutine calve_fl_icebergs(bergs,pberg,k,l_b,fl_disp_x,fl_disp_y,berg_from_bit
   cberg%halo_berg    = 0.0
 
   !always same values as parent:
+  cberg%start_mass   = pberg%start_mass !used for tracking the different size classes calved from grounded ice, so set to pberg.
   cberg%uvel         = pberg%uvel
   cberg%vvel         = pberg%vvel
   cberg%axn          = pberg%axn
