@@ -32,7 +32,6 @@
     fl_r_s=86400  !(86400) time in s over which to calve, on average, fl_r footloose bergs
     displace_fl_bergs=.true. !(T) randomly assign FL berg positions to sides of parent berg
     fl_style='fl_bits' !('new_bergs'). Can also group FL bergs into 'fl_bits'
-    fl_melt_as_bergy_bits=.false.!true. !(F) If fl_style==fl_bits, melt the fl_bits as bergy bits
     new_berg_from_fl_bits_mass_thres=8.e11
     fl_use_poisson_distribution=.true.!.false.
 
@@ -55,7 +54,7 @@
     tangental_damping_coef=2.e-5 !(2.e-5) Coeff for rel berg motion damping (tangential comp.)
     critical_interaction_damping_on=.true. !(T) Sets damping on rel berg vel to crit val
     LoW_ratio=1.5 ! (1.5) Initial ratio L/W for newly calved icebergs
-    bergy_bit_erosion_fraction=0.0 ! (0.) Fraction of erosion melt flux to divert to bergy bits
+    bergy_bit_erosion_fraction=1.0 ! (0.) Fraction of erosion melt flux to divert to bergy bits
     sicn_shift=0. ! (0) Shift of sea-ice concent. in erosion flux modulation (0<sicn_shift<1)
     u_override=0.0 ! (0) Overrides the u velocity of icebergs (for ocean testing)
     v_override=0.0 ! (0) Overrides the v velocity of icebergs (for ocean testing)
@@ -115,6 +114,7 @@
 
     parallel_reprod=.true. !(T) Reproduce across different PE decompositions
     save_short_traj=.false. ! (T) True saves only lon,lat,time,id in iceberg_trajectory.nc
+    save_fl_traj=.true. !(T) True save masses and footloose parameters in iceberg_trajectory.nc
     ignore_traj=.false. ! (F) If true, then model does not track trajectory data at all
 
     ignore_missing_restart_bergs=.False. !(F) 'T'=ignore missing bergs in restart

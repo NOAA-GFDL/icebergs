@@ -19,7 +19,7 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 implicit none ; private
 
 integer :: buffer_width=36 ! This should be a parameter
-integer :: buffer_width_traj=27 ! This should be a parameter
+integer :: buffer_width_traj=33 ! This should be a parameter
 integer :: buffer_width_bond_traj=11 !This should be a parameter
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 
