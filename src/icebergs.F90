@@ -188,7 +188,7 @@ subroutine debugwriteandstop(bergs)
   bergs%debug_write=.true.
   call record_posn(bergs)
   call move_all_trajectories(bergs)
-  call write_trajectory(bergs%trajectories, bergs%save_short_traj)
+  call write_trajectory(bergs%trajectories, bergs%save_short_traj, bergs%save_fl_traj)
   if (save_bond_traj) call write_bond_trajectory(bergs%bond_trajectories)
   call mpp_sync()
   call error_mesg('KID', 'WRITE AND STOP!!!', FATAL)
@@ -3052,55 +3052,39 @@ subroutine thermodynamics(bergs)
 
       ! Footloose bits (FL bits). For now, FL bits do not erode into bergy bits.
       if (this%mass_of_fl_bits>0.) then
-
         call fl_bits_dimensions(bergs,this,Lfl,Wfl,Tfl)
         Mfl=this%mass_of_fl_bits
-
-        if (bergs%fl_melt_as_bergy_bits) then
-          Lfl=min(L,W,T,40.)
-          Afl=(Mfl/bergs%rho_bergs)/Lfl
-          Mb_fl=max( 0.58*(dvo**0.8)*(SST+2.0)/(Lfl**0.2), 0.) *perday ! FL bits basal turbulent melting
-          Mb_fl=bergs%rho_bergs*Afl*Mb_fl ! in kg/s
-          dMfl=min(Mb_fl*bergs%dt,Mfl) ! FL bergy bits mass lost to melting (kg)
-          Mnew_fl=Mfl-dMfl ! remove mass lost to FL bergy bits melt
-          dMe_fl=0.; dMb_fl=dMfl; dMv_fl=0.
-          if (Mnew==0.) then ! if parent berg has completely melted then
-            dMfl=Mfl ! instantly melt all of these footloose bits
-            Mnew_fl=0.
-          endif
+        Volfl=Lfl*Wfl*Tfl
+        !basal turbulent melting
+        Mb_fl=max( 0.58*(dvo**0.8)*(SST+4.0)/(Lfl**0.2), 0.) *perday
+        Tnfl=max(Tfl-  Mb_fl*bergs%dt,0.) ! new FL thickness (m)
+        if (bergs%use_operator_splitting) then
+          !basal turbulent melting, continued
+          nVolfl=Tnfl*Wfl*Lfl ! new volume (m^3)
+          Mnew1_fl=(nVolfl/Volfl)*Mfl ! new mass (kg)
+          dMb_fl=Mfl-Mnew1_fl ! mass lost to basal melting (>0) (kg)
+          !buoyant convection
+          Lnfl=max(Lfl-Mv_fl*bergs%dt,0.) ! new FL length (m)
+          Wnfl=max(Wfl-Mv_fl*bergs%dt,0.) ! new FL width (m)
+          nVolfl=Tnfl*Wnfl*Lnfl ! new footloose volume (m^3)
+          Mnew2_fl=(nVolfl/Volfl)*Mfl !new FL mass (kg), after buoyant convection
+          dMv_fl=Mnew1_fl-Mnew2_fl
+          !erosion
+          Lnfl=max(Lnfl-Me_fl*bergs%dt,0.) ! new FL length (m)
+          Wnfl=max(Wnfl-Me_fl*bergs%dt,0.) ! new FL width (m)
+          nVolfl=Tnfl*Wnfl*Lnfl ! new footloose volume (m^3)
+          Mnew_fl=(nVolfl/Volfl)*Mfl !new FL mass (kg), after all melt and erosion
+          dMe_fl=Mnew2_fl-Mnew_fl !FL mass lost to erosion (>0) (kg)
         else
-          Volfl=Lfl*Wfl*Tfl
-          !basal turbulent melting
-          Mb_fl=max( 0.58*(dvo**0.8)*(SST+4.0)/(Lfl**0.2), 0.) *perday
-          Tnfl=max(Tfl-  Mb_fl*bergs%dt,0.) ! new FL thickness (m)
-          if (bergs%use_operator_splitting) then
-            !basal turbulent melting, continued
-            nVolfl=Tnfl*Wfl*Lfl ! new volume (m^3)
-            Mnew1_fl=(nVolfl/Volfl)*Mfl ! new mass (kg)
-            dMb_fl=Mfl-Mnew1_fl ! mass lost to basal melting (>0) (kg)
-            !buoyant convection
-            Lnfl=max(Lfl-Mv_fl*bergs%dt,0.) ! new FL length (m)
-            Wnfl=max(Wfl-Mv_fl*bergs%dt,0.) ! new FL width (m)
-            nVolfl=Tnfl*Wnfl*Lnfl ! new footloose volume (m^3)
-            Mnew2_fl=(nVolfl/Volfl)*Mfl !new FL mass (kg), after buoyant convection
-            dMv_fl=Mnew1_fl-Mnew2_fl
-            !erosion
-            Lnfl=max(Lnfl-Me_fl*bergs%dt,0.) ! new FL length (m)
-            Wnfl=max(Wnfl-Me_fl*bergs%dt,0.) ! new FL width (m)
-            nVolfl=Tnfl*Wnfl*Lnfl ! new footloose volume (m^3)
-            Mnew_fl=(nVolfl/Volfl)*Mfl !new FL mass (kg), after all melt and erosion
-            dMe_fl=Mnew2_fl-Mnew_fl !FL mass lost to erosion (>0) (kg)
-          else
-            Lnfl=max(Lfl-(Mv_fl+Me_fl)*bergs%dt,0.) ! (m)
-            Wnfl=max(Wfl-(Mv_fl+Me_fl)*bergs%dt,0.) ! (m)
-            nVolfl=Tnfl*Wnfl*Lnfl ! new footloose volume (m^3)
-            Mnew_fl=(nVolfl/Volfl)*Mfl ! new footloose mass (kg)
-            dMb_fl=(Mfl/Volfl)*(Wfl*Lfl)*Mb_fl*bergs%dt       !approx. FL mass loss to basal melting (kg)
-            dMe_fl=(Mfl/Volfl)*(Tfl*(Wfl+Lfl))*Me_fl*bergs%dt !approx. FL mass loss to erosion (kg)
-            dMv_fl=(Mfl/Volfl)*(Tfl*(Wfl+Lfl))*Mv_fl*bergs%dt !approx. FL mass loss to buoyant convection (kg)
-          endif
-          dMfl=Mfl-Mnew_fl ! total footloose mass lost to all erosion and melting (>0) (kg)
+          Lnfl=max(Lfl-(Mv_fl+Me_fl)*bergs%dt,0.) ! (m)
+          Wnfl=max(Wfl-(Mv_fl+Me_fl)*bergs%dt,0.) ! (m)
+          nVolfl=Tnfl*Wnfl*Lnfl ! new footloose volume (m^3)
+          Mnew_fl=(nVolfl/Volfl)*Mfl ! new footloose mass (kg)
+          dMb_fl=(Mfl/Volfl)*(Wfl*Lfl)*Mb_fl*bergs%dt       !approx. FL mass loss to basal melting (kg)
+          dMe_fl=(Mfl/Volfl)*(Tfl*(Wfl+Lfl))*Me_fl*bergs%dt !approx. FL mass loss to erosion (kg)
+          dMv_fl=(Mfl/Volfl)*(Tfl*(Wfl+Lfl))*Mv_fl*bergs%dt !approx. FL mass loss to buoyant convection (kg)
         endif
+        dMfl=Mfl-Mnew_fl ! total footloose mass lost to all erosion and melting (>0) (kg)
       else
         dMfl=0.; dMb_fl=0.; dMv_fl=0.; dMe_fl=0.
         Mnew_fl=this%mass_of_fl_bits ! retain previous value incase non-zero
@@ -3420,16 +3404,11 @@ subroutine fl_bits_dimensions(bergs,this,L_fl,W_fl,T_fl)
   real,parameter :: B_c=1.e8/(12.*(1.-0.3**2.)) !youngs=1.e8, poisson=0.3
   real :: l_w,l_b
 
-  if (bergs%fl_melt_as_bergy_bits) then
-    L_fl=min(this%length,this%width,this%thickness,40.)
-    T_fl=L_fl; W_fl=(this%mass_of_fl_bits/bergs%rho_bergs)/(L_fl*T_fl)
-  else
-    l_w  = (lw_c*B_c*(this%thickness**3.))**0.25  !buoyancy length
-    l_b  = l_c*l_w !length of a freshly calved footloose child berg
-    L_fl = bergs%fl_bits_scale_l*3.*l_b; W_fl=bergs%fl_bits_scale_w*l_b
-    T_fl=bergs%fl_bits_scale_t*this%thickness
-    call rolling(bergs,T_fl,W_fl,L_fl)
-  endif
+  l_w  = (lw_c*B_c*(this%thickness**3.))**0.25  !buoyancy length
+  l_b  = l_c*l_w !length of a freshly calved footloose child berg
+  L_fl = bergs%fl_bits_scale_l*3.*l_b; W_fl=bergs%fl_bits_scale_w*l_b
+  T_fl=bergs%fl_bits_scale_t*this%thickness
+  call rolling(bergs,T_fl,W_fl,L_fl)
 end subroutine fl_bits_dimensions
 
 
@@ -5513,7 +5492,7 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
   if (sample_traj .or. bergs%writeandstop) call record_posn(bergs)
   if (write_traj .or. bergs%writeandstop) then
     call move_all_trajectories(bergs)
-    call write_trajectory(bergs%trajectories, bergs%save_short_traj)
+    call write_trajectory(bergs%trajectories, bergs%save_short_traj, bergs%save_fl_traj)
     if (save_bond_traj) call write_bond_trajectory(bergs%bond_trajectories)
   endif
 
@@ -8267,7 +8246,7 @@ subroutine icebergs_end(bergs)
   call move_all_trajectories(bergs, delete_bergs=.true.)
 
   if (.not. bergs%ignore_traj) then
-    call write_trajectory(bergs%trajectories, bergs%save_short_traj)
+    call write_trajectory(bergs%trajectories, bergs%save_short_traj, bergs%save_fl_traj)
     if (save_bond_traj) call write_bond_trajectory(bergs%bond_trajectories)
   endif
 

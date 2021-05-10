@@ -19,7 +19,7 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 implicit none ; private
 
 integer :: buffer_width=36 ! This should be a parameter
-integer :: buffer_width_traj=39 ! This should be a parameter
+integer :: buffer_width_traj=27 ! This should be a parameter
 integer :: buffer_width_bond_traj=11 !This should be a parameter
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 
@@ -533,6 +533,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   logical :: only_interactive_forces=.False. !< Icebergs only feel interactive forces, and not ocean, wind...
   logical :: halo_debugging=.False. !< Use for debugging halos (remove when its working)
   logical :: save_short_traj=.True. !< True saves only lon,lat,time,id in iceberg_trajectory.nc
+  logical :: save_fl_traj=.False. ! True saves short traj, plus masses and footloose parameters in iceberg_trajectory.nc
   logical :: ignore_traj=.False. !< If true, then model does not write trajectory data at all
   logical :: iceberg_bonds_on=.False. !< True=Allow icebergs to have bonds, False=don't allow.
   logical :: manually_initialize_bonds=.False. !< True= Bonds are initialize manually.
@@ -627,7 +628,6 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   real :: fl_r_s=0. !< seconds over which fl_r footloose bergs calve
   logical :: displace_fl_bergs=.true. !< footloose berg positions are randomly assigned along edges of parent berg
   character(len=11) :: fl_style='new_bergs' !< Evolve footloose bergs individually as 'new_bergs', or as a group with size 'fl_bits'
-  logical :: fl_melt_as_bergy_bits=.false. !< Melt footloose bits as bergy_bits
   logical :: fl_bits_erosion_to_bergy_bits=.true. !< Erosion from footloose bits becomes bergy bits
   real :: fl_k_scale_by_perimeter=0 !< If greater than 0, scales FL k by (berg perimeter (m))/(this scaling (m))
   real :: new_berg_from_fl_bits_mass_thres=huge(0.) ! Create a new berg from FL bits when mass_of_fl_bits exceeds this value
@@ -778,6 +778,7 @@ logical :: Static_icebergs=.False. ! True= icebergs do no move
 logical :: only_interactive_forces=.False. ! Icebergs only feel interactive forces, and not ocean, wind...
 logical :: halo_debugging=.False. ! Use for debugging halos (remove when its working)
 logical :: save_short_traj=.True. ! True saves only lon,lat,time,id in iceberg_trajectory.nc
+logical :: save_fl_traj=.False. ! True saves short traj, plus masses and footloose parameters in iceberg_trajectory.nc
 logical :: ignore_traj=.False. ! If true, then model does not traj trajectory data at all
 !logical :: iceberg_bonds_on=.False. ! True=Allow icebergs to have bonds, False=don't allow.
 logical :: manually_initialize_bonds=.False. ! True= Bonds are initialize manually.
@@ -829,7 +830,6 @@ real :: fl_r=0. !< footloose average number of bergs calved per fl_r_s
 real :: fl_r_s=0. !< seconds over which fl_r footloose bergs calve
 logical :: displace_fl_bergs=.true. !< footloose berg positions are randomly assigned along edges of parent berg
 character(len=11) :: fl_style='new_bergs' !< Evolve footloose bergs individually as 'fl_bits', or as a group with size 'bergy_bits' or 'mean_size'
-logical :: fl_melt_as_bergy_bits=.false. !< Melt footloose bits as bergy_bits
 logical :: fl_bits_erosion_to_bergy_bits=.true. !< Erosion from footloose bits becomes bergy bits
 real :: fl_k_scale_by_perimeter=0 !< If greater than 0, scales FL k by (berg perimeter (m))/(this scaling (m))
 real :: new_berg_from_fl_bits_mass_thres=huge(0.) ! Create a new berg from FL bits when mass_of_fl_bits exceeds this value
@@ -860,7 +860,7 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          remove_unused_bergs,force_convergence,explicit_inner_mts,convergence_tolerance,dem,ignore_tangential_force,poisson,&
          dem_spring_coef,dem_damping_coef,dem_beam_test,constant_interaction_LW,constant_length,constant_width,&
          dem_shear_for_frac_only,use_damage,fl_use_poisson_distribution, fl_use_perimeter, fl_r, fl_r_s,displace_fl_bergs,&
-         fl_style,fl_melt_as_bergy_bits,fl_bits_erosion_to_bergy_bits,fl_k_scale_by_perimeter,use_spring_for_land_contact,&
+         fl_style,fl_bits_erosion_to_bergy_bits,fl_k_scale_by_perimeter,use_spring_for_land_contact, save_fl_traj,&
          new_berg_from_fl_bits_mass_thres,fl_bits_scale_l,fl_bits_scale_w,fl_bits_scale_t,separate_distrib_for_n_hemisphere,&
          initial_mass_n, distribution_n, mass_scaling_n, initial_thickness_n
 
@@ -1263,7 +1263,8 @@ if (.not. iceberg_bonds_on) then
 else
   buffer_width=buffer_width+(max_bonds*5) ! Increase buffer width to include bonds being passed between processors
 endif
-if (save_short_traj) buffer_width_traj=12 ! This is the length of the short buffer used for abrevated traj
+if (save_short_traj) buffer_width_traj=6 ! This is the length of the short buffer used for abrevated traj
+if (save_fl_traj) buffer_width_traj=buffer_width_traj+6
 if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files should be ignored
 
 if (use_damage) then
@@ -1343,6 +1344,7 @@ endif
   bergs%traj_sample_hrs=traj_sample_hrs
   bergs%traj_write_hrs=traj_write_hrs
   bergs%save_short_traj=save_short_traj
+  bergs%save_fl_traj=save_fl_traj
   bergs%ignore_traj=ignore_traj
   bergs%verbose_hrs=verbose_hrs
   bergs%grd%halo=halo
@@ -1452,12 +1454,7 @@ endif
   bergs%fl_r_s=fl_r_s
   bergs%displace_fl_bergs=displace_fl_bergs
   bergs%fl_style=fl_style
-  bergs%fl_melt_as_bergy_bits=fl_melt_as_bergy_bits
   bergs%fl_bits_erosion_to_bergy_bits=fl_bits_erosion_to_bergy_bits
-  if (fl_style.ne.'new_bergs') then
-    displace_fl_bergs=.false.
-    bergs%fl_melt_as_bergy_bits=.false.
-  endif
   bergs%fl_k_scale_by_perimeter=fl_k_scale_by_perimeter
   bergs%fl_bits_scale_l=fl_bits_scale_l
   bergs%fl_bits_scale_w=fl_bits_scale_w
@@ -3812,12 +3809,13 @@ integer :: new_size, old_size
 end subroutine increase_ibuffer
 
 !> Packs a trajectory entry into a buffer
-subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj)
+subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj, save_fl_traj)
   ! Arguments
   type(xyt), pointer :: traj !< Trajectory entry to pack
   type(buffer), pointer :: buff !< Buffer to pack entry into
   integer, intent(in) :: n !< Position in buffer to place entry
   logical, intent(in) :: save_short_traj !< If true, only use a subset of trajectory data
+  logical, intent(in) :: save_fl_traj !< If true, save masses and footloose parameters
   ! Local variables
   integer :: counter ! Position in stack
   integer :: cnt, ij
@@ -3833,26 +3831,23 @@ subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj)
   call split_id(traj%id, cnt, ij)
   call push_buffer_value(buff%data(:,n),counter,cnt)
   call push_buffer_value(buff%data(:,n),counter,ij)
-  call push_buffer_value(buff%data(:,n),counter,traj%mass)
-  call push_buffer_value(buff%data(:,n),counter,traj%start_mass)
-  call push_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
-  call push_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bits)
-  call push_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bergy_bits)
-  call push_buffer_value(buff%data(:,n),counter,traj%fl_k)
+  if (save_fl_traj) then
+    call push_buffer_value(buff%data(:,n),counter,traj%mass)
+    call push_buffer_value(buff%data(:,n),counter,traj%start_mass)
+    call push_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
+    call push_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bits)
+    call push_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bergy_bits)
+    call push_buffer_value(buff%data(:,n),counter,traj%fl_k)
+  endif
   if (.not. save_short_traj) then
     call push_buffer_value(buff%data(:,n),counter,traj%uvel)
     call push_buffer_value(buff%data(:,n),counter,traj%vvel)
     call push_buffer_value(buff%data(:,n),counter,traj%uvel_prev)
     call push_buffer_value(buff%data(:,n),counter,traj%vvel_prev)
-    ! call push_buffer_value(buff%data(:,n),counter,traj%mass)
-    ! call push_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
-    ! call push_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bits)
-    ! call push_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bergy_bits)
     call push_buffer_value(buff%data(:,n),counter,traj%heat_density)
     call push_buffer_value(buff%data(:,n),counter,traj%thickness)
     call push_buffer_value(buff%data(:,n),counter,traj%width)
     call push_buffer_value(buff%data(:,n),counter,traj%length)
-    ! call push_buffer_value(buff%data(:,n),counter,traj%fl_k)
     call push_buffer_value(buff%data(:,n),counter,traj%uo)
     call push_buffer_value(buff%data(:,n),counter,traj%vo)
     call push_buffer_value(buff%data(:,n),counter,traj%ui)
@@ -3911,12 +3906,13 @@ subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj)
 end subroutine pack_traj_into_buffer2
 
 !> Unpacks a trajectory entry from a buffer
-subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj)
+subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj, save_fl_traj)
   ! Arguments
   type(xyt), pointer :: first !< Trajectory list
   type(buffer), pointer :: buff !< Buffer from which to unpack
   integer, intent(in) :: n !< Position in buffer to unpack
   logical, intent(in) :: save_short_traj !< If true, only use a subset of trajectory data
+  logical, intent(in) :: save_fl_traj !< If true, save masses and footloose parameters
   ! Local variables
   type(xyt) :: traj
   integer :: counter ! Position in stack
@@ -3949,26 +3945,23 @@ subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj)
   call pull_buffer_value(buff%data(:,n),counter,cnt)
   call pull_buffer_value(buff%data(:,n),counter,ij)
   traj%id = id_from_2_ints(cnt, ij)
-  call pull_buffer_value(buff%data(:,n),counter,traj%mass)
-  call pull_buffer_value(buff%data(:,n),counter,traj%start_mass)
-  call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
-  call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bits)
-  call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bergy_bits)
-  call pull_buffer_value(buff%data(:,n),counter,traj%fl_k)
+  if (save_fl_traj) then
+    call pull_buffer_value(buff%data(:,n),counter,traj%mass)
+    call pull_buffer_value(buff%data(:,n),counter,traj%start_mass)
+    call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
+    call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bits)
+    call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bergy_bits)
+    call pull_buffer_value(buff%data(:,n),counter,traj%fl_k)
+  endif
   if (.not. save_short_traj) then
     call pull_buffer_value(buff%data(:,n),counter,traj%uvel)
     call pull_buffer_value(buff%data(:,n),counter,traj%vvel)
     call pull_buffer_value(buff%data(:,n),counter,traj%uvel_prev)
     call pull_buffer_value(buff%data(:,n),counter,traj%vvel_prev)
-    ! call pull_buffer_value(buff%data(:,n),counter,traj%mass)
-    ! call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
-    ! call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bits)
-    ! call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bergy_bits)
     call pull_buffer_value(buff%data(:,n),counter,traj%heat_density)
     call pull_buffer_value(buff%data(:,n),counter,traj%thickness)
     call pull_buffer_value(buff%data(:,n),counter,traj%width)
     call pull_buffer_value(buff%data(:,n),counter,traj%length)
-    ! call pull_buffer_value(buff%data(:,n),counter,traj%fl_k)
     call pull_buffer_value(buff%data(:,n),counter,traj%uo)
     call pull_buffer_value(buff%data(:,n),counter,traj%vo)
     call pull_buffer_value(buff%data(:,n),counter,traj%ui)
@@ -5852,26 +5845,23 @@ endif
       posn%year=bergs%current_year
       posn%day=bergs%current_yearday
       posn%id=this%id
-      posn%mass=this%mass
-      posn%start_mass=this%start_mass
-      posn%mass_of_bits=this%mass_of_bits
-      posn%mass_of_fl_bits=this%mass_of_fl_bits
-      posn%mass_of_fl_bergy_bits=this%mass_of_fl_bergy_bits
-      posn%fl_k=this%fl_k
+      if (bergs%save_fl_traj) then
+        posn%mass=this%mass
+        posn%start_mass=this%start_mass
+        posn%mass_of_bits=this%mass_of_bits
+        posn%mass_of_fl_bits=this%mass_of_fl_bits
+        posn%mass_of_fl_bergy_bits=this%mass_of_fl_bergy_bits
+        posn%fl_k=this%fl_k
+      endif
       if (.not. bergs%save_short_traj) then !Not totally sure that this is correct
         posn%uvel=this%uvel
         posn%vvel=this%vvel
         posn%uvel_prev=this%uvel_prev
         posn%vvel_prev=this%vvel_prev
-        ! posn%mass=this%mass
-        ! posn%mass_of_bits=this%mass_of_bits
-        ! posn%mass_of_fl_bits=this%mass_of_fl_bits
-        ! posn%mass_of_fl_bergy_bits=this%mass_of_fl_bergy_bits
         posn%heat_density=this%heat_density
         posn%thickness=this%thickness
         posn%width=this%width
         posn%length=this%length
-        ! posn%fl_k=this%fl_k
         posn%uo=this%uo
         posn%vo=this%vo
         posn%ui=this%ui

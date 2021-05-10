@@ -1683,10 +1683,11 @@ character(len=37) :: filename
 end subroutine read_ocean_depth
 
 !> Write a trajectory-based diagnostics file
-subroutine write_trajectory(trajectory, save_short_traj)
+subroutine write_trajectory(trajectory, save_short_traj, save_fl_traj)
 ! Arguments
 type(xyt), pointer :: trajectory !< An iceberg trajectory
 logical, intent(in) :: save_short_traj !< If true, record less data
+logical, intent(in) :: save_fl_traj !< If true, save masses and footloose data
 ! Local variables
 integer :: iret, ncid, i_dim, i
 integer :: lonid, latid, yearid, dayid, uvelid, vvelid, idcntid, idijid
@@ -1745,7 +1746,7 @@ logical :: io_is_in_append_mode
            call increase_ibuffer(ibuffer_io, ntrajs_rcvd_io,buffer_width_traj)
            call mpp_recv(ibuffer_io%data, ntrajs_rcvd_io*buffer_width_traj,from_pe=from_pe, tag=COMM_TAG_12)
            do i=1, ntrajs_rcvd_io
-              call unpack_traj_from_buffer2(traj4io, ibuffer_io, i, save_short_traj)
+              call unpack_traj_from_buffer2(traj4io, ibuffer_io, i, save_short_traj, save_fl_traj)
            enddo
        endif
      enddo
@@ -1753,7 +1754,7 @@ logical :: io_is_in_append_mode
      ! Pack and send trajectories to the root PE for this I/O tile
      do while (associated(trajectory))
        ntrajs_sent_io = ntrajs_sent_io +1
-       call pack_traj_into_buffer2(trajectory, obuffer_io, ntrajs_sent_io, save_short_traj)
+       call pack_traj_into_buffer2(trajectory, obuffer_io, ntrajs_sent_io, save_short_traj, save_fl_traj)
        this => trajectory ! Need to keep pointer in order to free up the links memory
        trajectory => trajectory%next ! This will eventually result in trajectory => null()
        deallocate(this) ! Delete the link from memory
@@ -1815,12 +1816,14 @@ logical :: io_is_in_append_mode
       dayid = inq_varid(ncid, 'day')
       idcntid = inq_varid(ncid, 'id_cnt')
       idijid = inq_varid(ncid, 'id_ij')
-      mid = inq_varid(ncid, 'mass')
-      smid = inq_varid(ncid, 'start_mass')
-      mbid = inq_varid(ncid, 'mass_of_bits')
-      mflbid = inq_varid(ncid, 'mass_of_fl_bits')
-      mflbbid = inq_varid(ncid, 'mass_of_fl_bergy_bits')
-      flkid = inq_varid(ncid, 'fl_k')
+      if (save_fl_traj) then
+        mid = inq_varid(ncid, 'mass')
+        smid = inq_varid(ncid, 'start_mass')
+        mbid = inq_varid(ncid, 'mass_of_bits')
+        mflbid = inq_varid(ncid, 'mass_of_fl_bits')
+        mflbbid = inq_varid(ncid, 'mass_of_fl_bergy_bits')
+        flkid = inq_varid(ncid, 'fl_k')
+      endif
       if (.not.save_short_traj) then
         uvelid = inq_varid(ncid, 'uvel')
         vvelid = inq_varid(ncid, 'vvel')
@@ -1832,15 +1835,10 @@ logical :: io_is_in_append_mode
         viid = inq_varid(ncid, 'vi')
         uaid = inq_varid(ncid, 'ua')
         vaid = inq_varid(ncid, 'va')
-        ! mid = inq_varid(ncid, 'mass')
-        ! mbid = inq_varid(ncid, 'mass_of_bits')
-        ! mflbid = inq_varid(ncid, 'mass_of_fl_bits')
-        ! mflbbid = inq_varid(ncid, 'mass_of_fl_bergy_bits')
         hdid = inq_varid(ncid, 'heat_density')
         did = inq_varid(ncid, 'thickness')
         wid = inq_varid(ncid, 'width')
         lid = inq_varid(ncid, 'length')
-        ! flkid = inq_varid(ncid, 'fl_k')
         sshxid = inq_varid(ncid, 'ssh_x')
         sshyid = inq_varid(ncid, 'ssh_y')
         sstid = inq_varid(ncid, 'sst')
@@ -1900,12 +1898,14 @@ logical :: io_is_in_append_mode
       dayid = def_var(ncid, 'day', NF_DOUBLE, i_dim)
       idcntid = def_var(ncid, 'id_cnt', NF_INT, i_dim)
       idijid = def_var(ncid, 'id_ij', NF_INT, i_dim)
-      mid = def_var(ncid, 'mass', NF_DOUBLE, i_dim)
-      smid = def_var(ncid, 'start_mass', NF_DOUBLE, i_dim)
-      mbid = def_var(ncid, 'mass_of_bits', NF_DOUBLE, i_dim)
-      mflbid = def_var(ncid, 'mass_of_fl_bits', NF_DOUBLE, i_dim)
-      mflbbid = def_var(ncid, 'mass_of_fl_bergy_bits', NF_DOUBLE, i_dim)
-      flkid = def_var(ncid, 'fl_k', NF_DOUBLE, i_dim)
+      if (save_fl_traj) then
+        mid = def_var(ncid, 'mass', NF_DOUBLE, i_dim)
+        smid = def_var(ncid, 'start_mass', NF_DOUBLE, i_dim)
+        mbid = def_var(ncid, 'mass_of_bits', NF_DOUBLE, i_dim)
+        mflbid = def_var(ncid, 'mass_of_fl_bits', NF_DOUBLE, i_dim)
+        mflbbid = def_var(ncid, 'mass_of_fl_bergy_bits', NF_DOUBLE, i_dim)
+        flkid = def_var(ncid, 'fl_k', NF_DOUBLE, i_dim)
+      endif
       if (.not. save_short_traj) then
         uvelid = def_var(ncid, 'uvel', NF_DOUBLE, i_dim)
         vvelid = def_var(ncid, 'vvel', NF_DOUBLE, i_dim)
@@ -1917,15 +1917,10 @@ logical :: io_is_in_append_mode
         viid = def_var(ncid, 'vi', NF_DOUBLE, i_dim)
         uaid = def_var(ncid, 'ua', NF_DOUBLE, i_dim)
         vaid = def_var(ncid, 'va', NF_DOUBLE, i_dim)
-        ! mid = def_var(ncid, 'mass', NF_DOUBLE, i_dim)
-        ! mbid = def_var(ncid, 'mass_of_bits', NF_DOUBLE, i_dim)
-        ! mflbid = def_var(ncid, 'mass_of_fl_bits', NF_DOUBLE, i_dim)
-        ! mflbbid = def_var(ncid, 'mass_of_fl_bergy_bits', NF_DOUBLE, i_dim)
         hdid = def_var(ncid, 'heat_density', NF_DOUBLE, i_dim)
         did = def_var(ncid, 'thickness', NF_DOUBLE, i_dim)
         wid = def_var(ncid, 'width', NF_DOUBLE, i_dim)
         lid = def_var(ncid, 'length', NF_DOUBLE, i_dim)
-        ! flkid = def_var(ncid, 'fl_k', NF_DOUBLE, i_dim)
         sshxid = def_var(ncid, 'ssh_x', NF_DOUBLE, i_dim)
         sshyid = def_var(ncid, 'ssh_y', NF_DOUBLE, i_dim)
         sstid = def_var(ncid, 'sst', NF_DOUBLE, i_dim)
@@ -1988,18 +1983,20 @@ logical :: io_is_in_append_mode
       call put_att(ncid, idcntid, 'units', 'dimensionless')
       call put_att(ncid, idijid, 'long_name', 'position component of iceberg id')
       call put_att(ncid, idijid, 'units', 'dimensionless')
-      call put_att(ncid, mid, 'long_name', 'mass')
-      call put_att(ncid, mid, 'units', 'kg')
-      call put_att(ncid, smid, 'long_name', 'start_mass')
-      call put_att(ncid, smid, 'units', 'kg')
-      call put_att(ncid, mbid, 'long_name', 'mass_of_bits')
-      call put_att(ncid, mbid, 'units', 'kg')
-      call put_att(ncid, mflbid, 'long_name', 'mass_of_fl_bits')
-      call put_att(ncid, mflbid, 'units', 'kg')
-      call put_att(ncid, mflbbid, 'long_name', 'mass_of_fl_bergy_bits')
-      call put_att(ncid, mflbbid, 'units', 'kg')
-      call put_att(ncid, flkid, 'long_name', 'footloose calving k')
-      call put_att(ncid, flkid, 'units', 'none')
+      if (save_fl_traj) then
+        call put_att(ncid, mid, 'long_name', 'mass')
+        call put_att(ncid, mid, 'units', 'kg')
+        call put_att(ncid, smid, 'long_name', 'start_mass')
+        call put_att(ncid, smid, 'units', 'kg')
+        call put_att(ncid, mbid, 'long_name', 'mass_of_bits')
+        call put_att(ncid, mbid, 'units', 'kg')
+        call put_att(ncid, mflbid, 'long_name', 'mass_of_fl_bits')
+        call put_att(ncid, mflbid, 'units', 'kg')
+        call put_att(ncid, mflbbid, 'long_name', 'mass_of_fl_bergy_bits')
+        call put_att(ncid, mflbbid, 'units', 'kg')
+        call put_att(ncid, flkid, 'long_name', 'footloose calving k')
+        call put_att(ncid, flkid, 'units', 'none')
+      endif
       if (.not. save_short_traj) then
         call put_att(ncid, uvelid, 'long_name', 'zonal spped')
         call put_att(ncid, uvelid, 'units', 'm/s')
@@ -2017,14 +2014,6 @@ logical :: io_is_in_append_mode
         call put_att(ncid, uaid, 'units', 'm/s')
         call put_att(ncid, vaid, 'long_name', 'atmos meridional spped')
         call put_att(ncid, vaid, 'units', 'm/s')
-        ! call put_att(ncid, mid, 'long_name', 'mass')
-        ! call put_att(ncid, mid, 'units', 'kg')
-        ! call put_att(ncid, mbid, 'long_name', 'mass_of_bits')
-        ! call put_att(ncid, mbid, 'units', 'kg')
-        ! call put_att(ncid, mflbid, 'long_name', 'mass_of_fl_bits')
-        ! call put_att(ncid, mflbid, 'units', 'kg')
-        ! call put_att(ncid, mflbbid, 'long_name', 'mass_of_fl_bergy_bits')
-        ! call put_att(ncid, mflbbid, 'units', 'kg')
         call put_att(ncid, hdid, 'long_name', 'heat_density')
         call put_att(ncid, hdid, 'units', 'J/kg')
         call put_att(ncid, did, 'long_name', 'thickness')
@@ -2033,8 +2022,6 @@ logical :: io_is_in_append_mode
         call put_att(ncid, wid, 'units', 'm')
         call put_att(ncid, lid, 'long_name', 'length')
         call put_att(ncid, lid, 'units', 'm')
-        ! call put_att(ncid, flkid, 'long_name', 'footloose calving k')
-        ! call put_att(ncid, flkid, 'units', 'none')
         call put_att(ncid, sshxid, 'long_name', 'sea surface height gradient_x')
         call put_att(ncid, sshxid, 'units', 'non-dim')
         call put_att(ncid, sshyid, 'long_name', 'sea surface height gradient_y')
@@ -2139,12 +2126,14 @@ logical :: io_is_in_append_mode
       call split_id(this%id, cnt, ij)
       call put_int(ncid, idcntid, i, cnt)
       call put_int(ncid, idijid, i, ij)
-      call put_double(ncid, mid, i, this%mass)
-      call put_double(ncid, smid, i, this%start_mass)
-      call put_double(ncid, mbid, i, this%mass_of_bits)
-      call put_double(ncid, mflbid, i, this%mass_of_fl_bits)
-      call put_double(ncid, mflbbid, i, this%mass_of_fl_bergy_bits)
-      call put_double(ncid, flkid, i, this%fl_k)
+      if (save_fl_traj) then
+        call put_double(ncid, mid, i, this%mass)
+        call put_double(ncid, smid, i, this%start_mass)
+        call put_double(ncid, mbid, i, this%mass_of_bits)
+        call put_double(ncid, mflbid, i, this%mass_of_fl_bits)
+        call put_double(ncid, mflbbid, i, this%mass_of_fl_bergy_bits)
+        call put_double(ncid, flkid, i, this%fl_k)
+      endif
       if (.not. save_short_traj) then
         call put_double(ncid, uvelid, i, this%uvel)
         call put_double(ncid, vvelid, i, this%vvel)
@@ -2156,15 +2145,10 @@ logical :: io_is_in_append_mode
         call put_double(ncid, viid, i, this%vi)
         call put_double(ncid, uaid, i, this%ua)
         call put_double(ncid, vaid, i, this%va)
-        ! call put_double(ncid, mid, i, this%mass)
-        ! call put_double(ncid, mbid, i, this%mass_of_bits)
-        ! call put_double(ncid, mflbid, i, this%mass_of_fl_bits)
-        ! call put_double(ncid, mflbbid, i, this%mass_of_fl_bergy_bits)
         call put_double(ncid, hdid, i, this%heat_density)
         call put_double(ncid, did, i, this%thickness)
         call put_double(ncid, wid, i, this%width)
         call put_double(ncid, lid, i, this%length)
-        ! call put_double(ncid, flkid, i, this%fl_k)
         call put_double(ncid, sshxid, i, this%ssh_x)
         call put_double(ncid, sshyid, i, this%ssh_y)
         call put_double(ncid, sstid, i, this%sst)
