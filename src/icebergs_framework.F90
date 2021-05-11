@@ -461,6 +461,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
              !! \todo Should make dt adaptive?
   integer :: current_year !< Current year (years)
   real :: current_yearday !< Current year-day, 1.00-365.99, (days)
+  real :: traj_area_thres !< Threshold for berg area (km^2) that must be exceeded to save a non-bonded berg trajectory
   real :: traj_sample_hrs !< Period between sampling for trajectories (hours)
   real :: traj_write_hrs !< Period between writing of trajectories (hours)
   real :: verbose_hrs !< Period between terminal status reports (hours)
@@ -631,9 +632,9 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   logical :: fl_bits_erosion_to_bergy_bits=.true. !< Erosion from footloose bits becomes bergy bits
   real :: fl_k_scale_by_perimeter=0 !< If greater than 0, scales FL k by (berg perimeter (m))/(this scaling (m))
   real :: new_berg_from_fl_bits_mass_thres=huge(0.) ! Create a new berg from FL bits when mass_of_fl_bits exceeds this value
-  real :: fl_bits_scale_l=0.9  !< For determining dimensions of FL bits berg; FL_bits length = fl_bits_scale_l*3*l_b
-  real :: fl_bits_scale_w=0.9 !< For determining dimensions of FL bits berg; FL_bits width = fl_bits_scale_l*3*l_b
-  real :: fl_bits_scale_t=0.9 !< For determining dimensions of FL bits berg; FL_bits thickness = fl_bits_scale_l*T
+  real :: fl_bits_scale_l=0.9 !< For determining dimensions of FL bits berg; FL_bits length    = fl_bits_scale_l * 3*l_b
+  real :: fl_bits_scale_w=0.9 !< For determining dimensions of FL bits berg; FL_bits width     = fl_bits_scale_w * 3*l_b
+  real :: fl_bits_scale_t=0.9 !< For determining dimensions of FL bits berg; FL_bits thickness = fl_bits_scale_t * T
 end type icebergs
 
 !> Read original restarts. Needs to be module global so can be public to icebergs_mod.
@@ -706,6 +707,7 @@ logical, intent(in), optional :: fractional_area !< If true, ice_area contains c
 
 ! Namelist parameters (and defaults)
 integer :: halo=4 ! Width of halo region
+real :: traj_area_thres=0. ! Threshold for berg area (km^2) that must be exceeded to save a non-bonded berg trajectory
 real :: traj_sample_hrs=24. ! Period between sampling of position for trajectory storage
 real :: traj_write_hrs=480. ! Period between writing sampled trajectories to disk
 real :: verbose_hrs=24. ! Period between verbose messages
@@ -716,10 +718,10 @@ real :: contact_spring_coef=0. !Spring coef for berg collisions (is set to sprin
 logical :: uniaxial_test=.false. !adds a tensile stress to the east-most berg element
 real :: cdrag_grounding=0.0 ! Drag coefficient against ocean bottom
 real :: h_to_init_grounding=100.0
-!character(len=11) :: fracture_criterion !<'energy','stress','strain_rate','strain',or 'none'
+!character(len=11) :: fracture_criterion ! 'energy','stress','strain_rate','strain',or 'none'
 real :: frac_thres_n=0.0 !normal fracture strain threshold
 real :: frac_thres_t=0.0 !tangential fracture strain threshold
-logical :: damage_test_1=.false. !< Sets initial damage for bonds that overlap y=17000.0
+logical :: damage_test_1=.false. ! Sets initial damage for bonds that overlap y=17000.0
 real :: frac_thres_scaling=1.0 !scaling factor for frac_thres_n and frac_thres_t, useful for tuning
 logical :: debug_write=.false. !Sets traj_sample_hours=traj_write_hours & includes halo bergs in write
 real :: bond_coef=1.e-8 ! Spring constant for iceberg bonds - not being used right now
@@ -743,8 +745,8 @@ logical :: use_operator_splitting=.true. ! Use first order operator splitting fo
 logical :: add_weight_to_ocean=.true. ! Add weight of icebergs + bits to ocean
 logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
 logical :: time_average_weight=.false. ! Time average the weight on the ocean
-real :: length_for_manually_initialize_bonds=1000.0 !<if manually init bonds, only  bond if dist between particles is .lt. this length - Alex
-logical :: manually_initialize_bonds_from_radii=.false. !<if manually init bonds, form bonds if dist between particles is < 1.25x the smaller radii - Alex
+real :: length_for_manually_initialize_bonds=1000.0 ! if manually init bonds, only  bond if dist between particles is .lt. this length - Alex
+logical :: manually_initialize_bonds_from_radii=.false. ! if manually init bonds, form bonds if dist between particles is < 1.25x the smaller radii - Alex
 real :: speed_limit=0. ! CFL speed limit for a berg
 real :: tau_calving=0. ! Time scale for smoothing out calving field (years)
 real :: tip_parameter=0. ! Parameter to override iceberg rolling critical ratio (use zero to get parameter directly from ice and seawater densities
@@ -753,7 +755,7 @@ real :: coastal_drift=0. ! A velocity added to ocean currents to cause bergs to 
 real :: tidal_drift=0. ! Amplitude of a stochastic tidal velocity added to ocean currents to cause bergs to drift randomly
 logical :: Runge_not_Verlet=.True. ! True=Runge Kutta, False=Verlet.
 logical :: use_mixed_melting=.False. ! If true, then the melt is determined partly using 3 eq model partly using iceberg parameterizations (according to iceberg bond number)
-logical :: internal_bergs_for_drag=.False. !< True=reduces side drag for bonded elements in momentum equation.
+logical :: internal_bergs_for_drag=.False. ! True=reduces side drag for bonded elements in momentum equation.
 logical :: apply_thickness_cutoff_to_gridded_melt=.False. ! Prevents melt for ocean thickness below melt_cuttoff (applied to gridded melt fields)
 logical :: apply_thickness_cutoff_to_bergs_melt=.False. ! Prevents melt for ocean thickness below melt_cuttoff (applied to bergs)
 logical :: use_updated_rolling_scheme=.false. ! Use the corrected Rolling Scheme rather than the erroneous one
@@ -816,33 +818,33 @@ logical :: ignore_tangential_force=.false.
 real :: poisson=0.3 ! Poisson's ratio
 real :: dem_spring_coef=0.
 real :: dem_damping_coef=0.1
-logical :: dem_shear_for_frac_only=.false. !< If true, DEM shear is calculated for fracture, but zeroed for berg interactions
+logical :: dem_shear_for_frac_only=.false. ! If true, DEM shear is calculated for fracture, but zeroed for berg interactions
 integer :: dem_beam_test=0 !1=Simply supported beam,2=cantilever beam,3=angular vel test
 ! Element Interactions
-logical :: constant_interaction_LW=.false. !< Always use the initial, globally constant, element length & width during berg interactions
-real :: constant_length=0. !< If constant_interaction_LW, the constant length used. If zero in the nml, will be set to max initial L
-real :: constant_width=0. !< If constant_interaction_LW, the constant width used. If zero in the nml, will be set to max initial W
-logical :: use_spring_for_land_contact=.false. !< Treat contact with masked (land) cells like contact with a static berg
+logical :: constant_interaction_LW=.false. ! Always use the initial, globally constant, element length & width during berg interactions
+real :: constant_length=0. ! If constant_interaction_LW, the constant length used. If zero in the nml, will be set to max initial L
+real :: constant_width=0. ! If constant_interaction_LW, the constant width used. If zero in the nml, will be set to max initial W
+logical :: use_spring_for_land_contact=.false. ! Treat contact with masked (land) cells like contact with a static berg
 ! Footloose calving parameters [England et al (2020) Modeling the breakup of tabular icebergs. Sci. Adv.]
-logical :: fl_use_poisson_distribution=.true. !< fl_r is (T) mean of Poisson distribution to determine k, or (F) k=fl_r
-logical :: fl_use_perimeter=.false. !< scale number of footloose bergs to calve by perimeter of the parent berg
-real :: fl_r=0. !< footloose average number of bergs calved per fl_r_s
-real :: fl_r_s=0. !< seconds over which fl_r footloose bergs calve
-logical :: displace_fl_bergs=.true. !< footloose berg positions are randomly assigned along edges of parent berg
-character(len=11) :: fl_style='new_bergs' !< Evolve footloose bergs individually as 'fl_bits', or as a group with size 'bergy_bits' or 'mean_size'
-logical :: fl_bits_erosion_to_bergy_bits=.true. !< Erosion from footloose bits becomes bergy bits
-real :: fl_k_scale_by_perimeter=0 !< If greater than 0, scales FL k by (berg perimeter (m))/(this scaling (m))
+logical :: fl_use_poisson_distribution=.true. ! fl_r is (T) mean of Poisson distribution to determine k, or (F) k=fl_r
+logical :: fl_use_perimeter=.false. ! scale number of footloose bergs to calve by perimeter of the parent berg
+real :: fl_r=0. ! footloose average number of bergs calved per fl_r_s
+real :: fl_r_s=0. ! seconds over which fl_r footloose bergs calve
+logical :: displace_fl_bergs=.true. ! footloose berg positions are randomly assigned along edges of parent berg
+character(len=11) :: fl_style='new_bergs' ! Evolve footloose bergs individually as 'fl_bits', or as a group with size 'bergy_bits' or 'mean_size'
+logical :: fl_bits_erosion_to_bergy_bits=.true. ! Erosion from footloose bits becomes bergy bits
+real :: fl_k_scale_by_perimeter=0 ! If greater than 0, scales FL k by (berg perimeter (m))/(this scaling (m))
 real :: new_berg_from_fl_bits_mass_thres=huge(0.) ! Create a new berg from FL bits when mass_of_fl_bits exceeds this value
-real :: fl_bits_scale_l=0.9 !< For determining dimensions of FL bits berg; FL_bits length = fl_bits_scale_l*3*l_b
-real :: fl_bits_scale_w=0.9 !< For determining dimensions of FL bits berg; FL_bits width = fl_bits_scale_l*l_b
-real :: fl_bits_scale_t=0.9 !< For determining dimensions of FL bits berg; FL_bits thickness = fl_bits_scale_l*T
+real :: fl_bits_scale_l=0.9 ! For determining dimensions of FL bits berg; FL_bits length    = fl_bits_scale_l * 3*l_b
+real :: fl_bits_scale_w=0.9 ! For determining dimensions of FL bits berg; FL_bits width     = fl_bits_scale_w * l_b
+real :: fl_bits_scale_t=0.9 ! For determining dimensions of FL bits berg; FL_bits thickness = fl_bits_scale_t * T
 
 namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,&
-         Static_icebergs,distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef, &
-         radial_damping_coef, tangental_damping_coef, only_interactive_forces, rho_bergs, LoW_ratio, debug, really_debug, &
-         use_operator_splitting, bergy_bit_erosion_fraction, iceberg_bonds_on, manually_initialize_bonds, &
-         ignore_missing_restart_bergs,  parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, &
-         ignore_ij_restart, use_new_predictive_corrective, halo_debugging, hexagonal_icebergs, time_average_weight, &
+         traj_area_thres, Static_icebergs,distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef,&
+         radial_damping_coef, tangental_damping_coef, only_interactive_forces, rho_bergs, LoW_ratio, debug, really_debug,&
+         use_operator_splitting, bergy_bit_erosion_fraction, iceberg_bonds_on, manually_initialize_bonds,&
+         ignore_missing_restart_bergs,  parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode,&
+         ignore_ij_restart, use_new_predictive_corrective, halo_debugging, hexagonal_icebergs, time_average_weight,&
          generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_icebergs_on,&
          scale_damping_by_pmag, critical_interaction_damping_on, tang_crit_int_damp_on, require_restart,&
          old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,&
@@ -850,9 +852,9 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          initial_orientation,rotate_icebergs_for_mass_spreading,grid_is_latlon,Lx,use_f_plane,use_old_spreading,&
          grid_is_regular,override_iceberg_velocities,u_override,v_override,add_iceberg_thickness_to_SSH,&
          Iceberg_melt_without_decay,melt_icebergs_as_ice_shelf, Use_three_equation_model,find_melt_using_spread_mass,&
-         use_mixed_layer_salinity_for_thermo,utide_icebergs,ustar_icebergs_bg,cdrag_icebergs, pass_fields_to_ocean_model, &
+         use_mixed_layer_salinity_for_thermo,utide_icebergs,ustar_icebergs_bg,cdrag_icebergs, pass_fields_to_ocean_model,&
          const_gamma, Gamma_T_3EQ, ignore_traj, debug_iceberg_with_id,use_updated_rolling_scheme, tip_parameter, &
-         read_old_restarts, tau_calving, read_ocean_depth_from_file, melt_cutoff,apply_thickness_cutoff_to_gridded_melt, &
+         read_old_restarts, tau_calving, read_ocean_depth_from_file, melt_cutoff,apply_thickness_cutoff_to_gridded_melt,&
          apply_thickness_cutoff_to_bergs_melt, use_mixed_melting, internal_bergs_for_drag, coastal_drift, tidal_drift,&
          mts,new_mts,ewsame,monitor_energy,mts_sub_steps,contact_distance,length_for_manually_initialize_bonds,&
          manually_initialize_bonds_from_radii,contact_spring_coef,fracture_criterion, damage_test_1, uniaxial_test, &
@@ -1341,6 +1343,7 @@ endif
 
  ! Parameters
   bergs%dt=dt
+  bergs%traj_area_thres=traj_area_thres
   bergs%traj_sample_hrs=traj_sample_hrs
   bergs%traj_write_hrs=traj_write_hrs
   bergs%save_short_traj=save_short_traj
@@ -3439,9 +3442,10 @@ subroutine pull_buffer_ivalue(vbuf, counter, val)
 
 end subroutine pull_buffer_ivalue
 
+!> Nullify the other_berg pointer for a bond pointing to the current berg
 subroutine clear_berg_from_partners_bonds(berg)
 ! Arguments
-type(iceberg), intent(in), pointer :: berg
+type(iceberg), intent(in), pointer :: berg !< Iceberg to clear from partner bonds
 ! Local variables
 type(iceberg), pointer :: other_berg
 type(bond), pointer :: current_bond, matching_bond
@@ -4245,7 +4249,7 @@ subroutine unpack_duplicate_check(bergs,localberg,duplicate)
   type(iceberg) :: localberg !< Input iceberg
   logical :: duplicate !< True if a duplicate is detected
   ! Local variables
-  type(iceberg), pointer :: this !<bergs for comparison
+  type(iceberg), pointer :: this ! bergs for comparison
 
   duplicate=.false.
   if (.not. bergs%mts) return
@@ -4513,7 +4517,7 @@ end function inorder
 !! \todo Should be able to remove this function if using identifiers properly
 real function time_hash(berg)!  Alon: Think about removing this.
 ! Arguments
-type(iceberg), pointer :: berg
+type(iceberg), pointer :: berg !< An iceberg
   time_hash=berg%start_day+366.*float(berg%start_year)
 end function time_hash
 
@@ -4949,7 +4953,7 @@ real :: maxlon
   enddo;enddo
 end subroutine init_dem_params
 
-
+!> Set the accumulated bond rotation to zero for all bergs
 subroutine reset_bond_rotation(bergs)
 type(icebergs), pointer :: bergs !< Container for all types and memory
 type(iceberg), pointer :: this, other_berg
@@ -5300,13 +5304,16 @@ type(bond), pointer :: prev,next,current_bond
   deallocate(bond_to_delete)
 end subroutine delete_bond_from_list
 
+!> Bond two bergs together
 subroutine form_a_bond(berg, other_id, other_berg_ine, other_berg_jne, other_berg)
 ! Arguments
-type(iceberg), pointer :: berg
-type(iceberg), optional,  pointer :: other_berg
+type(iceberg), pointer :: berg !< first berg
+integer(kind=8), intent(in) :: other_id !< ID of the other other berg
+integer, optional  :: other_berg_ine !< second berg zonal cell index
+integer, optional :: other_berg_jne !< second berg meridional cell index
+type(iceberg), optional,  pointer :: other_berg !< second berg
+! Local variables
 type(bond) , pointer :: new_bond, first_bond
-integer(kind=8), intent(in) :: other_id
-integer, optional  :: other_berg_ine, other_berg_jne
 integer :: stderrunit
 
  stderrunit = stderr()
@@ -5794,6 +5801,7 @@ type(iceberg), pointer :: this, other_berg
 integer :: grdi, grdj
 integer :: js,je,is,ie
 type(bond) , pointer :: current_bond
+real :: area_thres
 ! Local bond variables
 type(bond_xyt) :: bond_posn
 real :: dx_dlon,dy_dlat,lat_ref,dx,dy,n1,n2,id1,id2
@@ -5837,139 +5845,143 @@ endif
     endif
   endif
 
+  area_thres=bergs%traj_area_thres*1.e6 ! convert from km^2 to m^2
+
   do grdj = js,je ; do grdi = is,ie
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
-      posn%lon=this%lon
-      posn%lat=this%lat
-      posn%year=bergs%current_year
-      posn%day=bergs%current_yearday
-      posn%id=this%id
-      if (bergs%save_fl_traj) then
-        posn%mass=this%mass
-        posn%start_mass=this%start_mass
-        posn%mass_of_bits=this%mass_of_bits
-        posn%mass_of_fl_bits=this%mass_of_fl_bits
-        posn%mass_of_fl_bergy_bits=this%mass_of_fl_bergy_bits
-        posn%fl_k=this%fl_k
-      endif
-      if (.not. bergs%save_short_traj) then !Not totally sure that this is correct
-        posn%uvel=this%uvel
-        posn%vvel=this%vvel
-        posn%uvel_prev=this%uvel_prev
-        posn%vvel_prev=this%vvel_prev
-        posn%heat_density=this%heat_density
-        posn%thickness=this%thickness
-        posn%width=this%width
-        posn%length=this%length
-        posn%uo=this%uo
-        posn%vo=this%vo
-        posn%ui=this%ui
-        posn%vi=this%vi
-        posn%ua=this%ua
-        posn%va=this%va
-        posn%ssh_x=this%ssh_x
-        posn%ssh_y=this%ssh_y
-        posn%sst=this%sst
-        posn%sss=this%sss
-        posn%cn=this%cn
-        posn%hi=this%hi
-        posn%axn=this%axn
-        posn%ayn=this%ayn
-        posn%bxn=this%bxn
-        posn%byn=this%byn
-        posn%halo_berg=this%halo_berg
-        posn%static_berg=this%static_berg
-        posn%od=this%od
-
-        if (bergs%mts) then
-          posn%axn_fast=this%axn_fast
-          posn%ayn_fast=this%ayn_fast
-          posn%bxn_fast=this%bxn_fast
-          posn%byn_fast=this%byn_fast
+      current_bond=>this%first_bond
+      if ( (this%mass/(bergs%rho_bergs*this%thickness)) >= area_thres .or. associated(current_bond) ) then
+        posn%lon=this%lon
+        posn%lat=this%lat
+        posn%year=bergs%current_year
+        posn%day=bergs%current_yearday
+        posn%id=this%id
+        if (bergs%save_fl_traj) then
+          posn%mass=this%mass
+          posn%start_mass=this%start_mass
+          posn%mass_of_bits=this%mass_of_bits
+          posn%mass_of_fl_bits=this%mass_of_fl_bits
+          posn%mass_of_fl_bergy_bits=this%mass_of_fl_bergy_bits
+          posn%fl_k=this%fl_k
         endif
+        if (.not. bergs%save_short_traj) then !Not totally sure that this is correct
+          posn%uvel=this%uvel
+          posn%vvel=this%vvel
+          posn%uvel_prev=this%uvel_prev
+          posn%vvel_prev=this%vvel_prev
+          posn%heat_density=this%heat_density
+          posn%thickness=this%thickness
+          posn%width=this%width
+          posn%length=this%length
+          posn%uo=this%uo
+          posn%vo=this%vo
+          posn%ui=this%ui
+          posn%vi=this%vi
+          posn%ua=this%ua
+          posn%va=this%va
+          posn%ssh_x=this%ssh_x
+          posn%ssh_y=this%ssh_y
+          posn%sst=this%sst
+          posn%sss=this%sss
+          posn%cn=this%cn
+          posn%hi=this%hi
+          posn%axn=this%axn
+          posn%ayn=this%ayn
+          posn%bxn=this%bxn
+          posn%byn=this%byn
+          posn%halo_berg=this%halo_berg
+          posn%static_berg=this%static_berg
+          posn%od=this%od
 
-        if (iceberg_bonds_on) then
-          posn%n_bonds=this%n_bonds
-        end if
-
-        if (monitor_energy) then
-          posn%Ee=this%Ee
-          posn%Ed=this%Ed
-          posn%Eext=this%Eext
-          posn%Ee_contact=this%Ee_contact
-          posn%Ed_contact=this%Ed_contact
-          posn%Efrac=this%Efrac
-          ! posn%Ee_contact_temp=this%Ee_contact_temp
-          ! posn%Ed_contact_temp=this%Ed_contact_temp
-          ! posn%Ee_temp=this%Ee_temp
-          ! posn%Ed_temp=this%Ed_temp
-          ! posn%Eext_temp=this%Eext_temp
-        endif
-
-        if (dem) then
-          posn%ang_vel=this%ang_vel
-          posn%ang_accel=this%ang_accel
-          posn%rot=this%rot
-        elseif (fracture_criterion .ne. 'none') then
-          posn%accum_bond_rotation=this%accum_bond_rotation
-        endif
-      endif
-
-      call push_posn(this%trajectory, posn)
-
-      if (save_bond_traj) then
-        current_bond=>this%first_bond
-        do while (associated(current_bond)) ! loop over all bonds
-          if  (associated(current_bond%other_berg)) then
-            other_berg=>current_bond%other_berg
-
-            ! From icebergs.F90 --> subroutine convert_from_grid_to_meters
-            if (bergs%grd%grid_is_latlon) then
-              lat_ref=0.5*(this%lat+other_berg%lat)
-              dx_dlon=pi_180*Rearth*cos(lat_ref*pi_180);  dy_dlat=pi_180*Rearth
-            else
-              dx_dlon=1.0;                                dy_dlat=1.0
-            endif
-
-            dx=(this%lon-other_berg%lon)*dx_dlon; dy=(this%lat-other_berg%lat)*dy_dlat
-            n1=dx/this%length; n2=dy/this%length !unit vector
-            bond_posn%lon=this%lon-dx/2;          bond_posn%lat=this%lat-dy/2
-            bond_posn%year=bergs%current_year;    bond_posn%day=bergs%current_yearday
-            bond_posn%length=current_bond%length;
-            bond_posn%n1=n1;                      bond_posn%n2=n2
-            bond_posn%id1=this%id;                bond_posn%id2=other_berg%id
-
-            if (use_damage) then
-              bond_posn%damage=current_bond%damage
-            endif
-
-            if (monitor_energy) then
-              bond_posn%Ee=current_bond%Ee
-              bond_posn%Ed=current_bond%Ed
-              bond_posn%axn_fast=current_bond%axn_fast
-              bond_posn%ayn_fast=current_bond%ayn_fast
-              bond_posn%bxn_fast=current_bond%bxn_fast
-              bond_posn%byn_fast=current_bond%byn_fast
-            endif
-
-            if (dem) then
-              bond_posn%tangd1=current_bond%tangd1
-              bond_posn%tangd2=current_bond%tangd2
-              bond_posn%nstress=current_bond%nstress
-              bond_posn%sstress=current_bond%sstress
-            elseif (fracture_criterion.ne.'none') then
-              bond_posn%rotation=current_bond%rotation
-              bond_posn%rel_rotation=current_bond%rel_rotation
-              bond_posn%n_frac_var=current_bond%n_frac_var
-              if (fracture_criterion.eq.'strain_rate') bond_posn%n_strain_rate=current_bond%n_strain_rate
-              if (fracture_criterion.eq.'energy') bond_posn%spring_pe=current_bond%spring_pe
-            endif
-
-            call push_bond_posn(current_bond%bond_trajectory, bond_posn)
+          if (bergs%mts) then
+            posn%axn_fast=this%axn_fast
+            posn%ayn_fast=this%ayn_fast
+            posn%bxn_fast=this%bxn_fast
+            posn%byn_fast=this%byn_fast
           endif
-          current_bond=>current_bond%next_bond
-        enddo
+
+          if (iceberg_bonds_on) then
+            posn%n_bonds=this%n_bonds
+          end if
+
+          if (monitor_energy) then
+            posn%Ee=this%Ee
+            posn%Ed=this%Ed
+            posn%Eext=this%Eext
+            posn%Ee_contact=this%Ee_contact
+            posn%Ed_contact=this%Ed_contact
+            posn%Efrac=this%Efrac
+            ! posn%Ee_contact_temp=this%Ee_contact_temp
+            ! posn%Ed_contact_temp=this%Ed_contact_temp
+            ! posn%Ee_temp=this%Ee_temp
+            ! posn%Ed_temp=this%Ed_temp
+            ! posn%Eext_temp=this%Eext_temp
+          endif
+
+          if (dem) then
+            posn%ang_vel=this%ang_vel
+            posn%ang_accel=this%ang_accel
+            posn%rot=this%rot
+          elseif (fracture_criterion .ne. 'none') then
+            posn%accum_bond_rotation=this%accum_bond_rotation
+          endif
+        endif
+
+        call push_posn(this%trajectory, posn)
+
+        if (save_bond_traj) then
+          do while (associated(current_bond)) ! loop over all bonds
+            if  (associated(current_bond%other_berg)) then
+              other_berg=>current_bond%other_berg
+
+              ! From icebergs.F90 --> subroutine convert_from_grid_to_meters
+              if (bergs%grd%grid_is_latlon) then
+                lat_ref=0.5*(this%lat+other_berg%lat)
+                dx_dlon=pi_180*Rearth*cos(lat_ref*pi_180);  dy_dlat=pi_180*Rearth
+              else
+                dx_dlon=1.0;                                dy_dlat=1.0
+              endif
+
+              dx=(this%lon-other_berg%lon)*dx_dlon; dy=(this%lat-other_berg%lat)*dy_dlat
+              n1=dx/this%length; n2=dy/this%length !unit vector
+              bond_posn%lon=this%lon-dx/2;          bond_posn%lat=this%lat-dy/2
+              bond_posn%year=bergs%current_year;    bond_posn%day=bergs%current_yearday
+              bond_posn%length=current_bond%length;
+              bond_posn%n1=n1;                      bond_posn%n2=n2
+              bond_posn%id1=this%id;                bond_posn%id2=other_berg%id
+
+              if (use_damage) then
+                bond_posn%damage=current_bond%damage
+              endif
+
+              if (monitor_energy) then
+                bond_posn%Ee=current_bond%Ee
+                bond_posn%Ed=current_bond%Ed
+                bond_posn%axn_fast=current_bond%axn_fast
+                bond_posn%ayn_fast=current_bond%ayn_fast
+                bond_posn%bxn_fast=current_bond%bxn_fast
+                bond_posn%byn_fast=current_bond%byn_fast
+              endif
+
+              if (dem) then
+                bond_posn%tangd1=current_bond%tangd1
+                bond_posn%tangd2=current_bond%tangd2
+                bond_posn%nstress=current_bond%nstress
+                bond_posn%sstress=current_bond%sstress
+              elseif (fracture_criterion.ne.'none') then
+                bond_posn%rotation=current_bond%rotation
+                bond_posn%rel_rotation=current_bond%rel_rotation
+                bond_posn%n_frac_var=current_bond%n_frac_var
+                if (fracture_criterion.eq.'strain_rate') bond_posn%n_strain_rate=current_bond%n_strain_rate
+                if (fracture_criterion.eq.'energy') bond_posn%spring_pe=current_bond%spring_pe
+              endif
+
+              call push_bond_posn(current_bond%bond_trajectory, bond_posn)
+            endif
+            current_bond=>current_bond%next_bond
+          enddo
+        endif
       endif
 
       this=>this%next

@@ -2733,12 +2733,14 @@ subroutine footloose_calving(bergs, time)
 
 contains
 
-  !TODO: finish this
+  !> Get maximum number of footloose bergs that can calve over a timestep for bonded edge elements.
+  !> \todo finish this
   subroutine max_k_for_edge_elements
     !for most edge elements, maxk=huge(1.0)
     max_k=huge(1.0)
   end subroutine max_k_for_edge_elements
 
+  !> Determine random displacement of footloose child bergs from parent berg
   subroutine get_footloose_displacement
     real :: lon1,lat1,x1,y1,dxdl1,dydl,xdot2,ydot2
     logical :: on_tangential_plane
@@ -3379,9 +3381,11 @@ subroutine rolling(bergs,Tn,Wn,Ln)
 
 contains
 
+  !> swap values between two parameters
   subroutine swap_variables(x,y)
     ! Arguments
-    real, intent(inout) :: x, y
+    real, intent(inout) :: x !< first parameter
+    real, intent(inout) :: y !< second parameter
     real :: temp
     temp=x
     x=y
@@ -3411,7 +3415,7 @@ subroutine fl_bits_dimensions(bergs,this,L_fl,W_fl,T_fl)
   call rolling(bergs,T_fl,W_fl,L_fl)
 end subroutine fl_bits_dimensions
 
-
+!> Generate gridded fields from icebergs
 subroutine create_gridded_icebergs_fields(bergs)
 ! Arguments
 type(icebergs), pointer :: bergs !< Container for all types and memory
@@ -4694,6 +4698,7 @@ subroutine Hexagon_into_quadrants_using_triangles(x0, y0, H, theta, Area_hex ,Ar
 
  end subroutine Hexagon_into_quadrants_using_triangles
 
+!> Loop through all bergs and call interp_flds
 subroutine interp_gridded_fields_to_bergs(bergs)
   ! Arguments
   type(icebergs), pointer :: bergs !< Container for all types and memory
@@ -4732,7 +4737,7 @@ subroutine interp_gridded_fields_to_bergs(bergs)
 
 end subroutine interp_gridded_fields_to_bergs
 
-
+!> Interpolate ocean, sea ice, and atmosphere fields from grid to iceberg
 subroutine interp_flds(grd, x, y, i, j, xi, yj, rx, ry, uo, vo, ui, vi, ua, va, ssh_x, ssh_y, sst, sss, cn, hi, od)
   ! Arguments
   type(icebergs_gridded), pointer :: grd !< Container for gridded fields
@@ -8335,9 +8340,10 @@ subroutine icebergs_end(bergs)
 
 end subroutine icebergs_end
 
+!> deallocate a buffer
 subroutine dealloc_buffer(buff)
   ! Arguments
-  type(buffer), pointer :: buff
+  type(buffer), pointer :: buff !< the buffer
   ! Local variables
     if (associated(buff)) then
       if (associated(buff%data)) deallocate(buff%data)

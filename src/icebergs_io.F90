@@ -634,8 +634,10 @@ end function last_berg
 
 !> Read a real value from a file and optionally return a default value if variable is missing
 real function get_real_from_file(ncid, varid, k, value_if_not_in_file)
-integer, intent(in) :: ncid, varid, k
-real, optional :: value_if_not_in_file
+integer, intent(in) :: ncid !< file id
+integer, intent(in) :: varid !< variable id
+integer, intent(in) :: k !< index
+real, optional :: value_if_not_in_file !< default value, if variable missing in file
 
 if (varid<1.and.present(value_if_not_in_file)) then
   get_real_from_file=value_if_not_in_file
@@ -1188,6 +1190,7 @@ logical :: lres
 
 end subroutine generate_bergs
 
+!> For generating bergs for debugging, assign initial berg positions and velocities
 subroutine loc_set_berg_pos(grd, xi, yj, uvel, vvel, berg)
   type(icebergs_gridded), pointer :: grd !< Container for gridded fields
   real, intent(in) :: xi !< Non-dimensional x-position within cell to give berg
