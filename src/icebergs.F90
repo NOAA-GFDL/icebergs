@@ -50,7 +50,7 @@ use ice_bergs_framework, only: save_bond_traj
 use ice_bergs_framework, only: fracture_testing_initialization, orig_bond_length
 use ice_bergs_framework, only: update_and_break_bonds,break_bonds_dem,assign_n_bonds,reset_bond_rotation
 use ice_bergs_framework, only: update_bond_angles
-use ice_bergs_framework, only: monitor_energy, energy_tests_init, new_mts
+use ice_bergs_framework, only: monitor_energy, energy_tests_init, mts, new_mts
 use ice_bergs_framework, only: dem_tests_init
 use ice_bergs_framework, only: dem, init_dem_params
 use ice_bergs_framework, only: set_constant_interaction_length_and_width
@@ -1265,7 +1265,6 @@ subroutine accel_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, d
     scaling=1.0
   endif
 
-
   ! Initializing accelerations
   axn=0.; ayn=0.; bxn=0.; byn=0.
 
@@ -2081,14 +2080,14 @@ subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, r
   grd=>bergs%grd
 
   ! Interpolate gridded fields to berg
-  if (bergs%mts) then
+  !if (bergs%mts) then
     !gridded fields already saved on berg
     uo=berg%uo; vo=berg%vo; ua=berg%ua; va=berg%va; ui=berg%ui; vi=berg%vi;
     ssh_x=berg%ssh_x; ssh_y=berg%ssh_y; sst=berg%sst; sss=berg%sss;  cn=berg%cn; hi=berg%hi; od=berg%od
-  else
-    call interp_flds(grd, berg%lon, berg%lat, i, j, xi, yj, rx, ry, uo, vo, ui, vi, ua, va, ssh_x, &
-      ssh_y, sst, sss, cn, hi, od)
-  end if
+  !else
+  !  call interp_flds(grd, berg%lon, berg%lat, i, j, xi, yj, rx, ry, uo, vo, ui, vi, ua, va, ssh_x, &
+  !    ssh_y, sst, sss, cn, hi, od)
+  !end if
 
   if ((grd%grid_is_latlon) .and. (.not. bergs%use_f_plane)) then
      f_cori=(2.*omega)*sin(pi_180*lat)
@@ -2560,7 +2559,7 @@ subroutine footloose_calving(bergs, time)
   integer :: grdi, grdj
   integer, dimension(8) :: seed
   real :: T, W, L, N_bonds, Ln
-  real :: IC, max_k, k, Lr_fl, l_w, l_b, pu
+  real :: IC, max_k, k, l_w, l_b, pu, c, l_b3, Lmin, Wmin, ds, Wn, dA
   real :: fl_disp_x, fl_disp_y, interp_loc, dM_fl_bits
 
   ! For convenience
@@ -2610,6 +2609,7 @@ subroutine footloose_calving(bergs, time)
 
         l_w  = (lw_c*B_c*(T**3.))**0.25  !buoyancy length
         l_b  = l_c*l_w                   !length of child icebergs
+        l_b3 = 3*l_b
 
         !---Determine k, the number of child bergs to calve via the footloose mechanism---!
         !Bergs%fl_r is the average number of bergs to calve over the time increment
@@ -2631,11 +2631,16 @@ subroutine footloose_calving(bergs, time)
             call max_k_for_edge_elements
           endif
         else
-          !non-bonded berg must be larger than 3*(l_b) for FL calving. Set max_k accordingly.
-          max_k = max(ceiling((L-3*l_b)*W/(3*l_b**2.)),0)
+          !non-bonded berg length must be greater than 3*(l_b) for FL calving. Set max_k accordingly.
+          if (bergs%fl_k_scale_by_perimeter>0) then
+            !the minimum length and width the parent berg can have after footloose
+            c = ceiling((L-l_b3)/l_b3); Lmin = L - c*l_b3;
+            c = ceiling((W-l_b3)/l_b3); Wmin = W - c*l_b3;
 
-          if (L-max_k*3.*(l_b**2.)/W<=0.) then
-            max_k = max_k-1
+            max_k = max(floor((L*W - Lmin*Wmin)/(l_b3*l_b)),0)
+          else
+            max_k = max(ceiling((L-l_b3)*W/(3*l_b**2.)),0)
+            if (L-max_k*3.*(l_b**2.)/W<=0.) max_k = max_k-1
           endif
         endif
 
@@ -2661,7 +2666,14 @@ subroutine footloose_calving(bergs, time)
 
             if (bergs%iceberg_bonds_on) k=k*((N_max-N_bonds)/N_max) !reduce FL calve rate by number of bonds
             k=k*(bergs%dt/bergs%fl_r_s) !scale k to dt
-            if (bergs%fl_k_scale_by_perimeter>0) k = k * (2.*(L+W)/bergs%fl_k_scale_by_perimeter)
+            if (bergs%fl_k_scale_by_perimeter>0) then
+              if (c == 0) then
+                !W not eligible for footloose, so only scale by length
+                k = k * 2.*L/bergs%fl_k_scale_by_perimeter
+              else
+                k = k * 2.*(L+W)/bergs%fl_k_scale_by_perimeter
+              endif
+            endif
             this%fl_k=this%fl_k+k       !update fl_k
           endif
 
@@ -2678,7 +2690,22 @@ subroutine footloose_calving(bergs, time)
         !if there is footloose calving, create the new bergs and reduce length of parent berg
         if (k>0) then
 
-          Lr_fl = k*3.*(l_b**2.)/W !FL mechanism length reduction for parent berg
+          !new parent berg length (Ln) and width (Wn), and change in area (dA):
+          if (bergs%fl_k_scale_by_perimeter>0 .and. c>0) then
+            !for scale by perimeter, both the length and width are reduced by ds
+            ds = 0.5*( (L+W) - sqrt( (L+W)**2. - 4. * (l_b3*l_b*k) ) )
+            Ln = L-ds; Wn=W-ds
+            !Corrections to keep Wn >= Wmin. Ln is adjusted accordingly to retain the same dA.
+            if (Wn<Wmin) then
+              Ln=Ln*(1-(Wmin-Wn)/Wmin)
+              Wn=Wmin
+            endif
+          else
+            ds = k*3.*(l_b**2.)/W !FL mechanism length reduction for parent berg
+            Ln=L-ds
+            Wn=W
+          endif
+          dA = L*W - Ln*Wn !change in area. Should equal k*3*l_b**2
 
           if (bergs%fl_style.eq.'new_bergs') then
             !calve and track footloose bergs
@@ -2688,7 +2715,7 @@ subroutine footloose_calving(bergs, time)
             bergs%nbergs_calved_fl=bergs%nbergs_calved_fl+1
           else
             !put FL berg mass in footloose bergs bits.
-            dM_fl_bits=bergs%rho_bergs*W*T*Lr_fl
+            dM_fl_bits=bergs%rho_bergs*T*dA
             this%mass_of_fl_bits=this%mass_of_fl_bits+dM_fl_bits
             ! mass flux into fl bits (kg/m2/s)
             if (grd%area(grdi,grdj).ne.0.) then
@@ -2697,8 +2724,7 @@ subroutine footloose_calving(bergs, time)
             endif
           endif
 
-          Ln=L-Lr_fl !new length
-          if (Ln .le. 0) then
+          if (Ln .le. 0 .or. Wn .le. 0) then
             if (N_bonds==0) then
               print *,'l_b,L,W,k,max_k',l_b,L,W,k,max_k
               call error_mesg('KID,footloose_calving', &
@@ -2707,8 +2733,8 @@ subroutine footloose_calving(bergs, time)
             this%fl_k=-3 !marks this berg to be deleted later
           else
             !update length, width, thickness,and mass of parent berg
-            if (bergs%allow_bergs_to_roll .and. N_bonds.eq.0.) call rolling(bergs,T,W,Ln)
-            this%thickness=T; this%width=W; this%length=Ln
+            if (bergs%allow_bergs_to_roll .and. N_bonds.eq.0.) call rolling(bergs,T,Wn,Ln)
+            this%thickness=T; this%width=Wn; this%length=Ln
             this%mass=this%length*this%width*this%thickness*bergs%rho_bergs
           endif
         endif
@@ -2941,9 +2967,9 @@ subroutine thermodynamics(bergs)
     this=>bergs%list(grdi,grdj)%first
     do while(associated(this))
       if (debug) call check_position(grd, this, 'thermodynamics (top)')
-      call interp_flds(grd, this%lon, this%lat, this%ine, this%jne, this%xi, this%yj, 0., 0., &
-                       this%uo, this%vo, this%ui, this%vi, this%ua, this%va, this%ssh_x, &
-                       this%ssh_y, this%sst, this%sss,this%cn, this%hi)
+      ! call interp_flds(grd, this%lon, this%lat, this%ine, this%jne, this%xi, this%yj, 0., 0., &
+      !                  this%uo, this%vo, this%ui, this%vi, this%ua, this%va, this%ssh_x, &
+      !                  this%ssh_y, this%sst, this%sss,this%cn, this%hi)
       SST=this%sst
       SSS=this%sss
       IC=min(1.,this%cn+bergs%sicn_shift) ! Shift sea-ice concentration
@@ -4706,7 +4732,7 @@ subroutine interp_gridded_fields_to_bergs(bergs)
   ! Local variables
   type(icebergs_gridded), pointer :: grd
   type(iceberg), pointer :: berg
-  integer :: grdj,grdi,i
+  integer :: grdj,grdi,i,is,ie,js,je
   type(randomNumberStream) :: rns ! Random numbers for stochastic tidal parameterization
   real :: rx,ry
 
@@ -4714,7 +4740,13 @@ subroutine interp_gridded_fields_to_bergs(bergs)
   grd=>bergs%grd
   rx=0.0; ry=0.0;
 
-  do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec ! just for computational domain
+  if (bergs%mts) then
+    is=grd%isc; ie=grd%iec; js=grd%jsc; je=grd%jec
+  else
+    is=grd%isc-1; ie=grd%iec+1; js=grd%jsc-1; je=grd%jec+1
+  endif
+
+  do grdj = js,je ; do grdi = is,ie ! just for computational domain
     berg=>bergs%list(grdi,grdj)%first
     if (associated(berg) .and. grd%tidal_drift>0.) then
       ! Seed random numbers based on space and "time"
@@ -4902,8 +4934,13 @@ subroutine interp_flds(grd, x, y, i, j, xi, yj, rx, ry, uo, vo, ui, vi, ua, va, 
   endif
 
   ! Quadratic interpolation of ocean depth+sea surface height (A-grid)
+  ! Ocean depth is only needed for grounding friction, used with the MTS model only?
   if (present(od)) then
-    od=quad_interp_from_agrid(grd,grd%ocean_depth,x,y,i,j,xi,yj)+quad_interp_from_agrid(grd,grd%ssh,x,y,i,j,xi,yj)
+    if (mts) then
+      od=quad_interp_from_agrid(grd,grd%ocean_depth,x,y,i,j,xi,yj)+quad_interp_from_agrid(grd,grd%ssh,x,y,i,j,xi,yj)
+    else
+      od=grd%ocean_depth(i,j)+grd%ssh(i,j)
+    endif
   endif
 end subroutine interp_flds
 
@@ -5367,22 +5404,6 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
   if (debug) call bergs_chksum(bergs, 'run bergs (top)')
   if (debug) call checksum_gridded(bergs%grd, 'top of s/r run')
 
-  !If MTS VV and first visit, perform initial interp of gridded fields to bergs
-  if (.not. Visited) then
-    Visited=.true.
-    if (bergs%mts) then
-      call interp_gridded_fields_to_bergs(bergs)
-      call transfer_mts_bergs(bergs)
-    elseif ((bergs%contact_distance>0.) .or. (bergs%contact_spring_coef .ne. bergs%spring_coef)) then
-      call set_conglom_ids(bergs)
-    endif
-    if (bergs%iceberg_bonds_on) call orig_bond_length(bergs)
-
-    if (monitor_energy) then
-      call energy_tests_init(bergs)
-    endif
-  endif
-
   ! Accumulate ice from calving
   call accumulate_calving(bergs)
   if (grd%id_accum>0) then
@@ -5403,6 +5424,22 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
   if (debug) call checksum_gridded(bergs%grd, 's/r run after calving')
   if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'icebergs_run, after calving()    ')
   call mpp_clock_end(bergs%clock_cal)
+
+  !need to redo MTS transfers after a restart
+  if (.not. Visited) then
+    Visited=.true.
+    if (bergs%mts) then
+      call interp_gridded_fields_to_bergs(bergs)
+      call transfer_mts_bergs(bergs)
+    elseif ((bergs%contact_distance>0.) .or. (bergs%contact_spring_coef .ne. bergs%spring_coef)) then
+      call set_conglom_ids(bergs)
+    endif
+    if (bergs%iceberg_bonds_on) call orig_bond_length(bergs)
+    if (monitor_energy) call energy_tests_init(bergs)
+    if (mpp_pe()==0) write(*,'(a)') 'KID, iceberg_run: completed first visit initialization'
+  endif
+
+  if (.not. bergs%mts) call interp_gridded_fields_to_bergs(bergs)
 
   ! For each berg, evolve
   call mpp_clock_begin(bergs%clock_mom)
@@ -5453,6 +5490,7 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
         call set_conglom_ids(bergs)
       endif
     endif
+    call interp_gridded_fields_to_bergs(bergs)
   endif
   if (debug) call bergs_chksum(bergs, 'run bergs (exchanged)')
   if (debug) call checksum_gridded(bergs%grd, 's/r run after exchange')
@@ -5506,7 +5544,6 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
     call mpp_sync()
     call error_mesg('KID', 'WRITE AND STOP!!!', FATAL)
   endif
-
 
   ! Gridded diagnostics
   if (grd%id_uo>0) &
@@ -6217,6 +6254,8 @@ subroutine calve_icebergs(bergs)
   integer :: stderrunit
   real, pointer :: initial_mass, mass_scaling, initial_thickness, initial_width, initial_length
   logical :: allocations_done
+  type(randomNumberStream) :: rns ! Random numbers for stochastic tidal parameterization
+  real :: rx,ry
 
   ! Get the stderr unit number
   stderrunit = stderr()
@@ -6357,6 +6396,16 @@ subroutine calve_icebergs(bergs)
             endif
             newberg%accum_bond_rotation=0.
           endif
+
+          !interpolate gridded variables to new iceberg
+          if (grd%tidal_drift>0.) then
+            call getRandomNumbers(rns, rx)
+            call getRandomNumbers(rns, ry)
+            rx = 2.*rx - 1.; ry = 2.*ry - 1.
+          endif
+          call interp_flds(grd, newberg%lon, newberg%lat, i, j, xi, yj, rx, ry, newberg%uo, newberg%vo, newberg%ui, &
+            newberg%vi, newberg%ua, newberg%va, newberg%ssh_x, newberg%ssh_y, newberg%sst, newberg%sss, newberg%cn, &
+            newberg%hi, newberg%od)
 
           call add_new_berg_to_list(bergs%list(i,j)%first, newberg)
           calved_to_berg=initial_mass*mass_scaling ! Units of kg

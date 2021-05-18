@@ -1826,6 +1826,7 @@ logical :: io_is_in_append_mode
         mflbid = inq_varid(ncid, 'mass_of_fl_bits')
         mflbbid = inq_varid(ncid, 'mass_of_fl_bergy_bits')
         flkid = inq_varid(ncid, 'fl_k')
+        did = inq_varid(ncid, 'thickness')
       endif
       if (.not.save_short_traj) then
         uvelid = inq_varid(ncid, 'uvel')
@@ -1839,7 +1840,6 @@ logical :: io_is_in_append_mode
         uaid = inq_varid(ncid, 'ua')
         vaid = inq_varid(ncid, 'va')
         hdid = inq_varid(ncid, 'heat_density')
-        did = inq_varid(ncid, 'thickness')
         wid = inq_varid(ncid, 'width')
         lid = inq_varid(ncid, 'length')
         sshxid = inq_varid(ncid, 'ssh_x')
@@ -1908,6 +1908,7 @@ logical :: io_is_in_append_mode
         mflbid = def_var(ncid, 'mass_of_fl_bits', NF_DOUBLE, i_dim)
         mflbbid = def_var(ncid, 'mass_of_fl_bergy_bits', NF_DOUBLE, i_dim)
         flkid = def_var(ncid, 'fl_k', NF_DOUBLE, i_dim)
+        did = def_var(ncid, 'thickness', NF_DOUBLE, i_dim)
       endif
       if (.not. save_short_traj) then
         uvelid = def_var(ncid, 'uvel', NF_DOUBLE, i_dim)
@@ -1921,7 +1922,6 @@ logical :: io_is_in_append_mode
         uaid = def_var(ncid, 'ua', NF_DOUBLE, i_dim)
         vaid = def_var(ncid, 'va', NF_DOUBLE, i_dim)
         hdid = def_var(ncid, 'heat_density', NF_DOUBLE, i_dim)
-        did = def_var(ncid, 'thickness', NF_DOUBLE, i_dim)
         wid = def_var(ncid, 'width', NF_DOUBLE, i_dim)
         lid = def_var(ncid, 'length', NF_DOUBLE, i_dim)
         sshxid = def_var(ncid, 'ssh_x', NF_DOUBLE, i_dim)
@@ -1999,6 +1999,8 @@ logical :: io_is_in_append_mode
         call put_att(ncid, mflbbid, 'units', 'kg')
         call put_att(ncid, flkid, 'long_name', 'footloose calving k')
         call put_att(ncid, flkid, 'units', 'none')
+        call put_att(ncid, did, 'long_name', 'thickness')
+        call put_att(ncid, did, 'units', 'm')
       endif
       if (.not. save_short_traj) then
         call put_att(ncid, uvelid, 'long_name', 'zonal spped')
@@ -2019,8 +2021,6 @@ logical :: io_is_in_append_mode
         call put_att(ncid, vaid, 'units', 'm/s')
         call put_att(ncid, hdid, 'long_name', 'heat_density')
         call put_att(ncid, hdid, 'units', 'J/kg')
-        call put_att(ncid, did, 'long_name', 'thickness')
-        call put_att(ncid, did, 'units', 'm')
         call put_att(ncid, wid, 'long_name', 'width')
         call put_att(ncid, wid, 'units', 'm')
         call put_att(ncid, lid, 'long_name', 'length')
@@ -2136,6 +2136,7 @@ logical :: io_is_in_append_mode
         call put_double(ncid, mflbid, i, this%mass_of_fl_bits)
         call put_double(ncid, mflbbid, i, this%mass_of_fl_bergy_bits)
         call put_double(ncid, flkid, i, this%fl_k)
+        call put_double(ncid, did, i, this%thickness)
       endif
       if (.not. save_short_traj) then
         call put_double(ncid, uvelid, i, this%uvel)
@@ -2149,7 +2150,6 @@ logical :: io_is_in_append_mode
         call put_double(ncid, uaid, i, this%ua)
         call put_double(ncid, vaid, i, this%va)
         call put_double(ncid, hdid, i, this%heat_density)
-        call put_double(ncid, did, i, this%thickness)
         call put_double(ncid, wid, i, this%width)
         call put_double(ncid, lid, i, this%length)
         call put_double(ncid, sshxid, i, this%ssh_x)

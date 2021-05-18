@@ -19,7 +19,7 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 implicit none ; private
 
 integer :: buffer_width=36 ! This should be a parameter
-integer :: buffer_width_traj=33 ! This should be a parameter
+integer :: buffer_width_traj=32 ! This should be a parameter
 integer :: buffer_width_bond_traj=11 !This should be a parameter
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 
@@ -534,7 +534,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   logical :: only_interactive_forces=.False. !< Icebergs only feel interactive forces, and not ocean, wind...
   logical :: halo_debugging=.False. !< Use for debugging halos (remove when its working)
   logical :: save_short_traj=.True. !< True saves only lon,lat,time,id in iceberg_trajectory.nc
-  logical :: save_fl_traj=.False. ! True saves short traj, plus masses and footloose parameters in iceberg_trajectory.nc
+  logical :: save_fl_traj=.True. ! True saves short traj, plus masses and footloose parameters in iceberg_trajectory.nc
   logical :: ignore_traj=.False. !< If true, then model does not write trajectory data at all
   logical :: iceberg_bonds_on=.False. !< True=Allow icebergs to have bonds, False=don't allow.
   logical :: manually_initialize_bonds=.False. !< True= Bonds are initialize manually.
@@ -780,7 +780,7 @@ logical :: Static_icebergs=.False. ! True= icebergs do no move
 logical :: only_interactive_forces=.False. ! Icebergs only feel interactive forces, and not ocean, wind...
 logical :: halo_debugging=.False. ! Use for debugging halos (remove when its working)
 logical :: save_short_traj=.True. ! True saves only lon,lat,time,id in iceberg_trajectory.nc
-logical :: save_fl_traj=.False. ! True saves short traj, plus masses and footloose parameters in iceberg_trajectory.nc
+logical :: save_fl_traj=.True. ! True saves short traj, plus masses and footloose parameters in iceberg_trajectory.nc
 logical :: ignore_traj=.False. ! If true, then model does not traj trajectory data at all
 !logical :: iceberg_bonds_on=.False. ! True=Allow icebergs to have bonds, False=don't allow.
 logical :: manually_initialize_bonds=.False. ! True= Bonds are initialize manually.
@@ -790,7 +790,7 @@ logical :: scale_damping_by_pmag=.true. ! Scales damping by magnitude of (projec
 logical :: critical_interaction_damping_on=.true. ! Sets the damping on relative iceberg velocity to critical value - Added by Alon
 logical :: tang_crit_int_damp_on=.true. ! Critical interaction damping for tangential component?
 logical :: do_unit_tests=.false. ! Conduct some unit tests
-logical :: input_freq_distribution=.false. ! Flag to show if input distribution is freq or mass dist (=1 if input is a freq dist, =0 to use an input mass dist)
+logical :: input_freq_distribution=.true. ! Flag to show if input distribution is freq or mass dist (=1 if input is a freq dist, =0 to use an input mass dist)
 logical :: read_old_restarts=.false. ! Legacy option that does nothing
 logical :: use_old_spreading=.true. ! If true, spreads iceberg mass as if the berg is one grid cell wide
 logical :: read_ocean_depth_from_file=.false. ! If true, ocean depth is read from a file.
@@ -1266,7 +1266,7 @@ else
   buffer_width=buffer_width+(max_bonds*5) ! Increase buffer width to include bonds being passed between processors
 endif
 if (save_short_traj) buffer_width_traj=6 ! This is the length of the short buffer used for abrevated traj
-if (save_fl_traj) buffer_width_traj=buffer_width_traj+6
+if (save_fl_traj) buffer_width_traj=buffer_width_traj+7
 if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files should be ignored
 
 if (use_damage) then
@@ -3842,6 +3842,7 @@ subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj, save_fl_traj)
     call push_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bits)
     call push_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bergy_bits)
     call push_buffer_value(buff%data(:,n),counter,traj%fl_k)
+    call push_buffer_value(buff%data(:,n),counter,traj%thickness)
   endif
   if (.not. save_short_traj) then
     call push_buffer_value(buff%data(:,n),counter,traj%uvel)
@@ -3849,7 +3850,6 @@ subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj, save_fl_traj)
     call push_buffer_value(buff%data(:,n),counter,traj%uvel_prev)
     call push_buffer_value(buff%data(:,n),counter,traj%vvel_prev)
     call push_buffer_value(buff%data(:,n),counter,traj%heat_density)
-    call push_buffer_value(buff%data(:,n),counter,traj%thickness)
     call push_buffer_value(buff%data(:,n),counter,traj%width)
     call push_buffer_value(buff%data(:,n),counter,traj%length)
     call push_buffer_value(buff%data(:,n),counter,traj%uo)
@@ -3956,6 +3956,7 @@ subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj, save_fl_tra
     call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bits)
     call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bergy_bits)
     call pull_buffer_value(buff%data(:,n),counter,traj%fl_k)
+    call pull_buffer_value(buff%data(:,n),counter,traj%thickness)
   endif
   if (.not. save_short_traj) then
     call pull_buffer_value(buff%data(:,n),counter,traj%uvel)
@@ -3963,7 +3964,6 @@ subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj, save_fl_tra
     call pull_buffer_value(buff%data(:,n),counter,traj%uvel_prev)
     call pull_buffer_value(buff%data(:,n),counter,traj%vvel_prev)
     call pull_buffer_value(buff%data(:,n),counter,traj%heat_density)
-    call pull_buffer_value(buff%data(:,n),counter,traj%thickness)
     call pull_buffer_value(buff%data(:,n),counter,traj%width)
     call pull_buffer_value(buff%data(:,n),counter,traj%length)
     call pull_buffer_value(buff%data(:,n),counter,traj%uo)
@@ -5864,6 +5864,7 @@ endif
           posn%mass_of_fl_bits=this%mass_of_fl_bits
           posn%mass_of_fl_bergy_bits=this%mass_of_fl_bergy_bits
           posn%fl_k=this%fl_k
+          posn%thickness=this%thickness
         endif
         if (.not. bergs%save_short_traj) then !Not totally sure that this is correct
           posn%uvel=this%uvel
@@ -5871,7 +5872,6 @@ endif
           posn%uvel_prev=this%uvel_prev
           posn%vvel_prev=this%vvel_prev
           posn%heat_density=this%heat_density
-          posn%thickness=this%thickness
           posn%width=this%width
           posn%length=this%length
           posn%uo=this%uo
