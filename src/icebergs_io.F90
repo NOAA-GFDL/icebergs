@@ -1686,11 +1686,12 @@ character(len=37) :: filename
 end subroutine read_ocean_depth
 
 !> Write a trajectory-based diagnostics file
-subroutine write_trajectory(trajectory, save_short_traj, save_fl_traj)
+subroutine write_trajectory(trajectory, save_short_traj, save_fl_traj, fl_r)
 ! Arguments
 type(xyt), pointer :: trajectory !< An iceberg trajectory
 logical, intent(in) :: save_short_traj !< If true, record less data
 logical, intent(in) :: save_fl_traj !< If true, save masses and footloose data
+real, intent(in) :: fl_r !< If >0 and save_fl_traj, save footloose params
 ! Local variables
 integer :: iret, ncid, i_dim, i
 integer :: lonid, latid, yearid, dayid, uvelid, vvelid, idcntid, idijid
@@ -1698,7 +1699,7 @@ integer :: uvelpid,vvelpid
 integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid, sssid
 integer :: cnid, hiid, hsid
 integer :: mid, smid, did, wid, lid, mbid, mflbid, mflbbid, hdid, nbid, odid, flkid
-integer :: axnid,aynid,bxnid,bynid,axnfid,aynfid,bxnfid,bynfid
+integer :: axnid,aynid,bxnid,bynid,axnfid,aynfid,bxnfid,bynfid, msid
 integer :: eecid,edcid,eeid,edid,aeid,efid
 integer :: eectid, edctid, eetid, edtid, aetid
 integer :: avid, aaid, rid, abrid
@@ -1749,7 +1750,7 @@ logical :: io_is_in_append_mode
            call increase_ibuffer(ibuffer_io, ntrajs_rcvd_io,buffer_width_traj)
            call mpp_recv(ibuffer_io%data, ntrajs_rcvd_io*buffer_width_traj,from_pe=from_pe, tag=COMM_TAG_12)
            do i=1, ntrajs_rcvd_io
-              call unpack_traj_from_buffer2(traj4io, ibuffer_io, i, save_short_traj, save_fl_traj)
+              call unpack_traj_from_buffer2(traj4io, ibuffer_io, i, save_short_traj, save_fl_traj, fl_r)
            enddo
        endif
      enddo
@@ -1757,7 +1758,7 @@ logical :: io_is_in_append_mode
      ! Pack and send trajectories to the root PE for this I/O tile
      do while (associated(trajectory))
        ntrajs_sent_io = ntrajs_sent_io +1
-       call pack_traj_into_buffer2(trajectory, obuffer_io, ntrajs_sent_io, save_short_traj, save_fl_traj)
+       call pack_traj_into_buffer2(trajectory, obuffer_io, ntrajs_sent_io, save_short_traj, save_fl_traj, fl_r)
        this => trajectory ! Need to keep pointer in order to free up the links memory
        trajectory => trajectory%next ! This will eventually result in trajectory => null()
        deallocate(this) ! Delete the link from memory
@@ -1822,11 +1823,14 @@ logical :: io_is_in_append_mode
       if (save_fl_traj) then
         mid = inq_varid(ncid, 'mass')
         smid = inq_varid(ncid, 'start_mass')
-        mbid = inq_varid(ncid, 'mass_of_bits')
-        mflbid = inq_varid(ncid, 'mass_of_fl_bits')
-        mflbbid = inq_varid(ncid, 'mass_of_fl_bergy_bits')
-        flkid = inq_varid(ncid, 'fl_k')
         did = inq_varid(ncid, 'thickness')
+        mbid = inq_varid(ncid, 'mass_of_bits')
+        if (fl_r>0) then
+          msid = inq_varid(ncid, 'mass_scaling')
+          mflbid = inq_varid(ncid, 'mass_of_fl_bits')
+          mflbbid = inq_varid(ncid, 'mass_of_fl_bergy_bits')
+          flkid = inq_varid(ncid, 'fl_k')
+        endif
       endif
       if (.not.save_short_traj) then
         uvelid = inq_varid(ncid, 'uvel')
@@ -1904,11 +1908,14 @@ logical :: io_is_in_append_mode
       if (save_fl_traj) then
         mid = def_var(ncid, 'mass', NF_DOUBLE, i_dim)
         smid = def_var(ncid, 'start_mass', NF_DOUBLE, i_dim)
-        mbid = def_var(ncid, 'mass_of_bits', NF_DOUBLE, i_dim)
-        mflbid = def_var(ncid, 'mass_of_fl_bits', NF_DOUBLE, i_dim)
-        mflbbid = def_var(ncid, 'mass_of_fl_bergy_bits', NF_DOUBLE, i_dim)
-        flkid = def_var(ncid, 'fl_k', NF_DOUBLE, i_dim)
         did = def_var(ncid, 'thickness', NF_DOUBLE, i_dim)
+        mbid = def_var(ncid, 'mass_of_bits', NF_DOUBLE, i_dim)
+        if (fl_r>0) then
+          msid = def_var(ncid, 'mass_scaling', NF_DOUBLE, i_dim)
+          mflbid = def_var(ncid, 'mass_of_fl_bits', NF_DOUBLE, i_dim)
+          mflbbid = def_var(ncid, 'mass_of_fl_bergy_bits', NF_DOUBLE, i_dim)
+          flkid = def_var(ncid, 'fl_k', NF_DOUBLE, i_dim)
+        endif
       endif
       if (.not. save_short_traj) then
         uvelid = def_var(ncid, 'uvel', NF_DOUBLE, i_dim)
@@ -1991,16 +1998,20 @@ logical :: io_is_in_append_mode
         call put_att(ncid, mid, 'units', 'kg')
         call put_att(ncid, smid, 'long_name', 'start_mass')
         call put_att(ncid, smid, 'units', 'kg')
-        call put_att(ncid, mbid, 'long_name', 'mass_of_bits')
-        call put_att(ncid, mbid, 'units', 'kg')
-        call put_att(ncid, mflbid, 'long_name', 'mass_of_fl_bits')
-        call put_att(ncid, mflbid, 'units', 'kg')
-        call put_att(ncid, mflbbid, 'long_name', 'mass_of_fl_bergy_bits')
-        call put_att(ncid, mflbbid, 'units', 'kg')
-        call put_att(ncid, flkid, 'long_name', 'footloose calving k')
-        call put_att(ncid, flkid, 'units', 'none')
         call put_att(ncid, did, 'long_name', 'thickness')
         call put_att(ncid, did, 'units', 'm')
+        call put_att(ncid, mbid, 'long_name', 'mass_of_bits')
+        call put_att(ncid, mbid, 'units', 'kg')
+        if (fl_r>0) then
+          call put_att(ncid, msid, 'long_name', 'mass_scaling')
+          call put_att(ncid, msid, 'units', 'dimensionless')
+          call put_att(ncid, mflbid, 'long_name', 'mass_of_fl_bits')
+          call put_att(ncid, mflbid, 'units', 'kg')
+          call put_att(ncid, mflbbid, 'long_name', 'mass_of_fl_bergy_bits')
+          call put_att(ncid, mflbbid, 'units', 'kg')
+          call put_att(ncid, flkid, 'long_name', 'footloose calving k')
+          call put_att(ncid, flkid, 'units', 'none')
+        endif
       endif
       if (.not. save_short_traj) then
         call put_att(ncid, uvelid, 'long_name', 'zonal spped')
@@ -2132,11 +2143,14 @@ logical :: io_is_in_append_mode
       if (save_fl_traj) then
         call put_double(ncid, mid, i, this%mass)
         call put_double(ncid, smid, i, this%start_mass)
-        call put_double(ncid, mbid, i, this%mass_of_bits)
-        call put_double(ncid, mflbid, i, this%mass_of_fl_bits)
-        call put_double(ncid, mflbbid, i, this%mass_of_fl_bergy_bits)
-        call put_double(ncid, flkid, i, this%fl_k)
         call put_double(ncid, did, i, this%thickness)
+        call put_double(ncid, mbid, i, this%mass_of_bits)
+        if (fl_r>0) then
+          call put_double(ncid, msid, i, this%mass_scaling)
+          call put_double(ncid, mflbid, i, this%mass_of_fl_bits)
+          call put_double(ncid, mflbbid, i, this%mass_of_fl_bergy_bits)
+          call put_double(ncid, flkid, i, this%fl_k)
+        endif
       endif
       if (.not. save_short_traj) then
         call put_double(ncid, uvelid, i, this%uvel)

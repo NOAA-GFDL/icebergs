@@ -255,6 +255,7 @@ type :: xyt
   real :: heat_density !< Heat density of berg (J/kg)
   real :: od !< Ocean depth
   real :: start_mass
+  real :: mass_scaling
   integer :: year !< Year of this record (years)
   integer(kind=8) :: id = -1 !< Iceberg identifier
   type(xyt), pointer :: next=>null() !< Next link in list
@@ -462,6 +463,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   integer :: current_year !< Current year (years)
   real :: current_yearday !< Current year-day, 1.00-365.99, (days)
   real :: traj_area_thres !< Threshold for berg area (km^2) that must be exceeded to save a non-bonded berg trajectory
+  real :: traj_area_thres_sntbc !< Threshold for berg area (km^2) for saving trajectory when using save_nonfl_traj_by_class
   real :: traj_sample_hrs !< Period between sampling for trajectories (hours)
   real :: traj_write_hrs !< Period between writing of trajectories (hours)
   real :: verbose_hrs !< Period between terminal status reports (hours)
@@ -535,6 +537,10 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   logical :: halo_debugging=.False. !< Use for debugging halos (remove when its working)
   logical :: save_short_traj=.True. !< True saves only lon,lat,time,id in iceberg_trajectory.nc
   logical :: save_fl_traj=.True. ! True saves short traj, plus masses and footloose parameters in iceberg_trajectory.nc
+  real :: save_all_traj_year=huge(0.0) ! Year at which all trajectories (for all berg areas) are saved
+  logical :: save_nonfl_traj_by_class=.false. ! Save non-footloose trajectories based on initial mass class
+  real :: save_traj_by_class_start_mass_thres_n=0.0 ! The northern hemisphere mass thres for save_nonfl_traj_by_class
+  real :: save_traj_by_class_start_mass_thres_s=0.0 ! The southern hemisphere mass thres for save_nonfl_traj_by_class
   logical :: ignore_traj=.False. !< If true, then model does not write trajectory data at all
   logical :: iceberg_bonds_on=.False. !< True=Allow icebergs to have bonds, False=don't allow.
   logical :: manually_initialize_bonds=.False. !< True= Bonds are initialize manually.
@@ -625,6 +631,11 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   ! Footloose calving parameters [England et al (2020) Modeling the breakup of tabular icebergs. Sci. Adv.]
   logical :: fl_use_poisson_distribution=.true. !< fl_r is (T) mean of Poisson distribution to determine k, or (F) k=fl_r
   logical :: fl_use_perimeter=.false. !< scale number of footloose bergs to calve by perimeter of the parent berg
+  real :: fl_youngs=1.e8 !< Young's modulus for footloose calculations (Pa)
+  real :: fl_strength=500. !< yield stress for footloose calculations (kPa)
+  logical :: fl_use_l_scale=.false. !< footloose based on side melt and/or erosion
+  real :: fl_l_scale=1. !< scaling factor for footloose based on side melt
+  logical :: fl_l_scale_erosion_only=.true. !< fl according to erosion - buoyant convection
   real :: fl_r=0. !< footloose average number of bergs calved per fl_r_s
   real :: fl_r_s=0. !< seconds over which fl_r footloose bergs calve
   logical :: displace_fl_bergs=.true. !< footloose berg positions are randomly assigned along edges of parent berg
@@ -708,6 +719,7 @@ logical, intent(in), optional :: fractional_area !< If true, ice_area contains c
 ! Namelist parameters (and defaults)
 integer :: halo=4 ! Width of halo region
 real :: traj_area_thres=0. ! Threshold for berg area (km^2) that must be exceeded to save a non-bonded berg trajectory
+real :: traj_area_thres_sntbc=0. !< Threshold for berg area (km^2) for saving trajectory when using save_nonfl_traj_by_class
 real :: traj_sample_hrs=24. ! Period between sampling of position for trajectory storage
 real :: traj_write_hrs=480. ! Period between writing sampled trajectories to disk
 real :: verbose_hrs=24. ! Period between verbose messages
@@ -781,6 +793,10 @@ logical :: only_interactive_forces=.False. ! Icebergs only feel interactive forc
 logical :: halo_debugging=.False. ! Use for debugging halos (remove when its working)
 logical :: save_short_traj=.True. ! True saves only lon,lat,time,id in iceberg_trajectory.nc
 logical :: save_fl_traj=.True. ! True saves short traj, plus masses and footloose parameters in iceberg_trajectory.nc
+real :: save_all_traj_year=huge(0.0) ! Year at which all trajectories (for all berg areas) are saved
+logical :: save_nonfl_traj_by_class=.false. ! Save non-footloose trajectories based on initial mass class
+real :: save_traj_by_class_start_mass_thres_n=0.0 ! The northern hemisphere mass thres for save_nonfl_traj_by_class
+real :: save_traj_by_class_start_mass_thres_s=0.0 ! The southern hemisphere mass thres for save_nonfl_traj_by_class
 logical :: ignore_traj=.False. ! If true, then model does not traj trajectory data at all
 !logical :: iceberg_bonds_on=.False. ! True=Allow icebergs to have bonds, False=don't allow.
 logical :: manually_initialize_bonds=.False. ! True= Bonds are initialize manually.
@@ -828,6 +844,11 @@ logical :: use_spring_for_land_contact=.false. ! Treat contact with masked (land
 ! Footloose calving parameters [England et al (2020) Modeling the breakup of tabular icebergs. Sci. Adv.]
 logical :: fl_use_poisson_distribution=.true. ! fl_r is (T) mean of Poisson distribution to determine k, or (F) k=fl_r
 logical :: fl_use_perimeter=.false. ! scale number of footloose bergs to calve by perimeter of the parent berg
+real :: fl_youngs=1.e8 !< Young's modulus for footloose calculations (Pa)
+real :: fl_strength=500. !< yield stress for footloose calculations (kPa)
+logical :: fl_use_l_scale=.false. !< footloose based on side melt
+real :: fl_l_scale=1. !< scaling factor for footloose based on side melt and/or erosion
+logical :: fl_l_scale_erosion_only=.true. !< fl according to erosion - buoyant convection
 real :: fl_r=0. ! footloose average number of bergs calved per fl_r_s
 real :: fl_r_s=0. ! seconds over which fl_r footloose bergs calve
 logical :: displace_fl_bergs=.true. ! footloose berg positions are randomly assigned along edges of parent berg
@@ -864,7 +885,9 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          dem_shear_for_frac_only,use_damage,fl_use_poisson_distribution, fl_use_perimeter, fl_r, fl_r_s,displace_fl_bergs,&
          fl_style,fl_bits_erosion_to_bergy_bits,fl_k_scale_by_perimeter,use_spring_for_land_contact, save_fl_traj,&
          new_berg_from_fl_bits_mass_thres,fl_bits_scale_l,fl_bits_scale_w,fl_bits_scale_t,separate_distrib_for_n_hemisphere,&
-         initial_mass_n, distribution_n, mass_scaling_n, initial_thickness_n
+         initial_mass_n, distribution_n, mass_scaling_n, initial_thickness_n, fl_use_l_scale, fl_l_scale,&
+         fl_l_scale_erosion_only, fl_youngs, fl_strength,  save_all_traj_year, save_nonfl_traj_by_class,&
+         save_traj_by_class_start_mass_thres_n, save_traj_by_class_start_mass_thres_s,traj_area_thres_sntbc
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -873,6 +896,8 @@ real :: lon_mod, big_number
 logical :: lerr
 integer :: stdlogunit, stderrunit
 real :: Total_mass_s, Total_mass_n
+real :: remaining_dist_s,remaining_dist_n
+integer :: last_dist_j, last_dist_j_n
 real :: mts_fast_dt=0.0 !Added by Alex
 real :: maxlon_c,minlon_c !Added by Alex, for mts verlet periodicity
 integer :: k,maxk
@@ -1221,7 +1246,7 @@ real :: dx,dy,dx_dlon,dy_dlat,lat_ref2,lon_ref
 
   ! If a separate calving distribution for the northern hemisphere is not used, the following northern
   ! hemisphere parameters inherit the values of their respective southern hemisphere parameters
-  if (.not. bergs%separate_distrib_for_n_hemisphere) then
+  if (.not. separate_distrib_for_n_hemisphere) then
     initial_mass_n=initial_mass; distribution_n=distribution
     mass_scaling_n=mass_scaling; initial_thickness_n=initial_thickness
   endif
@@ -1238,6 +1263,33 @@ if (input_freq_distribution) then
            distribution(j)=(distribution(j)*initial_mass(j))/Total_mass_s
            distribution_n(j)=(distribution_n(j)*initial_mass_n(j))/Total_mass_n
      enddo
+
+     if (mpp_pe()==0) then
+       print *,'uncorrected distribution_s',distribution
+       print *,'uncorrected distribution_n',distribution_n
+     endif
+     !floating point fix: correct the distributions so that
+     !remaining_dist_s and remaining_dist_n in icebergs.F90/accumulate_calving are >= 0
+     do j=1,nclasses
+       if (distribution(j)>0.) last_dist_j=j
+       if (distribution_n(j)>0.) last_dist_j_n=j
+     enddo
+     remaining_dist_s=1.; remaining_dist_n=1.
+     do j=1,last_dist_j-1
+       remaining_dist_s=remaining_dist_s-distribution(j)
+     enddo
+     distribution(last_dist_j)=remaining_dist_s
+     do j=1,last_dist_j_n-1
+       remaining_dist_n=remaining_dist_n-distribution_n(j)
+     enddo
+     distribution_n(last_dist_j_n)=remaining_dist_n
+     if (mpp_pe()==0) then
+       print *,'remaining_dist_s, last_dist_j_s, remaining_dist_n','last_dist_j_n',&
+         remaining_dist_s-distribution(last_dist_j),last_dist_j,&
+         remaining_dist_n-distribution_n(last_dist_j_n),last_dist_j_n
+       print *,'corrected distribution_s',distribution
+       print *,'corrected distribution_n',distribution_n
+     endif
 endif
 
 if ((halo .lt. 3) .and. (rotate_icebergs_for_mass_spreading .and. iceberg_bonds_on) )   then
@@ -1266,7 +1318,13 @@ else
   buffer_width=buffer_width+(max_bonds*5) ! Increase buffer width to include bonds being passed between processors
 endif
 if (save_short_traj) buffer_width_traj=6 ! This is the length of the short buffer used for abrevated traj
-if (save_fl_traj) buffer_width_traj=buffer_width_traj+7
+if (save_fl_traj) then
+  if (fl_r>0) then
+    buffer_width_traj=buffer_width_traj+8
+  else
+    buffer_width_traj=buffer_width_traj+4
+  endif
+endif
 if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files should be ignored
 
 if (use_damage) then
@@ -1344,10 +1402,15 @@ endif
  ! Parameters
   bergs%dt=dt
   bergs%traj_area_thres=traj_area_thres
+  bergs%traj_area_thres_sntbc=traj_area_thres_sntbc
   bergs%traj_sample_hrs=traj_sample_hrs
   bergs%traj_write_hrs=traj_write_hrs
   bergs%save_short_traj=save_short_traj
   bergs%save_fl_traj=save_fl_traj
+  bergs%save_all_traj_year=save_all_traj_year
+  bergs%save_nonfl_traj_by_class=save_nonfl_traj_by_class
+  bergs%save_traj_by_class_start_mass_thres_n=save_traj_by_class_start_mass_thres_n
+  bergs%save_traj_by_class_start_mass_thres_s=save_traj_by_class_start_mass_thres_s
   bergs%ignore_traj=ignore_traj
   bergs%verbose_hrs=verbose_hrs
   bergs%grd%halo=halo
@@ -1452,6 +1515,11 @@ endif
   ! Footloose calving parameters
   bergs%fl_use_poisson_distribution=fl_use_poisson_distribution
   bergs%fl_use_perimeter=fl_use_perimeter
+  bergs%fl_youngs=fl_youngs
+  bergs%fl_strength=fl_strength
+  bergs%fl_use_l_scale=fl_use_l_scale
+  bergs%fl_l_scale=fl_l_scale
+  bergs%fl_l_scale_erosion_only=fl_l_scale_erosion_only
   bergs%new_berg_from_fl_bits_mass_thres=new_berg_from_fl_bits_mass_thres
   bergs%fl_r=fl_r
   bergs%fl_r_s=fl_r_s
@@ -1462,6 +1530,14 @@ endif
   bergs%fl_bits_scale_l=fl_bits_scale_l
   bergs%fl_bits_scale_w=fl_bits_scale_w
   bergs%fl_bits_scale_t=fl_bits_scale_t
+  if (bergs%fl_use_l_scale) then
+    bergs%fl_use_perimeter=.true.
+    bergs%fl_k_scale_by_perimeter=1
+    if (.not. bergs%use_operator_splitting) then
+      call error_mesg('KID, ice_bergs_framework_init', &
+        'use_operator_splitting must be true when fl_use_l_scale=.true.', FATAL)
+    endif
+  endif
 
   if (monitor_energy) then
     if (bergs%constant_interaction_LW) then
@@ -3813,13 +3889,14 @@ integer :: new_size, old_size
 end subroutine increase_ibuffer
 
 !> Packs a trajectory entry into a buffer
-subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj, save_fl_traj)
+subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj, save_fl_traj, fl_r)
   ! Arguments
   type(xyt), pointer :: traj !< Trajectory entry to pack
   type(buffer), pointer :: buff !< Buffer to pack entry into
   integer, intent(in) :: n !< Position in buffer to place entry
   logical, intent(in) :: save_short_traj !< If true, only use a subset of trajectory data
   logical, intent(in) :: save_fl_traj !< If true, save masses and footloose parameters
+  real, intent(in) :: fl_r !< If >0 and save_fl_traj, save footloose parameters
   ! Local variables
   integer :: counter ! Position in stack
   integer :: cnt, ij
@@ -3838,11 +3915,14 @@ subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj, save_fl_traj)
   if (save_fl_traj) then
     call push_buffer_value(buff%data(:,n),counter,traj%mass)
     call push_buffer_value(buff%data(:,n),counter,traj%start_mass)
-    call push_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
-    call push_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bits)
-    call push_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bergy_bits)
-    call push_buffer_value(buff%data(:,n),counter,traj%fl_k)
     call push_buffer_value(buff%data(:,n),counter,traj%thickness)
+    call push_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
+    if (fl_r>0) then
+      call push_buffer_value(buff%data(:,n),counter,traj%mass_scaling)
+      call push_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bits)
+      call push_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bergy_bits)
+      call push_buffer_value(buff%data(:,n),counter,traj%fl_k)
+    endif
   endif
   if (.not. save_short_traj) then
     call push_buffer_value(buff%data(:,n),counter,traj%uvel)
@@ -3910,13 +3990,14 @@ subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj, save_fl_traj)
 end subroutine pack_traj_into_buffer2
 
 !> Unpacks a trajectory entry from a buffer
-subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj, save_fl_traj)
+subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj, save_fl_traj, fl_r)
   ! Arguments
   type(xyt), pointer :: first !< Trajectory list
   type(buffer), pointer :: buff !< Buffer from which to unpack
   integer, intent(in) :: n !< Position in buffer to unpack
   logical, intent(in) :: save_short_traj !< If true, only use a subset of trajectory data
   logical, intent(in) :: save_fl_traj !< If true, save masses and footloose parameters
+  real, intent(in) :: fl_r !< If >0 and save_fl_traj, save footloose parameters
   ! Local variables
   type(xyt) :: traj
   integer :: counter ! Position in stack
@@ -3952,11 +4033,14 @@ subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj, save_fl_tra
   if (save_fl_traj) then
     call pull_buffer_value(buff%data(:,n),counter,traj%mass)
     call pull_buffer_value(buff%data(:,n),counter,traj%start_mass)
-    call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
-    call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bits)
-    call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bergy_bits)
-    call pull_buffer_value(buff%data(:,n),counter,traj%fl_k)
     call pull_buffer_value(buff%data(:,n),counter,traj%thickness)
+    call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
+    if (fl_r>0) then
+      call pull_buffer_value(buff%data(:,n),counter,traj%mass_scaling)
+      call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bits)
+      call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bergy_bits)
+      call pull_buffer_value(buff%data(:,n),counter,traj%fl_k)
+    endif
   endif
   if (.not. save_short_traj) then
     call pull_buffer_value(buff%data(:,n),counter,traj%uvel)
@@ -5801,10 +5885,11 @@ type(iceberg), pointer :: this, other_berg
 integer :: grdi, grdj
 integer :: js,je,is,ie
 type(bond) , pointer :: current_bond
-real :: area_thres
+real :: area_thres,area_thres2
 ! Local bond variables
 type(bond_xyt) :: bond_posn
-real :: dx_dlon,dy_dlat,lat_ref,dx,dy,n1,n2,id1,id2
+real :: dx_dlon,dy_dlat,lat_ref,dx,dy,n1,n2,id1,id2,berg_area
+logical :: loc_save_nonfl_traj_by_class
 
 if (bergs%debug_write) then
   js=bergs%grd%jsd+1; je=bergs%grd%jed; is=bergs%grd%isd+1; ie=bergs%grd%ied
@@ -5846,12 +5931,26 @@ endif
   endif
 
   area_thres=bergs%traj_area_thres*1.e6 ! convert from km^2 to m^2
+  area_thres2=bergs%traj_area_thres_sntbc*1.e6
+  loc_save_nonfl_traj_by_class=.false.
 
   do grdj = js,je ; do grdi = is,ie
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
+      berg_area=this%mass/(bergs%rho_bergs*this%thickness)
+      if (bergs%save_nonfl_traj_by_class) then
+        loc_save_nonfl_traj_by_class=.false.
+        if (this%fl_k>=0. .and. berg_area>area_thres2) then
+          if (this%lat<0.) then
+            if (this%start_mass>=bergs%save_traj_by_class_start_mass_thres_s) loc_save_nonfl_traj_by_class=.true.
+          else
+            if (this%start_mass>=bergs%save_traj_by_class_start_mass_thres_n) loc_save_nonfl_traj_by_class=.true.
+          endif
+        endif
+      endif
       current_bond=>this%first_bond
-      if ( (this%mass/(bergs%rho_bergs*this%thickness)) >= area_thres .or. associated(current_bond) ) then
+      if ( bergs%current_year>bergs%save_all_traj_year .or. loc_save_nonfl_traj_by_class .or. &
+        berg_area >= area_thres .or. associated(current_bond) ) then
         posn%lon=this%lon
         posn%lat=this%lat
         posn%year=bergs%current_year
@@ -5860,11 +5959,14 @@ endif
         if (bergs%save_fl_traj) then
           posn%mass=this%mass
           posn%start_mass=this%start_mass
-          posn%mass_of_bits=this%mass_of_bits
-          posn%mass_of_fl_bits=this%mass_of_fl_bits
-          posn%mass_of_fl_bergy_bits=this%mass_of_fl_bergy_bits
-          posn%fl_k=this%fl_k
           posn%thickness=this%thickness
+          posn%mass_of_bits=this%mass_of_bits
+          if (bergs%fl_r>0) then
+            posn%mass_scaling=this%mass_scaling
+            posn%mass_of_fl_bits=this%mass_of_fl_bits
+            posn%mass_of_fl_bergy_bits=this%mass_of_fl_bergy_bits
+            posn%fl_k=this%fl_k
+          endif
         endif
         if (.not. bergs%save_short_traj) then !Not totally sure that this is correct
           posn%uvel=this%uvel

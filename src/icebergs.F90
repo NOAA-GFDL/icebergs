@@ -188,7 +188,7 @@ subroutine debugwriteandstop(bergs)
   bergs%debug_write=.true.
   call record_posn(bergs)
   call move_all_trajectories(bergs)
-  call write_trajectory(bergs%trajectories, bergs%save_short_traj, bergs%save_fl_traj)
+  call write_trajectory(bergs%trajectories, bergs%save_short_traj, bergs%save_fl_traj, bergs%fl_r)
   if (save_bond_traj) call write_bond_trajectory(bergs%bond_trajectories)
   call mpp_sync()
   call error_mesg('KID', 'WRITE AND STOP!!!', FATAL)
@@ -851,7 +851,7 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
   real :: A2,T2,M2,u2,v2,lon2,lat2,R2 ! Other iceberg
   real :: dlon, dlat, lat_ref, dx_dlon, dy_dlat
   real :: r_dist_x, r_dist_y, r_dist
-  real :: Rmin, delta, L, l0, youngs, Thick, T_Rmin, n1, n2
+  real :: Rmin, delta, L, l0, youngs_dem, Thick, T_Rmin, n1, n2
   real :: ur, vr, up, vp, rotu, rotv, rtu, rtv, RR1, RR2
   real :: ur2, vr2
   real :: ss_factor, ss1, ss2
@@ -940,13 +940,13 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
     !Thick=min(T1,T2) !minimum thickness
     !Thick=0.5*(T1+T2) !average thickness
 
-    youngs=bergs%dem_spring_coef
+    youngs_dem=bergs%dem_spring_coef
 
     !normal force:
-    !Fn_x=youngs*Thick*delta*n1*L/l0 !Fn_y=youngs*Thick*delta*n2*L/l0
-    !normal stiffness is youngs*Thick*L/l0
-    if (savestress) current_bond%nstress=-youngs*delta/l0 !normal stress
-    Fn_x=youngs*Thick*delta*L/l0; Fn_y=Fn_x*n2; Fn_x=Fn_x*n1
+    !Fn_x=youngs_dem*Thick*delta*n1*L/l0 !Fn_y=youngs_dem*Thick*delta*n2*L/l0
+    !normal stiffness is youngs_dem*Thick*L/l0
+    if (savestress) current_bond%nstress=-youngs_dem*delta/l0 !normal stress
+    Fn_x=youngs_dem*Thick*delta*L/l0; Fn_y=Fn_x*n2; Fn_x=Fn_x*n1
 
     !relative translational velocity
     ur=berg%uvel_old-other_berg%uvel_old; vr=berg%vvel_old-other_berg%vvel_old
@@ -980,7 +980,7 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
     endif
 
     !shear terms
-    ss_factor=-L*Thick*youngs/(l0*2.0*(1.0+bergs%poisson)) !shear stiffness
+    ss_factor=-L*Thick*youngs_dem/(l0*2.0*(1.0+bergs%poisson)) !shear stiffness
     if (bergs%ignore_tangential_force) ss_factor=0.
     Fs_x=ss_factor*current_bond%tangd1; Fs_y=ss_factor*current_bond%tangd2 !shear forces
     if (savestress) current_bond%sstress=sqrt(Fs_x**2+Fs_y**2)/(L*Thick) !shear stress
@@ -989,10 +989,10 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
     Ts = -(RR1x*Fs_y-RR1y*Fs_x)
 
     !Torque from relative particle rotation
-    Tr = -youngs*Thick*(L*L*L)*sin(berg%rot-other_berg%rot)/(12.*l0)
+    Tr = -youngs_dem*Thick*(L*L*L)*sin(berg%rot-other_berg%rot)/(12.*l0)
 
     !damping
-    K_damp = 2.*youngs/(3.*(1.-bergs%poisson**2)) !damping factor
+    K_damp = 2.*youngs_dem/(3.*(1.-bergs%poisson**2)) !damping factor
     Meff = M1*M2/(M1+M2) !effective mass
 
     damping_coef = bergs%dem_damping_coef*sqrt(K_damp*Meff)
@@ -2554,6 +2554,8 @@ subroutine footloose_calving(bergs, time)
   type(icebergs_gridded), pointer :: grd
   type(bond), pointer :: current_bond
   real, save :: N_max, youngs, poisson, l_c, lw_c, B_c, exp_nlambda, rn
+  real, save :: e1, drho, sigmay, lfootparam
+  real :: foot_l,foot_mass, foot_area
   type(randomNumberStream),save :: rns ! Random numbers for stochastic tidal parameterization
   logical, save :: Visited=.false.
   integer :: grdi, grdj
@@ -2578,7 +2580,14 @@ subroutine footloose_calving(bergs, time)
       N_max=0.0
     endif
 
-    youngs=1.e8; poisson=0.3
+    !for fl_use_l_scale
+    e1=exp(0.25*pi)
+    drho=rho_seawater-bergs%rho_bergs
+    sigmay=bergs%fl_strength*1000 !strength (Pa)
+    !to get foot length for calving, multiply lfootparam by thickness/l_w
+    lfootparam=e1*rho_seawater*sigmay/(6*bergs%rho_bergs*gravity*drho)
+
+    poisson=0.3; youngs=bergs%fl_youngs
     l_c  = pi/(2.*sqrt(2.)) !for length-scale of child iceberg
     lw_c = 1./(gravity*rho_seawater) !for buoyancy length
     B_c  = youngs/(12.*(1.-poisson**2.)) !for bending stiffness
@@ -2644,47 +2653,73 @@ subroutine footloose_calving(bergs, time)
           endif
         endif
 
-        if (max_k==0) then
-          k=0
-          this%fl_k=0
+        if (bergs%fl_use_l_scale) then
+          if (max_k==0) then
+            k=0
+          else
+            ! !here, fl_k is the accumulated mass from side melt/erosion
+            ! foot_l = lfootparam*T/l_w
+            ! !this is the mass of side melt/erosion needed to calve a single footloose berg
+            ! foot_mass = foot_l * T*(1.-bergs%rho_bergs/rho_seawater) * l_b3 * bergs%rho_bergs
+            ! !If bergs%fl_l_scale=1, all side mass loss is above sea level, and goes into creating the
+            ! !foot. Adjust to >1 if some mass loss evenly melts the sides at all depths...
+            ! foot_mass = bergs%fl_l_scale * foot_mass/T
+            ! k=floor(this%fl_k/foot_mass)
+            ! if (k>max_k) k=max_k
+            ! this%fl_k=this%fl_k-k*foot_mass
+
+            !here, fl_k is the accumulated mass from side melt/erosion
+            foot_l = lfootparam*T/l_w
+            !this is the area of side melt/erosion needed to calve a single footloose berg
+            foot_area = foot_l * l_b3
+            foot_area = bergs%fl_l_scale * foot_area
+            k=floor(this%fl_k/foot_area)
+            if (k>max_k) k=max_k
+            this%fl_k=this%fl_k-k*foot_area
+          endif
         else
-          ! If sea ice concentration is <=50%, generate footloose child bergs
-          IC=min(1.,grd%cn(grdi,grdj)+bergs%sicn_shift) !sea ice only known on grid when this routine is called
-          if (.not. IC>0.5) then
+          if (max_k==0) then
+            k=0
+            this%fl_k=0
+          else
+            ! If sea ice concentration is <=50%, generate footloose child bergs
+            IC=min(1.,grd%cn(grdi,grdj)+bergs%sicn_shift) !sea ice only known on grid when this routine is called
+            if (.not. IC>0.5) then
 
-            if (bergs%fl_use_poisson_distribution) then
-              k=0; pu=1.0
-              do while (pu >= exp_nlambda)
-                call getRandomNumbers(rns, rn)
-                pu=pu*rn
-                k=k+1
-              enddo
-              k=k-1.0 !FL calving rate (per day or year)
-            else
-              k=bergs%fl_r
-            endif
-
-            if (bergs%iceberg_bonds_on) k=k*((N_max-N_bonds)/N_max) !reduce FL calve rate by number of bonds
-            k=k*(bergs%dt/bergs%fl_r_s) !scale k to dt
-            if (bergs%fl_k_scale_by_perimeter>0) then
-              if (c == 0) then
-                !W not eligible for footloose, so only scale by length
-                k = k * 2.*L/bergs%fl_k_scale_by_perimeter
+              if (bergs%fl_use_poisson_distribution) then
+                k=0; pu=1.0
+                do while (pu >= exp_nlambda)
+                  call getRandomNumbers(rns, rn)
+                  pu=pu*rn
+                  k=k+1
+                enddo
+                k=k-1.0 !FL calving rate (per day or year)
               else
-                k = k * 2.*(L+W)/bergs%fl_k_scale_by_perimeter
+                k=bergs%fl_r
               endif
-            endif
-            this%fl_k=this%fl_k+k       !update fl_k
+
+              if (bergs%iceberg_bonds_on) k=k*((N_max-N_bonds)/N_max) !reduce FL calve rate by number of bonds
+              k=k*(bergs%dt/bergs%fl_r_s) !scale k to dt
+              if (bergs%fl_k_scale_by_perimeter>0) then
+                if (c == 0) then
+                  !W not eligible for footloose, so only scale by length
+                  k = k * 2.*L/bergs%fl_k_scale_by_perimeter
+                else
+                  k = k * 2.*(L+W)/bergs%fl_k_scale_by_perimeter
+                endif
+              endif
+              this%fl_k=this%fl_k+k       !update fl_k
+            end if
+
+            k=floor(this%fl_k)
           endif
 
-          k=floor(this%fl_k)
-        endif
-
-        if (k>max_k) then
-          k=max_k
-          this%fl_k=0.
-        else
-          this%fl_k=this%fl_k-k !save the remainder for the next timestep
+          if (k>max_k) then
+            k=max_k
+            this%fl_k=0.
+          else
+            this%fl_k=this%fl_k-k !save the remainder for the next timestep
+          endif
         endif
 
         !if there is footloose calving, create the new bergs and reduce length of parent berg
@@ -2929,7 +2964,7 @@ subroutine thermodynamics(bergs)
   ! Local variables
   type(icebergs_gridded), pointer :: grd
   type(bond), pointer :: current_bond
-  real :: M, T, W, L, SST, Vol, Ln, Wn, Tn, nVol, IC, Dn
+  real :: M, T, W, L, SST, Vol, Ln, Ln1, Wn, Wn1, Tn, nVol, IC, Dn
   real :: Mv, Me, Mb, melt, dvo, dva, dM, Ss, dMe, dMb, dMv
   real :: Mnew, Mnew1, Mnew2, Hocean
   real :: Mbits, nMbits, dMbitsE, dMbitsM, Lbits, Abits, Mbb
@@ -2942,9 +2977,10 @@ subroutine thermodynamics(bergs)
   ! Footloose bits stuff
   real :: Lfl, Wfl, Tfl, Mfl, Afl, Me_fl, Mv_fl, Mb_fl, dMfl
   real :: Volfl, Lnfl, Wnfl, Tnfl, nVolfl, Mnew1_fl, Mnew2_fl, Mnew_fl
-  real :: dMb_fl, dMv_fl, dMe_fl
+  real :: dMb_fl, dMv_fl, dMe_fl, dMe_l, dMv_l
   real :: Mbits_fl, dMbitsE_fl, nMbits_fl, Lbits_fl, Abits_fl, Mbb_fl, dMbitsM_fl
-  real :: prev_mass_of_fl_bits, prev_mass_of_fl_bergy_bits, M_edit, Mscale_edit
+  real :: prev_mass_of_fl_bits, prev_mass_of_fl_bergy_bits, M_edit, Mscale_edit,l_b3,fb, kd
+  real, parameter :: l_c=pi/(2.*sqrt(2.)),lw_c = 1./(gravity*rho_seawater),B_c=1./(12.*(1.-0.3**2.))
 
   ! For convenience
   grd=>bergs%grd
@@ -3052,14 +3088,14 @@ subroutine thermodynamics(bergs)
         Mnew1=(nVol/Vol)*M ! new mass (kg)
         dMb=M-Mnew1 ! mass lost to basal melting (>0) (kg)
 
-        Ln=max(L-Mv*bergs%dt,0.) ! new length (m)
-        Wn=max(W-Mv*bergs%dt,0.) ! new width (m)
-        nVol=Tn*Wn*Ln ! new volume (m^3)
+        Ln1=max(L-Mv*bergs%dt,0.) ! new length (m)
+        Wn1=max(W-Mv*bergs%dt,0.) ! new width (m)
+        nVol=Tn*Wn1*Ln1 ! new volume (m^3)
         Mnew2=(nVol/Vol)*M ! new mass (kg)
         dMv=Mnew1-Mnew2 ! mass lost to buoyant convection (>0) (kg)
 
-        Ln=max(Ln-Me*bergs%dt,0.) ! new length (m)
-        Wn=max(Wn-Me*bergs%dt,0.) ! new width (m)
+        Ln=max(Ln1-Me*bergs%dt,0.) ! new length (m)
+        Wn=max(Wn1-Me*bergs%dt,0.) ! new width (m)
         nVol=Tn*Wn*Ln ! new volume (m^3)
         Mnew=(nVol/Vol)*M ! new mass (kg)
         dMe=Mnew2-Mnew ! mass lost to erosion (>0) (kg)
@@ -3076,6 +3112,58 @@ subroutine thermodynamics(bergs)
         dMb=(M/Vol)*(W*L)*Mb*bergs%dt ! approx. mass loss to basal melting (kg)
         dMe=(M/Vol)*(T*(W+L))*Me*bergs%dt ! approx. mass lost to erosion (kg)
         dMv=(M/Vol)*(T*(W+L))*Mv*bergs%dt ! approx. mass loss to buoyant convection (kg)
+      endif
+
+      ! !if footloose is based on length of foot, accumulate side mass loss on fl_k
+      ! !note: this only works when bergs%use_operator_splitting=.true.
+      ! if (bergs%fl_use_l_scale .and. this%fl_k>=0) then
+      !   l_b3 = 3.*l_c*(lw_c*bergs%fl_youngs*B_c*(Tn**3.))**0.25 !child berg length x 3
+      !   if (L>l_b3) then !do not accumulate side made loss for sides < l_b3
+      !     if (W>l_b3) then
+      !       if (bergs%fl_l_scale_erosion_only) then
+      !         this%fl_k=this%fl_k + (dMe - dMv)/Tn
+      !         if (this%fl_k<0) this%fl_k=0
+      !       else
+      !         this%fl_k= this%fl_k + (dMe + dMv)/Tn
+      !       endif
+      !     else
+      !       dMv_l=dMv*(Wn1 + W)/(2.*(Ln1 + W)) !mass loss from length from buoyant convection
+      !       dMe_l=dMe*(Wn+ Wn1)/(2.*(Ln+ Wn1)) !mass loss from length from erosion
+      !       if (bergs%fl_l_scale_erosion_only) then
+      !         this%fl_k=this%fl_k + (dMe_l - dMv_l)/Tn
+      !         if (this%fl_k<0) this%fl_k=0
+      !       else
+      !         this%fl_k= this%fl_k + (dMe_l + dMv_l)/Tn
+      !       endif
+      !     endif
+      !   endif
+      ! endif
+
+      !if footloose is based on length of foot, accumulate side mass loss on fl_k
+      !note: this only works when bergs%use_operator_splitting=.true.
+      if (bergs%fl_use_l_scale .and. this%fl_k>=0) then
+        l_b3 = 3.*l_c*(lw_c*bergs%fl_youngs*B_c*(Tn**3.))**0.25 !child berg length x 3
+        if (L>l_b3) then !do not accumulate side made loss for sides < l_b3
+          fb = Tn*(1.-bergs%rho_bergs/rho_seawater) !freeboard
+          kd = Tn-fb !keel depth
+          if (W>l_b3) then
+            if (bergs%fl_l_scale_erosion_only) then
+              this%fl_k=this%fl_k + (dMe/fb - dMv/kd)/bergs%rho_bergs !horiz area from erosion - from buoy conv
+              if (this%fl_k<0) this%fl_k=0
+            else
+              this%fl_k= this%fl_k + (dMe + dMv)/Tn
+            endif
+          else
+            dMv_l=dMv*(Wn1 + W)/(2.*(Ln1 + W)) !mass loss from length from buoyant convection
+            dMe_l=dMe*(Wn+ Wn1)/(2.*(Ln+ Wn1)) !mass loss from length from erosion
+            if (bergs%fl_l_scale_erosion_only) then
+              this%fl_k=this%fl_k + (dMe_l/fb - dMv_l/kd)/bergs%rho_bergs
+              if (this%fl_k<0) this%fl_k=0
+            else
+              this%fl_k= this%fl_k + (dMe_l + dMv_l)/Tn
+            endif
+          endif
+        endif
       endif
 
       ! Footloose bits (FL bits). For now, FL bits do not erode into bergy bits.
@@ -3432,10 +3520,10 @@ subroutine fl_bits_dimensions(bergs,this,L_fl,W_fl,T_fl)
   real :: T_fl !< Footloose berg bits thickness
   ! Local variables
   real,parameter :: l_c=pi/(2.*sqrt(2.)), lw_c = 1./(gravity*rho_seawater)
-  real,parameter :: B_c=1.e8/(12.*(1.-0.3**2.)) !youngs=1.e8, poisson=0.3
+  real,parameter :: B_c=1./(12.*(1.-0.3**2.)) !poisson=0.3
   real :: l_w,l_b
 
-  l_w  = (lw_c*B_c*(this%thickness**3.))**0.25  !buoyancy length
+  l_w  = (lw_c*bergs%fl_youngs*B_c*(this%thickness**3.))**0.25  !buoyancy length
   l_b  = l_c*l_w !length of a freshly calved footloose child berg
   L_fl = bergs%fl_bits_scale_l*3.*l_b; W_fl=bergs%fl_bits_scale_w*l_b
   T_fl=bergs%fl_bits_scale_t*this%thickness
@@ -5536,7 +5624,7 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
   if (sample_traj .or. bergs%writeandstop) call record_posn(bergs)
   if (write_traj .or. bergs%writeandstop) then
     call move_all_trajectories(bergs)
-    call write_trajectory(bergs%trajectories, bergs%save_short_traj, bergs%save_fl_traj)
+    call write_trajectory(bergs%trajectories, bergs%save_short_traj, bergs%save_fl_traj, bergs%fl_r)
     if (save_bond_traj) call write_bond_trajectory(bergs%bond_trajectories)
   endif
 
@@ -8301,7 +8389,7 @@ subroutine icebergs_end(bergs)
   call move_all_trajectories(bergs, delete_bergs=.true.)
 
   if (.not. bergs%ignore_traj) then
-    call write_trajectory(bergs%trajectories, bergs%save_short_traj, bergs%save_fl_traj)
+    call write_trajectory(bergs%trajectories, bergs%save_short_traj, bergs%save_fl_traj, bergs%fl_r)
     if (save_bond_traj) call write_bond_trajectory(bergs%bond_trajectories)
   endif
 
