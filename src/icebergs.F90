@@ -3114,31 +3114,6 @@ subroutine thermodynamics(bergs)
         dMv=(M/Vol)*(T*(W+L))*Mv*bergs%dt ! approx. mass loss to buoyant convection (kg)
       endif
 
-      ! !if footloose is based on length of foot, accumulate side mass loss on fl_k
-      ! !note: this only works when bergs%use_operator_splitting=.true.
-      ! if (bergs%fl_use_l_scale .and. this%fl_k>=0) then
-      !   l_b3 = 3.*l_c*(lw_c*bergs%fl_youngs*B_c*(Tn**3.))**0.25 !child berg length x 3
-      !   if (L>l_b3) then !do not accumulate side made loss for sides < l_b3
-      !     if (W>l_b3) then
-      !       if (bergs%fl_l_scale_erosion_only) then
-      !         this%fl_k=this%fl_k + (dMe - dMv)/Tn
-      !         if (this%fl_k<0) this%fl_k=0
-      !       else
-      !         this%fl_k= this%fl_k + (dMe + dMv)/Tn
-      !       endif
-      !     else
-      !       dMv_l=dMv*(Wn1 + W)/(2.*(Ln1 + W)) !mass loss from length from buoyant convection
-      !       dMe_l=dMe*(Wn+ Wn1)/(2.*(Ln+ Wn1)) !mass loss from length from erosion
-      !       if (bergs%fl_l_scale_erosion_only) then
-      !         this%fl_k=this%fl_k + (dMe_l - dMv_l)/Tn
-      !         if (this%fl_k<0) this%fl_k=0
-      !       else
-      !         this%fl_k= this%fl_k + (dMe_l + dMv_l)/Tn
-      !       endif
-      !     endif
-      !   endif
-      ! endif
-
       !if footloose is based on length of foot, accumulate side mass loss on fl_k
       !note: this only works when bergs%use_operator_splitting=.true.
       if (bergs%fl_use_l_scale .and. this%fl_k>=0) then
@@ -3166,7 +3141,7 @@ subroutine thermodynamics(bergs)
         endif
       endif
 
-      ! Footloose bits (FL bits). For now, FL bits do not erode into bergy bits.
+      ! Footloose bits (FL bits).
       if (this%mass_of_fl_bits>0.) then
         call fl_bits_dimensions(bergs,this,Lfl,Wfl,Tfl)
         Mfl=this%mass_of_fl_bits
@@ -3302,42 +3277,37 @@ subroutine thermodynamics(bergs)
             melt=dMv/bergs%dt ! melt rate due to convection term in kg/s
             grd%melt_conv(i,j)=grd%melt_conv(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
           endif
+
+          if (dMfl>0) then
+            if(grd%id_melt_buoy_fl>0) then
+              melt=dMb_fl/bergs%dt ! melt rate due to buoyancy term in kg/s
+              grd%melt_buoy_fl(i,j)=grd%melt_buoy_fl(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
+            endif
+            if(grd%id_melt_eros_fl>0) then
+              melt=dMe_fl/bergs%dt ! erosion rate in kg/s
+              grd%melt_eros_fl(i,j)=grd%melt_eros_fl(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
+            endif
+            if(grd%id_melt_conv_fl>0) then
+              melt=dMv_fl/bergs%dt ! melt rate due to convection term in kg/s
+              grd%melt_conv_fl(i,j)=grd%melt_conv_fl(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
+            endif
+          endif
         else
           !Independently-tracked footloose "child" berg:
           if(grd%id_fl_child_melt>0) then
             melt=(dM-(dMbitsE-dMbitsM))/bergs%dt !total melt of the "child" berg (here, melts like a parent berg)
             grd%fl_child_melt(i,j)=grd%fl_child_melt(i,j)+melt/grd%area(i,j)*this%mass_scaling !kg/m2/s
           endif
-          if(grd%id_melt_buoy>0) then
+          if(grd%id_melt_buoy_fl>0) then
             melt=dMb/bergs%dt ! melt rate due to buoyancy term in kg/s
             grd%melt_buoy_fl(i,j)=grd%melt_buoy_fl(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
           endif
-          if(grd%id_melt_eros>0) then
+          if(grd%id_melt_eros_fl>0) then
             melt=dMe/bergs%dt ! erosion rate in kg/s
             grd%melt_eros_fl(i,j)=grd%melt_eros_fl(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
           endif
-          if(grd%id_melt_conv>0) then
+          if(grd%id_melt_conv_fl>0) then
             melt=dMv/bergs%dt ! melt rate due to convection term in kg/s
-            grd%melt_conv_fl(i,j)=grd%melt_conv_fl(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
-          endif
-        endif
-
-        if (dMfl>0) then
-          ! Footloose bit:
-          if(grd%id_fl_child_melt>0) then
-            melt=(dM-(dMbitsE-dMbitsM))/bergs%dt !total melt of the "child" FL bits
-            grd%fl_child_melt(i,j)=grd%fl_child_melt(i,j)+melt/grd%area(i,j)*this%mass_scaling !kg/m2/s
-          endif
-          if(grd%id_melt_buoy>0) then
-            melt=dMb_fl/bergs%dt ! melt rate due to buoyancy term in kg/s
-            grd%melt_buoy_fl(i,j)=grd%melt_buoy_fl(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
-          endif
-          if(grd%id_melt_eros>0) then
-            melt=dMe_fl/bergs%dt ! erosion rate in kg/s
-            grd%melt_eros_fl(i,j)=grd%melt_eros_fl(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
-          endif
-          if(grd%id_melt_conv>0) then
-            melt=dMv_fl/bergs%dt ! melt rate due to convection term in kg/s
             grd%melt_conv_fl(i,j)=grd%melt_conv_fl(i,j)+melt/grd%area(i,j)*this%mass_scaling ! kg/m2/s
           endif
         endif
