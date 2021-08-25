@@ -5138,7 +5138,7 @@ subroutine calculate_sum_over_bergs_diagnositcs(bergs, grd, berg, i, j)
 
   !Mass of bergy bits
   if (grd%id_bergy_mass>0 .or. bergs%add_weight_to_ocean)&
-    & grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+berg%mass_of_bits/grd%area(i,j)*berg%mass_scaling ! kg/m2
+    & grd%bergy_mass(i,j)=grd%bergy_mass(i,j)+(berg%mass_of_bits+berg%mass_of_fl_bergy_bits)/grd%area(i,j)*berg%mass_scaling ! kg/m2
 
   !Mass of footloose bits
   if (grd%id_fl_bits_mass>0 .or. bergs%add_weight_to_ocean)&
