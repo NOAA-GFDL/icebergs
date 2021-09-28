@@ -1825,6 +1825,8 @@ logical :: io_is_in_append_mode
         smid = inq_varid(ncid, 'start_mass')
         did = inq_varid(ncid, 'thickness')
         mbid = inq_varid(ncid, 'mass_of_bits')
+        uvelid = inq_varid(ncid, 'uvel')
+        vvelid = inq_varid(ncid, 'vvel')
         if (fl_r>0) then
           msid = inq_varid(ncid, 'mass_scaling')
           mflbid = inq_varid(ncid, 'mass_of_fl_bits')
@@ -1833,8 +1835,8 @@ logical :: io_is_in_append_mode
         endif
       endif
       if (.not.save_short_traj) then
-        uvelid = inq_varid(ncid, 'uvel')
-        vvelid = inq_varid(ncid, 'vvel')
+        !uvelid = inq_varid(ncid, 'uvel')
+        !vvelid = inq_varid(ncid, 'vvel')
         uvelpid = inq_varid(ncid, 'uvel_prev')
         vvelpid = inq_varid(ncid, 'vvel_prev')
         uoid = inq_varid(ncid, 'uo')
@@ -1910,6 +1912,8 @@ logical :: io_is_in_append_mode
         smid = def_var(ncid, 'start_mass', NF_DOUBLE, i_dim)
         did = def_var(ncid, 'thickness', NF_DOUBLE, i_dim)
         mbid = def_var(ncid, 'mass_of_bits', NF_DOUBLE, i_dim)
+        uvelid = def_var(ncid, 'uvel', NF_DOUBLE, i_dim)
+        vvelid = def_var(ncid, 'vvel', NF_DOUBLE, i_dim)
         if (fl_r>0) then
           msid = def_var(ncid, 'mass_scaling', NF_DOUBLE, i_dim)
           mflbid = def_var(ncid, 'mass_of_fl_bits', NF_DOUBLE, i_dim)
@@ -1918,8 +1922,8 @@ logical :: io_is_in_append_mode
         endif
       endif
       if (.not. save_short_traj) then
-        uvelid = def_var(ncid, 'uvel', NF_DOUBLE, i_dim)
-        vvelid = def_var(ncid, 'vvel', NF_DOUBLE, i_dim)
+        !uvelid = def_var(ncid, 'uvel', NF_DOUBLE, i_dim)
+        !vvelid = def_var(ncid, 'vvel', NF_DOUBLE, i_dim)
         uvelpid = def_var(ncid, 'uvel_prev', NF_DOUBLE, i_dim)
         vvelpid = def_var(ncid, 'vvel_prev', NF_DOUBLE, i_dim)
         uoid = def_var(ncid, 'uo', NF_DOUBLE, i_dim)
@@ -2002,6 +2006,10 @@ logical :: io_is_in_append_mode
         call put_att(ncid, did, 'units', 'm')
         call put_att(ncid, mbid, 'long_name', 'mass_of_bits')
         call put_att(ncid, mbid, 'units', 'kg')
+        call put_att(ncid, uvelid, 'long_name', 'zonal spped')
+        call put_att(ncid, uvelid, 'units', 'm/s')
+        call put_att(ncid, vvelid, 'long_name', 'meridional spped')
+        call put_att(ncid, vvelid, 'units', 'm/s')
         if (fl_r>0) then
           call put_att(ncid, msid, 'long_name', 'mass_scaling')
           call put_att(ncid, msid, 'units', 'dimensionless')
@@ -2014,10 +2022,10 @@ logical :: io_is_in_append_mode
         endif
       endif
       if (.not. save_short_traj) then
-        call put_att(ncid, uvelid, 'long_name', 'zonal spped')
-        call put_att(ncid, uvelid, 'units', 'm/s')
-        call put_att(ncid, vvelid, 'long_name', 'meridional spped')
-        call put_att(ncid, vvelid, 'units', 'm/s')
+        ! call put_att(ncid, uvelid, 'long_name', 'zonal spped')
+        ! call put_att(ncid, uvelid, 'units', 'm/s')
+        ! call put_att(ncid, vvelid, 'long_name', 'meridional spped')
+        ! call put_att(ncid, vvelid, 'units', 'm/s')
         call put_att(ncid, uoid, 'long_name', 'ocean zonal spped')
         call put_att(ncid, uoid, 'units', 'm/s')
         call put_att(ncid, void, 'long_name', 'ocean meridional spped')
@@ -2145,6 +2153,8 @@ logical :: io_is_in_append_mode
         call put_double(ncid, smid, i, this%start_mass)
         call put_double(ncid, did, i, this%thickness)
         call put_double(ncid, mbid, i, this%mass_of_bits)
+        call put_double(ncid, uvelid, i, this%uvel)
+        call put_double(ncid, vvelid, i, this%vvel)
         if (fl_r>0) then
           call put_double(ncid, msid, i, this%mass_scaling)
           call put_double(ncid, mflbid, i, this%mass_of_fl_bits)
@@ -2153,8 +2163,8 @@ logical :: io_is_in_append_mode
         endif
       endif
       if (.not. save_short_traj) then
-        call put_double(ncid, uvelid, i, this%uvel)
-        call put_double(ncid, vvelid, i, this%vvel)
+        ! call put_double(ncid, uvelid, i, this%uvel)
+        ! call put_double(ncid, vvelid, i, this%vvel)
         call put_double(ncid, uvelpid, i, this%uvel_prev)
         call put_double(ncid, vvelpid, i, this%vvel_prev)
         call put_double(ncid, uoid, i, this%uo)

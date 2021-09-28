@@ -464,6 +464,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   real :: current_yearday !< Current year-day, 1.00-365.99, (days)
   real :: traj_area_thres !< Threshold for berg area (km^2) that must be exceeded to save a non-bonded berg trajectory
   real :: traj_area_thres_sntbc !< Threshold for berg area (km^2) for saving trajectory when using save_nonfl_traj_by_class
+  real :: traj_area_thres_fl !< Threshold for berg area (km^2) that must be exceeded to save a non-bonded FL berg trajectory
   real :: traj_sample_hrs !< Period between sampling for trajectories (hours)
   real :: traj_write_hrs !< Period between writing of trajectories (hours)
   real :: verbose_hrs !< Period between terminal status reports (hours)
@@ -720,6 +721,7 @@ logical, intent(in), optional :: fractional_area !< If true, ice_area contains c
 integer :: halo=4 ! Width of halo region
 real :: traj_area_thres=0. ! Threshold for berg area (km^2) that must be exceeded to save a non-bonded berg trajectory
 real :: traj_area_thres_sntbc=0. !< Threshold for berg area (km^2) for saving trajectory when using save_nonfl_traj_by_class
+real :: traj_area_thres_fl=huge(0.0) ! Threshold for berg area (km^2) that must be exceeded to save a non-bonded FL berg trajectory
 real :: traj_sample_hrs=24. ! Period between sampling of position for trajectory storage
 real :: traj_write_hrs=480. ! Period between writing sampled trajectories to disk
 real :: verbose_hrs=24. ! Period between verbose messages
@@ -887,7 +889,8 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          new_berg_from_fl_bits_mass_thres,fl_bits_scale_l,fl_bits_scale_w,fl_bits_scale_t,separate_distrib_for_n_hemisphere,&
          initial_mass_n, distribution_n, mass_scaling_n, initial_thickness_n, fl_use_l_scale, fl_l_scale,&
          fl_l_scale_erosion_only, fl_youngs, fl_strength,  save_all_traj_year, save_nonfl_traj_by_class,&
-         save_traj_by_class_start_mass_thres_n, save_traj_by_class_start_mass_thres_s,traj_area_thres_sntbc
+         save_traj_by_class_start_mass_thres_n, save_traj_by_class_start_mass_thres_s,traj_area_thres_sntbc,&
+         traj_area_thres_fl
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -1320,9 +1323,9 @@ endif
 if (save_short_traj) buffer_width_traj=6 ! This is the length of the short buffer used for abrevated traj
 if (save_fl_traj) then
   if (fl_r>0) then
-    buffer_width_traj=buffer_width_traj+8
+    buffer_width_traj=buffer_width_traj+8+2
   else
-    buffer_width_traj=buffer_width_traj+4
+    buffer_width_traj=buffer_width_traj+4+2
   endif
 endif
 if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files should be ignored
@@ -1403,6 +1406,7 @@ endif
   bergs%dt=dt
   bergs%traj_area_thres=traj_area_thres
   bergs%traj_area_thres_sntbc=traj_area_thres_sntbc
+  bergs%traj_area_thres_fl=traj_area_thres_fl
   bergs%traj_sample_hrs=traj_sample_hrs
   bergs%traj_write_hrs=traj_write_hrs
   bergs%save_short_traj=save_short_traj
@@ -3917,6 +3921,8 @@ subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj, save_fl_traj, 
     call push_buffer_value(buff%data(:,n),counter,traj%start_mass)
     call push_buffer_value(buff%data(:,n),counter,traj%thickness)
     call push_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
+    call push_buffer_value(buff%data(:,n),counter,traj%uvel)
+    call push_buffer_value(buff%data(:,n),counter,traj%vvel)
     if (fl_r>0) then
       call push_buffer_value(buff%data(:,n),counter,traj%mass_scaling)
       call push_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bits)
@@ -3925,8 +3931,8 @@ subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj, save_fl_traj, 
     endif
   endif
   if (.not. save_short_traj) then
-    call push_buffer_value(buff%data(:,n),counter,traj%uvel)
-    call push_buffer_value(buff%data(:,n),counter,traj%vvel)
+    !call push_buffer_value(buff%data(:,n),counter,traj%uvel)
+    !call push_buffer_value(buff%data(:,n),counter,traj%vvel)
     call push_buffer_value(buff%data(:,n),counter,traj%uvel_prev)
     call push_buffer_value(buff%data(:,n),counter,traj%vvel_prev)
     call push_buffer_value(buff%data(:,n),counter,traj%heat_density)
@@ -4035,6 +4041,8 @@ subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj, save_fl_tra
     call pull_buffer_value(buff%data(:,n),counter,traj%start_mass)
     call pull_buffer_value(buff%data(:,n),counter,traj%thickness)
     call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
+    call pull_buffer_value(buff%data(:,n),counter,traj%uvel)
+    call pull_buffer_value(buff%data(:,n),counter,traj%vvel)
     if (fl_r>0) then
       call pull_buffer_value(buff%data(:,n),counter,traj%mass_scaling)
       call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bits)
@@ -4043,8 +4051,8 @@ subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj, save_fl_tra
     endif
   endif
   if (.not. save_short_traj) then
-    call pull_buffer_value(buff%data(:,n),counter,traj%uvel)
-    call pull_buffer_value(buff%data(:,n),counter,traj%vvel)
+    !call pull_buffer_value(buff%data(:,n),counter,traj%uvel)
+    !call pull_buffer_value(buff%data(:,n),counter,traj%vvel)
     call pull_buffer_value(buff%data(:,n),counter,traj%uvel_prev)
     call pull_buffer_value(buff%data(:,n),counter,traj%vvel_prev)
     call pull_buffer_value(buff%data(:,n),counter,traj%heat_density)
@@ -5885,11 +5893,11 @@ type(iceberg), pointer :: this, other_berg
 integer :: grdi, grdj
 integer :: js,je,is,ie
 type(bond) , pointer :: current_bond
-real :: area_thres,area_thres2
+real :: area_thres,area_thres2,area_thres3
 ! Local bond variables
 type(bond_xyt) :: bond_posn
 real :: dx_dlon,dy_dlat,lat_ref,dx,dy,n1,n2,id1,id2,berg_area
-logical :: loc_save_nonfl_traj_by_class
+logical :: loc_save_nonfl_traj_by_class,save_fl_berg
 
 if (bergs%debug_write) then
   js=bergs%grd%jsd+1; je=bergs%grd%jed; is=bergs%grd%isd+1; ie=bergs%grd%ied
@@ -5932,6 +5940,7 @@ endif
 
   area_thres=bergs%traj_area_thres*1.e6 ! convert from km^2 to m^2
   area_thres2=bergs%traj_area_thres_sntbc*1.e6
+  area_thres3=bergs%traj_area_thres_fl*1.e6
   loc_save_nonfl_traj_by_class=.false.
 
   do grdj = js,je ; do grdi = is,ie
@@ -5948,9 +5957,14 @@ endif
           endif
         endif
       endif
+      if (this%fl_k<0 .and. berg_area>area_thres3) then
+        save_fl_berg=.true.
+      else
+        save_fl_berg=.false.
+      endif
       current_bond=>this%first_bond
       if ( bergs%current_year>bergs%save_all_traj_year .or. loc_save_nonfl_traj_by_class .or. &
-        berg_area >= area_thres .or. associated(current_bond) ) then
+        berg_area >= area_thres .or. associated(current_bond) .or. save_fl_berg) then
         posn%lon=this%lon
         posn%lat=this%lat
         posn%year=bergs%current_year
@@ -5961,6 +5975,8 @@ endif
           posn%start_mass=this%start_mass
           posn%thickness=this%thickness
           posn%mass_of_bits=this%mass_of_bits
+          posn%uvel=this%uvel
+          posn%vvel=this%vvel
           if (bergs%fl_r>0) then
             posn%mass_scaling=this%mass_scaling
             posn%mass_of_fl_bits=this%mass_of_fl_bits
@@ -5969,8 +5985,8 @@ endif
           endif
         endif
         if (.not. bergs%save_short_traj) then !Not totally sure that this is correct
-          posn%uvel=this%uvel
-          posn%vvel=this%vvel
+          !posn%uvel=this%uvel
+          !posn%vvel=this%vvel
           posn%uvel_prev=this%uvel_prev
           posn%vvel_prev=this%vvel_prev
           posn%heat_density=this%heat_density
