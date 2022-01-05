@@ -20,6 +20,8 @@
 
 &icebergs_nml
 
+    orig_dem_moment_of_inertia=.true.
+
     !defaults given in parentheses:
     dem_beam_test=2
     dem=.true.

@@ -1,0 +1,26 @@
+TO RUN THE EXPERIMENT IN THE PAPER/AGU 2021:
+
+1. Make the iceberg input files:
+   cd makeberg; ./RUN_for_paper; cd ..
+
+2. (optional) Run the spinup without fracture or grounding, and test different ocean scaling, etc. These tests are used to determine which simulation best follows the observed A68:
+   ./RUN_test_init_for_paper.sh
+
+3. Run the selected spinup (which uses ocean_scaling=17.8) to the point for restart:
+   cp square_for_restart_od_17.8_ydn.1.nml input.nml
+   ./RUN_1p.sh
+
+4. Copy the restart to a new directory:
+   cp INPUT/ S_17.8_ydn.1_r/
+
+5. Rerun the simulation from the restart, this time activating grounding and fracture:
+   ./RUN_restart_for_paper.sh
+
+6. animate the results:
+   ./animate_trajectories.py -fname=sq_ssf_ssg1.e4_od17.8_addsm.true._rectx-37.5285_y-55.2166_n23_t10.nc
+
+
+Warning: steps 1 and 6 probably require different versions of python or packages. TODO: fix this.
+
+
+

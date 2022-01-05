@@ -47,16 +47,18 @@ def main(args ):
         length = file.variables['length'][:]
         n1 = file.variables['n1'][:]
         n2 = file.variables['n2'][:]
-        rot = file.variables['rotation'][:]
-        rrot = file.variables['rel_rotation'][:]
-        ns = file.variables['n_strain'][:]
-        nsr = file.variables['n_strain_rate'][:]
+        #rot = file.variables['rotation'][:]
+        #rrot = file.variables['rel_rotation'][:]
+        #ns = file.variables['n_strain'][:]
+        #nsr = file.variables['n_strain_rate'][:]
+        ns = file.variables['nstress'][:]
+        ss = file.variables['sstress'][:]
         id_cnt1 = file.variables['id_cnt1'][:]
         id_ij1 = file.variables['id_ij1'][:]
         id_cnt2 = file.variables['id_cnt2'][:]
         id_ij2 = file.variables['id_ij2'][:]
-        fields = ['x','y','time','len','n1','n2','rot','rrot','ns','nsr','berg_id1','berg_id2']
-
+        #fields = ['x','y','time','len','n1','n2','rot','rrot','ns','nsr','berg_id1','berg_id2']
+        fields = ['x','y','time','len','n1','n2','ns','ss','berg_id1','berg_id2']
     idmid=int('2',8)**32
     btime=year+day/365.15
     bidin1=id_cnt1*idmid+id_ij1
@@ -77,10 +79,12 @@ def main(args ):
     length = length[biddiff>0]
     n1 = n1[biddiff>0]
     n2 = n2[biddiff>0]
-    rot=rot[biddiff>0]
-    rrot=rrot[biddiff>0]
+    # rot=rot[biddiff>0]
+    # rrot=rrot[biddiff>0]
+    # ns=ns[biddiff>0]
+    # nsr=nsr[biddiff>0]
     ns=ns[biddiff>0]
-    nsr=nsr[biddiff>0]
+    ss=ss[biddiff>0]
     bidin1 = bidin1[biddiff>0]
     bidin2 = bidin2[biddiff>0]
 
@@ -93,10 +97,12 @@ def main(args ):
         blen = length[btime == utime[i]]
         bn1 = n1[btime == utime[i]]
         bn2 = n2[btime == utime[i]]
-        brot = rot[btime == utime[i]]
-        brrot = rrot[btime == utime[i]]
+        # brot = rot[btime == utime[i]]
+        # brrot = rrot[btime == utime[i]]
+        # bns = ns[btime == utime[i]]
+        # bnsr = nsr[btime == utime[i]]
         bns = ns[btime == utime[i]]
-        bnsr = nsr[btime == utime[i]]
+        bss = ss[btime == utime[i]]
         bid1 = bidin1[btime == utime[i]]
         bid2 = bidin2[btime == utime[i]]
 
@@ -105,8 +111,8 @@ def main(args ):
             writer = csv.writer(file)
             writer.writerow(fields)
             for j in range(len(x)):
-                writer.writerow([x[j],y[j],time[j],blen[j],bn1[j],bn2[j],brot[j],brrot[j],bns[j],bnsr[j],bid1[j],bid2[j]])
-
+               # writer.writerow([x[j],y[j],time[j],blen[j],bn1[j],bn2[j],brot[j],brrot[j],bns[j],bnsr[j],bid1[j],bid2[j]])
+                writer.writerow([x[j],y[j],time[j],blen[j],bn1[j],bn2[j],bns[j],bss[j],bid1[j],bid2[j]])
 print('Script complete')
 
 def str2bool(string):

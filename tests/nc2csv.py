@@ -90,9 +90,9 @@ def main(args ):
                 aynf = file.variables['ayn_fast'][:]
                 bxnf = file.variables['bxn_fast'][:]
                 bynf = file.variables['byn_fast'][:]
-                tot_axn = file.variables['tot_accel_x'][:]
-                tot_ayn = file.variables['tot_accel_y'][:]
-                fields = ['x','y','time','id','uv','vv','mass','H','W','L','axn','ayn','bxn','byn','ocean_depth','axnf','aynf','bxnf','bynf','nbonds_id','accelx','accely']
+                #tot_axn = file.variables['tot_accel_x'][:]
+                #tot_ayn = file.variables['tot_accel_y'][:]
+                fields = ['x','y','time','id','uv','vv','mass','H','W','L','axn','ayn','bxn','byn','ocean_depth','axnf','aynf','bxnf','bynf','nbonds_id']#,'accelx','accely']
             else:
                 fields = ['x','y','time','id','uv','vv','mass','H','W','L','axn','ayn','bxn','byn','ocean_depth']
 
@@ -124,8 +124,8 @@ def main(args ):
                 ayf = aynf[ptime == utime[i]]
                 bxf = bxnf[ptime == utime[i]]
                 byf = bynf[ptime == utime[i]]
-                tot_ax = tot_axn[ptime == utime[i]]
-                tot_ay = tot_ayn[ptime == utime[i]]
+                #tot_ax = tot_axn[ptime == utime[i]]
+                #tot_ay = tot_ayn[ptime == utime[i]]
         filename = fout+str(i)+".csv"
         with open(filename, 'w') as file:
             writer = csv.writer(file)
@@ -136,7 +136,8 @@ def main(args ):
             else:
                 if mts==True:
                     for j in range(len(x)):
-                        writer.writerow([x[j],y[j],time[j],pid[j],uv[j],vv[j],mass[j],H[j],W[j],L[j],ax[j],ay[j],bx[j],by[j],od[j],axf[j],ayf[j],bxf[j],byf[j],nb[j],tot_ax[j],tot_ay[j]])
+                        writer.writerow([x[j],y[j],time[j],pid[j],uv[j],vv[j],mass[j],H[j],W[j],L[j],ax[j],ay[j],bx[j],by[j],od[j],axf[j],ayf[j],bxf[j],byf[j],nb[j]])
+                                        #,tot_ax[j],tot_ay[j]])
                 else:
                     for j in range(len(x)):
                         writer.writerow([x[j],y[j],time[j],pid[j],uv[j],vv[j],mass[j],H[j],W[j],L[j],ax[j],ay[j],bx[j],by[j],od[j]])

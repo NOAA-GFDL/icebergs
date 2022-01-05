@@ -6,7 +6,7 @@ import numpy as np  # http://code.google.com/p/netcdf4-python/
 import matplotlib
 import math
 import os
-matplotlib.use("GTKAgg")
+matplotlib.use("tkagg")
 from pylab import *
 #import matplotlib.pyplot as plt
 import pdb
@@ -18,7 +18,7 @@ import netCDF4 as nc
 
 def Divide_hexagon_into_4_quadrants_old(x0,y0,H):
 	S=(2/sqrt(3))*H
-	Area_hex=3*(np.sqrt(3)/2)*(S**2)  #Area of the hexagon (should be equal to Area/grid_area, since it is not dim)  - check this
+	Area_hex=3*(np.sqrt(3)/2)*(S**2)  #Area of the hexagon (should be equal to Area/grid_area, since it is not dim)	 - check this
 	#print 'y0,H',y0, H	
 	#Defining boundaries of hexagon, and if statements to see which side of the boundary you are on
 	W1= False ; W2=False ;W3=False ;W4=False ;W5=False ;W6=False ;H1=False ;V1=False ;V2=False
@@ -120,7 +120,7 @@ def Divide_hexagon_into_4_quadrants_old(x0,y0,H):
 
 	else:
 		#Determine which sector within the hexagon you are in. (sectors 1 to 6 go counter clockwise starting with top right)
-		if (H1==True):  #Bottom half
+		if (H1==True):	#Bottom half
 			if V1:
 				#if W1==False:
 				if ((y0+(sqrt(3)*(x0+S)))<=0.):
@@ -244,18 +244,18 @@ def Divide_hexagon_into_4_quadrants_old(x0,y0,H):
 
 
 
-def Hexagon_into_quadrants_using_triangles_across_lines(x0,y0,H,theta,  Px, Py, Qx, Qy, Rx, Ry, Sx, Sy ):
+def Hexagon_into_quadrants_using_triangles_across_lines(x0,y0,H,theta,	Px, Py, Qx, Qy, Rx, Ry, Sx, Sy ):
 	#In this routine, the hexagon is divided across lines PQ, RS.	 
 	#Length of side of Hexagon
 	S=(2/sqrt(3))*H;  
 
 	#Finding positions of corners
-	C1x=S           ; C1y=0.  #Corner 1 (right)
-	C2x=H/sqrt(3.)  ; C2y=H;  #Corner 2 (top right)
+	C1x=S		; C1y=0.  #Corner 1 (right)
+	C2x=H/sqrt(3.)	; C2y=H;  #Corner 2 (top right)
 	C3x=-H/sqrt(3.) ; C3y=H;  #Corner 3 (top left)
-	C4x=-S          ; C4y=0.; #Corner 4 (left)
+	C4x=-S		; C4y=0.; #Corner 4 (left)
 	C5x=-H/sqrt(3.) ; C5y=-H; #Corner 5 (bottom right)
-	C6x=H/sqrt(3.)  ; C6y=-H; #Corner 6 (bottom right)
+	C6x=H/sqrt(3.)	; C6y=-H; #Corner 6 (bottom right)
 
 	#Finding positions of corners
 	[C1x,C1y]=rotate_and_translate(C1x,C1y,theta,x0,y0)
@@ -321,9 +321,9 @@ def Hexagon_into_quadrants_using_triangles_across_lines(x0,y0,H,theta,  Px, Py, 
 
 	Error=Area_hex-(Area_Q1+Area_Q2+Area_Q3+Area_Q4)
 	if (abs(Error)>0.01):
-		print  'diamonds, hex error, H,x0,y0, Error', H, x0 , y0, Error
-        	print 'diamonds, hex error, Areas',Area_hex, (Area_Q1+Area_Q2 + Area_Q3+Area_Q4), Area_Q1,  Area_Q2 , Area_Q3,  Area_Q4
-	      	print 'Hexagon error is large!!'
+		print  ('diamonds, hex error, H,x0,y0, Error', H, x0 , y0, Error)
+		print ('diamonds, hex error, Areas',Area_hex, (Area_Q1+Area_Q2 + Area_Q3+Area_Q4), Area_Q1,  Area_Q2 , Area_Q3,	 Area_Q4)
+		print ('Hexagon error is large!!')
 
 
 
@@ -337,16 +337,16 @@ def Hexagon_into_quadrants_using_triangles_across_lines(x0,y0,H,theta,  Px, Py, 
 	elif  (((Area_Q3>=Area_Q1) and (Area_Q3>=Area_Q2)) and (Area_Q3>=Area_Q4)):
 		#print 'fix3',Error
 		Area_Q3=Area_Q3+Error
-   	elif  (((Area_Q4>=Area_Q1) and (Area_Q4>=Area_Q2)) and (Area_Q4>=Area_Q3)):
+	elif  (((Area_Q4>=Area_Q1) and (Area_Q4>=Area_Q2)) and (Area_Q4>=Area_Q3)):
 		#print 'fix4',Error
 		Area_Q4=Area_Q4+Error
 	else:
-		print 'There is some thing wrong with this hexagon. Something very wrong'
+		print ('There is some thing wrong with this hexagon. Something very wrong')
 
 	#Error=Area_hex-(Area_Q1+Area_Q2+Area_Q3+Area_Q4)
 	Error=Area_hex-(Area_Q1+Area_Q2+Area_Q3+Area_Q4)
 	if ((abs(Error)>0.01)):
-		print 'The hexagon error is still too large!!!', Error
+		print ('The hexagon error is still too large!!!', Error)
 
 
 
@@ -358,12 +358,12 @@ def Hexagon_into_quadrants_using_triangles(x0,y0,H,theta):
 	S=(2/sqrt(3))*H;  
 
 	#Finding positions of corners
-	C1x=S           ; C1y=0.  #Corner 1 (right)
-	C2x=H/sqrt(3.)  ; C2y=H;  #Corner 2 (top right)
+	C1x=S		; C1y=0.  #Corner 1 (right)
+	C2x=H/sqrt(3.)	; C2y=H;  #Corner 2 (top right)
 	C3x=-H/sqrt(3.) ; C3y=H;  #Corner 3 (top left)
-	C4x=-S          ; C4y=0.; #Corner 4 (left)
+	C4x=-S		; C4y=0.; #Corner 4 (left)
 	C5x=-H/sqrt(3.) ; C5y=-H; #Corner 5 (bottom right)
-	C6x=H/sqrt(3.)  ; C6y=-H; #Corner 6 (bottom right)
+	C6x=H/sqrt(3.)	; C6y=-H; #Corner 6 (bottom right)
 
 	#Finding positions of corners
 	[C1x,C1y]=rotate_and_translate(C1x,C1y,theta,x0,y0)
@@ -415,9 +415,9 @@ def Hexagon_into_quadrants_using_triangles(x0,y0,H,theta):
 
 	Error=Area_hex-(Area_Q1+Area_Q2+Area_Q3+Area_Q4)
 	if (abs(Error)>0.01):
-		print  'diamonds, hex error, H,x0,y0, Error', H, x0 , y0, Error
-        	print 'diamonds, hex error, Areas',Area_hex, (Area_Q1+Area_Q2 + Area_Q3+Area_Q4), Area_Q1,  Area_Q2 , Area_Q3,  Area_Q4
-	      	print 'Hexagon error is large!!'
+		print ( 'diamonds, hex error, H,x0,y0, Error', H, x0 , y0, Error)
+		print ('diamonds, hex error, Areas',Area_hex, (Area_Q1+Area_Q2 + Area_Q3+Area_Q4), Area_Q1,  Area_Q2 , Area_Q3,	 Area_Q4)
+		print ('Hexagon error is large!!')
 
 
 
@@ -431,16 +431,16 @@ def Hexagon_into_quadrants_using_triangles(x0,y0,H,theta):
 	elif  (((Area_Q3>=Area_Q1) and (Area_Q3>=Area_Q2)) and (Area_Q3>=Area_Q4)):
 		#print 'fix3',Error
 		Area_Q3=Area_Q3+Error
-   	elif  (((Area_Q4>=Area_Q1) and (Area_Q4>=Area_Q2)) and (Area_Q4>=Area_Q3)):
+	elif  (((Area_Q4>=Area_Q1) and (Area_Q4>=Area_Q2)) and (Area_Q4>=Area_Q3)):
 		#print 'fix4',Error
 		Area_Q4=Area_Q4+Error
 	else:
-		print 'There is some thing wrong with this hexagon. Something very wrong'
+		print ('There is some thing wrong with this hexagon. Something very wrong')
 
 	#Error=Area_hex-(Area_Q1+Area_Q2+Area_Q3+Area_Q4)
 	Error=Area_hex-(Area_Q1+Area_Q2+Area_Q3+Area_Q4)
 	if ((abs(Error)>0.01)):
-		print 'The hexagon error is still too large!!!', Error
+		print ('The hexagon error is still too large!!!', Error)
 
 
 
@@ -468,7 +468,7 @@ def find_intersect_using_metric(Ax,Ay, Bx, By, Cx, Cy):
 	elif M_BC<=min(M_AC, M_AB):
 		return BC_px, BC_py, BC_qx, BC_qy
 	else: 
-		print 'You should not get here'
+		print ('You should not get here')
 		halt
 
 def find_intersect_using_metric_and_lines(Ax,Ay, Bx, By, Cx, Cy,Px, Py, Qx, Qy, Rx, Ry, Sx, Sy):
@@ -492,7 +492,7 @@ def find_intersect_using_metric_and_lines(Ax,Ay, Bx, By, Cx, Cy,Px, Py, Qx, Qy, 
 	elif M_BC<=min(M_AC, M_AB):
 		return BC_px, BC_py, BC_qx, BC_qy
 	else: 
-		print 'You should not get here'
+		print ('You should not get here')
 		halt
 
 
@@ -533,11 +533,11 @@ def Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy):
 	[Area_Right ,Area_Left]=divding_triangle_across_axes(Ax,Ay,Bx,By,Cx,Cy,'y');
 	 
 	#Decide if the origin is in the triangle
-	if point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,0.,0.):  #Then you have to divide area 4 ways.
+	if point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,0.,0.):	#Then you have to divide area 4 ways.
 		#Find a line in the triangle that cuts both axes in/on the trianlge
-	    	[px, py]=intercept_of_a_line(Ax,Ay,Bx,By,'x'); #x_intercept
-	    	[qx, qy]=intercept_of_a_line(Ax,Ay,Bx,By,'y'); #y_intercept
-	    	if (point_in_interval(Ax,Ay,Bx,By,px,py) & point_in_interval(Ax,Ay,Bx,By,qx,qy))==False:
+		[px, py]=intercept_of_a_line(Ax,Ay,Bx,By,'x'); #x_intercept
+		[qx, qy]=intercept_of_a_line(Ax,Ay,Bx,By,'y'); #y_intercept
+		if (point_in_interval(Ax,Ay,Bx,By,px,py) & point_in_interval(Ax,Ay,Bx,By,qx,qy))==False:
 			[px, py]=intercept_of_a_line(Ax,Ay,Cx,Cy,'x'); #x_intercept
 			[qx, qy]=intercept_of_a_line(Ax,Ay,Cx,Cy,'y'); #y_intercept
 			if (point_in_interval(Ax,Ay,Cx,Cy,px,py) & point_in_interval(Ax,Ay,Cx,Cy,qx,qy))==False:
@@ -555,16 +555,16 @@ def Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy):
 		if Area_key_quadrant>0.0:
 			if px>=0. and qy>=0.: #First quadrant
 				Key_quadrant=1;
-			elif px<0. and qy>=0.:  #Second quadrant
+			elif px<0. and qy>=0.:	#Second quadrant
 				Key_quadrant=2;
 			elif px<0. and qy<0.:
-				Key_quadrant=3;  #Third quadrant
+				Key_quadrant=3;	 #Third quadrant
 			else:
-				Key_quadrant=4;  #Forth quadrant
+				Key_quadrant=4;	 #Forth quadrant
 	    
 	#if (point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,0.,0.) is False) or (Area_key_quadrant==0):
 	if Area_key_quadrant==0:
-	#else:  #Then at least one quadrant is empty, and this can be used to find the areas in the other quadrant.  Assigning quadrants. Key_quadrant is the empty quadrant.
+	#else:	#Then at least one quadrant is empty, and this can be used to find the areas in the other quadrant.  Assigning quadrants. Key_quadrant is the empty quadrant.
 		#print 'Mother...'
 		#print 'Ax, Ay',Ax,Ay
 		#print 'Bx, By',Bx,By
@@ -575,7 +575,7 @@ def Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy):
 			#No points land in this quadrant and triangle does not cross the quadrant
 			Key_quadrant=1;
 		elif  (((Ax<0. and Ay>0) or (Bx<0. and By>0.) or (Cx<0. and Cy>0.))==False)  and (Area_Upper+Area_Left<=Area_triangle):
-			#elif  (((Ax<0. and Ay>=0) or (Bx<0. and By>=0.) or (Cx<0. and Cy>=0.))==False)  and (Area_Upper+Area_Left<=Area_triangle):
+			#elif  (((Ax<0. and Ay>=0) or (Bx<0. and By>=0.) or (Cx<0. and Cy>=0.))==False)	 and (Area_Upper+Area_Left<=Area_triangle):
 			Key_quadrant=2;
 		elif (((Ax<0. and Ay<0.) or (Bx<0. and By<0.) or (Cx<0. and Cy<0.))==False) & (Area_Lower+Area_Left<=Area_triangle):
 			#elif (((Ax<0. and Ay<0.) or (Bx<0. and By<0.) or (Cx<0. and Cy<0.))==False) & (Area_Lower+Area_Left<=Area_triangle):
@@ -609,7 +609,7 @@ def Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy):
 		#Area_Q3=Area_Left-Area_Q2;
 		Area_Q3=Area_triangle-Area_Q1-Area_Q2-Area_Q4;
 	else:
-	    print 'Help, I need somebody, help!'
+	    print( 'Help, I need somebody, help!')
 	    halt
 	
 	Area_Q1=max(Area_Q1,0.); 
@@ -621,14 +621,14 @@ def Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy):
 	#Marker 1
 	if Error>1e-15:
 	#if True:
-		print 'The triangles are not accurate enough. This is a problem!'
-		print 'Triangle corners: ' ,Ax,Ay,Bx,By,Cx,Cy
-		print 'Error',Error
-		print 'Key_quadrant', Key_quadrant 
-		print 'Area Key_quadrant', Area_key_quadrant 
-		print 'Upper, Lower',Area_Upper ,Area_Lower
-		print 'Left, Right ', Area_Right ,Area_Left
-		print 'Point in triangle', point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,0.,0.)
+		print ('The triangles are not accurate enough. This is a problem!')
+		print ('Triangle corners: ' ,Ax,Ay,Bx,By,Cx,Cy)
+		print ('Error',Error)
+		print ('Key_quadrant', Key_quadrant )
+		print ('Area Key_quadrant', Area_key_quadrant) 
+		print ('Upper, Lower',Area_Upper ,Area_Lower)
+		print ('Left, Right ', Area_Right ,Area_Left)
+		print ('Point in triangle', point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,0.,0.))
 		#plt.plot(np.array([Ax,Bx,Cx,Ax]),np.array([Ay, By, Cy,Ay]))
 		#plt.plot(np.array([-0.5,0.5]),np.array([0.,0.]),'k')
 		#plt.plot(np.array([0.,0.]),np.array([-0.5,0.5]),'k')
@@ -659,7 +659,7 @@ def find_quadrant_using_lines(x0 , y0 , Px, Py, Qx, Qy, Rx, Ry, Sx, Sy): #Findin
 
 	return quadrant
 
-def Triangle_divided_into_four_parts(Ax,Ay,Bx,By,Cx,Cy, Px, Py, Qx, Qy, Rx, Ry, Sx, Sy  ):#Divides the triangle into 4 parts, across two intersecting lines. PQ, RS intersect at origin (for now)
+def Triangle_divided_into_four_parts(Ax,Ay,Bx,By,Cx,Cy, Px, Py, Qx, Qy, Rx, Ry, Sx, Sy	):#Divides the triangle into 4 parts, across two intersecting lines. PQ, RS intersect at origin (for now)
 	Area_key_quadrant=0.0
 	Area_triangle=Area_of_triangle(Ax,Ay,Bx,By,Cx,Cy);
 	#if Area_triangle==0.0:
@@ -672,11 +672,11 @@ def Triangle_divided_into_four_parts(Ax,Ay,Bx,By,Cx,Cy, Px, Py, Qx, Qy, Rx, Ry, 
 	[Area_Right ,Area_Left] =divding_triangle_across_line(Ax,Ay,Bx,By,Cx,Cy, Rx, Ry, Sx, Sy);
 	 
 	#Decide if the origin is in the triangle
-	if point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,0.,0.):  #Then you have to divide area 4 ways.
+	if point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,0.,0.):	#Then you have to divide area 4 ways.
 		#Find a line in the triangle that cuts both axes in/on the trianlge
-	    	[px, py]=intercept_of_two_lines(Ax,Ay,Bx,By,Px, Py, Qx, Qy); #PQ_intercept
-	    	[qx, qy]=intercept_of_two_lines(Ax,Ay,Bx,By,Rx, Ry, Sx, Sy); #RS_intercept
-	    	if (point_in_interval(Ax,Ay,Bx,By,px,py) & point_in_interval(Ax,Ay,Bx,By,qx,qy))==False:
+		[px, py]=intercept_of_two_lines(Ax,Ay,Bx,By,Px, Py, Qx, Qy); #PQ_intercept
+		[qx, qy]=intercept_of_two_lines(Ax,Ay,Bx,By,Rx, Ry, Sx, Sy); #RS_intercept
+		if (point_in_interval(Ax,Ay,Bx,By,px,py) & point_in_interval(Ax,Ay,Bx,By,qx,qy))==False:
 			[px, py]=intercept_of_two_lines(Ax,Ay,Cx,Cy,Px, Py, Qx, Qy); #PQ_intercept
 			[qx, qy]=intercept_of_two_lines(Ax,Ay,Cx,Cy,Rx, Ry, Sx, Sy); #RS_intercept
 			if (point_in_interval(Ax,Ay,Cx,Cy,px,py) & point_in_interval(Ax,Ay,Cx,Cy,qx,qy))==False:
@@ -692,15 +692,15 @@ def Triangle_divided_into_four_parts(Ax,Ay,Bx,By,Cx,Cy, Px, Py, Qx, Qy, Rx, Ry, 
 		Area_key_quadrant=Area_of_triangle(px,py,qx,qy,0.,0.);
 		if px>=0. and qy>=0.: #First quadrant  (I think the zeros here are because the PQ, RS intersect at zero)
 			Key_quadrant=1;
-		elif px<0. and qy>=0.:  #Second quadrant
+		elif px<0. and qy>=0.:	#Second quadrant
 			Key_quadrant=2;
 		elif px<0. and qy<0.:
-			Key_quadrant=3;  #Third quadrant
+			Key_quadrant=3;	 #Third quadrant
 		else:
-			Key_quadrant=4;  #Forth quadrant
+			Key_quadrant=4;	 #Forth quadrant
 	    
 	if Area_key_quadrant==0:
-		#else:  #Then at least one quadrant is empty, and this can be used to find the areas in the other quadrant.  Assigning quadrants. Key_quadrant is the empty quadrant.
+		#else:	#Then at least one quadrant is empty, and this can be used to find the areas in the other quadrant.  Assigning quadrants. Key_quadrant is the empty quadrant.
 		#print 'Mother...'
 		#print 'Ax, Ay',Ax,Ay
 		#print 'Bx, By',Bx,By
@@ -712,7 +712,7 @@ def Triangle_divided_into_four_parts(Ax,Ay,Bx,By,Cx,Cy, Px, Py, Qx, Qy, Rx, Ry, 
 		C_quad = find_quadrant_using_lines(Cx,Cy,Px, Py, Qx, Qy, Rx, Ry, Sx, Sy)
 		#print 'A_quad, B_quad, C_quad',A_quad, B_quad, C_quad
 
-		if (((A_quad==1) or (B_quad==1) or (C_quad==1))==False)  and (Area_Upper+Area_Right<=Area_triangle):
+		if (((A_quad==1) or (B_quad==1) or (C_quad==1))==False)	 and (Area_Upper+Area_Right<=Area_triangle):
 			#No points land in this quadrant and triangle does not cross the quadrant
 			Key_quadrant=1;
 		elif  (((A_quad==2) or (B_quad==2) or (C_quad==2))==False)  and (Area_Upper+Area_Left<=Area_triangle):
@@ -749,7 +749,7 @@ def Triangle_divided_into_four_parts(Ax,Ay,Bx,By,Cx,Cy, Px, Py, Qx, Qy, Rx, Ry, 
 		#Area_Q3=Area_Left-Area_Q2;
 		Area_Q3=Area_triangle-Area_Q1-Area_Q2-Area_Q4;
 	else:
-	    print 'Help, I need somebody, help!'
+	    print ('Help, I need somebody, help!')
 	    halt
 	
 	Area_Q1=max(Area_Q1,0.); 
@@ -760,30 +760,30 @@ def Triangle_divided_into_four_parts(Ax,Ay,Bx,By,Cx,Cy, Px, Py, Qx, Qy, Rx, Ry, 
 	Error=abs(Area_Q1+Area_Q2+Area_Q3+Area_Q4-Area_triangle)
 	if Error>1e-15:
 	#if True:
-		print 'The triangles are not accurate enough. This is a problem!'
-		print 'Triangle corners: ' ,Ax,Ay,Bx,By,Cx,Cy
-		print 'Error',Error
-		print 'Key_quadrant', Key_quadrant 
-		print 'Area Key_quadrant', Area_key_quadrant 
-		print 'Upper, Lower',Area_Upper ,Area_Lower
-		print 'Left, Right ', Area_Right ,Area_Left
-		print 'Point in triangle', point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,0.,0.)
+		print ('The triangles are not accurate enough. This is a problem!')
+		print ('Triangle corners: ' ,Ax,Ay,Bx,By,Cx,Cy)
+		print ('Error',Error)
+		print ('Key_quadrant', Key_quadrant )
+		print ('Area Key_quadrant', Area_key_quadrant )
+		print ('Upper, Lower',Area_Upper ,Area_Lower)
+		print ('Left, Right ', Area_Right ,Area_Left)
+		print ('Point in triangle', point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,0.,0.))
 		#return
 
 	return [Area_triangle, Area_Q1, Area_Q2 ,Area_Q3 ,Area_Q4]
 
 def divding_triangle_across_axes(Ax,Ay,Bx,By,Cx,Cy,axes1):
-	if axes1=='x':  #Use the y-coordinates for if statements to see which side of the line you are on
+	if axes1=='x':	#Use the y-coordinates for if statements to see which side of the line you are on
 		A0=Ay; B0=By;  C0=Cy;
-	if axes1=='y':  #Use the y-coordinates for if statements to see which side of the line you are on
+	if axes1=='y':	#Use the y-coordinates for if statements to see which side of the line you are on
 		A0=Ax; B0=Bx;  C0=Cx;
  
 	#print 'A0,B0,C0', A0,B0,C0
 	A_triangle=Area_of_triangle(Ax,Ay,Bx,By,Cx,Cy);
-	if B0*C0>0.: #then B and C are on the same side  (and non-zero)
+	if B0*C0>0.: #then B and C are on the same side	 (and non-zero)
 		#print 'HHHH1'	
 		if A0*B0>=0.: #then all three on the the same side (if it equals zero, then A0=0 and the otehrs are not)
-			if (A0>0.)  or  (A0==0. and  B0>0.):
+			if (A0>0.)  or	(A0==0. and  B0>0.):
 				Area_positive= A_triangle;
 				Area_negative= 0.;
 			else:
@@ -804,19 +804,19 @@ def divding_triangle_across_axes(Ax,Ay,Bx,By,Cx,Cy,axes1):
 		if (A0==0. and B0==0. and C0==0.):
 			Area_positive= 0.;
 			Area_negative= 0.;
-		elif (A0*B0<0.)  or  (A0*C0<0.):    #A, B are on opposite sides, and C is zero.  OR  A, C are on opposite sides, and B is zero.
+		elif (A0*B0<0.)	 or  (A0*C0<0.):    #A, B are on opposite sides, and C is zero.	 OR  A, C are on opposite sides, and B is zero.
 			[Area_positive, Area_negative]=Area_of_triangle_across_axes(Ax,Ay,Bx,By,Cx,Cy,axes1);
 			#print 'HHHH6'	
 		elif (A0*B0>0.) or (A0*C0>0.) or (abs(A0)>0. and (B0==0.) and (C0==0.)):
 			#print 'HHHH7'	
-		        if (A0>0.):
-		        	Area_positive= A_triangle;
+			if (A0>0.):
+				Area_positive= A_triangle;
 				Area_negative= 0.;
-        		else:
+			else:
 				Area_positive= 0.;
 				Area_negative= A_triangle;
     
-    		elif A0==0.:  #(Also, one of B,C is zero too)
+		elif A0==0.:  #(Also, one of B,C is zero too)
 			#print 'HHHH8'	
 			if B0>0. or C0>0.:
 				Area_positive= A_triangle;
@@ -824,12 +824,12 @@ def divding_triangle_across_axes(Ax,Ay,Bx,By,Cx,Cy,axes1):
 			elif B0<0. or C0<0.:
 				Area_positive= 0.;
 				Area_negative= A_triangle;
-		        else:
+			else:
 				print 'You should not get here1'
 				halt
-    		else:
-			print 'You should not get here2'
-			print Ax,Ay,Bx,By,Cx,Cy
+		else:
+			print ('You should not get here2')
+			print (Ax,Ay,Bx,By,Cx,Cy)
 			halt
 	
 	return [Area_positive, Area_negative]
@@ -843,10 +843,10 @@ def divding_triangle_across_line2(Ax,Ay,Bx,By,Cx,Cy,  Px, Py, Qx, Qy ):
 	#print Px, Py, Qx, Qy
  
 	A_triangle=Area_of_triangle(Ax,Ay,Bx,By,Cx,Cy);
-	if B0*C0>0.: #then B and C are on the same side  (and non-zero)
+	if B0*C0>0.: #then B and C are on the same side	 (and non-zero)
 		#print 'GGG1'
 		if A0*B0>=0.: #then all three on the the same side (if it equals zero, then A0=0 and the otehrs are not)
-			if (A0>0.)  or  (A0==0. and  B0>0.):
+			if (A0>0.)  or	(A0==0. and  B0>0.):
 				Area_positive= A_triangle;
 				Area_negative= 0.;
 			else:
@@ -867,36 +867,36 @@ def divding_triangle_across_line2(Ax,Ay,Bx,By,Cx,Cy,  Px, Py, Qx, Qy ):
 		if (A0==0. and B0==0. and C0==0.):
 			Area_positive= 0.;
 			Area_negative= 0.;
-		elif (A0*B0<0.)  or  (A0*C0<0.):    #A, B are on opposite sides, and C is zero.  OR  A, C are on opposite sides, and B is zero.
+		elif (A0*B0<0.)	 or  (A0*C0<0.):    #A, B are on opposite sides, and C is zero.	 OR  A, C are on opposite sides, and B is zero.
 			[Area_positive, Area_negative]=Area_of_triangle_across_line(Ax,Ay,Bx,By,Cx,Cy, Px, Py, Qx, Qy);
 			#print 'GGG5', Area_positive, Area_negative
 		elif (A0*B0>0.) or (A0*C0>0.) or (abs(A0)>0. and (B0==0.) and (C0==0.)):
-		        if (A0>0.):
-		        	Area_positive= A_triangle;
+			if (A0>0.):
+				Area_positive= A_triangle;
 				Area_negative= 0.;
-        		else:
+			else:
 				Area_positive= 0.;
 				Area_negative= A_triangle;
     
-    		elif A0==0.:  #(Also, one of B,C is zero too)
+		elif A0==0.:  #(Also, one of B,C is zero too)
 			if B0>0. or C0>0.:
 				Area_positive= A_triangle;
 				Area_negative= 0.;
 			elif B0<0. or C0<0.:
 				Area_positive= 0.;
 				Area_negative= A_triangle;
-		        else:
-				print 'You should not get here1'
+			else:
+				print ('You should not get here1')
 				halt
-    		else:
-			print 'You should not get here2'
-			print Ax,Ay,Bx,By,Cx,Cy
+		else:
+			print ('You should not get here2')
+			print (Ax,Ay,Bx,By,Cx,Cy)
 			halt
 	
 	return [Area_positive, Area_negative]
 
 
-def divding_triangle_across_line(Ax,Ay,Bx,By,Cx,Cy,   Px, Py, Qx, Qy ):  #Triangle is ABC, line is PQ
+def divding_triangle_across_line(Ax,Ay,Bx,By,Cx,Cy,   Px, Py, Qx, Qy ):	 #Triangle is ABC, line is PQ
 	A0= Above_on_below_line(Ax,Ay, Px, Py, Qx, Qy)
 	B0= Above_on_below_line(Bx,By, Px, Py, Qx, Qy)
 	C0= Above_on_below_line(Cx,Cy, Px, Py, Qx, Qy) 
@@ -905,7 +905,7 @@ def divding_triangle_across_line(Ax,Ay,Bx,By,Cx,Cy,   Px, Py, Qx, Qy ):  #Triang
 	A_triangle=Area_of_triangle(Ax,Ay,Bx,By,Cx,Cy);
 	# B and C are on the same side of the line
 	#if (Point_above_line(Bx,By, Px, Py, Qx, Qy)==Point_above_line(Cx,Cy, Px, Py, Qx, Qy)) :
-	#if ((B0==C0) and (B0!=0))  or ((B0==0 or C0==0) and np.max(B0,C0)>0.5)   :
+	#if ((B0==C0) and (B0!=0))  or ((B0==0 or C0==0) and np.max(B0,C0)>0.5)	  :
 	if ((B0==C0) and (B0!=0))  or ((B0==0 or C0==0))   : #B and C on the same side or B or C is zero
 		#print 'BBB1'
 		[Area_positive, Area_negative]=Area_of_triangle_across_line(Ax,Ay,Bx,By,Cx,Cy, Px, Py, Qx, Qy);
@@ -958,7 +958,7 @@ def intercept_of_a_line(Ax,Ay,Bx,By,axes1):
 	if axes1=='y': #y intercept
 		if (Ax==Bx)==False:
 			x0=0.; 
-			y0=-(((Ay-By)/(Ax-Bx))*Ax)+Ay;  
+			y0=-(((Ay-By)/(Ax-Bx))*Ax)+Ay;	
 		else:
 			x0=No_intercept_val;
 			y0=No_intercept_val;
@@ -990,18 +990,18 @@ def intercept_of_two_lines(Ax,Ay,Bx,By,Px,Py,Qx,Qy):
 		else:
 			m1=(Ay-By)/(Ax-Bx)
 			if (Px==Qx):
-				print 'Stop2'
+				print ('Stop2')
 				(x0 , y0) =intercept_of_a_line(Ax-Px,Ay,Bx-Px,By,'y')
 				x0=Px
 			else:
 				m2=(Py-Qy)/(Px-Qx)
 				if m1==m2:
-					print 'Stop3'
+					print( 'Stop3')
 					x0=No_intercept_val;
 					y0=No_intercept_val;
 					halt2
 				else:
-					print 'Stop4'
+					print( 'Stop4')
 					x0=(1/(m1-m2))*( (m1*Ax -Ay) -(m2*Px - Py))
 					y0=m1*(x0-Ax)+Ay
 	
@@ -1093,8 +1093,8 @@ def Area_of_triangle_across_line(Ax,Ay,Bx,By,Cx,Cy, Px,Py, Qx, Qy, debug=False):
 		else: #If A is not on the line
 			#If A is on the same side of the line as B and C
 			#All on the same side of the line
-			if ((A0==B0 and A0==C0)  or (A0==B0 and C0==0) or (A0==C0 and B0==0)):  
-			#if Point_above_line(Ax,Ay, Px,Py, Qx, Qy) == Point_above_line( Bx,By, Px,Py, Qx, Qy)  and (Point_above_line(Ax,Ay,Px,Py,Qx,Qy)==Point_above_line(Cx,Cy,Px,Py,Qx,Qy)):  
+			if ((A0==B0 and A0==C0)	 or (A0==B0 and C0==0) or (A0==C0 and B0==0)):	
+			#if Point_above_line(Ax,Ay, Px,Py, Qx, Qy) == Point_above_line( Bx,By, Px,Py, Qx, Qy)  and (Point_above_line(Ax,Ay,Px,Py,Qx,Qy)==Point_above_line(Cx,Cy,Px,Py,Qx,Qy)):	
 				#print 'AAA4'
 				#if Point_above_line(Bx,By, Px,Py, Qx, Qy) or Point_above_line(Cx,Cy, Px,Py, Qx, Qy):
 				if A0==1 or C0==1:
@@ -1103,7 +1103,7 @@ def Area_of_triangle_across_line(Ax,Ay,Bx,By,Cx,Cy, Px,Py, Qx, Qy, debug=False):
 				else:
 					Area_positive= 0.0;
 					Area_negative= A_triangle2;
-			elif (C0==0 and B0==0 and (abs(A0)>0)):  
+			elif (C0==0 and B0==0 and (abs(A0)>0)):	 
 				if Point_above_line(Ax,Ay, Px,Py, Qx, Qy):
 					Area_positive= A_triangle2;
 					Area_negative= 0.0;
@@ -1128,7 +1128,7 @@ def Area_of_triangle_across_line(Ax,Ay,Bx,By,Cx,Cy, Px,Py, Qx, Qy, debug=False):
 	return [Area_positive, Area_negative]
 
 def Area_of_triangle(Ax,Ay,Bx,By,Cx,Cy):
-	Area    =   abs(    0.5*((Ax*(By-Cy))+(Bx*(Cy-Ay))+(Cx*(Ay-By))) );
+	Area	=   abs(    0.5*((Ax*(By-Cy))+(Bx*(Cy-Ay))+(Cx*(Ay-By))) );
 	return Area
 
 
@@ -1154,7 +1154,7 @@ def rotate_and_translate(px,py,theta,x0,y0):
 def point_in_triangle_old(Ax,Ay,Bx,By,Cx,Cy,qx,qy):
 	#if False:
 	if (Ax==qx and Ay==qy) or (Bx==qx and By==qy) or (Cx==qx and Cy==qy):  #Exclude the pathelogical case
-	        	point_is_in_triangle = 0.;
+			point_is_in_triangle = 0.;
 	else:
 		if (check_if_point_is_on_the_line(Ax,Ay,Bx,By,qx,qy) or (check_if_point_is_on_the_line(Ax,Ay,Cx,Cy,qx,qy)) or (check_if_point_is_on_the_line(Bx,By,Cx,Cy,qx,qy))):
 			point_is_in_triangle = 0;
@@ -1188,7 +1188,7 @@ def point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,qx,qy):
 	point_is_in_triangle = 0;
 
 	if (Ax==qx and Ay==qy) or (Bx==qx and By==qy) or (Cx==qx and Cy==qy):  #Exclude the pathelogical case
-	        	point_is_in_triangle = 0.;
+			point_is_in_triangle = 0.;
 	else:
 		if (check_if_point_is_on_the_line(Ax,Ay,Bx,By,qx,qy) or (check_if_point_is_on_the_line(Ax,Ay,Cx,Cy,qx,qy)) or (check_if_point_is_on_the_line(Bx,By,Cx,Cy,qx,qy))):
 			point_is_in_triangle = 0;
@@ -1221,16 +1221,16 @@ def roundoff(x,sig_fig):
 
 def square_spreading_calculation(x,y,L):
 	xL=min(0.5, max(0., 0.5-(x/L)))
-        xR=min(0.5, max(0., (x/L)+(0.5-(1/L) )))
-        xC=max(0., 1.-(xL+xR))
-        yD=min(0.5, max(0., 0.5-(y/L)))
-        yU=min(0.5, max(0., (y/L)+(0.5-(1/L) )))
-        yC=max(0., 1.-(yD+yU))
+	xR=min(0.5, max(0., (x/L)+(0.5-(1/L) )))
+	xC=max(0., 1.-(xL+xR))
+	yD=min(0.5, max(0., 0.5-(y/L)))
+	yU=min(0.5, max(0., (y/L)+(0.5-(1/L) )))
+	yC=max(0., 1.-(yD+yU))
 
 def plot_axes_and_triangel(Ax,Ay, Bx, By, Cx, Cy, Px=None, Py=None, Qx=None, Qy=None, Rx=None, Ry=None, Sx=None, Sy=None):
 	if Px is None:
 		Px=-1. ; Py=0. ; Qx=1. ; Qy=0. #x-axis 
-                Rx=0. ; Ry=-1. ; Sx=0. ; Sy=1. #y-axis 
+		Rx=0. ; Ry=-1. ; Sx=0. ; Sy=1. #y-axis 
 	plt.plot(np.array([Px, Qx]), np.array([Py, Qy]))
 	plt.plot(np.array([Rx, Sx]), np.array([Ry, Sy]))
 	plt.plot(np.array([Ax, Bx, Cx, Ax]), np.array([Ay, By, Cy, Ay]))
@@ -1268,7 +1268,7 @@ def main():
 		#plt.plot(Px,Py,'*')
 		#plt.plot(Qx,Qy,'*')
 
-		print 'x0, y0' , x0 , y0
+		print ('x0, y0' , x0 , y0)
 		plt.show()
 
 
@@ -1294,16 +1294,16 @@ def main():
 									x=divding_triangle_across_axes(Ax,Ay,Bx,By,Cx,Cy,axes1)
 									y=divding_triangle_across_line2(Ax,Ay,Bx,By,Cx,Cy, Px,Py, Qx, Qy)
 									#y=divding_triangle_across_line(Ax,Ay,Bx,By,Cx,Cy, Px,Py, Qx, Qy)
-									#if abs(x[0]-y[0])>0 or  abs(x[1]-y[1])>0 or  abs(x[0]-z[0])>0 or  abs(x[1]-z[1])>0:
-									if abs(x[0]-y[0])>0 or  abs(x[1]-y[1])>0:
-										print 'Broken!!!: ', 'Ax, Ay =', Ax, Ay, 'Bx, By =' , Bx, By, 'Cx, Cy =' ,Cx, Cy
-										print 'count', count
-										print x
-										print y
+									#if abs(x[0]-y[0])>0 or	 abs(x[1]-y[1])>0 or  abs(x[0]-z[0])>0 or  abs(x[1]-z[1])>0:
+									if abs(x[0]-y[0])>0 or	abs(x[1]-y[1])>0:
+										print ('Broken!!!: ', 'Ax, Ay =', Ax, Ay, 'Bx, By =' , Bx, By, 'Cx, Cy =' ,Cx, Cy)
+										print ('count', count)
+										print (x)
+										print( y)
 										plot_axes_and_triangel(Ax,Ay, Bx, By, Cx, Cy)
 										halt
 
-		print 'Test Successful'
+		print ('Test Successful')
 
 
 
@@ -1326,16 +1326,16 @@ def main():
 									y=Triangle_divided_into_four_parts(Ax,Ay,Bx,By,Cx,Cy, Px, Py, Qx, Qy, Rx, Ry, Sx, Sy )
 									Error=abs(x[1]+x[2]+x[3]+x[4]-x[0])
 									#if Error>1e-15:
-									if abs(x[0]-y[0])>0 or  abs(x[1]-y[1])>0 or abs(x[2]-y[2])>0 or  abs(x[3]-y[3])>0 or  abs(x[4]-y[4])>0 :
-										print 'Broken!!!: ', 'Ax, Ay =', Ax, Ay, 'Bx, By =' , Bx, By, 'Cx, Cy =' ,Cx, Cy
-										print 'count=', count
+									if abs(x[0]-y[0])>0 or	abs(x[1]-y[1])>0 or abs(x[2]-y[2])>0 or	 abs(x[3]-y[3])>0 or  abs(x[4]-y[4])>0 :
+										print ('Broken!!!: ', 'Ax, Ay =', Ax, Ay, 'Bx, By =' , Bx, By, 'Cx, Cy =' ,Cx, Cy)
+										print( 'count=', count)
 										#print 'Error = ', Error
-										print x
+										print( x)
 										#print y
 										plot_axes_and_triangel(Ax,Ay, Bx, By, Cx, Cy)
 										halt
 
-		print 'Triangle_into_fours Test Successful'
+		print ('Triangle_into_fours Test Successful')
 
 		#[T23_Area,T23_Q1,T23_Q2,T23_Q3,T23_Q4]=Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy); 
 		#[T23_Area,T23_Q1,T23_Q2,T23_Q3,T23_Q4]= Triangle_divided_into_four_parts(Ax,Ay,Bx,By,Cx,Cy, Px, Py, Qx, Qy, Rx, Ry, Sx, Sy  )
@@ -1343,8 +1343,8 @@ def main():
 	if test_case=='Point_above_line':
 		x0=0.1 ;y0=0.3 ; Px=0.4; Py=-1.0; Qx=0.2; Qy=2.2
 		plt.plot(np.array([Px, Qx]), np.array([Py, Qy]))
-                plt.plot(x0,y0,'*')
-		print Point_above_line(x0,y0,Px, Py, Qx, Qy)
+		plt.plot(x0,y0,'*')
+		print (Point_above_line(x0,y0,Px, Py, Qx, Qy))
 		plt.show()
 
 
@@ -1363,7 +1363,7 @@ def main():
 					#print count
 					if count>0:
 						C5x=-H/sqrt(3.) ; C5y=-H; #Corner 5 (bottom right)
-						C6x=H/sqrt(3.)  ; C6y=-H; #Corner 6 (bottom right)
+						C6x=H/sqrt(3.)	; C6y=-H; #Corner 6 (bottom right)
 						[C5x,C5y]=rotate_and_translate(C5x,C5y,theta,x0,y0)
 						[C6x,C6y]=rotate_and_translate(C6x,C6y,theta,x0,y0)
 						#x = Triangle_divided_into_four_parts(x0,y0,C5x,C5y,C6x,C6y, Px, Py, Qx, Qy, Rx, Ry, Sx, Sy  ); #T023
@@ -1382,14 +1382,14 @@ def main():
 						#eps=0.0
 						#if abs(Area_hex-Area_hexb)>eps or  abs(Area_Q1-Area_Q1b)>eps or abs(Area_Q2-Area_Q2b)>eps \
 						#		or  abs(Area_Q3-Area_Q3b)>eps or  abs(Area_Q4-Area_Q4b)>eps :
-						if abs(x[0]-y[0])>0 or  abs(x[1]-y[1])>0 or abs(x[2]-y[2])>0 or  abs(x[3]-y[3])>0 or  abs(x[4]-y[4])>0 :
-							print 'Broken!!!: ', x0, y0, H
-							print Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4 
-							print Area_hexb, Area_Q1b, Area_Q2b, Area_Q3b, Area_Q4b
-							print 'count=', count
+						if abs(x[0]-y[0])>0 or	abs(x[1]-y[1])>0 or abs(x[2]-y[2])>0 or	 abs(x[3]-y[3])>0 or  abs(x[4]-y[4])>0 :
+							print ('Broken!!!: ', x0, y0, H)
+							print (Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4 )
+							print (Area_hexb, Area_Q1b, Area_Q2b, Area_Q3b, Area_Q4b)
+							print ('count=', count)
 							halt
 		
-		print 'Many_Hexagons Test Successful'
+		print ('Many_Hexagons Test Successful')
 
 
 	if test_case=='hexagon':
@@ -1401,14 +1401,14 @@ def main():
 		#print x0,y0,H
 		#print 'First version', Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4
 		(Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4)= Hexagon_into_quadrants_using_triangles(x0,y0,H,theta=0)
-		print 'Triangle version1',Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4
+		print ('Triangle version1',Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4)
 		(Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4)= Hexagon_into_quadrants_using_triangles(x0,y0,H,theta=90.)
-		print 'Triangle version2',Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4
+		print ('Triangle version2',Area_hex, Area_Q1, Area_Q2, Area_Q3, Area_Q4)
 		
 		#print 'Analysis'	
 		#print 'sum of quadrants: ', (Area_Q1+Area_Q2+Area_Q3+Area_Q4)
-		print 'Scaled areas: '
-		print (Area_Q1+Area_Q2+Area_Q3+Area_Q4)/Area_hex, Area_Q1/Area_hex, Area_Q2/Area_hex, Area_Q3/Area_hex, Area_Q4/Area_hex
+		print ('Scaled areas: ')
+		print( (Area_Q1+Area_Q2+Area_Q3+Area_Q4)/Area_hex, Area_Q1/Area_hex, Area_Q2/Area_hex, Area_Q3/Area_hex, Area_Q4/Area_hex)
 		
 
 	elif test_case=='square':
@@ -1429,15 +1429,15 @@ def main():
 
 		[T23_Area,T23_Q1,T23_Q2,T23_Q3,T23_Q4]=Triangle_divided_into_four_quadrants(Ax,Ay,Bx,By,Cx,Cy); #T023
 
-		#Px=1. ; Py=0. ; Qx=2. ; Qy=0.  
-		#Rx=0. ; Ry=1. ; Sx=0. ; Sy=2.  
+		#Px=1. ; Py=0. ; Qx=2. ; Qy=0.	
+		#Rx=0. ; Ry=1. ; Sx=0. ; Sy=2.	
 		#[T23_Area,T23_Q1,T23_Q2,T23_Q3,T23_Q4]= Triangle_divided_into_four_parts(Ax,Ay,Bx,By,Cx,Cy, Px, Py, Qx, Qy, Rx, Ry, Sx, Sy  )
 
-		print 'Triangle 2: ',Ax,Ay,Bx,By,Cx,Cy
-		print 'Full',T23_Q1+T23_Q2+T23_Q3+T23_Q4
-		print 'Q1, Q2,Q3,Q4',T23_Q1,T23_Q2,T23_Q3,T23_Q4
-		print 'Full triangle area',T23_Area
-		print 'Error',(T23_Q1+T23_Q2+T23_Q3+T23_Q4-T23_Area)
+		print ('Triangle 2: ',Ax,Ay,Bx,By,Cx,Cy)
+		print ('Full',T23_Q1+T23_Q2+T23_Q3+T23_Q4)
+		print ('Q1, Q2,Q3,Q4',T23_Q1,T23_Q2,T23_Q3,T23_Q4)
+		print ('Full triangle area',T23_Area)
+		print ('Error',(T23_Q1+T23_Q2+T23_Q3+T23_Q4-T23_Area))
 		
 		
 
@@ -1448,10 +1448,10 @@ def main():
 		By= -8.433062639672301E-002
 		Cx=0.249999999997304
 		Cy=6.000694090068343E-002
-		print 'Point in triangle', point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,0.,0.)
+		print ('Point in triangle', point_in_triangle(Ax,Ay,Bx,By,Cx,Cy,0.,0.))
 
 
-	print 'Script complete'
+	print ('Script complete')
 
 if __name__ == '__main__':
 	main()

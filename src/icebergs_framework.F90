@@ -38,10 +38,10 @@ logical :: use_roundoff_fix=.true. !< Use a "fix" for the round-off discrepancy 
 logical :: old_bug_rotated_weights=.false. !< Skip the rotation of off-center weights for rotated halo updates
 logical :: make_calving_reproduce=.false. !< Make the calving.res.nc file reproduce across pe count changes.
 logical :: old_bug_bilin=.true. !< If true, uses the inverted bilinear function (use False to get correct answer)
-character(len=10) :: restart_input_dir = 'INPUT/' !< Directory to look for restart files
+character(len=20) :: restart_input_dir = 'INPUT/' !< Directory to look for restart files
 integer, parameter :: delta_buf=25 !< Size by which to increment buffers
 real, parameter :: pi_180=pi/180. !< Converts degrees to radians
-real, parameter :: Rearth=6360000. !< Radius of earth (m)
+real :: Rearth=6360000. !< Radius of earth (m)
 logical :: fix_restart_dates=.true. !< After a restart, check that bergs were created before the current model date
 logical :: do_unit_tests=.false. !< Conduct some unit tests
 logical :: force_all_pes_traj=.false. !< Force all pes write trajectory files regardless of io_layout
@@ -52,8 +52,20 @@ logical :: ewsame=.false. !<(F) set T if periodic and 2 PEs along the x directio
 logical :: monitor_energy=.false. !<monitors energies: elastic (spring+collision), external, dissipated, fracture
 logical :: iceberg_bonds_on=.False. ! True=Allow icebergs to have bonds, False=don't allow.
 logical :: dem=.false. !< If T, run in DEM-mode with angular terms, variable stiffness, etc
+logical :: power_ground=.false.
+logical :: short_step_mts_grounding=.false.
+logical :: radius_based_drag=.false. !if T, hex bergs, and dem, 2r is used as the area of the vert face for drag/wave forces
+logical :: A68_test=.false. !< If True, grounding will not be allowed west of 38 deg W nor North of 54.85 S
+real :: A68_xdisp=0.
+real :: A68_ydisp=0.
+logical :: rev_mind=.false.
+logical :: add_curl_to_torque=.false. !include torque from the curl of ocean and atmospheric velocities (DEM-mode only)
 character(len=11) :: fracture_criterion='none' !<'energy','stress','strain_rate','strain',or 'none'
 logical :: use_damage=.false. !< Damage on bonds. Can evolve and serve as fracture criterion, or just to represent weaker bond
+logical :: orig_dem_moment_of_inertia=.false.
+logical :: break_bonds_on_sub_steps=.false.
+logical :: skip_first_outer_mts_step=.false.
+logical :: no_frac_first_ts=.false.
 
 !Public params !Niki: write a subroutine to expose these
 public nclasses,buffer_width,buffer_width_traj,buffer_width_bond_traj
@@ -61,7 +73,9 @@ public verbose, really_debug, debug, restart_input_dir,make_calving_reproduce,ol
 public ignore_ij_restart, use_slow_find,generate_test_icebergs,old_bug_rotated_weights,budget
 public orig_read, force_all_pes_traj
 public mts,new_mts,save_bond_traj,ewsame,monitor_energy,iceberg_bonds_on
-public dem, fracture_criterion
+public dem, add_curl_to_torque, fracture_criterion, orig_dem_moment_of_inertia
+public power_ground, short_step_mts_grounding, radius_based_drag
+public A68_test, A68_xdisp, A68_ydisp
 
 !Public types
 public icebergs_gridded, xyt, iceberg, icebergs, buffer, bond, bond_xyt
@@ -81,7 +95,7 @@ public find_cell, find_cell_by_search, find_cell_wide, count_bergs, is_point_in_
 public sum_mass, sum_heat, bilin, yearday, bergs_chksum, list_chksum, count_bergs_in_list
 public checksum_gridded
 public grd_chksum2,grd_chksum3
-public fix_restart_dates, offset_berg_dates
+public Rearth, fix_restart_dates, offset_berg_dates
 public move_berg_between_cells
 public find_individual_iceberg
 public monitor_a_berg
@@ -96,6 +110,7 @@ public fracture_testing_initialization, orig_bond_length
 public energy_tests_init,dem_tests_init
 public init_dem_params
 public set_constant_interaction_length_and_width,use_damage,damage_test_1_init
+public break_bonds_on_sub_steps, skip_first_outer_mts_step, no_frac_first_ts
 
 !> Container for gridded fields
 type :: icebergs_gridded
@@ -285,6 +300,8 @@ type :: xyt
   real, allocatable :: ang_vel !< Angular velocity
   real, allocatable :: ang_accel !< Angular acceleration
   real, allocatable :: rot !< Accumulated rotation
+  real, allocatable :: curl_o !< curl of ocean velocity
+  real, allocatable :: curl_a !< curl of atmospheric velocity
 end type xyt
 
 !> An iceberg object, used as a link in a linked list
@@ -373,6 +390,8 @@ type :: iceberg
   real, allocatable :: ang_vel !< Angular velocity
   real, allocatable :: ang_accel !< Angular acceleration
   real, allocatable :: rot !< Accumulated rotation
+  real, allocatable :: curl_o !< curl of ocean velocity
+  real, allocatable :: curl_a !< curl of atmospheric velocity
 end type iceberg
 
 !> A bond object connecting two bergs, used as a link in a linked list
@@ -390,7 +409,8 @@ type :: bond
   !in which case the following correspond to only the most recent timestep and units are s^(-1)
   real, allocatable :: damage
   real, allocatable :: rotation !radians
-  real, allocatable :: rel_rotation !<rotation relative to the mean of all bonds for a berg
+  real, allocatable :: rel_rotation !<non-dem mode: rotation relative to the mean of all bonds for a berg
+  !!dem-mode: relative rotation between two bonded particles (radians)
   real, allocatable :: n_frac_var !<normal strain, stress, or spring energy
   real, allocatable :: n_strain_rate !<for fracture_criterion=='strain_rate' only
   real, allocatable :: spring_pe
@@ -537,6 +557,8 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   logical :: only_interactive_forces=.False. !< Icebergs only feel interactive forces, and not ocean, wind...
   logical :: halo_debugging=.False. !< Use for debugging halos (remove when its working)
   logical :: save_short_traj=.True. !< True saves only lon,lat,time,id in iceberg_trajectory.nc
+  character(len=70) :: traj_name='iceberg_trajectories.nc'
+  character(len=70) :: bond_traj_name='bond_trajectories.nc'
   logical :: save_fl_traj=.True. ! True saves short traj, plus masses and footloose parameters in iceberg_trajectory.nc
   real :: save_all_traj_year=huge(0.0) ! Year at which all trajectories (for all berg areas) are saved
   logical :: save_nonfl_traj_by_class=.false. ! Save non-footloose trajectories based on initial mass class
@@ -557,6 +579,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   real :: length_for_manually_initialize_bonds=1000.0 !< If manually initialing bonds, only  bond if dist between particles is < this length -Added by Alex
   logical :: manually_initialize_bonds_from_radii=.false. !< If manually initialing bonds, form bonds if dist between particles is < 1.25x the smaller radii-Alex
   real :: speed_limit=0. !< CFL speed limit for a berg [m/s]
+  logical :: tau_is_velocity=.false. !< If True, then wind stress input is actually velocity (m/s)
   real :: tau_calving=0. !< Time scale for smoothing out calving field (years)
   real :: tip_parameter=0. !< If non-zero, overrides iceberg rolling critical ratio (use zero to get parameter directly from ice and seawater densities)
   real :: grounding_fraction=0. !< Fraction of water column depth at which grounding occurs
@@ -615,7 +638,9 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   real :: convergence_tolerance=1.e-8 !tolerance for the MTS convergence scheme
   ! DEM-mode parameters
   logical :: dem=.false. !if T, run in DEM-mode with angular terms, variable stiffness, etc
+  logical :: use_grounding_torque=.false.
   logical :: ignore_tangential_force=.false.
+  real :: dem_K_damp !damping parameter
   real :: poisson=0.3 ! Poisson's ratio
   real :: dem_spring_coef=0.
   real :: dem_damping_coef=0.1
@@ -624,12 +649,16 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   logical :: uniaxial_test=.false. !adds a tensile stress to the east-most berg element
   real :: dem_tests_start_lon !starting lon of west-most berg element for uniaxial/dem tests
   real :: dem_tests_end_lon !starting lon of east-most berg element for uniaxial/dem tests
+  logical :: add_curl_to_torque=.false. !include torque from the curl of ocean and atmospheric velocities
   ! Element interactions
   logical :: constant_interaction_LW=.false. !< Use a constant element length & width during berg interactions
   real :: constant_length=0.!< If constant_interaction_LW, the constant length. If 0, will be set to max initial length
   real :: constant_width=0. !< If constant_interaction_LW, the constant width.  If 0, will be set to max initial width
+  real :: constant_area
+  real :: constant_radius
+  real :: ocean_drag_scale=1. !< Scaling factor for the ocean drag coefficients
   logical :: use_spring_for_land_contact=.false. !< Treat contact with masked (land) cells like contact with a static berg
-  ! Footloose calving parameters [England et al (2020) Modeling the breakup of tabular icebergs. Sci. Adv.]
+  ! Footloose calving parameters
   logical :: fl_use_poisson_distribution=.true. !< fl_r is (T) mean of Poisson distribution to determine k, or (F) k=fl_r
   logical :: fl_use_perimeter=.false. !< scale number of footloose bergs to calve by perimeter of the parent berg
   real :: fl_youngs=1.e8 !< Young's modulus for footloose calculations (Pa)
@@ -721,7 +750,7 @@ logical, intent(in), optional :: fractional_area !< If true, ice_area contains c
 integer :: halo=4 ! Width of halo region
 real :: traj_area_thres=0. ! Threshold for berg area (km^2) that must be exceeded to save a non-bonded berg trajectory
 real :: traj_area_thres_sntbc=0. !< Threshold for berg area (km^2) for saving trajectory when using save_nonfl_traj_by_class
-real :: traj_area_thres_fl=huge(0.0) ! Threshold for berg area (km^2) that must be exceeded to save a non-bonded FL berg trajectory
+real :: traj_area_thres_fl=1.e9 ! Threshold for berg area (km^2) that must be exceeded to save a non-bonded FL berg trajectory
 real :: traj_sample_hrs=24. ! Period between sampling of position for trajectory storage
 real :: traj_write_hrs=480. ! Period between writing sampled trajectories to disk
 real :: verbose_hrs=24. ! Period between verbose messages
@@ -762,6 +791,7 @@ logical :: time_average_weight=.false. ! Time average the weight on the ocean
 real :: length_for_manually_initialize_bonds=1000.0 ! if manually init bonds, only  bond if dist between particles is .lt. this length - Alex
 logical :: manually_initialize_bonds_from_radii=.false. ! if manually init bonds, form bonds if dist between particles is < 1.25x the smaller radii - Alex
 real :: speed_limit=0. ! CFL speed limit for a berg
+logical :: tau_is_velocity=.false. !< If True, then wind stress input is actually velocity (m/s)
 real :: tau_calving=0. ! Time scale for smoothing out calving field (years)
 real :: tip_parameter=0. ! Parameter to override iceberg rolling critical ratio (use zero to get parameter directly from ice and seawater densities
 real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
@@ -794,6 +824,8 @@ logical :: Static_icebergs=.False. ! True= icebergs do no move
 logical :: only_interactive_forces=.False. ! Icebergs only feel interactive forces, and not ocean, wind...
 logical :: halo_debugging=.False. ! Use for debugging halos (remove when its working)
 logical :: save_short_traj=.True. ! True saves only lon,lat,time,id in iceberg_trajectory.nc
+character(len=70) :: traj_name='iceberg_trajectories.nc'
+character(len=70) :: bond_traj_name='bond_trajectories.nc'
 logical :: save_fl_traj=.True. ! True saves short traj, plus masses and footloose parameters in iceberg_trajectory.nc
 real :: save_all_traj_year=huge(0.0) ! Year at which all trajectories (for all berg areas) are saved
 logical :: save_nonfl_traj_by_class=.false. ! Save non-footloose trajectories based on initial mass class
@@ -832,6 +864,7 @@ real, dimension(nclasses) :: initial_thickness_n=(/80.4, 159.5, 240., 320., 360.
 integer(kind=8) :: debug_iceberg_with_id = -1 ! If positive, monitors a berg with this id
 ! DEM-mode parameters
 !logical :: dem=.false. !if T, run in DEM-mode with angular terms, variable stiffness, etc
+logical :: use_grounding_torque=.false.
 logical :: ignore_tangential_force=.false.
 real :: poisson=0.3 ! Poisson's ratio
 real :: dem_spring_coef=0.
@@ -842,6 +875,7 @@ integer :: dem_beam_test=0 !1=Simply supported beam,2=cantilever beam,3=angular 
 logical :: constant_interaction_LW=.false. ! Always use the initial, globally constant, element length & width during berg interactions
 real :: constant_length=0. ! If constant_interaction_LW, the constant length used. If zero in the nml, will be set to max initial L
 real :: constant_width=0. ! If constant_interaction_LW, the constant width used. If zero in the nml, will be set to max initial W
+real :: ocean_drag_scale=1. !< Scaling factor for the ocean drag coefficients
 logical :: use_spring_for_land_contact=.false. ! Treat contact with masked (land) cells like contact with a static berg
 ! Footloose calving parameters [England et al (2020) Modeling the breakup of tabular icebergs. Sci. Adv.]
 logical :: fl_use_poisson_distribution=.true. ! fl_r is (T) mean of Poisson distribution to determine k, or (F) k=fl_r
@@ -862,13 +896,14 @@ real :: fl_bits_scale_l=0.9 ! For determining dimensions of FL bits berg; FL_bit
 real :: fl_bits_scale_w=0.9 ! For determining dimensions of FL bits berg; FL_bits width     = fl_bits_scale_w * l_b
 real :: fl_bits_scale_t=0.9 ! For determining dimensions of FL bits berg; FL_bits thickness = fl_bits_scale_t * T
 
-namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,&
+
+namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,traj_name,bond_traj_name,&
          traj_area_thres, Static_icebergs,distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef,&
          radial_damping_coef, tangental_damping_coef, only_interactive_forces, rho_bergs, LoW_ratio, debug, really_debug,&
          use_operator_splitting, bergy_bit_erosion_fraction, iceberg_bonds_on, manually_initialize_bonds,&
          ignore_missing_restart_bergs,  parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode,&
          ignore_ij_restart, use_new_predictive_corrective, halo_debugging, hexagonal_icebergs, time_average_weight,&
-         generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_icebergs_on,&
+         generate_test_icebergs, speed_limit, Rearth, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_icebergs_on,&
          scale_damping_by_pmag, critical_interaction_damping_on, tang_crit_int_damp_on, require_restart,&
          old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,&
          grounding_fraction, input_freq_distribution, force_all_pes_traj,allow_bergs_to_roll,set_melt_rates_to_zero,lat_ref,&
@@ -890,7 +925,10 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          initial_mass_n, distribution_n, mass_scaling_n, initial_thickness_n, fl_use_l_scale, fl_l_scale,&
          fl_l_scale_erosion_only, fl_youngs, fl_strength,  save_all_traj_year, save_nonfl_traj_by_class,&
          save_traj_by_class_start_mass_thres_n, save_traj_by_class_start_mass_thres_s,traj_area_thres_sntbc,&
-         traj_area_thres_fl
+         traj_area_thres_fl,tau_is_velocity, add_curl_to_torque,ocean_drag_scale, A68_test, &
+         A68_xdisp,A68_ydisp,&
+         orig_dem_moment_of_inertia, break_bonds_on_sub_steps, skip_first_outer_mts_step, rev_mind, &
+         no_frac_first_ts, use_grounding_torque, power_ground, short_step_mts_grounding, radius_based_drag
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -1345,7 +1383,11 @@ endif
 if (dem) then
   buffer_width=buffer_width+3+(max_bonds*4)
   buffer_width_traj=buffer_width_traj+3
-  buffer_width_bond_traj=buffer_width_bond_traj+4
+  buffer_width_bond_traj=buffer_width_bond_traj+4+1
+  if (add_curl_to_torque) then
+    buffer_width=buffer_width+1 !2
+    buffer_width_traj=buffer_width_traj+1 !2
+  endif
 elseif (fracture_criterion .ne. 'none') then
   buffer_width=buffer_width+1+(max_bonds*3)
   buffer_width_traj=buffer_width_traj+1
@@ -1410,6 +1452,8 @@ endif
   bergs%traj_sample_hrs=traj_sample_hrs
   bergs%traj_write_hrs=traj_write_hrs
   bergs%save_short_traj=save_short_traj
+  bergs%traj_name=traj_name
+  bergs%bond_traj_name=bond_traj_name
   bergs%save_fl_traj=save_fl_traj
   bergs%save_all_traj_year=save_all_traj_year
   bergs%save_nonfl_traj_by_class=save_nonfl_traj_by_class
@@ -1444,6 +1488,7 @@ endif
   bergs%passive_mode=passive_mode
   bergs%time_average_weight=time_average_weight
   bergs%speed_limit=speed_limit
+  bergs%tau_is_velocity=tau_is_velocity
   bergs%tau_calving=tau_calving
   bergs%tip_parameter=tip_parameter
   bergs%use_updated_rolling_scheme=use_updated_rolling_scheme  !Alon
@@ -1506,16 +1551,32 @@ endif
   bergs%convergence_tolerance=convergence_tolerance
   ! DEM-mode parameters
   bergs%dem=dem
+  bergs%use_grounding_torque=use_grounding_torque
   bergs%ignore_tangential_force=ignore_tangential_force
   if (bergs%dem) bergs%explicit_inner_mts=.true.
   bergs%poisson=poisson
   bergs%dem_spring_coef=dem_spring_coef
+  bergs%dem_K_damp=2.*bergs%dem_spring_coef/(3.*(1.-bergs%poisson**2)) !damping factor
   bergs%dem_damping_coef=dem_damping_coef
   bergs%dem_beam_test=dem_beam_test
   bergs%constant_interaction_LW=constant_interaction_LW
   bergs%constant_length=constant_length
   bergs%constant_width=constant_width
+  if (bergs%constant_interaction_LW) then
+    bergs%constant_area=bergs%constant_length*bergs%constant_width
+    if (bergs%hexagonal_icebergs) then
+      bergs%constant_radius=sqrt(bergs%constant_area/(2.*sqrt(3.)))
+    else
+      if (bergs%iceberg_bonds_on) then
+        bergs%constant_radius=0.5*sqrt(bergs%constant_area)
+      else
+        bergs%constant_radius=sqrt(bergs%constant_area/pi) ! Interaction radius of the iceberg (assuming circular icebergs)
+      endif
+    endif
+  endif
+  bergs%ocean_drag_scale=ocean_drag_scale
   bergs%dem_shear_for_frac_only=dem_shear_for_frac_only
+  bergs%add_curl_to_torque=add_curl_to_torque
   ! Footloose calving parameters
   bergs%fl_use_poisson_distribution=fl_use_poisson_distribution
   bergs%fl_use_perimeter=fl_use_perimeter
@@ -3380,6 +3441,10 @@ type(bond), pointer :: current_bond
     call push_buffer_value(buff%data(:,n), counter, berg%ang_vel)
     call push_buffer_value(buff%data(:,n), counter, berg%ang_accel)
     call push_buffer_value(buff%data(:,n), counter, berg%rot)
+    if (add_curl_to_torque) then
+      call push_buffer_value(buff%data(:,n), counter, berg%curl_o)
+      !call push_buffer_value(buff%data(:,n), counter, berg%curl_a)
+    endif
   elseif (fracture_criterion .ne. 'none') then
     call push_buffer_value(buff%data(:,n), counter, berg%accum_bond_rotation)
   endif
@@ -3413,6 +3478,7 @@ type(bond), pointer :: current_bond
           call push_buffer_value(buff%data(:,n), counter, current_bond%tangd2)
           call push_buffer_value(buff%data(:,n), counter, current_bond%nstress)
           call push_buffer_value(buff%data(:,n), counter, current_bond%sstress)
+          call push_buffer_value(buff%data(:,n), counter, current_bond%rel_rotation)
         elseif (fracture_criterion .ne. 'none') then
           call push_buffer_value(buff%data(:,n), counter, current_bond%rotation)
           call push_buffer_value(buff%data(:,n), counter, current_bond%rel_rotation)
@@ -3608,6 +3674,9 @@ real :: temp_lon,temp_lat,length
 
   if (dem) then
     allocate(localberg%ang_vel,localberg%ang_accel,localberg%rot)
+    if (add_curl_to_torque) then
+      allocate(localberg%curl_o) !,localberg%curl_a)
+    endif
   elseif (fracture_criterion .ne. 'none') then
     allocate(localberg%accum_bond_rotation)
   endif
@@ -3693,6 +3762,10 @@ real :: temp_lon,temp_lat,length
     call pull_buffer_value(buff%data(:,n), counter, localberg%ang_vel)
     call pull_buffer_value(buff%data(:,n), counter, localberg%ang_accel)
     call pull_buffer_value(buff%data(:,n), counter, localberg%rot)
+    if (add_curl_to_torque) then
+      call pull_buffer_value(buff%data(:,n), counter, localberg%curl_o)
+      !call pull_buffer_value(buff%data(:,n), counter, localberg%curl_a)
+    endif
   elseif (fracture_criterion .ne. 'none') then
     call pull_buffer_value(buff%data(:,n), counter, localberg%accum_bond_rotation)
   endif
@@ -3832,6 +3905,7 @@ real :: temp_lon,temp_lat,length
           call pull_buffer_value(buff%data(:,n), counter, current_bond%tangd2)
           call pull_buffer_value(buff%data(:,n), counter, current_bond%nstress)
           call pull_buffer_value(buff%data(:,n), counter, current_bond%sstress)
+          call pull_buffer_value(buff%data(:,n), counter, current_bond%rel_rotation)
         elseif (fracture_criterion .ne. 'none') then
           call pull_buffer_value(buff%data(:,n), counter, current_bond%rotation)
           call pull_buffer_value(buff%data(:,n), counter, current_bond%rel_rotation)
@@ -3987,6 +4061,10 @@ subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj, save_fl_traj, 
       call push_buffer_value(buff%data(:,n), counter, traj%ang_vel)
       call push_buffer_value(buff%data(:,n), counter, traj%ang_accel)
       call push_buffer_value(buff%data(:,n), counter, traj%rot)
+      if (add_curl_to_torque) then
+        call push_buffer_value(buff%data(:,n), counter, traj%curl_o)
+        !call push_buffer_value(buff%data(:,n), counter, traj%curl_a)
+      endif
     elseif (fracture_criterion .ne. 'none') then
       call push_buffer_value(buff%data(:,n), counter, traj%accum_bond_rotation)
     endif
@@ -4024,6 +4102,7 @@ subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj, save_fl_tra
 
   if (dem) then
     allocate(traj%ang_vel,traj%ang_accel,traj%rot)
+    if (add_curl_to_torque) allocate(traj%curl_o) !,traj%curl_a)
   elseif (fracture_criterion .ne. 'none') then
     allocate(traj%accum_bond_rotation)
   endif
@@ -4107,6 +4186,10 @@ subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj, save_fl_tra
       call pull_buffer_value(buff%data(:,n), counter, traj%ang_vel)
       call pull_buffer_value(buff%data(:,n), counter, traj%ang_accel)
       call pull_buffer_value(buff%data(:,n), counter, traj%rot)
+      if (add_curl_to_torque) then
+        call pull_buffer_value(buff%data(:,n), counter, traj%curl_o)
+        !call pull_buffer_value(buff%data(:,n), counter, traj%curl_a)
+      endif
     elseif (fracture_criterion .ne. 'none') then
       call pull_buffer_value(buff%data(:,n), counter, traj%accum_bond_rotation)
     endif
@@ -4162,6 +4245,7 @@ subroutine pack_bond_traj_into_buffer2(bond_traj, buff, n)
     call push_buffer_value(buff%data(:,n),counter,bond_traj%tangd2)
     call push_buffer_value(buff%data(:,n),counter,bond_traj%nstress)
     call push_buffer_value(buff%data(:,n),counter,bond_traj%sstress)
+    call push_buffer_value(buff%data(:,n),counter,bond_traj%rel_rotation)
   elseif (fracture_criterion.ne.'none') then
     call push_buffer_value(buff%data(:,n),counter,bond_traj%rotation)
     call push_buffer_value(buff%data(:,n),counter,bond_traj%rel_rotation)
@@ -4193,7 +4277,7 @@ subroutine unpack_bond_traj_from_buffer2(first, buff, n)
     allocate(bond_traj%Ee,bond_traj%Ed,bond_traj%axn_fast,bond_traj%ayn_fast,bond_traj%bxn_fast,bond_traj%byn_fast)
   endif
   if (dem) then
-    allocate(bond_traj%tangd1,bond_traj%tangd2,bond_traj%nstress,bond_traj%sstress)
+    allocate(bond_traj%tangd1,bond_traj%tangd2,bond_traj%nstress,bond_traj%sstress,bond_traj%rel_rotation)
   elseif (fracture_criterion.ne.'none') then
     allocate(bond_traj%rotation,bond_traj%rel_rotation,bond_traj%n_frac_var)
     if (fracture_criterion.eq.'strain_rate') then
@@ -4236,6 +4320,7 @@ subroutine unpack_bond_traj_from_buffer2(first, buff, n)
     call pull_buffer_value(buff%data(:,n),counter,bond_traj%tangd2)
     call pull_buffer_value(buff%data(:,n),counter,bond_traj%nstress)
     call pull_buffer_value(buff%data(:,n),counter,bond_traj%sstress)
+    call pull_buffer_value(buff%data(:,n),counter,bond_traj%rel_rotation)
   elseif (fracture_criterion.ne.'none') then
     call pull_buffer_value(buff%data(:,n),counter,bond_traj%rotation)
     call pull_buffer_value(buff%data(:,n),counter,bond_traj%rel_rotation)
@@ -4718,6 +4803,7 @@ integer :: stderrunit
   endif
   if (dem) then
     allocate(berg%ang_vel,berg%ang_accel,berg%rot)
+    if (add_curl_to_torque) allocate(berg%curl_o) !,berg%curl_a)
   elseif (fracture_criterion .ne. 'none') then
     allocate(berg%accum_bond_rotation)
   endif
@@ -4978,6 +5064,17 @@ real :: elem_sum, l_sum, w_sum
   bergs%constant_length = l_sum/elem_sum
   bergs%constant_width  = w_sum/elem_sum
 
+  bergs%constant_area=bergs%constant_length*bergs%constant_width
+  if (bergs%hexagonal_icebergs) then
+    bergs%constant_radius=sqrt(bergs%constant_area/(2.*sqrt(3.)))
+  else
+    if (bergs%iceberg_bonds_on) then
+      bergs%constant_radius=0.5*sqrt(bergs%constant_area)
+    else
+      bergs%constant_radius=sqrt(bergs%constant_area/pi) ! Interaction radius of the iceberg (assuming circular icebergs)
+    endif
+  endif
+
 end subroutine set_constant_interaction_length_and_width
 
 !> Initialization for the DEM beam tests
@@ -5037,7 +5134,7 @@ real :: maxlon
   do grdj=grd%jsd,grd%jed ; do grdi=grd%isd,grd%ied !loop over all cells
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this)) ! loop over all bergs in cell
-      this%ang_vel=0.
+      !this%ang_vel=0.
       this%ang_accel=0.
       this%rot=0.
       this=>this%next
@@ -5304,6 +5401,11 @@ subroutine break_bonds_dem(bergs)
   integer :: grdi, grdj
   type(bond) , pointer :: current_bond,other_bond,kick_the_bucket
   real :: frac_thres_n,frac_thres_t
+  real :: Rsig,Rtau,frac
+
+  if (no_frac_first_ts) then
+    return
+  endif
 
   frac_thres_n=bergs%frac_thres_n; frac_thres_t=bergs%frac_thres_t
 
@@ -5324,15 +5426,33 @@ subroutine break_bonds_dem(bergs)
 
         if (current_bond%other_id.ne.-1) then
 
-          if (current_bond%nstress>frac_thres_n .or. current_bond%sstress>frac_thres_t) then
-            if (current_bond%nstress>frac_thres_n .and. current_bond%sstress>frac_thres_t) then
-              print *,'normal and shear stress break',this%id,current_bond%nstress,current_bond%sstress
-            elseif (current_bond%nstress>frac_thres_n) then
-              print *,'normal stress break',this%id,current_bond%nstress,current_bond%sstress
-            else
-              print *,'shear stress break',this%id,current_bond%nstress,current_bond%sstress
+          if (bergs%fracture_criterion=='computed') then
+            Rsig=current_bond%nstress/frac_thres_n
+            Rtau=current_bond%sstress/frac_thres_t
+            frac=0.5*Rsig+sqrt((0.5*Rsig)**2. + Rtau**2.)
+            if (frac > 1.) then
+              print *,'BREAK',this%lat,frac,Rsig,Rtau
+              current_bond%other_id=-1
             endif
-            current_bond%other_id=-1
+          elseif (bergs%fracture_criterion=='computed_s') then
+            Rsig=current_bond%nstress/bergs%frac_thres_n
+            Rtau=current_bond%sstress/bergs%frac_thres_t
+            frac=sqrt(Rsig**2. + Rtau**2.)
+            if (frac > 1.) then
+              print *,'BREAK',this%lat,frac,Rsig,Rtau
+              current_bond%other_id=-1
+            endif
+          else
+              if (current_bond%nstress>frac_thres_n .or. current_bond%sstress>frac_thres_t) then
+                if (current_bond%nstress>frac_thres_n .and. current_bond%sstress>frac_thres_t) then
+                  print *,'T and S break',this%lat,current_bond%nstress,current_bond%sstress
+                elseif (current_bond%nstress>frac_thres_n) then
+                  print *,'TENSILE break',this%lat,current_bond%nstress,current_bond%sstress
+                else
+                  print *,'SHEAR   break',this%lat,current_bond%nstress,current_bond%sstress
+                endif
+                current_bond%other_id=-1
+              endif
           endif
 
           if (current_bond%other_id.eq.-1) then
@@ -5341,7 +5461,28 @@ subroutine break_bonds_dem(bergs)
               !mark matching bond on other_berg
               other_bond=>other_berg%first_bond
               do while (associated(other_bond)) ! loop over all bonds
-                if (other_bond%other_id.eq.this%id) other_bond%other_id=-1
+                if (other_bond%other_id.eq.this%id) then
+                  other_bond%other_id=-1
+                  if (bergs%fracture_criterion=='computed') then
+                    Rsig=other_bond%nstress/frac_thres_n
+                    Rtau=other_bond%sstress/frac_thres_t
+                    frac=0.5*Rsig+sqrt((0.5*Rsig)**2. + Rtau**2.)
+                    if (frac <= 1.) then
+                      print *,'Other bond did not fracture!'
+                    endif
+                  elseif(bergs%fracture_criterion=='computed_s') then
+                    Rsig=current_bond%nstress/bergs%frac_thres_n
+                    Rtau=current_bond%sstress/bergs%frac_thres_t
+                    frac=sqrt(Rsig**2. + Rtau**2.)
+                    if (frac <= 1.) then
+                      print *,'Other bond did not fracture!'
+                    endif
+                  elseif (other_bond%nstress<=frac_thres_n .and. other_bond%sstress<=frac_thres_t) then
+                    print *,'Other bond did not fracture!'
+                    print *,'current and other bond nstress,',current_bond%nstress, other_bond%nstress
+                    print *,'current and other bond sstress,',current_bond%sstress, other_bond%sstress
+                  endif
+                endif
                 other_bond=>other_bond%next_bond
               enddo
             endif
@@ -5429,6 +5570,8 @@ if (berg%id .ne. other_id) then
     new_bond%tangd1=0.; new_bond%tangd2=0.
     allocate(new_bond%nstress,new_bond%sstress)
     new_bond%nstress=0.; new_bond%sstress=0.
+    allocate(new_bond%rel_rotation)
+    new_bond%rel_rotation=0.
   elseif (fracture_criterion.ne.'none') then
     allocate(new_bond%rotation,new_bond%rel_rotation,new_bond%n_frac_var)
     new_bond%rotation=0.; new_bond%rel_rotation=0.; new_bond%n_frac_var=0.
@@ -5920,6 +6063,7 @@ endif
 
   if (dem) then
     allocate(posn%ang_vel,posn%ang_accel,posn%rot)
+    if (add_curl_to_torque) allocate(posn%curl_o) !,posn%curl_a)
   elseif (fracture_criterion .ne. 'none') then
     allocate(posn%accum_bond_rotation)
   endif
@@ -5930,7 +6074,7 @@ endif
       allocate(bond_posn%Ee,bond_posn%Ed,bond_posn%axn_fast,bond_posn%ayn_fast,bond_posn%bxn_fast,bond_posn%byn_fast)
     endif
     if (dem) then
-      allocate(bond_posn%tangd1,bond_posn%tangd2,bond_posn%nstress,bond_posn%sstress)
+      allocate(bond_posn%tangd1,bond_posn%tangd2,bond_posn%nstress,bond_posn%sstress,bond_posn%rel_rotation)
     elseif (fracture_criterion.ne.'none') then
       allocate(bond_posn%rotation,bond_posn%rel_rotation,bond_posn%n_frac_var)
       if (fracture_criterion.eq.'strain_rate') allocate(bond_posn%n_strain_rate)
@@ -6041,6 +6185,10 @@ endif
             posn%ang_vel=this%ang_vel
             posn%ang_accel=this%ang_accel
             posn%rot=this%rot
+            if (add_curl_to_torque) then
+              posn%curl_o=this%curl_o
+              !posn%curl_a=this%curl_a
+            endif
           elseif (fracture_criterion .ne. 'none') then
             posn%accum_bond_rotation=this%accum_bond_rotation
           endif
@@ -6063,7 +6211,8 @@ endif
 
               dx=(this%lon-other_berg%lon)*dx_dlon; dy=(this%lat-other_berg%lat)*dy_dlat
               n1=dx/this%length; n2=dy/this%length !unit vector
-              bond_posn%lon=this%lon-dx/2;          bond_posn%lat=this%lat-dy/2
+              bond_posn%lon=0.5*(this%lon+other_berg%lon)
+              bond_posn%lat=0.5*(this%lat+other_berg%lat)
               bond_posn%year=bergs%current_year;    bond_posn%day=bergs%current_yearday
               bond_posn%length=current_bond%length;
               bond_posn%n1=n1;                      bond_posn%n2=n2
@@ -6087,6 +6236,7 @@ endif
                 bond_posn%tangd2=current_bond%tangd2
                 bond_posn%nstress=current_bond%nstress
                 bond_posn%sstress=current_bond%sstress
+                bond_posn%rel_rotation=current_bond%rel_rotation
               elseif (fracture_criterion.ne.'none') then
                 bond_posn%rotation=current_bond%rotation
                 bond_posn%rel_rotation=current_bond%rel_rotation
@@ -6133,6 +6283,7 @@ type(xyt), pointer :: new_posn
 
   if (dem) then
     allocate(new_posn%ang_vel,new_posn%ang_accel,new_posn%rot)
+    if (add_curl_to_torque) allocate(new_posn%curl_o) !,new_posn%curl_a)
   elseif (fracture_criterion .ne. 'none') then
     allocate(new_posn%accum_bond_rotation)
   endif
@@ -6159,7 +6310,7 @@ type(bond_xyt), pointer :: new_bond_posn
       new_bond_posn%bxn_fast,new_bond_posn%byn_fast)
   endif
   if (dem) then
-    allocate(new_bond_posn%tangd1,new_bond_posn%tangd2,new_bond_posn%nstress,new_bond_posn%sstress)
+    allocate(new_bond_posn%tangd1,new_bond_posn%tangd2,new_bond_posn%nstress,new_bond_posn%sstress,new_bond_posn%rel_rotation)
   elseif (fracture_criterion.ne.'none') then
     allocate(new_bond_posn%rotation,new_bond_posn%rel_rotation,new_bond_posn%n_frac_var)
     if (fracture_criterion.eq.'strain_rate') allocate(new_bond_posn%n_strain_rate)
@@ -6198,6 +6349,7 @@ type(xyt), pointer :: new_posn,next,last
 
   if (dem) then
     allocate(new_posn%ang_vel,new_posn%ang_accel,new_posn%rot)
+    if (add_curl_to_torque) allocate(new_posn%curl_o) !,new_posn%curl_a)
   elseif (fracture_criterion .ne. 'none' .and. (.not. dem)) then
     allocate(new_posn%accum_bond_rotation)
   endif
@@ -6234,7 +6386,7 @@ type(bond_xyt), pointer :: new_bond_posn,next,last
       new_bond_posn%bxn_fast,new_bond_posn%byn_fast)
   endif
   if (dem) then
-    allocate(new_bond_posn%tangd1,new_bond_posn%tangd2,new_bond_posn%nstress,new_bond_posn%sstress)
+    allocate(new_bond_posn%tangd1,new_bond_posn%tangd2,new_bond_posn%nstress,new_bond_posn%sstress,new_bond_posn%rel_rotation)
   elseif (fracture_criterion.ne.'none') then
     allocate(new_bond_posn%rotation,new_bond_posn%rel_rotation,new_bond_posn%n_frac_var)
     if (fracture_criterion.eq.'strain_rate') allocate(new_bond_posn%n_strain_rate)
@@ -6639,13 +6791,13 @@ if (.not. (oi-1.lt.grd%isd.or.oi.gt.grd%ied.or.oj-1.lt.grd%jsd.or.oj.gt.grd%jed)
 endif
 
 !find cell for structured grid without looping:
-oi=floor((x-grd%lon(grd%isd,grd%jsd))/(grd%lon(grd%isd+1,grd%jsd+1)-grd%lon(grd%isd,grd%jsd)))+grd%isd+1
-oj=floor((y-grd%lat(grd%isd,grd%jsd))/(grd%lat(grd%isd+1,grd%jsd+1)-grd%lat(grd%isd,grd%jsd)))+grd%jsd+1
-if (.not. (oi-1.lt.grd%isd.or.oi.gt.grd%ied.or.oj-1.lt.grd%jsd.or.oj.gt.grd%jed)) then
-  if (is_point_in_cell(grd, x, y, oi, oj)) then
-    check_and_find_cell=.true.; return
-  endif
-endif
+! oi=floor((x-grd%lon(grd%isd,grd%jsd))/(grd%lon(grd%isd+1,grd%jsd+1)-grd%lon(grd%isd,grd%jsd)))+grd%isd+1
+! oj=floor((y-grd%lat(grd%isd,grd%jsd))/(grd%lat(grd%isd+1,grd%jsd+1)-grd%lat(grd%isd,grd%jsd)))+grd%jsd+1
+! if (.not. (oi-1.lt.grd%isd.or.oi.gt.grd%ied.or.oj-1.lt.grd%jsd.or.oj.gt.grd%jed)) then
+!   if (is_point_in_cell(grd, x, y, oi, oj)) then
+!     check_and_find_cell=.true.; return
+!   endif
+! endif
 
   oi=-999; oj=-999
   do j=grd%jsd+1,grd%jed; do i=grd%isd+1,grd%ied
@@ -6671,13 +6823,13 @@ find_cell=.false.
 
 
 !find cell for structured grid without looping:
-oi=floor((x-grd%lon(grd%isd,grd%jsd))/(grd%lon(grd%isd+1,grd%jsd+1)-grd%lon(grd%isd,grd%jsd)))+grd%isd+1
-oj=floor((y-grd%lat(grd%isd,grd%jsd))/(grd%lat(grd%isd+1,grd%jsd+1)-grd%lat(grd%isd,grd%jsd)))+grd%jsd+1
-if (oi>grd%isc-1 .and. oi<grd%iec+1 .and. oj>grd%jsc-1 .and. oj<grd%jec+1) then
-  if (is_point_in_cell(grd, x, y, oi, oj)) then
-    find_cell=.true.; return
-  endif
-endif
+! oi=floor((x-grd%lon(grd%isd,grd%jsd))/(grd%lon(grd%isd+1,grd%jsd+1)-grd%lon(grd%isd,grd%jsd)))+grd%isd+1
+! oj=floor((y-grd%lat(grd%isd,grd%jsd))/(grd%lat(grd%isd+1,grd%jsd+1)-grd%lat(grd%isd,grd%jsd)))+grd%jsd+1
+! if (oi>grd%isc-1 .and. oi<grd%iec+1 .and. oj>grd%jsc-1 .and. oj<grd%jec+1) then
+!   if (is_point_in_cell(grd, x, y, oi, oj)) then
+!     find_cell=.true.; return
+!   endif
+! endif
 
   oi=-999; oj=-999
   do j=grd%jsc,grd%jec; do i=grd%isc,grd%iec
@@ -6702,13 +6854,13 @@ integer :: i,j
 
 find_cell_wide=.false.
 !find cell for structured grid without looping:
-oi=floor((x-grd%lon(grd%isd,grd%jsd))/(grd%lon(grd%isd+1,grd%jsd+1)-grd%lon(grd%isd,grd%jsd)))+grd%isd+1
-oj=floor((y-grd%lat(grd%isd,grd%jsd))/(grd%lat(grd%isd+1,grd%jsd+1)-grd%lat(grd%isd,grd%jsd)))+grd%jsd+1
-if (.not. (oi-1.lt.grd%isd.or.oi.gt.grd%ied.or.oj-1.lt.grd%jsd.or.oj.gt.grd%jed)) then
-  if (is_point_in_cell(grd, x, y, oi, oj)) then
-    find_cell_wide=.true.; return
-  endif
-endif
+! oi=floor((x-grd%lon(grd%isd,grd%jsd))/(grd%lon(grd%isd+1,grd%jsd+1)-grd%lon(grd%isd,grd%jsd)))+grd%isd+1
+! oj=floor((y-grd%lat(grd%isd,grd%jsd))/(grd%lat(grd%isd+1,grd%jsd+1)-grd%lat(grd%isd,grd%jsd)))+grd%jsd+1
+! if (.not. (oi-1.lt.grd%isd.or.oi.gt.grd%ied.or.oj-1.lt.grd%jsd.or.oj.gt.grd%jed)) then
+!   if (is_point_in_cell(grd, x, y, oi, oj)) then
+!     find_cell_wide=.true.; return
+!   endif
+! endif
 
 oi=-999; oj=-999
 
@@ -7736,6 +7888,78 @@ integer, intent(in) :: j !< j-index of cell
   endif
 end function bilin
 
+!> Bilinear interpolation of an A-grid field to a location within a cell (not tested!)
+real function bilin_interp_from_agrid(grd, fld, x, y, i, j, xi, yj)
+! Arguments
+type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+real, intent(in) :: fld(grd%isd:grd%ied,grd%jsd:grd%jed) !< Field to interpolate
+real, intent(in) :: x !<Longitude of position
+real, intent(in) :: y !<Latitude of position
+real, intent(in) :: xi !< Non-dimensional x-position within cell
+real, intent(in) :: yj !< Non-dimensional y-position within cell
+integer, intent(in) :: i !< i-index of cell
+integer, intent(in) :: j !< j-index of cell
+! Local variables
+integer :: is,ie,js,je
+real :: x1,x2,x3,x4,y1,y2,y3,y4
+real :: dx,dy,Delta_x,xx,yy
+real :: xloc,yloc !local coords
+real :: xb(2,2), yb(2,2) !basis functions
+
+!Uses bilinear lagrange basis functions (like in FEM), where the 4
+!nodes of an "element" are defined by a 2x2 array of neigboring cell-centers
+
+if (xi>=0.5) then
+  is=i; ie=i+1
+else
+  is=i-1; ie=i
+endif
+
+if (yj>=0.5) then
+  js=j; je=j+1
+else
+  js=j-1; je=j
+endif
+
+!four corners
+x1=grd%lonc(is,js); y1=grd%latc(is,js)
+x2=grd%lonc(ie,js); y2=grd%latc(ie,js)
+x3=grd%lonc(ie,je); y3=grd%latc(ie,je)
+x4=grd%lonc(is,je); y4=grd%latc(is,je)
+
+!get non-dimensional, local (natural) coords xloc and yloc:
+!largely copied from to pos_within_cell
+if ((.not. grd%grid_is_latlon) .and. (grd%grid_is_regular))  then
+  dx=abs(x3-x4); dy=abs(y3-y2)
+  x1=x3-(dx/2); y1=y3-(dy/2)
+  Delta_x= apply_modulo_around_point(x,x1,grd%Lx)-x1
+  xloc=((Delta_x)/dx)+0.5; yloc=((y-y1)/dy)+0.5
+elseif ((max(y1,y2,y3,y4)<89.999) .or.(.not. grd%grid_is_latlon)) then
+  ! This returns non-dimensional position xi,yj for quad cells (not at a pole)
+  call calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, x, y, xloc, yloc, grd%Lx)
+else
+  ! One of the cell corners is at the north pole so we switch to a tangent plane with
+  ! co-latitude as a radial coordinate.
+  xx=(90.-y)*cos(x*pi_180); yy=(90.-y)*sin(x*pi_180)
+  x1=(90.-y1)*cos(grd%lon(is,js)*pi_180); y1=(90.-y1)*sin(grd%lon(is,js)*pi_180)
+  x2=(90.-y2)*cos(grd%lon(ie,je)*pi_180); y2=(90.-y2)*sin(grd%lon(ie,je)*pi_180)
+  x3=(90.-y3)*cos(grd%lon(ie,je)*pi_180); y3=(90.-y3)*sin(grd%lon(ie,je)*pi_180)
+  x4=(90.-y4)*cos(grd%lon(is,je)*pi_180); y4=(90.-y4)*sin(grd%lon(is,je)*pi_180)
+  call calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, xx, yy, xloc, yloc, grd%Lx)
+endif
+
+!convert local coords to lie within the range [-1,1] rather than [0,1]
+xloc=xloc*2-1; yloc=yloc*2-1
+
+!basis functions:
+xb(1,:)=1-xloc; yb(:,1)=1-yloc
+xb(2,:)=1+xloc; yb(:,2)=1+yloc
+
+!interpolate:
+bilin_interp_from_agrid=sum(0.25*xb*yb*fld(is:ie,js:je))
+
+end function bilin_interp_from_agrid
+
 !> Quadratic interpolation of an A-grid field to a location within a cell
 real function quad_interp_from_agrid(grd, fld, x, y, i, j, xi, yj)
 ! Arguments
@@ -7753,12 +7977,23 @@ real :: x1,x2,x3,x4,y1,y2,y3,y4
 real :: dx,dy,Delta_x,xx,yy
 real :: xloc,yloc !local coords
 real :: xb(3,3), yb(3,3) !basis functions
+integer :: mind!=1
 
 !Uses bi-quadratic lagrange quadrilateral basis functions (like in FEM), where the 9
-!nodes of an "element" are defined by a 3x3 array of neigboring cell-centers
+!nodes of an "element" are defined by a 3x3 array of neigboring cell-centers. Note that a
+!perfect quadrilateral is assumed for simplicity (4 straight sides). This assumption
+!is imperfect when using a geographic grid (local coordinates may be slightly wrong),
+!but is probably good enough to approximate the bathymetry at a point, which is the
+!main purpose of this subroutine. Note that even the bilinear interpolations used elsewhere
+!are inaccurate, given the curved coordinate system...
 
 !bounds of "node" array (is:ie,js:je).
-if (mod(i,2)==1) then
+ if (rev_mind) then
+   mind=0
+ else
+   mind=1
+ endif
+if (mod(i,2)==mind) then
   if (xi>=0.5) then
     is=i; ie=i+2
   else
@@ -7767,7 +8002,7 @@ if (mod(i,2)==1) then
 else
   is=i-1; ie=i+1
 endif
-if (mod(j,2)==1) then
+if (mod(j,2)==mind) then
   if (yj>=0.5) then
     js=j; je=j+2
   else

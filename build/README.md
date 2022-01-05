@@ -16,5 +16,8 @@ To create a `Makefile`:
 To compile a "debug" executable:
 ```
 make DEBUG=1 -j
-##make NETCDF=3 DEBUG=1 bergs.x -j
+#or
+source mkcmd
+#source mkcmd runs the following:
+#make NETCDF=3 DEBUG=1 bergs.x -j
 ```

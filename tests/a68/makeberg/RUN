@@ -1,0 +1,89 @@
+rm ./output_files/Generic*
+
+#OPTION 1: SET CONSTANT THICKNESS TO 200 m
+#-------------------------------------------
+
+
+#./makeberg.py -Convert_to_lat_lon=True -input_is_cartesian=False -element_type='square' -plot_circles=False -Create_icebergs_bonds=False -Generic_ice_geometry_filename='./../data/a68_experiment_berg_2020_12_09_gridded_ll_p0625_cropped.nc' -Ice_geometry_source='Generic' -set_all_thicknesses_to_one=True -Th_prescribed=200 -plot_ice_thickness=False -plot_circles=True -plot_h_ice_new=False -plot_ice_mask=True -plot_icebergs_positions=False -adjust_lat_ref=True -Interpolate_from_four_corners=True -Radius=1500 -lat_ref_grid_to_cartesian=-55.2 -uvel=0.2 -R_earth=6378000.
+
+#6.371229e6
+
+#./makeberg.py -Convert_to_lat_lon=True -input_is_cartesian=False -element_type='hexagon' -plot_circles=False -Create_icebergs_bonds=False -Generic_ice_geometry_filename='./../data/a68_experiment_berg_2020_12_09_gridded_ll_p0625_cropped.nc' -Ice_geometry_source='Generic' -set_all_thicknesses_to_one=True -Th_prescribed=200 -plot_ice_thickness=False -plot_circles=True -plot_h_ice_new=False -plot_ice_mask=True -plot_icebergs_positions=False -adjust_lat_ref=True -Interpolate_from_four_corners=True -Radius=1500 -R_earth=6.371229e6 -lat_ref_grid_to_cartesian=-55.2 -uvel=0.2 -dx=3500.
+
+#for Rearth at 55 S for WGS84 ellipsoid
+#Change lon_init and lat_init to be displaced by dx/2 for this one!!
+#./makeberg.py -Convert_to_lat_lon=True -input_is_cartesian=False -element_type='hexagon' -plot_circles=False -Create_icebergs_bonds=False -Generic_ice_geometry_filename='./../data/a68_experiment_berg_2020_12_09_gridded_ll_p0625_cropped.nc' -Ice_geometry_source='Generic' -set_all_thicknesses_to_one=True -Th_prescribed=200 -plot_ice_thickness=False -plot_circles=True -plot_h_ice_new=False -plot_ice_mask=True -plot_icebergs_positions=False -adjust_lat_ref=True -Interpolate_from_four_corners=True -Radius=1500 -lat_ref_grid_to_cartesian=-55.2 -uvel=0.22 -dx=3500. -R_earth=6363827. -displace_y=-0.05 -icethres=0.5
+
+#./makeberg.py -Convert_to_lat_lon=True -input_is_cartesian=False -element_type='hexagon' -plot_circles=False -Create_icebergs_bonds=False -Generic_ice_geometry_filename='./../data/a68_experiment_berg_2020_12_09_gridded_ll_p0625_cropped.nc' -Ice_geometry_source='Generic' -set_all_thicknesses_to_one=True -Th_prescribed=200 -plot_ice_thickness=False -plot_circles=True -plot_h_ice_new=False -plot_ice_mask=True -plot_icebergs_positions=False -adjust_lat_ref=True -Interpolate_from_four_corners=True -Radius=1500 -lat_ref_grid_to_cartesian=-55.2 -uvel=0.22 -dx=3500. -R_earth=6363827. -displace_y=-0.025 -icethres=0.6
+
+#./makeberg.py -Convert_to_lat_lon=True -input_is_cartesian=False -element_type='hexagon' -plot_circles=False -Create_icebergs_bonds=False -Generic_ice_geometry_filename='./../data/a68_experiment_berg_2020_12_09_gridded_ll_p0625_cropped.nc' -Ice_geometry_source='Generic' -set_all_thicknesses_to_one=True -Th_prescribed=200 -plot_ice_thickness=False -plot_circles=True -plot_h_ice_new=False -plot_ice_mask=True -plot_icebergs_positions=False -adjust_lat_ref=True -Interpolate_from_four_corners=True -Radius=1500 -lat_ref_grid_to_cartesian=-55.2 -uvel=0.22 -dx=3540. -R_earth=6363827. -displace_y=-0.0625 -icethres=0.9
+
+#./makeberg.py -Convert_to_lat_lon=True -input_is_cartesian=False -element_type='hexagon' -plot_circles=False -Create_icebergs_bonds=False -Generic_ice_geometry_filename='./../data/a68_experiment_berg_2020_12_09_gridded_ll_p0625_cropped.nc' -Ice_geometry_source='Generic' -set_all_thicknesses_to_one=True -Th_prescribed=200 -plot_ice_thickness=False -plot_circles=True -plot_h_ice_new=False -plot_ice_mask=True -plot_icebergs_positions=False -adjust_lat_ref=True -Interpolate_from_four_corners=True -Radius=1500 -lat_ref_grid_to_cartesian=-55.2 -uvel=0.22 -dx=3540. -R_earth=6363827. -displace_y=-0.075 -icethres=0.9
+
+./makeberg.py -Convert_to_lat_lon=True -input_is_cartesian=False -element_type='hexagon' -plot_circles=False -Create_icebergs_bonds=False -Generic_ice_geometry_filename='./../data/a68_experiment_berg_2020_12_09_gridded_ll_p0625_cropped.nc' -Ice_geometry_source='Generic' -set_all_thicknesses_to_one=True -Th_prescribed=200 -plot_ice_thickness=False -plot_circles=True -plot_h_ice_new=False -plot_ice_mask=True -plot_icebergs_positions=False -adjust_lat_ref=True -Interpolate_from_four_corners=True -Radius=1500 -lat_ref_grid_to_cartesian=-55.2 -uvel=0.22 -dx=3540. -R_earth=6363827. -displace_y=-0.1 -icethres=0.9
+
+# AGU hex test:
+#./makeberg.py -Convert_to_lat_lon=True -input_is_cartesian=False -element_type='hexagon' -plot_circles=False -Create_icebergs_bonds=False -Generic_ice_geometry_filename='./../data/a68_experiment_berg_2020_12_09_gridded_ll_p0625_cropped.nc' -Ice_geometry_source='Generic' -set_all_thicknesses_to_one=True -Th_prescribed=200 -plot_ice_thickness=False -plot_circles=True -plot_h_ice_new=False -plot_ice_mask=True -plot_icebergs_positions=False -adjust_lat_ref=True -Interpolate_from_four_corners=True -Radius=1500 -lat_ref_grid_to_cartesian=-55.2 -uvel=0.22 -dx=3540. -R_earth=6363827. -displace_y=-0.175 -icethres=0.9
+
+
+#For testing rev_mind=.true. vs. rev_mind=.false.
+#./makeberg.py -Convert_to_lat_lon=True -input_is_cartesian=False -element_type='hexagon' -plot_circles=False -Create_icebergs_bonds=False -Generic_ice_geometry_filename='./../data/a68_experiment_berg_2020_12_14_gridded_ll_p0625_cropped.nc' -Ice_geometry_source='Generic' -set_all_thicknesses_to_one=True -Th_prescribed=200 -plot_ice_thickness=False -plot_circles=True -plot_h_ice_new=False -plot_ice_mask=True -plot_icebergs_positions=False -adjust_lat_ref=True -Interpolate_from_four_corners=True -Radius=1500 -lat_ref_grid_to_cartesian=-55.2 -dx=3500. -R_earth=6363827. -set_all_domain_to_ice=True -set_all_bergs_static_by_default=True
+
+#./makeberg.py -Convert_to_lat_lon=True -input_is_cartesian=False -element_type='square' -plot_circles=False -Create_icebergs_bonds=False -Generic_ice_geometry_filename='./../data/a68_experiment_berg_2020_12_09_gridded_ll_p0625_cropped.nc' -Ice_geometry_source='Generic' -set_all_thicknesses_to_one=True -Th_prescribed=200 -plot_ice_thickness=False -plot_circles=True -plot_h_ice_new=False -plot_ice_mask=True -plot_icebergs_positions=False -adjust_lat_ref=True -Interpolate_from_four_corners=False -Radius=1500 -lat_ref_grid_to_cartesian=-55.2 -uvel=0.22 -dx=500. -R_earth=6363827. -icethres=0.8
+
+
+# THIS IS THE ONE USED FOR AGU AND IN THE PAPER!!
+#./makeberg.py -Convert_to_lat_lon=True -input_is_cartesian=False -element_type='square' -plot_circles=False -Create_icebergs_bonds=False -Generic_ice_geometry_filename='./../data/a68_experiment_berg_2020_12_09_gridded_ll_p0625_cropped.nc' -Ice_geometry_source='Generic' -set_all_thicknesses_to_one=True -Th_prescribed=200 -plot_ice_thickness=False -plot_circles=True -plot_h_ice_new=False -plot_ice_mask=True -plot_icebergs_positions=False -adjust_lat_ref=True -Interpolate_from_four_corners=False -Radius=1500 -lat_ref_grid_to_cartesian=-55.2 -uvel=0.22 -dx=500. -R_earth=6363827. -icethres=0.5 -displace_y=-0.1
+
+#./makeberg.py -Convert_to_lat_lon=True -input_is_cartesian=False -element_type='square' -plot_circles=False -Create_icebergs_bonds=False -Generic_ice_geometry_filename='./../data/a68_experiment_berg_2020_12_09_gridded_ll_p0625_cropped.nc' -Ice_geometry_source='Generic' -set_all_thicknesses_to_one=True -Th_prescribed=200 -plot_ice_thickness=False -plot_circles=True -plot_h_ice_new=False -plot_ice_mask=True -plot_icebergs_positions=False -adjust_lat_ref=True -Interpolate_from_four_corners=False -Radius=1500 -lat_ref_grid_to_cartesian=-55.2 -uvel=0.22 -dx=500. -R_earth=6378000. -icethres=0.5 -displace_y=-0.1
+
+#for Rearth at 55 S for WGS84 ellipsoid
+ #this was the displacement for ./../oldnc2/od_##_tn_ng_ellr.nc??
+#./makeberg.py -Convert_to_lat_lon=True -input_is_cartesian=False -element_type='square' -plot_circles=False -Create_icebergs_bonds=False -Generic_ice_geometry_filename='./../data/a68_experiment_berg_2020_12_09_gridded_ll_p0625_cropped.nc' -Ice_geometry_source='Generic' -set_all_thicknesses_to_one=True -Th_prescribed=200 -plot_ice_thickness=False -plot_circles=True -plot_h_ice_new=False -plot_ice_mask=True -plot_icebergs_positions=False -adjust_lat_ref=True -Interpolate_from_four_corners=True -Radius=1500 -lat_ref_grid_to_cartesian=-55.2 -uvel=0.22 -dx=250. -R_earth=6363827. -displace_y=-0.05
+
+#-lat_ref_grid_to_cartesian=-55.2 -uvel=0.2 -vvel=0.0
+
+#./makeberg.py -Convert_to_lat_lon=True -input_is_cartesian=False -element_type='square' -Create_icebergs_bonds=False -Generic_ice_geometry_filename='./../data/a68_experiment_berg_2020_12_14_gridded_ll_p0625_cropped.nc' -Ice_geometry_source='Generic' -set_all_thicknesses_to_one=True -Th_prescribed=200 -plot_ice_thickness=False -plot_circles=True -plot_h_ice_new=False -plot_ice_thickness=False -plot_ice_mask=True -plot_icebergs_positions=False -adjust_lat_ref=True -Interpolate_from_four_corners=True -Radius=1500 -R_earth=6.371229e6 -lat_ref_grid_to_cartesian=-55.8
+
+#./makeberg.py -Convert_to_lat_lon=True -input_is_cartesian=False -element_type='square' -Create_icebergs_bonds=False -Generic_ice_geometry_filename='./../data/a68_experiment_berg_2020_12_14a_gridded_ll_p0625_cropped.nc' -Ice_geometry_source='Generic' -set_all_thicknesses_to_one=True -Th_prescribed=200 -plot_ice_thickness=False -plot_circles=True -plot_h_ice_new=False -plot_ice_thickness=False -plot_ice_mask=True -plot_icebergs_positions=False -adjust_lat_ref=True -Interpolate_from_four_corners=True -Radius=1500 -R_earth=6.371229e6 -lat_ref_grid_to_cartesian=-55.8
+
+#-uvel=0.2 -vvel=-0.2
+
+#-uvel=0.2 -vvel=-0.2 -ang_vel_prescribed=-7.5e-5
+
+#./makeberg.py -Convert_to_lat_lon=True -input_is_cartesian=False -element_type='square' -Create_icebergs_bonds=False -Generic_ice_geometry_filename='./../data/a68_experiment_berg_2020_12_13_gridded_ll_p0625_cropped.nc' -Ice_geometry_source='Generic' -set_all_thicknesses_to_one=True -Th_prescribed=200 -plot_ice_thickness=False -plot_circles=True -plot_h_ice_new=False -plot_ice_thickness=False -plot_ice_mask=False -plot_icebergs_positions=True -adjust_lat_ref=True -Interpolate_from_four_corners=True -Radius=1500 -R_earth=6.371229e6 -lat_ref_grid_to_cartesian=-55.8
+
+
+#-uvel=0.1 -vvel=0.4
+#-uvel=0.18 -vvel=-0.23 -R_earth=6360000
+#-ang_vel_prescribed=-7.5e-5
+#-uvel=0.2 -vvel=-0.2
+
+# -R_earth=6360000
+
+#-R_earth=6378000.
+
+#-uvel=0.18 -vvel=-0.23
+#-uvel=0.254 -vvel=-0.08
+#-R_earth=6360000 -uvel=0.18 -vvel=-0.23
+#-uvel=0.24 -vvel=-0.08
+
+#OPTION 2: VARY THICKESS
+#-----------------------
+
+#./makeberg.py -Convert_to_lat_lon=True -input_is_cartesian=False -element_type='square' -plot_circles=False -Create_icebergs_bonds=False -Generic_ice_geometry_filename='./../data/a68_experiment_berg_2020_12_09_gridded_ll_p0625_cropped_hvary.nc' -Ice_geometry_source='Generic' -set_all_thicknesses_to_one=False -plot_ice_thickness=False -plot_circles=True -plot_h_ice_new=False -plot_ice_mask=False -plot_icebergs_positions=True -adjust_lat_ref=True -Interpolate_from_four_corners=True -Radius=1500 -R_earth=6.371229e6 -lat_ref_grid_to_cartesian=-55.8
+#-uvel=0.2 -vvel=0.
+
+#./makeberg.py -Convert_to_lat_lon=True -input_is_cartesian=False -element_type='square' -plot_circles=False -Create_icebergs_bonds=False -Generic_ice_geometry_filename='./../data/a68_experiment_berg_2020_12_14_gridded_ll_p0625_cropped_hvary.nc' -Ice_geometry_source='Generic' -set_all_thicknesses_to_one=False -plot_ice_thickness=False -plot_circles=True -plot_h_ice_new=False -plot_ice_mask=False -plot_icebergs_positions=True -adjust_lat_ref=True -Interpolate_from_four_corners=True -Radius=1500 -R_earth=6.371229e6 -lat_ref_grid_to_cartesian=-55.8
+
+#-uvel=0.24 -vvel=-0.08
+#-uvel=0.18 -vvel=-0.23
+
+#-Radius=2000
+#-uvel=0.18 -vvel=-0.23 #correct?
+#-uvel=0.036 -vvel=-0.046 #wrong?
+#-uvel=0. -vvel=0
+
+#./make_one_berg.py
+
+cp ./output_files/Generic_icebergs.res.nc ./../INPUT/icebergs.res.nc

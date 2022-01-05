@@ -44,7 +44,7 @@ use ice_bergs_framework, only: split_id, id_from_2_ints, generate_id
 use ice_bergs_framework, only: mts,save_bond_traj
 use ice_bergs_framework, only: push_bond_posn, append_bond_posn
 use ice_bergs_framework, only: pack_bond_traj_into_buffer2,unpack_bond_traj_from_buffer2
-use ice_bergs_framework, only: monitor_energy, use_damage, dem, fracture_criterion, iceberg_bonds_on
+use ice_bergs_framework, only: monitor_energy, use_damage, dem, add_curl_to_torque, fracture_criterion, iceberg_bonds_on
 
 implicit none ; private
 
@@ -160,6 +160,8 @@ real, allocatable, dimension(:) :: lon,          &
                                    ang_vel,      &
                                    ang_accel,    &
                                    rot,          &
+                                   curl_o,       &
+                                   !curl_a,       &
                                    lon_prev,     &
                                    lat_prev,     &
                                    accum_bond_rotation, &
@@ -247,6 +249,10 @@ integer :: grdi, grdj
      allocate(ang_vel(nbergs))
      allocate(ang_accel(nbergs))
      allocate(rot(nbergs))
+     if (add_curl_to_torque) then
+       allocate(curl_o(nbergs))
+       !allocate(curl_a(nbergs))
+    endif
    elseif (fracture_criterion.ne.'none') then
      allocate(lon_prev(nbergs))
      allocate(lat_prev(nbergs))
@@ -323,6 +329,12 @@ integer :: grdi, grdj
       longname='dem angular acceleration',units='rad/s^2')
     id = register_restart_field(bergs_restart,filename,'rot',rot,&
       longname='dem accumulated rotation',units='rad')
+    if (add_curl_to_torque) then
+      id = register_restart_field(bergs_restart,filename,'curl_o',curl_o,&
+        longname='curl of ocean velocity',units='1/s')
+      !id = register_restart_field(bergs_restart,filename,'curl_a',curl_a,&
+      !  longname='curl of atmospheric velocity',units='1/s')
+    endif
   elseif (fracture_criterion.ne.'none') then
     id = register_restart_field(bergs_restart,filename,'lon_prev',lon_prev,longname='previous longitude',units='degrees_E')
     id = register_restart_field(bergs_restart,filename,'lat_prev',lat_prev,longname='previous latitude',units='degrees_N')
@@ -376,6 +388,10 @@ integer :: grdi, grdj
         ang_vel(i) = this%ang_vel
         ang_accel(i) = this%ang_accel
         rot(i) = this%rot
+        if (add_curl_to_torque) then
+          curl_o(i) = this%curl_o
+          !curl_a(i) = this%curl_a
+        endif
       elseif (fracture_criterion.ne.'none') then
         lon_prev(i) = this%lon_prev
         lat_prev(i) = this%lat_prev
@@ -425,6 +441,11 @@ integer :: grdi, grdj
              ang_vel,      &
              ang_accel,    &
              rot)
+    if (add_curl_to_torque) then
+      deallocate(          &
+             curl_o) !,       &
+             !curl_a)
+    endif
   elseif (fracture_criterion.ne.'none') then
     deallocate(            &
              lon_prev,     &
@@ -464,6 +485,7 @@ integer :: grdi, grdj
     allocate(tangd2(nbonds))
     allocate(nstress(nbonds))
     allocate(sstress(nbonds))
+    allocate(rel_rotation(nbonds))
   elseif (fracture_criterion.ne.'none') then
     allocate(rotation(nbonds))
     allocate(rel_rotation(nbonds))
@@ -506,6 +528,8 @@ integer :: grdi, grdj
       longname='normal stress',units='Pa')
     id = register_restart_field(bergs_bond_restart,filename_bonds,'sstress',sstress,&
       longname='shear stress',units='Pa')
+    id = register_restart_field(bergs_bond_restart,filename_bonds,'rel_rotation',rel_rotation,&
+      longname='relative rotation',units='rad')
   elseif (fracture_criterion.ne.'none') then
     id = register_restart_field(bergs_bond_restart,filename_bonds,'rotation',rotation,&
       longname='rotation',units='rad')
@@ -544,6 +568,7 @@ integer :: grdi, grdj
           tangd2(i)=current_bond%tangd2
           nstress(i)=current_bond%nstress
           sstress(i)=current_bond%sstress
+          rel_rotation(i)=current_bond%rel_rotation
         elseif (fracture_criterion.ne.'none') then
           rotation(i)=current_bond%rotation
           rel_rotation(i)=current_bond%rel_rotation
@@ -578,7 +603,8 @@ integer :: grdi, grdj
              tangd1,                &
              tangd2,                &
              nstress,               &
-             sstress)
+             sstress,               &
+             rel_rotation)
   elseif (fracture_criterion.ne.'none') then
     deallocate(                     &
              rotation,              &
@@ -658,7 +684,7 @@ logical :: explain
 logical :: multiPErestart  ! Not needed with new restart read; currently kept for compatibility
 real :: lon0, lon1, lat0, lat1
 real :: pos_is_good, pos_is_good_all_pe
-character(len=33) :: filename, filename_base
+character(len=53) :: filename, filename_base
 type(icebergs_gridded), pointer :: grd
 type(iceberg) :: localberg ! NOT a pointer but an actual local variable
 integer :: stderrunit, i, j, cnt, ij
@@ -792,6 +818,10 @@ integer, allocatable, dimension(:) :: ine,        &
        allocate(ang_vel(nbergs_in_file))
        allocate(ang_accel(nbergs_in_file))
        allocate(rot(nbergs_in_file))
+       if (add_curl_to_torque) then
+         allocate(localberg%curl_o)!, localberg%curl_a)
+         localberg%curl_o=0.0!; localberg%curl_a=0.0
+       endif
      elseif (fracture_criterion.ne.'none') then
        allocate(lon_prev(nbergs_in_file))
        allocate(lat_prev(nbergs_in_file))
@@ -884,6 +914,7 @@ integer, allocatable, dimension(:) :: ine,        &
            & ' on PE ',mpp_pe()
       write(stderrunit,*) 'KID, read_restart_bergs: lres = ',lres
     endif
+
     if (lres) then ! true if we reside on this PE grid
       localberg%uvel=uvel(k)
       localberg%vvel=vvel(k)
@@ -1107,6 +1138,10 @@ logical :: lres
     allocate(localberg%ang_vel)
     allocate(localberg%ang_accel)
     allocate(localberg%rot)
+    if (add_curl_to_torque) then
+      allocate(localberg%curl_o)
+      !allocate(localberg%curl_a)
+    endif
   elseif (fracture_criterion.ne.'none') then
     allocate(localberg%accum_bond_rotation)
   endif
@@ -1160,6 +1195,10 @@ logical :: lres
         localberg%ang_vel=0.
         localberg%ang_accel=0.
         localberg%rot=0.
+        if (add_curl_to_torque) then
+          localberg%curl_o=0.
+          !localberg%curl_a=0.
+        endif
       elseif (fracture_criterion.ne.'none') then
         localberg%accum_bond_rotation=0.
       endif
@@ -1235,7 +1274,7 @@ logical :: lres, found_restart, found
 logical :: first_berg_found, second_berg_found
 logical :: multiPErestart  ! Not needed with new restart read; currently kept for compatibility
 real :: lon0, lon1, lat0, lat1
-character(len=33) :: filename, filename_base
+character(len=53) :: filename, filename_base
 type(icebergs_gridded), pointer :: grd
 type(iceberg) :: localberg ! NOT a pointer but an actual local variable
 type(iceberg) , pointer :: this, first_berg, second_berg
@@ -1309,6 +1348,7 @@ integer(kind=8), allocatable, dimension(:) :: first_id,   &
       allocate(tangd2(nbonds_in_file))
       allocate(nstress(nbonds_in_file))
       allocate(sstress(nbonds_in_file))
+      allocate(rel_rotation(nbonds_in_file))
     elseif (fracture_criterion.ne.'none') then
       allocate(rotation(nbonds_in_file))
       allocate(rel_rotation(nbonds_in_file))
@@ -1341,6 +1381,7 @@ integer(kind=8), allocatable, dimension(:) :: first_id,   &
       call read_real_vector(filename,'tangd2',tangd2,grd%domain,value_if_not_in_file=0.)
       call read_real_vector(filename,'nstress',nstress,grd%domain,value_if_not_in_file=0.)
       call read_real_vector(filename,'sstress',sstress,grd%domain,value_if_not_in_file=0.)
+      call read_real_vector(filename,'rel_rotation',rel_rotation,grd%domain,value_if_not_in_file=0.)
     elseif (fracture_criterion.ne.'none') then
       call read_real_vector(filename,'rotation',rotation,grd%domain,value_if_not_in_file=0.)
       call read_real_vector(filename,'rel_rotation',rel_rotation,grd%domain,value_if_not_in_file=0.)
@@ -1452,10 +1493,11 @@ integer(kind=8), allocatable, dimension(:) :: first_id,   &
               current_bond%tangd2=tangd2(k)
               current_bond%nstress=nstress(k)
               current_bond%sstress=sstress(k)
+              current_bond%rel_rotation=rel_rotation(k)
             elseif (fracture_criterion.ne.'none') then
-              current_bond%tangd1=rotation(k)
-              current_bond%tangd2=rel_rotation(k)
-              current_bond%nstress=n_frac_var(k)
+              current_bond%rotation=rotation(k)
+              current_bond%rel_rotation=rel_rotation(k)
+              current_bond%n_frac_var=n_frac_var(k)
               if (fracture_criterion.eq.'strain_rate') then
                 current_bond%n_strain_rate=n_strain_rate(k)
               elseif (fracture_criterion.eq.'energy') then
@@ -1524,7 +1566,8 @@ integer(kind=8), allocatable, dimension(:) :: first_id,   &
                tangd1,                &
                tangd2,                &
                nstress,               &
-               sstress)
+               sstress,               &
+               rel_rotation)
     elseif (fracture_criterion.ne.'none') then
       deallocate(                     &
                rotation,              &
@@ -1686,7 +1729,7 @@ character(len=37) :: filename
 end subroutine read_ocean_depth
 
 !> Write a trajectory-based diagnostics file
-subroutine write_trajectory(trajectory, save_short_traj, save_fl_traj, fl_r)
+subroutine write_trajectory(trajectory, save_short_traj, save_fl_traj, fl_r, traj_name)
 ! Arguments
 type(xyt), pointer :: trajectory !< An iceberg trajectory
 logical, intent(in) :: save_short_traj !< If true, record less data
@@ -1695,7 +1738,7 @@ real, intent(in) :: fl_r !< If >0 and save_fl_traj, save footloose params
 ! Local variables
 integer :: iret, ncid, i_dim, i
 integer :: lonid, latid, yearid, dayid, uvelid, vvelid, idcntid, idijid
-integer :: uvelpid,vvelpid
+integer :: uvelpid,vvelpid, curloid, curlaid
 integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid, sssid
 integer :: cnid, hiid, hsid
 integer :: mid, smid, did, wid, lid, mbid, mflbid, mflbbid, hdid, nbid, odid, flkid
@@ -1703,7 +1746,7 @@ integer :: axnid,aynid,bxnid,bynid,axnfid,aynfid,bxnfid,bynfid, msid
 integer :: eecid,edcid,eeid,edid,aeid,efid
 integer :: eectid, edctid, eetid, edtid, aetid
 integer :: avid, aaid, rid, abrid
-character(len=37) :: filename
+character(len=70) :: filename, traj_name
 character(len=7) :: pe_name
 type(xyt), pointer :: this, next
 integer :: stderrunit, cnt, ij
@@ -1779,7 +1822,8 @@ logical :: io_is_in_append_mode
 
   if((force_all_pes_traj .OR. is_io_tile_root_pe) .AND. associated(traj4io)) then
 
-    call get_instance_filename("iceberg_trajectories.nc", filename)
+    !call get_instance_filename("iceberg_trajectories.nc", filename)
+    call get_instance_filename(traj_name, filename)
     if(io_tile_id(1) .ge. 0 .AND. .NOT. force_all_pes_traj) then !io_tile_root_pes write
        if(io_npes .gt. 1) then !attach tile_id  to filename only if there is more than one I/O pe
           if (io_tile_id(1)<10000) then
@@ -1890,6 +1934,10 @@ logical :: io_is_in_append_mode
           avid = inq_varid(ncid, 'ang_vel')
           aaid = inq_varid(ncid, 'ang_accel')
           rid  = inq_varid(ncid, 'rot')
+          if (add_curl_to_torque) then
+            curloid = inq_varid(ncid, 'curl_o')
+            !curlaid = inq_varid(ncid, 'curl_a')
+          endif
         elseif (fracture_criterion .ne. 'none') then
           abrid = inq_varid(ncid, 'accum_bond_rotation')
         endif
@@ -1977,6 +2025,10 @@ logical :: io_is_in_append_mode
           avid = def_var(ncid, 'ang_vel', NF_DOUBLE, i_dim)
           aaid = def_var(ncid, 'ang_accel', NF_DOUBLE, i_dim)
           rid  = def_var(ncid, 'rot', NF_DOUBLE, i_dim)
+          if (add_curl_to_torque) then
+            curloid = def_var(ncid, 'curl_o', NF_DOUBLE, i_dim)
+            !curlaid = def_var(ncid, 'curl_a', NF_DOUBLE, i_dim)
+          endif
         elseif (fracture_criterion .ne. 'none') then
           abrid = def_var(ncid, 'accum_bond_rotation', NF_DOUBLE, i_dim)
         endif
@@ -2121,6 +2173,12 @@ logical :: io_is_in_append_mode
           call put_att(ncid, aaid, 'units', 'rad/s^2')
           call put_att(ncid, rid, 'long_name', 'accumulated rotation')
           call put_att(ncid, rid, 'units', 'rad')
+          if (add_curl_to_torque) then
+            call put_att(ncid, curloid, 'long_name', 'curl of ocean velocity')
+            call put_att(ncid, curloid, 'units', '1/s')
+            !call put_att(ncid, curlaid, 'long_name', 'curl of atmospheric velocity')
+            !call put_att(ncid, curlaid, 'units', '1/s')
+          endif
         elseif (fracture_criterion .ne. 'none') then
           call put_att(ncid, abrid, 'long_name', 'accumulated bond rotation')
           call put_att(ncid, abrid, 'units', 'radians')
@@ -2218,6 +2276,10 @@ logical :: io_is_in_append_mode
           call put_double(ncid, avid, i, this%ang_vel)
           call put_double(ncid, aaid, i, this%ang_accel)
           call put_double(ncid, rid,  i, this%rot)
+          if (add_curl_to_torque) then
+            call put_double(ncid, curloid, i, this%curl_o)
+            !call put_double(ncid, curlaid, i, this%curl_a)
+          endif
         elseif (fracture_criterion .ne. 'none') then
           call put_double(ncid, abrid, i, this%accum_bond_rotation)
         endif
@@ -2238,7 +2300,7 @@ logical :: io_is_in_append_mode
 end subroutine write_trajectory
 
 !> Write a trajectory-based diagnostics file for bonds
-subroutine write_bond_trajectory(trajectory)
+subroutine write_bond_trajectory(trajectory, bond_traj_name)
 ! Arguments
 type(bond_xyt), pointer :: trajectory !< An iceberg bond trajectory
 ! Local variables
@@ -2248,7 +2310,7 @@ integer :: rotid,rrotid,nsid,nsrid, damid
 integer :: idcnt1_id, idcnt2_id, idij1_id, idij2_id, eeid, edid
 integer :: axid,ayid,bxid,byid
 integer :: td1id,td2id,dnsid,dssid
-character(len=34) :: filename
+character(len=70) :: filename, bond_traj_name
 character(len=7) :: pe_name
 type(bond_xyt), pointer :: this, next
 integer :: stderrunit, cnt, ij
@@ -2319,7 +2381,8 @@ logical :: io_is_in_append_mode
 
   if((force_all_pes_traj .OR. is_io_tile_root_pe) .AND. associated(traj4io)) then
 
-    call get_instance_filename("bond_trajectories.nc", filename)
+    !call get_instance_filename("bond_trajectories.nc", filename)
+    call get_instance_filename(bond_traj_name, filename)
     if(io_tile_id(1) .ge. 0 .AND. .NOT. force_all_pes_traj) then !io_tile_root_pes write
       if(io_npes .gt. 1) then !attach tile_id  to filename only if there is more than one I/O pe
         if (io_tile_id(1)<10000) then
@@ -2375,6 +2438,7 @@ logical :: io_is_in_append_mode
       if (dem) then
         td1id = inq_varid(ncid, 'tangd1');  td2id = inq_varid(ncid, 'tangd2')
         dnsid = inq_varid(ncid, 'nstress'); dssid = inq_varid(ncid, 'sstress')
+        rrotid = inq_varid(ncid, 'rel_rotation')
       elseif (fracture_criterion.ne.'none') then
         rotid = inq_varid(ncid, 'rotation');    rrotid = inq_varid(ncid, 'rel_rotation')
         nsid = inq_varid(ncid, 'n_frac_var')
@@ -2412,6 +2476,7 @@ logical :: io_is_in_append_mode
       if (dem) then
         td1id = def_var(ncid, 'tangd1',  NF_DOUBLE, i_dim); td2id = def_var(ncid, 'tangd2',  NF_DOUBLE, i_dim)
         dnsid = def_var(ncid, 'nstress', NF_DOUBLE, i_dim); dssid = def_var(ncid, 'sstress', NF_DOUBLE, i_dim)
+        rrotid = def_var(ncid, 'rel_rotation', NF_DOUBLE, i_dim)
       elseif (fracture_criterion.ne.'none') then
         rotid = def_var(ncid, 'rotation', NF_DOUBLE, i_dim); rrotid = def_var(ncid, 'rel_rotation', NF_DOUBLE, i_dim)
         nsid = def_var(ncid, 'n_frac_var', NF_DOUBLE, i_dim)
@@ -2467,6 +2532,7 @@ logical :: io_is_in_append_mode
         call put_att(ncid, td2id, 'units', 'm')
         call put_att(ncid, dnsid, 'long_name', 'normal stress'); call put_att(ncid, dnsid, 'units', 'Pa')
         call put_att(ncid, dssid, 'long_name', 'shear stress');  call put_att(ncid, dssid, 'units', 'Pa')
+        call put_att(ncid, rrotid, 'long_name', 'relative rotation');      call put_att(ncid, rrotid, 'units', 'rad')
       elseif (fracture_criterion.ne.'none') then
         call put_att(ncid, rotid, 'long_name', 'rotation');                call put_att(ncid, rotid, 'units', 'rad')
         call put_att(ncid, rrotid, 'long_name', 'relative rotation');      call put_att(ncid, rrotid, 'units', 'rad')
@@ -2515,6 +2581,7 @@ logical :: io_is_in_append_mode
       if (dem) then
         call put_double(ncid,td1id,i,this%tangd1);  call put_double(ncid,td2id,i,this%tangd2)
         call put_double(ncid,dnsid,i,this%nstress); call put_double(ncid,dssid,i,this%sstress)
+        call put_double(ncid,rrotid,i,this%rel_rotation)
       elseif (fracture_criterion.ne.'none') then
         call put_double(ncid,rotid,i,this%rotation);  call put_double(ncid,rrotid,i,this%rel_rotation)
         call put_double(ncid,nsid,i,this%n_frac_var)
