@@ -52,6 +52,7 @@ logical :: ewsame=.false. !<(F) set T if periodic and 2 PEs along the x directio
 logical :: monitor_energy=.false. !<monitors energies: elastic (spring+collision), external, dissipated, fracture
 logical :: iceberg_bonds_on=.False. ! True=Allow icebergs to have bonds, False=don't allow.
 logical :: dem=.false. !< If T, run in DEM-mode with angular terms, variable stiffness, etc
+logical :: save_bond_forces=.true. !< If T, saves forces on bonds (TODO save on bond traj, too), so that only 1 of 2 bonds in a pair need to be processed during DEM-MTS explicit sub-steps
 logical :: power_ground=.false.
 logical :: short_step_mts_grounding=.false.
 logical :: radius_based_drag=.false. !if T, hex bergs, and dem, 2r is used as the area of the vert face for drag/wave forces
@@ -73,7 +74,7 @@ public verbose, really_debug, debug, restart_input_dir,make_calving_reproduce,ol
 public ignore_ij_restart, use_slow_find,generate_test_icebergs,old_bug_rotated_weights,budget
 public orig_read, force_all_pes_traj
 public mts,new_mts,save_bond_traj,ewsame,monitor_energy,iceberg_bonds_on
-public dem, add_curl_to_torque, fracture_criterion, orig_dem_moment_of_inertia
+public dem, save_bond_forces, add_curl_to_torque, fracture_criterion, orig_dem_moment_of_inertia
 public power_ground, short_step_mts_grounding, radius_based_drag
 public A68_test, A68_xdisp, A68_ydisp
 
@@ -426,6 +427,14 @@ type :: bond
   real, allocatable :: tangd2 !< Accumulated tangential displacement, y-component (m)
   real, allocatable :: nstress !< Normal stress (Pa)
   real, allocatable :: sstress !< Shear stress (Pa)
+  type(bond), pointer :: other_bond=>null() !< Matching bond
+  ! If save_bond_forces
+  real, allocatable :: F_x !< Zonal force
+  real, allocatable :: F_y !< Meridional force
+  real, allocatable :: Fd_x !< Zonal damping force
+  real, allocatable :: Fd_y !< Meridional damping force
+  real, allocatable :: T !< Torque
+  real, allocatable :: T_d !< Torque (damping)
 end type bond
 
 !> A link in the bond trajectory record (diagnostic)
@@ -644,6 +653,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   real :: poisson=0.3 ! Poisson's ratio
   real :: dem_spring_coef=0.
   real :: dem_damping_coef=0.1
+  logical :: bond_break_detected=.false.
   logical :: dem_shear_for_frac_only=.false. !< If true, DEM shear is calculated for fracture, but zeroed for berg interactions
   integer :: dem_beam_test=0 !1=Simply supported beam,2=cantilever beam,3=angular vel tes
   logical :: uniaxial_test=.false. !adds a tensile stress to the east-most berg element
@@ -928,7 +938,7 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          traj_area_thres_fl,tau_is_velocity, add_curl_to_torque,ocean_drag_scale, A68_test, &
          A68_xdisp,A68_ydisp,&
          orig_dem_moment_of_inertia, break_bonds_on_sub_steps, skip_first_outer_mts_step, rev_mind, &
-         no_frac_first_ts, use_grounding_torque, power_ground, short_step_mts_grounding, radius_based_drag
+         no_frac_first_ts, use_grounding_torque, power_ground, short_step_mts_grounding, radius_based_drag, save_bond_forces
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -1381,7 +1391,7 @@ if (monitor_energy) then
 endif
 
 if (dem) then
-  buffer_width=buffer_width+3+(max_bonds*4)
+  buffer_width=buffer_width+3+(max_bonds*5)
   buffer_width_traj=buffer_width_traj+3
   buffer_width_bond_traj=buffer_width_bond_traj+4+1
   if (add_curl_to_torque) then
@@ -2321,9 +2331,9 @@ integer :: nbergs_to_send_n, nbergs_to_send_s
   enddo
 
   if (debug) then
-    call connect_all_bonds(bergs,ignore_unmatched=.false.)
+    call connect_all_bonds(bergs,ignore_unmatched=.false.,match_bond_pairs=.true.)
   else
-    call connect_all_bonds(bergs,ignore_unmatched=.true.)
+    call connect_all_bonds(bergs,ignore_unmatched=.true.,match_bond_pairs=.true.)
   endif
 
   call set_conglom_ids(bergs)
@@ -3513,6 +3523,7 @@ type(bond), pointer :: current_bond
         endif
 
         if (dem) then
+          call push_buffer_value(buff%data(:,n), counter, 0)
           call push_buffer_value(buff%data(:,n), counter, 0)
           call push_buffer_value(buff%data(:,n), counter, 0)
           call push_buffer_value(buff%data(:,n), counter, 0)
@@ -5426,7 +5437,18 @@ subroutine break_bonds_dem(bergs)
 
         if (current_bond%other_id.ne.-1) then
 
-          if (bergs%fracture_criterion=='computed') then
+          if (bergs%fracture_criterion=='stress') then
+            if (current_bond%nstress>frac_thres_n .or. current_bond%sstress>frac_thres_t) then
+              if (current_bond%nstress>frac_thres_n .and. current_bond%sstress>frac_thres_t) then
+                print *,'T and S break',this%lat,current_bond%nstress,current_bond%sstress
+              elseif (current_bond%nstress>frac_thres_n) then
+                print *,'TENSILE break',this%lat,current_bond%nstress,current_bond%sstress
+              else
+                print *,'SHEAR   break',this%lat,current_bond%nstress,current_bond%sstress
+              endif
+              current_bond%other_id=-1
+            endif
+          elseif (bergs%fracture_criterion=='computed') then
             Rsig=current_bond%nstress/frac_thres_n
             Rtau=current_bond%sstress/frac_thres_t
             frac=0.5*Rsig+sqrt((0.5*Rsig)**2. + Rtau**2.)
@@ -5443,48 +5465,45 @@ subroutine break_bonds_dem(bergs)
               current_bond%other_id=-1
             endif
           else
-              if (current_bond%nstress>frac_thres_n .or. current_bond%sstress>frac_thres_t) then
-                if (current_bond%nstress>frac_thres_n .and. current_bond%sstress>frac_thres_t) then
-                  print *,'T and S break',this%lat,current_bond%nstress,current_bond%sstress
-                elseif (current_bond%nstress>frac_thres_n) then
-                  print *,'TENSILE break',this%lat,current_bond%nstress,current_bond%sstress
-                else
-                  print *,'SHEAR   break',this%lat,current_bond%nstress,current_bond%sstress
-                endif
-                current_bond%other_id=-1
-              endif
+            call error_mesg('KID, break_bonds_dem','fracture criterion not supported for DEM!',FATAL)
           endif
 
-          if (current_bond%other_id.eq.-1) then
-            other_berg=>current_bond%other_berg
-            if (associated(other_berg)) then
-              !mark matching bond on other_berg
-              other_bond=>other_berg%first_bond
-              do while (associated(other_bond)) ! loop over all bonds
-                if (other_bond%other_id.eq.this%id) then
-                  other_bond%other_id=-1
-                  if (bergs%fracture_criterion=='computed') then
-                    Rsig=other_bond%nstress/frac_thres_n
-                    Rtau=other_bond%sstress/frac_thres_t
-                    frac=0.5*Rsig+sqrt((0.5*Rsig)**2. + Rtau**2.)
-                    if (frac <= 1.) then
-                      print *,'Other bond did not fracture!'
+          if (save_bond_forces) then
+            if (current_bond%other_id.eq.-1) current_bond%other_bond%other_id=-1
+          else
+            if (current_bond%other_id.eq.-1) then
+              other_berg=>current_bond%other_berg
+              if (associated(other_berg)) then
+                !mark matching bond on other_berg
+                other_bond=>other_berg%first_bond
+                do while (associated(other_bond)) ! loop over all bonds
+                  if (other_bond%other_id.eq.this%id) then
+                    other_bond%other_id=-1
+                    if (debug) then
+                      if (bergs%fracture_criterion=='computed') then
+                        Rsig=other_bond%nstress/frac_thres_n
+                        Rtau=other_bond%sstress/frac_thres_t
+                        frac=0.5*Rsig+sqrt((0.5*Rsig)**2. + Rtau**2.)
+                        if (frac <= 1.) then
+                          print *,'Other bond did not fracture!'
+                        endif
+                      elseif(bergs%fracture_criterion=='computed_s') then
+                        Rsig=current_bond%nstress/bergs%frac_thres_n
+                        Rtau=current_bond%sstress/bergs%frac_thres_t
+                        frac=sqrt(Rsig**2. + Rtau**2.)
+                        if (frac <= 1.) then
+                          print *,'Other bond did not fracture!'
+                        endif
+                      elseif (other_bond%nstress<=frac_thres_n .and. other_bond%sstress<=frac_thres_t) then
+                        print *,'Other bond did not fracture!'
+                        print *,'current and other bond nstress,',current_bond%nstress, other_bond%nstress
+                        print *,'current and other bond sstress,',current_bond%sstress, other_bond%sstress
+                      endif
                     endif
-                  elseif(bergs%fracture_criterion=='computed_s') then
-                    Rsig=current_bond%nstress/bergs%frac_thres_n
-                    Rtau=current_bond%sstress/bergs%frac_thres_t
-                    frac=sqrt(Rsig**2. + Rtau**2.)
-                    if (frac <= 1.) then
-                      print *,'Other bond did not fracture!'
-                    endif
-                  elseif (other_bond%nstress<=frac_thres_n .and. other_bond%sstress<=frac_thres_t) then
-                    print *,'Other bond did not fracture!'
-                    print *,'current and other bond nstress,',current_bond%nstress, other_bond%nstress
-                    print *,'current and other bond sstress,',current_bond%sstress, other_bond%sstress
                   endif
-                endif
-                other_bond=>other_bond%next_bond
-              enddo
+                  other_bond=>other_bond%next_bond
+                enddo
+              endif
             endif
           endif
         endif
@@ -5572,6 +5591,10 @@ if (berg%id .ne. other_id) then
     new_bond%nstress=0.; new_bond%sstress=0.
     allocate(new_bond%rel_rotation)
     new_bond%rel_rotation=0.
+    if (save_bond_forces) then
+      allocate(new_bond%F_x, new_bond%F_y, new_bond%Fd_x, new_bond%Fd_y, new_bond%T, new_bond%T_d)
+      new_bond%F_x=0.; new_bond%F_y=0.; new_bond%Fd_x=0.; new_bond%Fd_y=0.; new_bond%T=0.; new_bond%T_d=0.
+    endif
   elseif (fracture_criterion.ne.'none') then
     allocate(new_bond%rotation,new_bond%rel_rotation,new_bond%n_frac_var)
     new_bond%rotation=0.; new_bond%rel_rotation=0.; new_bond%n_frac_var=0.
@@ -5695,23 +5718,28 @@ type(bond) , pointer :: current_bond
 end subroutine show_all_bonds
 
 !> Sweep across all bergs filling in bond data
-subroutine connect_all_bonds(bergs, ignore_unmatched)
+subroutine connect_all_bonds(bergs, ignore_unmatched, match_bond_pairs)
 type(icebergs), pointer :: bergs !< Container for all types and memory
 logical,optional :: ignore_unmatched !< If true, do not call error if the other berg in a bond is not found
+logical,optional :: match_bond_pairs !< If true, point identical bonds (bond pairs) to each other
 ! Local variables
 type(iceberg), pointer :: other_berg, berg
 type(icebergs_gridded), pointer :: grd
 integer :: i, j
 integer :: grdi, grdj
 integer :: grdi_inner, grdj_inner
-type(bond) , pointer :: current_bond, other_berg_bond
-logical :: bond_matched, missing_bond, check_bond_quality,check_match
+type(bond) , pointer :: current_bond, other_bond
+logical :: bond_matched, missing_bond, check_bond_quality,check_match,link_bond_pairs
 integer nbonds
 
   check_match = .true.
   if (present(ignore_unmatched)) then
     if (ignore_unmatched) check_match = .false.
   end if
+  link_bond_pairs=.false.
+  if (present(match_bond_pairs)) then
+    if (match_bond_pairs) link_bond_pairs=.true.
+  endif
 
 missing_bond=.false.
 bond_matched=.false.
@@ -5819,6 +5847,38 @@ bond_matched=.false.
     check_bond_quality=.true.
     nbonds=0
     call count_bonds(bergs, nbonds,check_bond_quality)
+  endif
+
+  if (save_bond_forces .and. link_bond_pairs) then
+    do grdj = grd%jsd+1,grd%jed ; do grdi = grd%isd+1,grd%ied
+      berg=>bergs%list(grdi,grdj)%first
+      do while (associated(berg)) ! loop over all bergs
+        if (berg%halo_berg.ne.10) then
+          current_bond=>berg%first_bond
+          do while (associated(current_bond)) ! loop over all bonds
+            if (.not.associated(current_bond%other_bond)) then
+              other_berg=>current_bond%other_berg
+              if (associated(other_berg)) then
+                other_bond=>other_berg%first_bond
+                do while (associated(other_bond)) ! loop over all bonds
+                  if (other_bond%other_id.eq.berg%id) then
+                    other_bond%other_bond=>current_bond
+                    current_bond%other_bond=>other_bond
+                    other_bond=>null()
+                  else
+                    other_bond=>other_bond%next_bond
+                  endif
+                enddo
+              else
+                call error_mesg('KID, connect_all_bonds', 'A bond is missing its second berg !!!', WARNING)
+              endif
+            endif
+            current_bond=>current_bond%next_bond
+          enddo
+        endif
+        berg=>berg%next
+      enddo
+    enddo;enddo
   endif
 end subroutine connect_all_bonds
 
@@ -6791,13 +6851,13 @@ if (.not. (oi-1.lt.grd%isd.or.oi.gt.grd%ied.or.oj-1.lt.grd%jsd.or.oj.gt.grd%jed)
 endif
 
 !find cell for structured grid without looping:
-! oi=floor((x-grd%lon(grd%isd,grd%jsd))/(grd%lon(grd%isd+1,grd%jsd+1)-grd%lon(grd%isd,grd%jsd)))+grd%isd+1
-! oj=floor((y-grd%lat(grd%isd,grd%jsd))/(grd%lat(grd%isd+1,grd%jsd+1)-grd%lat(grd%isd,grd%jsd)))+grd%jsd+1
-! if (.not. (oi-1.lt.grd%isd.or.oi.gt.grd%ied.or.oj-1.lt.grd%jsd.or.oj.gt.grd%jed)) then
-!   if (is_point_in_cell(grd, x, y, oi, oj)) then
-!     check_and_find_cell=.true.; return
-!   endif
-! endif
+oi=floor((x-grd%lon(grd%isd,grd%jsd))/(grd%lon(grd%isd+1,grd%jsd+1)-grd%lon(grd%isd,grd%jsd)))+grd%isd+1
+oj=floor((y-grd%lat(grd%isd,grd%jsd))/(grd%lat(grd%isd+1,grd%jsd+1)-grd%lat(grd%isd,grd%jsd)))+grd%jsd+1
+if (.not. (oi-1.lt.grd%isd.or.oi.gt.grd%ied.or.oj-1.lt.grd%jsd.or.oj.gt.grd%jed)) then
+  if (is_point_in_cell(grd, x, y, oi, oj)) then
+    check_and_find_cell=.true.; return
+  endif
+endif
 
   oi=-999; oj=-999
   do j=grd%jsd+1,grd%jed; do i=grd%isd+1,grd%ied
@@ -6823,13 +6883,13 @@ find_cell=.false.
 
 
 !find cell for structured grid without looping:
-! oi=floor((x-grd%lon(grd%isd,grd%jsd))/(grd%lon(grd%isd+1,grd%jsd+1)-grd%lon(grd%isd,grd%jsd)))+grd%isd+1
-! oj=floor((y-grd%lat(grd%isd,grd%jsd))/(grd%lat(grd%isd+1,grd%jsd+1)-grd%lat(grd%isd,grd%jsd)))+grd%jsd+1
-! if (oi>grd%isc-1 .and. oi<grd%iec+1 .and. oj>grd%jsc-1 .and. oj<grd%jec+1) then
-!   if (is_point_in_cell(grd, x, y, oi, oj)) then
-!     find_cell=.true.; return
-!   endif
-! endif
+oi=floor((x-grd%lon(grd%isd,grd%jsd))/(grd%lon(grd%isd+1,grd%jsd+1)-grd%lon(grd%isd,grd%jsd)))+grd%isd+1
+oj=floor((y-grd%lat(grd%isd,grd%jsd))/(grd%lat(grd%isd+1,grd%jsd+1)-grd%lat(grd%isd,grd%jsd)))+grd%jsd+1
+if (oi>grd%isc-1 .and. oi<grd%iec+1 .and. oj>grd%jsc-1 .and. oj<grd%jec+1) then
+  if (is_point_in_cell(grd, x, y, oi, oj)) then
+    find_cell=.true.; return
+  endif
+endif
 
   oi=-999; oj=-999
   do j=grd%jsc,grd%jec; do i=grd%isc,grd%iec
@@ -6854,13 +6914,13 @@ integer :: i,j
 
 find_cell_wide=.false.
 !find cell for structured grid without looping:
-! oi=floor((x-grd%lon(grd%isd,grd%jsd))/(grd%lon(grd%isd+1,grd%jsd+1)-grd%lon(grd%isd,grd%jsd)))+grd%isd+1
-! oj=floor((y-grd%lat(grd%isd,grd%jsd))/(grd%lat(grd%isd+1,grd%jsd+1)-grd%lat(grd%isd,grd%jsd)))+grd%jsd+1
-! if (.not. (oi-1.lt.grd%isd.or.oi.gt.grd%ied.or.oj-1.lt.grd%jsd.or.oj.gt.grd%jed)) then
-!   if (is_point_in_cell(grd, x, y, oi, oj)) then
-!     find_cell_wide=.true.; return
-!   endif
-! endif
+oi=floor((x-grd%lon(grd%isd,grd%jsd))/(grd%lon(grd%isd+1,grd%jsd+1)-grd%lon(grd%isd,grd%jsd)))+grd%isd+1
+oj=floor((y-grd%lat(grd%isd,grd%jsd))/(grd%lat(grd%isd+1,grd%jsd+1)-grd%lat(grd%isd,grd%jsd)))+grd%jsd+1
+if (.not. (oi-1.lt.grd%isd.or.oi.gt.grd%ied.or.oj-1.lt.grd%jsd.or.oj.gt.grd%jed)) then
+  if (is_point_in_cell(grd, x, y, oi, oj)) then
+    find_cell_wide=.true.; return
+  endif
+endif
 
 oi=-999; oj=-999
 

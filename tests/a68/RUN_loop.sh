@@ -23,8 +23,8 @@
 #odrag=(2.9 2.95)
 #name=(hex_yn.175_nf_od2.9.nc hex_yn.175_nf_od2.95.nc)
 
-odrag=(9.5 10.5)
-name=(hex_yn.1_nf_od9.5_rad_drag_E1e6.nc hex_yn.1_nf_od10.5_rad_drag_E1e6.nc)
+odrag=(10.9 10.95)
+name=(hex_yn.1_nf_od10.9_rad_drag_E1e6.nc hex_yn.1_nf_od10.95_rad_drag_E1e6.nc)
 
 
 #odrag=(5.5 5)

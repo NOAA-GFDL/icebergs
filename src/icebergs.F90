@@ -53,7 +53,7 @@ use ice_bergs_framework, only: update_and_break_bonds,break_bonds_dem,assign_n_b
 use ice_bergs_framework, only: update_bond_angles
 use ice_bergs_framework, only: monitor_energy, energy_tests_init, mts, new_mts
 use ice_bergs_framework, only: dem_tests_init
-use ice_bergs_framework, only: dem, init_dem_params
+use ice_bergs_framework, only: dem, init_dem_params, save_bond_forces
 use ice_bergs_framework, only: orig_dem_moment_of_inertia, no_frac_first_ts
 use ice_bergs_framework, only: A68_test, A68_xdisp, A68_ydisp
 use ice_bergs_framework, only: set_constant_interaction_length_and_width, skip_first_outer_mts_step
@@ -170,7 +170,7 @@ subroutine icebergs_init(bergs, &
       call transfer_mts_bergs(bergs)
     else
       call update_halo_icebergs(bergs)
-      call connect_all_bonds(bergs)
+      call connect_all_bonds(bergs, match_bond_pairs=.true.)
     endif
     nbonds=0
     check_bond_quality=.True.
@@ -879,10 +879,10 @@ subroutine calculate_unbonded_same_conglom_dem_force(bergs, berg, other_berg, IA
 
     r_dist_x=dlon*dx_dlon
     r_dist_y=dlat*dy_dlat
-    r_dist=sqrt( (r_dist_x**2) + (r_dist_y**2) ) !(Stern et al 2017, Eqn 3)
+    r_dist= (r_dist_x**2) + (r_dist_y**2)
 
     if (bergs%constant_interaction_LW) then
-      if ( (2*bergs%constant_radius)<=r_dist ) return
+      if ( (2*bergs%constant_radius)**2<=r_dist ) return
       R1=bergs%constant_radius
       A1=bergs%constant_area
       M1=A1*berg%thickness*bergs%rho_bergs                      !Berg 1 mass
@@ -907,9 +907,11 @@ subroutine calculate_unbonded_same_conglom_dem_force(bergs, berg, other_berg, IA
           R2=sqrt(A2/pi) ! Interaction radius of the other iceberg
         endif
       endif
-      if ((R1+R2)<=r_dist) return
+      if ((R1+R2)**2<=r_dist) return
       M1=berg%mass; M2=other_berg%mass;
     endif
+
+    r_dist=sqrt(r_dist)
 
     u2=other_berg%uvel_old;  v2=other_berg%vvel_old !Old values are used to make it order invariant
 
@@ -1161,27 +1163,62 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
       Tr = -(bergs%dem_spring_coef/l0)*(2./3.)*((0.5*L)**3.)*Thick*theta
     endif
 
-!!$    if (abs(theta-theta_old) > abs(theta*0.05)) then
-!!$      print *,'theta mismatch!', theta_old, theta
-!!$    endif
-
     !if (savestress) current_bond%nstress=-bergs%dem_spring_coef*delta/l0 + abs(bergs%dem_spring_coef/l0*theta*0.5*L)
     if (savestress) current_bond%nstress=(bergs%dem_spring_coef/l0)*(-2*half_delta + abs(theta*0.5*L))
 
     !max tensile stress
 
     if (break_bonds_on_sub_steps) then
-      if (bergs%fracture_criterion=='computed') then
+
+      if (bergs%fracture_criterion=='stress') then
+        if (current_bond%nstress>bergs%frac_thres_n .or. current_bond%sstress>bergs%frac_thres_t) then
+          bergs%bond_break_detected=.true.
+
+          if (current_bond%nstress<0) then
+            !if fail under shear with normal compression, then should still feel contact force
+            Fd_x = Fd_x-damping_coef*ur; Fd_y = Fd_y-damping_coef*vr  !linear damping force
+            F_x = F_x + Fn_x; F_y = F_y + Fn_y !linear forces
+          endif
+
+          if (savestress .and. save_bond_forces) then
+            current_bond%T=0.; current_bond%T_d=0.
+            if (current_bond%nstress<0) then
+              current_bond%F_x=Fn_x; current_bond%F_y=Fn_y
+              current_bond%Fd_x=-damping_coef*ur; current_bond%Fd_y=-damping_coef*vr;
+            else
+              current_bond%F_x=0.; current_bond%F_y=0.
+              current_bond%Fd_x=0.; current_bond%Fd_y=0.
+            endif
+            current_bond%other_bond%F_x  = -current_bond%F_x
+            current_bond%other_bond%F_y  = -current_bond%F_y
+            current_bond%other_bond%Fd_x = -current_bond%Fd_x
+            current_bond%other_bond%Fd_y = -current_bond%Fd_y
+            current_bond%other_bond%T=0.; current_bond%other_bond%T_d=0.
+            current_bond%other_bond%nstress      = current_bond%nstress
+            current_bond%other_bond%sstress      = current_bond%sstress
+            current_bond%other_bond%rel_rotation = -current_bond%rel_rotation
+            current_bond%other_bond%tangd1       = -current_bond%tangd1
+            current_bond%other_bond%tangd2       = -current_bond%tangd2
+            current_bond%other_bond%length       = current_bond%length
+            current_bond%other_bond%other_id=-current_bond%other_bond%other_id
+          endif
+          return !Broken bond. Return without adding forces and torques
+        endif
+      elseif (bergs%fracture_criterion=='computed') then
         Rsig=current_bond%nstress/bergs%frac_thres_n
         Rtau=current_bond%sstress/bergs%frac_thres_t
-        if ((0.5*Rsig+sqrt((0.5*Rsig)**2. + Rtau**2.)) > 1) return
+        if ((0.5*Rsig+sqrt((0.5*Rsig)**2. + Rtau**2.)) > 1) then
+          bergs%bond_break_detected=.true.
+          if (save_bond_forces) current_bond%other_bond%other_id=-current_bond%other_bond%other_id
+          return
+        endif
       elseif (bergs%fracture_criterion=='computed_s') then
         Rsig=current_bond%nstress/bergs%frac_thres_n
         Rtau=current_bond%sstress/bergs%frac_thres_t
-        if (sqrt(Rsig**2. + Rtau**2.) > 1) return
-      elseif (bergs%fracture_criterion=='stress') then
-        if (current_bond%nstress>bergs%frac_thres_n .or. current_bond%sstress>bergs%frac_thres_t) then
-          return !Broken bond. Return without adding forces and torques
+        if (sqrt(Rsig**2. + Rtau**2.) > 1) then
+          if (save_bond_forces) current_bond%other_bond%other_id=-current_bond%other_bond%other_id
+          bergs%bond_break_detected=.true.
+          return
         endif
       else
         call error_mesg('KID, calculate_force_dem', &
@@ -1193,6 +1230,30 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
 
     !Meff = M1*M2/(M1+M2) !effective mass
     damping_coef = bergs%dem_damping_coef*sqrt(bergs%dem_K_damp*M1*M2/(M1+M2))
+
+    if (savestress .and. save_bond_forces) then
+      current_bond%F_x  = Fn_x + Fs_x
+      current_bond%F_y  = Fn_y + Fs_y
+      current_bond%Fd_x = -damping_coef*ur
+      current_bond%Fd_y = -damping_coef*vr
+      current_bond%T    = Ts+Tr
+      current_bond%T_d  = -damping_coef*(berg%ang_vel-other_berg%ang_vel)
+
+      current_bond%other_bond%F_x  = -current_bond%F_x
+      current_bond%other_bond%F_y  = -current_bond%F_y
+      current_bond%other_bond%Fd_x = -current_bond%Fd_x
+      current_bond%other_bond%Fd_y = -current_bond%Fd_y
+      current_bond%other_bond%T    = Ts-Tr
+      current_bond%other_bond%T_d  = -current_bond%T_d
+
+      current_bond%other_bond%nstress      = current_bond%nstress
+      current_bond%other_bond%sstress      = current_bond%sstress
+      current_bond%other_bond%rel_rotation = -current_bond%rel_rotation
+      current_bond%other_bond%tangd1       = -current_bond%tangd1
+      current_bond%other_bond%tangd2       = -current_bond%tangd2
+      current_bond%other_bond%length       = current_bond%length
+      current_bond%other_bond%other_id=-current_bond%other_bond%other_id !mark matching bond as processed
+    endif
 
     Fd_x = Fd_x-damping_coef*ur; Fd_y = Fd_y-damping_coef*vr  !linear damping force
     T_d  = T_d-damping_coef*(berg%ang_vel-other_berg%ang_vel) !damping torque
@@ -1207,199 +1268,6 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
   endif
 
 end subroutine calculate_force_dem
-
-!> Calculate interactive forces between two bergs using a discrete element method (DEM)
-!> that includes additional terms for tangential forces and torque.
-subroutine calculate_force_dem2(bergs, berg, other_berg, current_bond, &
-  dt, F_x, F_y, T, Fd_x, Fd_y, T_d, savestress)
-  ! Arguments
-  type(icebergs), pointer :: bergs !< Container for all types and memory
-  type(iceberg), pointer :: berg !< Primary berg
-  type(iceberg), pointer :: other_berg !< Berg that primary is interacting with
-  type(bond), pointer :: current_bond !< Bond being processed
-  real, intent(in) :: dt !< Time step size
-  real, intent(inout) :: F_x !< Net x-force without damping (N)
-  real, intent(inout) :: F_y !< Net y-force without damping (N)
-  real, intent(inout) :: T !< Net torque without damping (Nm)
-  real, intent(inout) :: Fd_x !< Net x-force from damping (N)
-  real, intent(inout) :: Fd_y !< Net y-force from damping (N)
-  real, intent(inout) :: T_d !< Net torque from damping (Nm)
-  logical, intent(in) :: savestress !< Save stress/tangential displacement on bond or not
-  ! Local variables
-  real :: A1,T1,M1,u1,v1,lon1,lat1,R1 ! Current iceberg
-  real :: A2,T2,M2,u2,v2,lon2,lat2,R2 ! Other iceberg
-  real :: dlon, dlat, lat_ref, dx_dlon, dy_dlat
-  real :: r_dist_x, r_dist_y, r_dist
-  real :: Rmin, delta, L, l0, youngs_dem, Thick, T_Rmin, n1, n2
-  real :: ur, vr, up, vp, rotu, rotv, rtu, rtv, RR1, RR2
-  real :: ur2, vr2
-  real :: ss_factor, ss1, ss2
-  real :: K_damp, Meff, damping_coef
-  real :: Fn_x, Fn_y, Fs_x, Fs_y, Ts, Tr
-  real :: tangdotnt,tangd1p,tangd2p, tmag, tmagp
-  real :: RR1x,RR1y,RR2x,RR2y,theta
-
-  !This DEM formulation follows Wang 2020 "A scale-invariant bonded particle model for
-  !simulating large deformation and failure of continua", which differs from "classic"
-  !DEM (e.g. Potyondy & Cundall, 2004) in its definition of bond width and torque from
-  !relative particle rotation. Forces and torques were further modified here to depend
-  !on ice thickness.
-
-  if ((berg%id .ne. other_berg%id) .and. (berg%fl_k.ne.-1) .and. (other_berg%fl_k.ne.-1)) then
-
-    ! From Berg 1
-    T1=berg%thickness
-    lon1=berg%lon_old; lat1=berg%lat_old
-
-    ! From Berg 2
-    T2=other_berg%thickness
-    lon2=other_berg%lon_old; lat2=other_berg%lat_old
-
-    if (bergs%constant_interaction_LW) then
-      ! use constant length and width here, just for interactions
-      A1=bergs%constant_length*bergs%constant_width !Berg 1 area
-      M1=A1*T1*bergs%rho_bergs                      !Berg 1 mass
-      A2=A1                                         !Berg 2 area
-      M2=A2*T2*bergs%rho_bergs                      !Berg 2 mass
-    else
-      ! use actual length and width of bergs
-      M1=berg%mass; A1=berg%length*berg%width                   !From Berg 1
-      M2=other_berg%mass; A2=other_berg%length*other_berg%width !From Berg 2
-    endif
-
-    dlon=lon1-lon2; dlat=lat1-lat2
-
-    ! Note that this is not the exact distance along a great circle.
-    ! Approximation for small distances. Should be fine.
-    lat_ref=0.5*(lat1+lat2)
-    call convert_from_grid_to_meters(lat_ref,bergs%grd%grid_is_latlon,dx_dlon,dy_dlat)
-
-    r_dist_x=dlon*dx_dlon
-    r_dist_y=dlat*dy_dlat
-    r_dist=sqrt( (r_dist_x**2) + (r_dist_y**2) ) !(Stern et al 2017, Eqn 3)
-    current_bond%length=r_dist
-
-    if (r_dist==0) print *,'r_dist,lat1,lon1,lat2,lon2',r_dist,berg%lat,berg%lon,other_berg%lat,other_berg%lon
-    !unit vec
-    n1=r_dist_x/r_dist; n2=r_dist_y/r_dist
-
-    !Stern et al 2017, Eqn 4: radius of circle inscribed within hexagon or square with area A1 or A2
-    if (bergs%hexagonal_icebergs) then
-      R1=sqrt(A1/(2.*sqrt(3.)))
-      R2=sqrt(A2/(2.*sqrt(3.)))
-    else !square packing
-      if (bergs%iceberg_bonds_on) then
-        R1=0.5*sqrt(A1)
-        R2=0.5*sqrt(A2)
-      else
-        R1=sqrt(A1/pi) ! Interaction radius of the iceberg (assuming circular icebergs)
-        R2=sqrt(A2/pi) ! Interaction radius of the other iceberg
-      endif
-    endif
-
-    !Rmin=min(R1,R2) !old
-    if (R1<R2) then
-      Rmin=R1
-      T_Rmin=T1 !thickness of element w/ minimum radius
-    else
-      Rmin=R2
-      T_Rmin=T2
-    endif
-    l0=R1+R2
-    delta=l0-r_dist
-
-    !element distances to contact point
-    RR1=R1-0.5*delta; RR2=R2-0.5*delta !magnitude
-    RR1x=RR1*n1;  RR1y=RR1*n2 !element 1 components
-    RR2x=RR2*n1;  RR2y=RR2*n2 !element 2 components
-
-    !bond width (determined at contact point)
-    L=2.0*(Rmin+(Rmin-0.5*delta)*abs(R1-R2)/r_dist)
-
-    Thick=T_Rmin+(Rmin-0.5*delta)*abs(T1-T2)/r_dist !thickness as determined at contact point
-    !Thick=min(T1,T2) !minimum thickness
-    !Thick=0.5*(T1+T2) !average thickness
-
-    youngs_dem=bergs%dem_spring_coef
-
-    !normal force:
-    !Fn_x=youngs_dem*Thick*delta*n1*L/l0 !Fn_y=youngs_dem*Thick*delta*n2*L/l0
-    !normal stiffness is youngs_dem*Thick*L/l0
-    Fn_x=youngs_dem*Thick*delta*L/l0; Fn_y=Fn_x*n2; Fn_x=Fn_x*n1
-
-    !relative translational velocity
-    ur=berg%uvel_old-other_berg%uvel_old; vr=berg%vvel_old-other_berg%vvel_old
-
-    if (savestress) then
-      !Rotation of contact plane:
-      tmag=sqrt(current_bond%tangd1**2+current_bond%tangd2**2) !old magnitude
-      !project old tangential displacement to current tangent plane
-      tangdotnt=current_bond%tangd1*n1+current_bond%tangd2*n2
-      tangd1p=current_bond%tangd1-tangdotnt*n1; tangd2p=current_bond%tangd2-tangdotnt*n2
-      !rescale to the old magnitude
-      tmagp=sqrt(tangd1p**2+tangd2p**2)
-      if (tmagp>0.) then
-        tangd1p=(tmag/tmagp)*tangd1p; tangd2p=(tmag/tmagp)*tangd2p
-      else
-        tangd1p=0.; tangd2p=0.
-      endif
-      current_bond%tangd1=tangd1p; current_bond%tangd2=tangd2p
-
-      !relative tangential velocities from rotation
-      rotu=RR1y*berg%ang_vel + RR2y*other_berg%ang_vel
-      rotv=-(RR1x*berg%ang_vel + RR2x*other_berg%ang_vel)
-      ur2=ur+rotu; vr2=vr+rotv
-
-      !'parallel' velocity = dot(relative velocity,unit vec)*unit vec
-      up=ur2*n1+vr2*n2; vp=up*n2; up=up*n1
-      rtu=ur2-up; rtv=vr2-vp !the relative tangential velocities
-
-      !add the new tangential displacement
-      current_bond%tangd1=current_bond%tangd1+rtu*dt; current_bond%tangd2=current_bond%tangd2+rtv*dt
-    endif
-
-    !shear terms
-    ss_factor=-L*Thick*youngs_dem/(l0*2.0*(1.0+bergs%poisson)) !shear stiffness
-    if (bergs%ignore_tangential_force) ss_factor=0.
-    Fs_x=ss_factor*current_bond%tangd1; Fs_y=ss_factor*current_bond%tangd2 !shear forces
-    if (savestress) current_bond%sstress=sqrt(Fs_x**2+Fs_y**2)/(L*Thick) !shear stress
-
-    !Torque from shearing force: Ts = R .cross. Fs
-    Ts = -(RR1x*Fs_y-RR1y*Fs_x)
-
-    !Torque from relative particle rotation
-    if (.not. orig_dem_moment_of_inertia) then
-      theta=sin(berg%rot-other_berg%rot)
-      Tr = -youngs_dem*(L**3.)*Thick*theta/(12.*l0) !should be same as below, except for theta
-    else
-      !For testing purposes. All particles should have same radius and thickness.
-      theta=berg%rot-other_berg%rot
-      Tr = -(youngs_dem/l0)*(2./3.)*((0.5*L)**3.)*Thick*theta
-    endif
-
-    !if (savestress) current_bond%nstress=-youngs_dem*delta/l0 + abs(youngs_dem/l0*theta*0.5*L)
-    if (savestress) current_bond%nstress=(youngs_dem/l0)*(-delta + abs(theta*0.5*L))
-    !max tensile stress
-
-    !damping
-    K_damp = 2.*youngs_dem/(3.*(1.-bergs%poisson**2)) !damping factor
-    Meff = M1*M2/(M1+M2) !effective mass
-
-    damping_coef = bergs%dem_damping_coef*sqrt(K_damp*Meff)
-
-    Fd_x = Fd_x-damping_coef*ur; Fd_y = Fd_y-damping_coef*vr  !linear damping force
-    T_d  = T_d-damping_coef*(berg%ang_vel-other_berg%ang_vel) !damping torque
-
-    if (bergs%dem_shear_for_frac_only) then
-      Fs_x=0.; Fs_y=0.
-    endif
-
-    !final forces
-    T = T + (Ts + Tr) !torque
-    F_x = F_x + Fn_x + Fs_x; F_y = F_y + Fn_y + Fs_y !linear forces
-  endif
-
-end subroutine calculate_force_dem2
 
 !> Experimental subroutine to calculate interactive force between a berg and a land cell
 !> Should prevent grounding.
@@ -1708,7 +1576,7 @@ subroutine accel_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, d
     endif
     if (short_step_mts_grounding) c_gnd=0.
 
-    !For testing sensitivity to number of short steps 
+    !For testing sensitivity to number of short steps
     ! if ((groundfrac.ne.0.) .and. (bergs%mts_sub_steps>200)) then
     !   print *,'changing # of ss to 200'
     !   bergs%mts_sub_steps=200
@@ -2142,7 +2010,7 @@ subroutine accel_explicit_inner_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, 
   real :: IAd_x, IAd_y, sum_bond_Ee, sum_bond_Ed, oneoverkn, M2, D, groundfrac
   type(iceberg), pointer :: other_berg
   integer :: grdi,grdj
-  logical :: bonded
+  logical :: bonded, bond_matched, run_contact
   ! DEM-mode local variables
   real :: F_x, F_y, T, Fd_x, Fd_y, T_d, R1, at, dragfrac
 
@@ -2159,25 +2027,45 @@ subroutine accel_explicit_inner_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, 
   endif
 
   bonded=.true.
+  bond_matched=.false.
   if (bergs%iceberg_bonds_on) then
     current_bond=>berg%first_bond
     do while (associated(current_bond)) ! loop over all bonds
-      other_berg=>current_bond%other_berg
-      if (.not. associated(other_berg)) then
-        call error_mesg('KID,bond interactions', 'Trying to do Bond interactions with unassosiated berg!' ,FATAL)
-      else
+
+      if (save_bond_forces) then
+        bond_matched=.false.
         if (bergs%dem) then
-          call calculate_force_dem(bergs,berg,other_berg,current_bond,&
-            dt,F_x,F_y,T,Fd_x,Fd_y,T_d,savestress=.true.)
-          other_berg%id=-other_berg%id !mark, as to not repeat in contact search below
+          if (current_bond%other_id<0) then
+            current_bond%other_id=-current_bond%other_id
+            other_berg=>current_bond%other_berg
+            other_berg%id=-other_berg%id !mark, as to not repeat in contact search below
+
+            bond_matched=.true.
+            F_x=F_x+current_bond%F_x; F_y=F_y+current_bond%F_y
+            Fd_x=Fd_x+current_bond%Fd_x; Fd_y=Fd_y+current_bond%Fd_y
+            T=T+current_bond%T; T_d=T_d+current_bond%T_d
+          endif
+        endif
+      endif
+
+      if (.not. bond_matched) then
+        other_berg=>current_bond%other_berg
+        if (.not. associated(other_berg)) then
+          call error_mesg('KID,bond interactions', 'Trying to do Bond interactions with unassosiated berg!' ,FATAL)
         else
-          P_ia_11=0. ; P_ia_12=0. ;  P_ia_21=0.;  P_ia_22=0.
-          P_ia_times_u_x=0. ; P_ia_times_u_y=0.
-          call calculate_force(bergs, berg, other_berg, IA_x, IA_y, uvel0, vvel0, uvel0, vvel0,  &
-            P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y,bonded)
-          other_berg%id=-other_berg%id !mark, as to not repeat in contact search below
-          IAd_x=IAd_x+P_ia_11*(other_berg%uvel_old-berg%uvel_old)+P_ia_12*(other_berg%vvel_old-berg%vvel_old)
-          IAd_y=IAd_y+P_ia_12*(other_berg%uvel_old-berg%uvel_old)+P_ia_22*(other_berg%vvel_old-berg%vvel_old)
+          if (bergs%dem) then
+            call calculate_force_dem(bergs,berg,other_berg,current_bond,&
+              dt,F_x,F_y,T,Fd_x,Fd_y,T_d,savestress=.true.)
+            other_berg%id=-other_berg%id !mark, as to not repeat in contact search below
+          else
+            P_ia_11=0. ; P_ia_12=0. ;  P_ia_21=0.;  P_ia_22=0.
+            P_ia_times_u_x=0. ; P_ia_times_u_y=0.
+            call calculate_force(bergs, berg, other_berg, IA_x, IA_y, uvel0, vvel0, uvel0, vvel0,  &
+              P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y,bonded)
+            other_berg%id=-other_berg%id !mark, as to not repeat in contact search below
+            IAd_x=IAd_x+P_ia_11*(other_berg%uvel_old-berg%uvel_old)+P_ia_12*(other_berg%vvel_old-berg%vvel_old)
+            IAd_y=IAd_y+P_ia_12*(other_berg%uvel_old-berg%uvel_old)+P_ia_22*(other_berg%vvel_old-berg%vvel_old)
+          endif
         endif
       endif
       current_bond=>current_bond%next_bond
@@ -2185,26 +2073,39 @@ subroutine accel_explicit_inner_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, 
     !contact search: find any surrounding non-bonded bergs in the same conglom, and processes
     !them for contact using the regular (non-contact) spring constant and crit_dist based on radii
     bonded=.false.
-    do grdj = max(berg%jne-2,bergs%grd%jsd+1),min(berg%jne+2,bergs%grd%jed);&
-      do grdi = max(berg%ine-2,bergs%grd%isd+1),min(berg%ine+2,bergs%grd%ied)
-      other_berg=>bergs%list(grdi,grdj)%first
-      do while (associated(other_berg))
-        if (other_berg%id>0 .and. other_berg%conglom_id.eq.berg%conglom_id) then
-          if (bergs%dem) then
-            call calculate_unbonded_same_conglom_dem_force(bergs, berg, other_berg, &
-              IA_x, IA_y, IAd_x, IAd_y, uvel0, vvel0, uvel0, vvel0)
-          else
-            P_ia_11=0. ; P_ia_12=0. ;  P_ia_21=0.;  P_ia_22=0.
-            P_ia_times_u_x=0. ; P_ia_times_u_y=0.
-            call calculate_force(bergs, berg, other_berg, IA_x, IA_y, uvel0, vvel0, uvel0, vvel0,  &
-              P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y,bonded,c_crit_dist=.true.)
-            IAd_x=IAd_x+P_ia_11*(other_berg%uvel_old-berg%uvel_old)+P_ia_12*(other_berg%vvel_old-berg%vvel_old)
-            IAd_y=IAd_y+P_ia_12*(other_berg%uvel_old-berg%uvel_old)+P_ia_22*(other_berg%vvel_old-berg%vvel_old)
+
+    !for dem-mode, do not bother running the contact algorithm if the particle is within interior of conglomerate
+    if (bergs%iceberg_bonds_on .and. bergs%dem) then
+      if (berg%n_bonds .eq. bergs%max_bonds) then
+        run_contact=.false.
+      else
+        run_contact=.true.
+      endif
+    else
+      run_contact=.true.
+    endif
+    if (run_contact) then
+      do grdj = max(berg%jne-1,bergs%grd%jsd+1),min(berg%jne+1,bergs%grd%jed);&
+        do grdi = max(berg%ine-1,bergs%grd%isd+1),min(berg%ine+1,bergs%grd%ied)
+        other_berg=>bergs%list(grdi,grdj)%first
+        do while (associated(other_berg))
+          if (other_berg%id>0 .and. other_berg%conglom_id.eq.berg%conglom_id) then
+            if (bergs%dem) then
+              call calculate_unbonded_same_conglom_dem_force(bergs, berg, other_berg, &
+                IA_x, IA_y, IAd_x, IAd_y, uvel0, vvel0, uvel0, vvel0)
+            else
+              P_ia_11=0. ; P_ia_12=0. ;  P_ia_21=0.;  P_ia_22=0.
+              P_ia_times_u_x=0. ; P_ia_times_u_y=0.
+              call calculate_force(bergs, berg, other_berg, IA_x, IA_y, uvel0, vvel0, uvel0, vvel0,  &
+                P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y,bonded,c_crit_dist=.true.)
+              IAd_x=IAd_x+P_ia_11*(other_berg%uvel_old-berg%uvel_old)+P_ia_12*(other_berg%vvel_old-berg%vvel_old)
+              IAd_y=IAd_y+P_ia_12*(other_berg%uvel_old-berg%uvel_old)+P_ia_22*(other_berg%vvel_old-berg%vvel_old)
+            endif
           endif
-        endif
-        other_berg=>other_berg%next
-      enddo
-    enddo;enddo
+          other_berg=>other_berg%next
+        enddo
+      enddo;enddo
+    endif
 
     !unmark the bonded bergs
     current_bond=>berg%first_bond
@@ -6152,7 +6053,7 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
       call update_halo_icebergs(bergs)
       if (bergs%debug_iceberg_with_id>0) call monitor_a_berg(bergs, 'icebergs_run, after update_halo()')
       if (bergs%iceberg_bonds_on) then
-        call connect_all_bonds(bergs)
+        call connect_all_bonds(bergs,match_bond_pairs=.true.)
       else
         if (grd%Lx>0.) call update_latlon(bergs)
       endif
@@ -7352,29 +7253,6 @@ subroutine evolve_icebergs_mts(bergs)
     berg=>bergs%list(grdi,grdj)%first
     do while (associated(berg)) ! loop over all bergs
 
-!!$      if (.not. short_step_mts_grounding) then
-!!$        !set fully-grounded particles to static
-!!$        D=(bergs%rho_bergs/rho_seawater)*berg%thickness ! draught (keel depth)
-!!$        if (bergs%h_to_init_grounding>0.0) then
-!!$          groundfrac=1.0-(berg%od-D)/bergs%h_to_init_grounding
-!!$          groundfrac=max(groundfrac,0.0); groundfrac=min(groundfrac,1.0)
-!!$        else
-!!$          if (D>berg%od) then
-!!$            groundfrac=1.0
-!!$          else
-!!$            groundfrac=0.0
-!!$          endif
-!!$        endif
-!!$
-!!$        if (groundfrac==1.0) then
-!!$          berg%static_berg=1.0
-!!$          berg%uvel=0.; berg%vvel=0.; berg%axn=0.; berg%ayn=0.; berg%bxn=0.; berg%byn=0.
-!!$          berg%uvel_prev=0.; berg%vvel_prev=0.; berg%uvel_old=0.; berg%vvel_old=0.
-!!$          berg%axn_fast=0.; berg%ayn_fast=0.; berg%bxn_fast=0.; berg%byn_fast=0.
-!!$          berg%ang_vel=0.; berg%ang_accel=0.
-!!$        endif
-!!$      endif
-
       if (berg%static_berg .lt. 0.5 .and. berg%halo_berg .lt. 0.5) then
         if (.not. is_point_in_cell(bergs%grd, berg%lon, berg%lat, berg%ine, berg%jne) ) then
           write(stderrunit,'(i4,a4,32i7)') mpp_pe(),'Lon',(i,i=grd%isd,grd%ied)
@@ -7624,7 +7502,7 @@ subroutine evolve_icebergs_mts(bergs)
       jj=jj+1
 
       if (monitor_energy .and. last_iter) save_bond_energy=.true.
-
+      bergs%bond_break_detected=.false.
     ! update velocities
     do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
       berg=>bergs%list(grdi,grdj)%first
@@ -7840,7 +7718,7 @@ subroutine evolve_icebergs_mts(bergs)
       enddo ! loop over all bergs
     enddo; enddo ! update 'old' velocities
 
-    if (break_bonds_on_sub_steps) call break_bonds_dem(bergs)
+    if (break_bonds_on_sub_steps .and. bergs%bond_break_detected) call break_bonds_dem(bergs)
   enddo ! loop over sub-steps
 
   !reset interactive_forces

@@ -1,9 +1,11 @@
 &icebergs_driver_nml
   a68_test=.true.
-  vert_int_ocean_vel=.false.
+  vert_int_ocean_vel=.false.!.true.
   data_dir='/lustre/f2/dev/gfdl/Alexander.Huth/MOM6-examples/src/icebergs/tests/a68/data/'
   Old_wrong_Rearth_and_SSH=.false.
-  Rearth=<rad>
+  !mom_Rearth=.true.
+  Rearth=<re>
+  !6363827 !6.378e6
   no_wind=.false.
   tau_is_velocity=.true.!.false.
   ibdt=1800.0 !seconds
@@ -11,36 +13,39 @@
   ibvo=0.0 !ocean y velocity
   ibui=0.0 !ice x velocity
   ibvi=0.0 !ice y velocity
-  ibhrs=240 !360 !480 !20 days !1440 !960 !total simulation hours (60 !40 days)
+  ibhrs=432 !360 !480 !20 days !1440 !960 !total simulation hours (60 !40 days)
   write_time_inc = 48 !increment at which time is written to screen
   nmax=999999999 !max number of timesteps
-  saverestart=.false. !.true. !.false.
+  saverestart=.false.
   halo=3
   debug=.true.
   reverse_a68_forcings=.false.
-  transient_a68_data_start_ind=355 !330 !static=0, dec09_1PM=206, dec13_5PM=305, dec14_1PM=326, dec14_5PM=330
+  transient_a68_data_start_ind=206 !330 !static=0, dec09_1PM=206, dec13_5PM=305, dec14_1PM=326, dec14_5PM=330
 /
 
 &icebergs_nml
-    Rearth=<rad>
-    A68_test=<a68>
+
+    Rearth=<re>
+    !6363827 !6.378e6 !6.371229e6 !6.36e6 !6.378e6
+    A68_test=.true.
     A68_xdisp=<xd>
     A68_ydisp=<yd>
-    tau_is_velocity=.true.
-    ocean_drag_scale=<od>
     short_step_mts_grounding=.true.
 
+    tau_is_velocity=.true.
+    ocean_drag_scale=<od>
+
+    skip_first_outer_mts_step=.true.
     add_curl_to_torque=.false.
 
     constant_interaction_LW=.true.
 
-    !traj_name=sq_ssf_ssg<gc>_od<od>_addsm<a68>_rectx<xd>_y<yd>_n<ns>_t<ts>.nc
-    traj_name=sq_ssfg_gc<gc>_od<od>_rx<xd>_y<yd>_n<ns>_t<ts>_ss<ss>.nc
-    !bond_traj_name=<bname>
-
-    no_frac_first_ts=.true.
+    traj_name=<name>_1p.nc
+    bond_traj_name=<name>_bonds_1p.nc
+    
     break_bonds_on_sub_steps=.true.
-    power_ground=<pg>
+
+    power_ground=.false.
 
     save_bond_forces=.true.
 
@@ -63,7 +68,7 @@
     !defaults given in parentheses:
     new_mts=.true.
     mts=.true. !(F) for using the Multiple Time Stepping Velocity Verlet scheme
-    mts_sub_steps=<ss> !75 !75 !150 !50 !(-1) # of mts sub-steps
+    mts_sub_steps=<ss> !200 !75 !75 !150 !50 !(-1) # of mts sub-steps
     !mts_sub_steps=10
     force_convergence=.true. !(F) experimental MTS convergence scheme to better conserve momentum during collisions
     convergence_tolerance=1e-4 !8 !(1.e-8) tolerance for the MTS force_convergence scheme
@@ -71,15 +76,15 @@
     contact_distance=4.e3 !(0) unbonded bergs contact at max(contact_dist,sum of their radii)
     contact_spring_coef=1.e-7!(default=spring_coeff) Berg spring coeff for collisions
     debug_write=.false. !(F)sets traj_sample_hours=traj_write_hours & includes halo bergs in write
-    cdrag_grounding=<gc>!1.e6!3.16e6!1.e6!1.e3!3.16e6 !for power-law-type friction
-    h_to_init_grounding=0!15!50. !15.
+    cdrag_grounding=<gc> !0.!1.e6!3.16e6!1.e6!1.e3!3.16e6 !for power-law-type friction
+    h_to_init_grounding=0!30!15!50. !15.
     ewsame=.false. !(F) set T if periodic and 2 PEs along the x (zonal) direction
     remove_unused_bergs=.true. !(T) remove unneeded bergs after PEs transfers
 
     fracture_criterion='stress' !('none') 'strain_rate','strain',or 'none'
     frac_thres_scaling = 1
     frac_thres_n = <ns>e3
-    frac_thres_t = <ts>e3
+    frac_thres_t = 100e3
 
     halo=3 !(4) halo width
     Lx=360 !28.875!45000. ! (360.) Length of X-domain. For periodicity (use a huge number for non-periodic)
@@ -146,9 +151,9 @@
 
     verbose=.false. !(F) Be verbose to stderr
     verbose_hrs=1!24000 ! (24) Period between verbose messages
-    traj_sample_hrs=1 !0!6 !(24) sampling period for trajectory storage
-    traj_write_hrs=6 !12 !0!6 !(480) Period for writing sampled trajectories to disk
-    save_bond_traj=.false. !(F) If T, saves bond trajectories in a separate file
+    traj_sample_hrs=0!1 !(24) sampling period for trajectory storage
+    traj_write_hrs=0!6 !(480) Period for writing sampled trajectories to disk
+    save_bond_traj=.true. !.false. !(F) If T, saves bond trajectories in a separate file
     budget=.false. !(T) Calculate budgets
     debug=.false. !(F) Turn on debugging
     really_debug=.false. !(F) Turn on debugging
@@ -162,13 +167,13 @@
     ignore_missing_restart_bergs=.False. !(F) 'T'=ignore missing bergs in restart
     require_restart=.true. !(F) 'T'=fail if the restart file is not present at start
     use_slow_find=.true. !(T) Use slow, but robust, find_cell for reading restarts
-    manually_initialize_bonds=.false.!.true. ! (F) True= Bonds are initialize manually.
-    manually_initialize_bonds_from_radii=.false.!.true.
+    manually_initialize_bonds=.true. ! (F) True= Bonds are initialize manually.
+    manually_initialize_bonds_from_radii=.true.
     !length_for_manually_initialize_bonds=800.0 !(1e3)Dist b/w bergs to init bonds manually
-    ignore_ij_restart=.false.!.true. !(F) ign. cell from restart,useful for restart on diff grid
+    ignore_ij_restart=.true. !(F) ign. cell from restart,useful for restart on diff grid
     generate_test_icebergs=.false. ! (F) Create ergs in absence of a restart file
     fix_restart_dates=.true. !(T) Post-restart, check bergs created before curr model date
-    restart_input_dir='<rdir>/' !'S_17.8_ydn.1_r/' !'S_19.5_ydn.05_r/' !'S_<od>_r/' !('INPUT'/) Directory to look for restart files
+    restart_input_dir='INPUT/' !('INPUT'/) Directory to look for restart files
     read_ocean_depth_from_file=.false. ! (F) If true, ocean depth is read from a file.
     orig_read=.false. !(F) Legacy option that does nothing
     read_old_restarts=.false. ! (F) Legacy option that does nothing
@@ -206,7 +211,7 @@
 /
 
  &fms_nml
-       clock_grain='MODULE'
+       clock_grain='NONE'
        domains_stack_size = 2000000
        clock_flags='SYNC'
 /

@@ -3,49 +3,55 @@
   vert_int_ocean_vel=.false.!.true.
   data_dir='/lustre/f2/dev/gfdl/Alexander.Huth/MOM6-examples/src/icebergs/tests/a68/data/'
   Old_wrong_Rearth_and_SSH=.false.
-  no_wind=.false.  
+  !mom_Rearth=.true.
+  Rearth=6363827
+  !6363827 !6.378e6
+  no_wind=.false.
   tau_is_velocity=.true.!.false.
   ibdt=1800.0 !seconds
   ibuo=0.0 !ocean x velocity
   ibvo=0.0 !ocean y velocity
   ibui=0.0 !ice x velocity
   ibvi=0.0 !ice y velocity
-  ibhrs=360 !120 !360 !480 !20 days !1440 !960 !total simulation hours (60 !40 days)
+  ibhrs=432 !360 !480 !20 days !1440 !960 !total simulation hours (60 !40 days)
   write_time_inc = 48 !increment at which time is written to screen
-  nmax=432 !298 !310 !99999 !310 !999999999 !max number of timesteps
-  saverestart=.false.!.true.!.false.
+  nmax=999999999 !max number of timesteps
+  saverestart=.false.
   halo=3
   debug=.true.
   reverse_a68_forcings=.false.
   transient_a68_data_start_ind=206 !330 !static=0, dec09_1PM=206, dec13_5PM=305, dec14_1PM=326, dec14_5PM=330
-  Rearth=6363827
-  !6.371229e6
 /
 
 &icebergs_nml
 
-    A68_test=.false. !.true. !.false.
-    short_step_mts_grounding=.true.
-    !rev_mind=.true.
     Rearth=6363827
-    tau_is_velocity=.true.!.false.
-    ocean_drag_scale=10 !20. !1
+    !6363827 !6.378e6 !6.371229e6 !6.36e6 !6.378e6
+    A68_test=.true.
+    A68_xdisp=-37.51
+    A68_ydisp=-55.2166
+    short_step_mts_grounding=.true.
 
-    add_curl_to_torque=.false.
+    tau_is_velocity=.true.!.false.
+    ocean_drag_scale=17.8 !20. !1
 
     skip_first_outer_mts_step=.true.
+    add_curl_to_torque=.false.
 
     constant_interaction_LW=.true.
 
-    traj_name=hex_yn.1_nf_od10_rad_drag_E1e6.nc
+    traj_name=longrun_od_17.8_tn_ng_ydn.1_ss90_ns18_rx-37.51_ry-55.2166_1p.nc
+    bond_traj_name=longrun_od_17.8_tn_ng_ydn.1_ss90_ns18_rx-37.51_ry-55.2166_bonds_1p.nc
+    
+    break_bonds_on_sub_steps=.true.
 
-    radius_based_drag=.true.
-    !orig_dem_moment_of_inertia=.true.
+    power_ground=.false.
+
+    save_bond_forces=.true.
 
     dem=.true.
     poisson=0.3
-    dem_damping_coef=1
-    !1.0
+    dem_damping_coef=1.0
     explicit_inner_mts=.true.
     rho_bergs=850. ! (850) iceberg density
     !dem_spring_coef=E=youngs. For hexagonal packing and a constant radius and density for all elements,
@@ -53,17 +59,16 @@
     !E=k*rho_bergs*2*sqrt(3)*(radius**2). If rho_bergs=850, radius=389.71 m, k=1.e-5, then E=4471.94
     !if square packing, use A=4*(radius**2) instead of A=2*sqrt(3)*(radius**2)
     !E=34000 for square packing with 1000 m radius, rho_bergs=850, and k=1.e-5
-    dem_spring_coef=1.e6 !5e6 !1e7!34000.0 !4471.938678723104 !1000.0
+    dem_spring_coef=5e6 !1e7!34000.0 !4471.938678723104 !1000.0
     !spring_coef=1.e-6 !(1.e-8) Spring const for berg interactions (dflt~highest stable value)
-    !spring_coef=0.00065359477124183 !if dem_spring_coef=0.5e7, r=1500, and square pack
-    !spring_coef=0.0007547062342348049 !if dem_spring_coef=0.5e7, r=1500, and hex pack
-    spring_coef=0.00037735311711740245 !if dem_spring_coef=2.5e6, r=1500, and hex pack
-    
+    !spring_coef=0.00013071895424836603!if dem_spring_coef=1e6 and r=1500?
+    spring_coef=0.00065359477124183 !if dem_spring_coef=0.5e7 and r=1500?
+
     monitor_energy=.false.
     !defaults given in parentheses:
     new_mts=.true.
     mts=.true. !(F) for using the Multiple Time Stepping Velocity Verlet scheme
-    mts_sub_steps=200 !125!75 !75 !150 !50 !(-1) # of mts sub-steps
+    mts_sub_steps=90 !200 !75 !75 !150 !50 !(-1) # of mts sub-steps
     !mts_sub_steps=10
     force_convergence=.true. !(F) experimental MTS convergence scheme to better conserve momentum during collisions
     convergence_tolerance=1e-4 !8 !(1.e-8) tolerance for the MTS force_convergence scheme
@@ -71,15 +76,15 @@
     contact_distance=4.e3 !(0) unbonded bergs contact at max(contact_dist,sum of their radii)
     contact_spring_coef=1.e-7!(default=spring_coeff) Berg spring coeff for collisions
     debug_write=.false. !(F)sets traj_sample_hours=traj_write_hours & includes halo bergs in write
-    cdrag_grounding=0
-    h_to_init_grounding=0.
+    cdrag_grounding=1.e4 !0.!1.e6!3.16e6!1.e6!1.e3!3.16e6 !for power-law-type friction
+    h_to_init_grounding=0!30!15!50. !15.
     ewsame=.false. !(F) set T if periodic and 2 PEs along the x (zonal) direction
     remove_unused_bergs=.true. !(T) remove unneeded bergs after PEs transfers
 
     fracture_criterion='stress' !('none') 'strain_rate','strain',or 'none'
-    frac_thres_scaling = 10000000000
-    frac_thres_n = 25000.0 !5000.0 !4250. !12000.0 !8000.0 !5575. !3000. !2.1e4 !12.
-    frac_thres_t = 11000. !2000.0 !2500. !6000.0 !4000.0 !5575. !1750. !35000. !12.
+    frac_thres_scaling = 1 !0000000
+    frac_thres_n = 18e3 !25000.0 !5000.0 !4250. !12000.0 !8000.0 !5575. !3000. !2.1e4 !12.
+    frac_thres_t = 100e3 !1000. !2000.0 !2500. !6000.0 !4000.0 !5575. !1750. !35000. !12.
 
     !!fracture_criterion='strain'
     !!frac_thres_n = 0.0162
@@ -89,7 +94,7 @@
     Lx=360 !28.875!45000. ! (360.) Length of X-domain. For periodicity (use a huge number for non-periodic)
     grid_is_latlon=.true. !(T) 'T'=lat/lon grid, uses earth radius to convert to distance
     grid_is_regular=.false. !(T) Point in cell can be found assuming regular Cartesian grid
-    hexagonal_icebergs=.true. !.false. !(F)'T'=bergs are rectangles,'F'=bergs are hex (for mass spread)
+    hexagonal_icebergs=.false. !(F)'T'=bergs are rectangles,'F'=bergs are hex (for mass spread)
     Static_icebergs=.False. ! (T) True=icebergs do no move
 
     bond_coef=1.e-8 ! (1.e-8) Spring const for berg bonds - not being used right now
@@ -145,14 +150,14 @@
     use_new_predictive_corrective =.true. ! (F) Flag to use Bob's pred-corr berg scheme
     input_freq_distribution=.false. !(F)input dist is: 'T' freq dist or 'F' mass dist
     use_old_spreading=.false. !(T)spreads berg mass as if  berg is 1 grid cell wide (for rect)
-    max_bonds=6 ! (6) Max # of bonds passed between processors
+    max_bonds=4 ! (6) Max # of bonds passed between processors
     internal_bergs_for_drag=.true. !(F) True reduces side drag for bonded bergs in momentum eqn.
 
     verbose=.false. !(F) Be verbose to stderr
     verbose_hrs=1!24000 ! (24) Period between verbose messages
-    traj_sample_hrs=1 !0!6 !(24) sampling period for trajectory storage
-    traj_write_hrs=6 !12 !0!6 !(480) Period for writing sampled trajectories to disk
-    save_bond_traj=.false. !(F) If T, saves bond trajectories in a separate file
+    traj_sample_hrs=0!1 !(24) sampling period for trajectory storage
+    traj_write_hrs=0!6 !(480) Period for writing sampled trajectories to disk
+    save_bond_traj=.true. !.false. !(F) If T, saves bond trajectories in a separate file
     budget=.false. !(T) Calculate budgets
     debug=.false. !(F) Turn on debugging
     really_debug=.false. !(F) Turn on debugging
@@ -210,7 +215,7 @@
 /
 
  &fms_nml
-       clock_grain='MODULE'
+       clock_grain='NONE'
        domains_stack_size = 2000000
        clock_flags='SYNC'
 /

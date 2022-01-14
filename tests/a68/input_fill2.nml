@@ -29,7 +29,7 @@
     !6363827 !6.378e6 !6.371229e6 !6.36e6 !6.378e6
     A68_test=.true.
     short_step_mts_grounding=.true.
-    
+
     tau_is_velocity=.true.!.false.
     ocean_drag_scale=<od> !20. !1
 
@@ -59,7 +59,7 @@
     !defaults given in parentheses:
     new_mts=.true.
     mts=.true. !(F) for using the Multiple Time Stepping Velocity Verlet scheme
-    mts_sub_steps=200 !75 !75 !150 !50 !(-1) # of mts sub-steps
+    mts_sub_steps=<ss> !200 !75 !75 !150 !50 !(-1) # of mts sub-steps
     !mts_sub_steps=10
     force_convergence=.true. !(F) experimental MTS convergence scheme to better conserve momentum during collisions
     convergence_tolerance=1e-4 !8 !(1.e-8) tolerance for the MTS force_convergence scheme

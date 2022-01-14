@@ -218,21 +218,24 @@ def main(args):
     boundary_path = mpath.Path(boundary_path)
 
     old=False
-    
+
+    if pvar==True:
+        old=True
+
     # Now we can do the plotting!
     f = plt.figure(figsize=(8,8))
     f.tight_layout()
 
     if old:
         ax1 = plt.subplot(111,xlim=(xmin, xmax), ylim=(ymin, ymax))
-        scat = ax1.scatter([],[],marker='o')#,edgecolor='red')        
+        scat = ax1.scatter([],[],marker='o')#,edgecolor='red')
     else:
         ax1 = plt.axes(projection=ccrs.NearsidePerspective(central_longitude=midlon, central_latitude=midlat))
-        scat = ax1.scatter([],[],transform=ccrs.PlateCarree(),marker='o')#,edgecolor='red')        
+        scat = ax1.scatter([],[],transform=ccrs.PlateCarree(),marker='o')#,edgecolor='red')
 
     if pvar==True:
         div = make_axes_locatable(ax1)
-        cax = div.append_axes('right', '5%', '5%')
+        cax = div.append_axes('right', size='5%', pad='5%')
         cmap = plt.cm.get_cmap('RdYlBu')
         norm = plt.Normalize(thevar.min(), thevar.max())
         #norm = plt.Normalize(165.7, 165.8)
@@ -262,7 +265,7 @@ def main(args):
             ax1.quiver(vv.lon.values,vv.lat.values,vv.uo.values,vv.vo.values,vv.vel.values,scale=8,cmap='viridis',norm=norm,transform=ccrs.PlateCarree())
         else:
             ax1.quiver(vv.lon,vv.lat,vv.uo,vv.vo,vv.vel,scale=8,cmap='viridis',norm=norm)
-        f.colorbar(plt.cm.ScalarMappable(norm=norm, cmap='viridis'),ax=ax1, shrink=0.75)        
+        f.colorbar(plt.cm.ScalarMappable(norm=norm, cmap='viridis'),ax=ax1, shrink=0.75)
         #330 is dec 14th at 5PM. 408 is dec 16th at 5 PM
 
 

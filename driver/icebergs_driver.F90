@@ -139,8 +139,6 @@ real :: a,bx,by,c,xc,yc !gaussian params
 !grounding/collision tests
 real :: mid
 
-call cpu_time(time_begin)
-
 ! Boot FMS
 call fms_init()
 
@@ -294,14 +292,6 @@ if (a68_test) then
       tauxa_hr=0.0; tauya_hr=0.0
     endif
   endif
-
-  !print *,'lon min/max',minval(lon),maxval(lon)
-  !print *,'lat min/max',minval(lat),maxval(lat)
-  !print *,'lon(isd:isc+1,jsc+1)',lon(isd:isc+1,jsc+1)
-  !print *,'depth(isd:isc+1,jsc+1)',depth(isd:isc+1,jsc+1)
-  !print *,'lon(isd,jsd),lat(isd,jsd)',lon(isd,jsd),lat(isd,jsd)
-  !print *,'lon(ied,jed),lat(ied,jed)',lon(ied,jed),lat(ied,jed)
-  !iceberg vel: ub: 0.0362195771130627 vb: -0.04608364827503143
 else
   do j = jsd, jed
     do i = isd, ied
@@ -435,22 +425,10 @@ endif
 ns = 1 !timestep counter
 if (transient_a68_data_start_ind>0) ns2 = 1
 
-!uo=0.;vo=0.ui=0.;vi=0.;ssh=0.;tauxa=0.;tauya=0.;depth=-1000000
-!tauxa=0.; tauya=0.; ssh_hr=0.
-
-!uo_hr=0.2; vo_hr=0.
-
 ! Time_end = increment_date(Time, years, months, days, hours, minutes, seconds)
 Time_end = increment_date(Time,0,0,0,ibhrs,0,0)
 
-! if (mpp_pe()==0) then
-!   print *,'shape(tauxa_hr)', shape(tauxa_hr)
-!   print *,'shape(tauya_hr)', shape(tauya_hr)
-!   print *,'shape(tauxa)', shape(tauxa)
-!   print *,'shape(tauya)', shape(tauya)
-!   print *,'lon(isc:isc+2,jsc:jsc+2)',lon(isc:isc+2,jsc:jsc+2)-360
-!   print *,'lat(isc:isc+2,jsc:jsc+2)',lat(isc:isc+2,jsc:jsc+2)
-! endif
+call cpu_time(time_begin)
 
 do while ((ns <= nmax) .and. (Time < Time_end))
   if (mpp_pe()==0 .and. debug .and. mod(ns-1,write_time_inc)==0) then
@@ -461,7 +439,7 @@ do while ((ns <= nmax) .and. (Time < Time_end))
     write(*,'(a,i5,a,i5,a,i5)')' year',iyr,'  month ',imon,'  day   ',iday
     write(*,'(a,i5,a,i5,a,i5)')' hour',ihr,'  minute',imin,'  second',isec
     call cpu_time(time_finish)
-    write(*,*) 'cpu time elapsed: ', (time_finish - time_begin)/60., 'minutes'
+    write(*,*) 'clock-time elapsed: ', (time_finish - time_begin)/60., 'minutes'
     write(*,'(a)') '-------------------------------------------'
     write(*,*) ''
   end if
@@ -481,11 +459,6 @@ do while ((ns <= nmax) .and. (Time < Time_end))
       vo=0.5*(vo+vo_hr(:,:,transient_a68_data_start_ind+dit*(int(ceiling(ns2))-1)))
       ssh=ssh_hr(:,:,transient_a68_data_start_ind+dit*(int(ns2)-1))
     endif
-    ! if (mpp_pe()==0) then
-    !   print *,'index',transient_a68_data_start_ind+dit*(ns-1)
-    !   print *,'tauxa(isc:isc+2,jsc:jsc+2)',tauxa(isc:isc+2,jsc:jsc+2)
-    !   print *,'tauya(isc:isc+2,jsc:jsc+2)',tauya(isc:isc+2,jsc:jsc+2)
-    ! endif
   endif
 
   ! The main driver the steps updates icebergs
@@ -509,34 +482,36 @@ do while ((ns <= nmax) .and. (Time < Time_end))
       ns2=ns2+1
     elseif (ibdt==1800.0) then
       ns2=ns2+0.5
-      !if (mod(ns,2)>0) then
-      !  ns2=ns2+1
-      !endif
     endif
   endif
-
 enddo
 
-if (saverestart) call icebergs_save_restart(bergs)
 
-call get_date(Time, iyr, imon, iday, ihr, imin, isec)
-write(*,*) ''
-write(*,'(a)') '-------------------------------------------'
-write(*,'(a,i5)')' Saving after timestep   ',ns-1
-print *,' ns2   ',ns2
-if (mod(ns2,1.)==0) then
-  print *,'transient_a68_data_start_ind+dit*(int(ns2)-1)',&
-    transient_a68_data_start_ind+dit*(int(ns2)-1)
-else
-  print *,'transient_a68_data_start_ind+dit*(int(ceiling(ns2))-1))',&
-    transient_a68_data_start_ind+dit*(int(ceiling(ns2))-1)
+if (a68_test) then
+  call cpu_time(time_finish)
+  call get_date(Time, iyr, imon, iday, ihr, imin, isec)
+  write(*,*) ''
+  write(*,'(a)') '-------------------------------------------'
+  write(*,'(a,i5)')' Saving after timestep   ',ns-1
+  print *,' ns2   ',ns2
+  if (mod(ns2,1.)==0) then
+    print *,'transient_a68_data_start_ind+dit*(int(ns2)-1)',&
+      transient_a68_data_start_ind+dit*(int(ns2)-1)
+  else
+    print *,'transient_a68_data_start_ind+dit*(int(ceiling(ns2))-1))',&
+      transient_a68_data_start_ind+dit*(int(ceiling(ns2))-1)
+  endif
+  write(*,'(a)')' Restart time is:'
+  write(*,'(a,i5,a,i5,a,i5)')' year',iyr,'  month ',imon,'  day   ',iday
+  write(*,'(a,i5,a,i5,a,i5)')' hour',ihr,'  minute',imin,'  second',isec
+  write(*,*) ''
+  write(*,*) 'clock-time elapsed: ', (time_finish - time_begin)/60., 'minutes'
+  write(*,*) 'clock-time per day: ', (time_finish - time_begin)/(ns-1)*(60*60*24)/ibdt
+  write(*,'(a)') '-------------------------------------------'
+  write(*,*) ''
 endif
-write(*,'(a)')' Restart time is:'
-write(*,'(a,i5,a,i5,a,i5)')' year',iyr,'  month ',imon,'  day   ',iday
-write(*,'(a,i5,a,i5,a,i5)')' hour',ihr,'  minute',imin,'  second',isec
-write(*,'(a)') '-------------------------------------------'
-write(*,*) ''
 
+if (saverestart) call icebergs_save_restart(bergs)
 
 !Deallocate all memory and disassociated pointer
 call icebergs_end(bergs)
