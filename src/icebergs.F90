@@ -1176,6 +1176,7 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
 
           if (current_bond%nstress<0) then
             !if fail under shear with normal compression, then should still feel contact force
+            damping_coef = bergs%dem_damping_coef*sqrt(bergs%dem_K_damp*M1*M2/(M1+M2))
             Fd_x = Fd_x-damping_coef*ur; Fd_y = Fd_y-damping_coef*vr  !linear damping force
             F_x = F_x + Fn_x; F_y = F_y + Fn_y !linear forces
           endif
@@ -2089,7 +2090,7 @@ subroutine accel_explicit_inner_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, 
         do grdi = max(berg%ine-1,bergs%grd%isd+1),min(berg%ine+1,bergs%grd%ied)
         other_berg=>bergs%list(grdi,grdj)%first
         do while (associated(other_berg))
-          if (other_berg%id>0 .and. other_berg%conglom_id.eq.berg%conglom_id) then
+          if (other_berg%id>0 .and. other_berg%conglom_id.eq.berg%conglom_id .and. other_berg%n_bonds<bergs%max_bonds) then
             if (bergs%dem) then
               call calculate_unbonded_same_conglom_dem_force(bergs, berg, other_berg, &
                 IA_x, IA_y, IAd_x, IAd_y, uvel0, vvel0, uvel0, vvel0)
@@ -3392,12 +3393,13 @@ subroutine thermodynamics(bergs)
         if (bergs%use_mixed_melting .or. bergs%allow_bergs_to_roll) then
           N_bonds=0.
           if (bergs%iceberg_bonds_on) then
+            N_bonds=this%n_bonds
             ! Determining number of bonds
-            current_bond=>this%first_bond
-            do while (associated(current_bond)) ! loop over all bonds
-              N_bonds=N_bonds+1.0
-              current_bond=>current_bond%next_bond
-            enddo
+            ! current_bond=>this%first_bond
+            ! do while (associated(current_bond)) ! loop over all bonds
+            !   N_bonds=N_bonds+1.0
+            !   current_bond=>current_bond%next_bond
+            ! enddo
           endif
           if  (this%static_berg .eq. 1)  N_bonds=N_max  !Static icebergs melt like ice shelves
         endif
@@ -7303,35 +7305,40 @@ subroutine evolve_icebergs_mts(bergs)
         do while (associated(berg)) ! loop over all bergs
           !only evolve non-static bergs that overlap, or are part of a conglom that overlaps, the computational domain:
           if (berg%static_berg .lt. 0.5 .and. (berg%conglom_id.ne.0 .or. bergs%force_convergence)) then
-            latn = berg%lat ;   lonn = berg%lon
-            uvel1=berg%uvel ;   vvel1=berg%vvel !V_n (previous cycle)
-            axn  = 0.0      ;   ayn  = 0.0 !note these are redefined at the start of subroutine accel_mts
-            bxn  = 0.0      ;   byn  = 0.0
-            i=berg%ine      ;   j=berg%jne
-            xi=berg%xi      ;   yj=berg%yj
+            if (ii==1 .or. berg%static_berg==0.1) then
+              latn = berg%lat ;   lonn = berg%lon
+              uvel1=berg%uvel ;   vvel1=berg%vvel !V_n (previous cycle)
+              axn  = 0.0      ;   ayn  = 0.0 !note these are redefined at the start of subroutine accel_mts
+              bxn  = 0.0      ;   byn  = 0.0
+              i=berg%ine      ;   j=berg%jne
+              xi=berg%xi      ;   yj=berg%yj
 
-            call accel_mts(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, rx, ry, &
-              ax1, ay1, axn, ayn, bxn, byn, save_bond_energy,Fec_x, Fec_y, Fdc_x, Fdc_y)
+              call accel_mts(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, rx, ry, &
+                ax1, ay1, axn, ayn, bxn, byn, save_bond_energy,Fec_x, Fec_y, Fdc_x, Fdc_y)
 
-            if (Fdc_x .ne. 0. .or. Fdc_y .ne. 0.) had_collision=.true.
-            if (monitor_energy .and. last_iter) &
-              call mts_energy_part_1(bergs,berg,ax1,ay1,axn,ayn,bxn,byn,Fec_x,Fec_y,Fdc_x,Fdc_y)
+              if (Fdc_x .ne. 0. .or. Fdc_y .ne. 0. .and. bergs%force_convergence) then
+                had_collision=.true.
+                berg%static_berg=0.1
+              endif
+              if (monitor_energy .and. last_iter) &
+                call mts_energy_part_1(bergs,berg,ax1,ay1,axn,ayn,bxn,byn,Fec_x,Fec_y,Fdc_x,Fdc_y)
 
-            ! Saving all the iceberg variables
-            berg%axn=axn; berg%ayn=ayn
-            berg%bxn=bxn; berg%byn=byn
+              ! Saving all the iceberg variables
+              berg%axn=axn; berg%ayn=ayn
+              berg%bxn=bxn; berg%byn=byn
 
-            if (bergs%force_convergence) then
-              berg%uvel_prev=berg%uvel+(dt*ax1); berg%vvel_prev=berg%vvel+(dt*ay1) !the new velocity
-              if (ii==1) usum=usum+berg%uvel_old**2 + berg%vvel_old**2
-              usum1=usum1+berg%uvel_prev**2+berg%vvel_prev**2
-              usum2=usum2+(berg%uvel_prev-berg%uvel_old)**2+(berg%vvel_prev-berg%vvel_old)**2
-            else
-              berg%uvel=berg%uvel+(dt*ax1); berg%vvel=berg%vvel+(dt*ay1)
+              if (bergs%force_convergence) then
+                berg%uvel_prev=berg%uvel+(dt*ax1); berg%vvel_prev=berg%vvel+(dt*ay1) !the new velocity
+                if (ii==1) usum=usum+berg%uvel_old**2 + berg%vvel_old**2
+                usum1=usum1+berg%uvel_prev**2+berg%vvel_prev**2
+                usum2=usum2+(berg%uvel_prev-berg%uvel_old)**2+(berg%vvel_prev-berg%vvel_old)**2
+              else
+                berg%uvel=berg%uvel+(dt*ax1); berg%vvel=berg%vvel+(dt*ay1)
 
-              !The final velocity from the previous cycle, which can be used
-              !during post-processing to calculate kinetic energy and momentum
-              berg%uvel_prev=berg%uvel    ; berg%vvel_prev=berg%vvel
+                !The final velocity from the previous cycle, which can be used
+                !during post-processing to calculate kinetic energy and momentum
+                berg%uvel_prev=berg%uvel    ; berg%vvel_prev=berg%vvel
+              endif
             endif
           endif
           berg=>berg%next
@@ -7345,6 +7352,7 @@ subroutine evolve_icebergs_mts(bergs)
           do while (associated(berg)) ! loop over all bergs
             if (berg%static_berg .lt. 0.5) then
               berg%uvel_old=berg%uvel_prev; berg%vvel_old=berg%vvel_prev
+              if (last_iter .and. berg%static_berg==0.1) berg%static_berg=0.
             endif
             berg=>berg%next
           enddo

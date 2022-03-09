@@ -150,9 +150,9 @@ def str2bool(string):
 	elif string.lower() in ("no", "false", "f", "0"):
 		Value=False
 	else:
-		print '**********************************************************************'
-		print 'The input variable ' ,str(string) ,  ' is not suitable for boolean conversion, using default'
-		print '**********************************************************************'
+		print( '**********************************************************************')
+		print( 'The input variable ' ,str(string) ,  ' is not suitable for boolean conversion, using default')
+		print( '**********************************************************************')
 
 		Value=None
 		return

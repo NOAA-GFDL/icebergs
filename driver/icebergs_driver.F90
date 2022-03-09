@@ -18,6 +18,7 @@ use mpp_mod, only : mpp_npes
 use mpp_mod, only : mpp_pe
 use mpp_mod, only : mpp_root_pe
 use mpp_mod, only: mpp_sync
+use mpp_mod, only: mpp_exit
 use time_manager_mod, only : time_type
 use time_manager_mod, only : set_date
 use time_manager_mod, only : set_calendar_type
@@ -60,6 +61,7 @@ logical :: collision_test=.false.
 logical :: chaotic_test=.false.
 logical :: grounding_test=.false.
 logical :: big_grounding_test=.false.
+logical :: dem_test_contact=.false.
 logical :: a68_test=.false.
 logical :: vert_int_ocean_vel=.false.
 logical :: tau_is_velocity=.true.
@@ -87,7 +89,7 @@ namelist /icebergs_driver_nml/ debug, ni, nj, halo, ibhrs, ibdt, ibuo, ibvo, nma
   saverestart,ibui,ibvi,collision_test,chaotic_test,grounding_test,&
   gridres,write_time_inc,bump_depth, sst, a68_test, data_dir, vert_int_ocean_vel,&
   reverse_a68_forcings,tau_is_velocity,transient_a68_data_start_ind,&
-  Old_wrong_Rearth_and_SSH,no_wind,REarth,big_grounding_test !mom_Rearth
+  Old_wrong_Rearth_and_SSH,no_wind,REarth,big_grounding_test,dem_test_contact !mom_Rearth
 ! For loops
 integer :: isc !< Start of i-index for computational domain (used for loops)
 integer :: iec !< End of i-index for computational domain (used for loops)
@@ -336,6 +338,32 @@ else
     depth = 1000.0-depth
   endif
 
+   if (dem_test_contact) then
+    lat(:,:)=lat(:,:)-0.45 !-25000.1
+    lon(:,:)=lon(:,:)-0.45
+    !assign land cells at the N and S portions of the domain.
+    !input.nml: set coastal drift parameter to prevent grounding
+    do j=jsd,jed; do i=isd,ied
+      if (lat(i,j)<=(-5.e3) .or. lat(i,j)>=(220.e3)) wet(i,j)=0.0
+    enddo;enddo
+
+    mid=50.e3
+
+    do j=jsd,jed; do i=isd,ied
+      if (lon(i,j)>65 .or. lat(i,j)==mid) then
+        vo(i,j)=0.0
+      else
+        if (lat(i,j)>mid) then
+          vo(i,j)=-ibvo
+        else
+          vo(i,j)=ibvo
+        endif
+      endif
+  enddo;enddo
+
+
+  endif
+
   if (grounding_test) then
     lat(:,:)=lat(:,:)-15000.0
     !assign land cells at the N and S portions of the domain.
@@ -513,13 +541,15 @@ endif
 
 if (saverestart) call icebergs_save_restart(bergs)
 
-!Deallocate all memory and disassociated pointer
-call icebergs_end(bergs)
-
 call cpu_time(time_finish)
 
 if (mpp_pe()==0) then
   write(*,*) 'Simulation finished in ', (time_finish - time_begin)/60., 'minutes'
 end if
+
+call mpp_exit()
+
+!Deallocate all memory and disassociated pointer
+call icebergs_end(bergs)
 
 end program icebergs_driver
