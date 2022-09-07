@@ -18,7 +18,8 @@ use fms_io_mod, only: get_instance_filename
 use fms_io_mod, only : save_restart, restart_file_type, free_restart_type, set_meta_global
 use fms_io_mod, only : register_restart_axis, register_restart_field, set_domain, nullify_domain
 use fms_io_mod, only : read_unlimited_axis =>read_compressed, field_exist, get_field_size
-use fms2_io_mod, only: register_global_attribute, open_file, close_file, fms2_io_write_restart=>write_restart, register_unlimited_compressed_axis, FmsNetcdfDomainFile_t, fms2_io_register_restart_field => register_restart_field
+use fms2_io_mod, only: register_global_attribute, open_file, close_file, fms2_io_write_restart=>write_restart, &
+register_unlimited_compressed_axis, FmsNetcdfDomainFile_t, fms2_io_register_restart_field => register_restart_field, fms2_io_register_restart_axis => register_axis
 
 use mpp_mod,    only : mpp_clock_begin, mpp_clock_end, mpp_clock_id
 use mpp_mod,    only : CLOCK_COMPONENT, CLOCK_SUBCOMPONENT, CLOCK_LOOP
@@ -160,7 +161,9 @@ integer, allocatable, dimension(:) :: ine,              &
 
 integer :: grdi, grdj
 
-type(FmsNetcdfDomainFile_t) :: fileobj_icebergs_res        !< Fms2_io fileobj_iceberg_res
+type(FmsNetcdfDomainFile_t) :: fileobj_icebergs_res        !< Fms2_io fileobj_icebergs_res
+type(FmsNetcdfDomainFile_t) :: fileobj_bonds_iceberg        !< Fms2_io fileobj_bonds_iceberg
+
 
 ! Get the stderr unit number
  stderrunit=stderr()
@@ -336,24 +339,24 @@ type(FmsNetcdfDomainFile_t) :: fileobj_icebergs_res        !< Fms2_io fileobj_ic
   allocate(other_berg_ine(nbonds))
   allocate(other_berg_jne(nbonds))
   
+  filename_bonds = trim("bonds_iceberg.res.nc")
 
-  call get_instance_filename("bonds_iceberg.res.nc", filename_bonds)
-  call set_domain(bergs%grd%domain)
-  call register_restart_axis(bergs_bond_restart,filename,'i',nbonds)
-  call set_meta_global(bergs_bond_restart,'file_format_major_version',ival=(/file_format_major_version/))
-  call set_meta_global(bergs_bond_restart,'file_format_minor_version',ival=(/file_format_minor_version/))
-  call set_meta_global(bergs_bond_restart,'time_axis',ival=(/0/))
+  if (open_file(fileobj_bonds_iceberg, filename, "overwrite", bergs%grd%domain, is_restart=.true.)) then
+  call register_unlimited_compressed_axis(fileobj_bonds_iceberg,'i',nbonds)
+  call register_global_attribute(fileobj_bonds_iceberg,'file_format_major_version',file_format_major_version)
+  call register_global_attribute(fileobj_bonds_iceberg,'file_format_minor_version',file_format_minor_version)
+  call register_global_attribute(fileobj_bonds_iceberg,'time_axis',0)
 
   !Now start writing in the io_tile_root_pe if there are any bergs in the I/O list
 
-  id = register_restart_field(bergs_bond_restart,filename_bonds,'first_berg_ine',first_berg_ine,longname='iceberg ine of first berg in bond',units='dimensionless')
-  id = register_restart_field(bergs_bond_restart,filename_bonds,'first_berg_jne',first_berg_jne,longname='iceberg jne of first berg in bond',units='dimensionless')
-  id = register_restart_field(bergs_bond_restart,filename_bonds,'first_id_cnt',first_id_cnt,longname='counter component of iceberg id first berg in bond',units='dimensionless')
-  id = register_restart_field(bergs_bond_restart,filename_bonds,'first_id_ij',first_id_ij,longname='position component of iceberg id first berg in bond',units='dimensionless')
-  id = register_restart_field(bergs_bond_restart,filename_bonds,'other_berg_ine',other_berg_ine,longname='iceberg ine of second berg in bond',units='dimensionless')
-  id = register_restart_field(bergs_bond_restart,filename_bonds,'other_berg_jne',other_berg_jne,longname='iceberg jne of second berg in bond',units='dimensionless')
-  id = register_restart_field(bergs_bond_restart,filename_bonds,'other_id_cnt',other_id_cnt,longname='counter component of iceberg id second berg in bond',units='dimensionless')
-  id = register_restart_field(bergs_bond_restart,filename_bonds,'other_id_ij',other_id_ij,longname='position component of iceberg id second berg in bond',units='dimensionless')
+  call fms2_io_register_restart_field(fileobj_bonds_iceberg,'first_berg_ine',first_berg_ine,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_bonds_iceberg,'first_berg_jne',first_berg_jne,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_bonds_iceberg,'first_id_cnt',first_id_cnt,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_bonds_iceberg,'first_id_ij',first_id_ij,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_bonds_iceberg,'other_berg_ine',other_berg_ine,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_bonds_iceberg,'other_berg_jne',other_berg_jne,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_bonds_iceberg,'other_id_cnt',other_id_cnt,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_bonds_iceberg,'other_id_ij',other_id_ij,(/"i"/))
 
 
   ! Write variables
@@ -378,8 +381,9 @@ type(FmsNetcdfDomainFile_t) :: fileobj_icebergs_res        !< Fms2_io fileobj_ic
     enddo!End of loop over bergs
   enddo; enddo !End of loop over grid
 
-  call save_restart(bergs_bond_restart, time_stamp)
-  call free_restart_type(bergs_bond_restart)
+  call fms2_io_write_restart(fileobj_bonds_iceberg)
+  call close_file(fileobj_bonds_iceberg)
+  
   deallocate(first_id_cnt,          &
              other_id_cnt,          &
              first_id_ij,           &
@@ -391,6 +395,7 @@ type(FmsNetcdfDomainFile_t) :: fileobj_icebergs_res        !< Fms2_io fileobj_ic
 
 
   call nullify_domain()
+  endif
   endif
 
   ! Write stored ice
@@ -412,7 +417,7 @@ type(FmsNetcdfDomainFile_t) :: fileobj_icebergs_res        !< Fms2_io fileobj_ic
     id = register_restart_field(calving_restart,filename,'rmean_calving_hflx',bergs%grd%rmean_calving_hflx,longname='RMEAN_CALVING_HFLX',units='none')
   endif
 
-  call save_restart(calving_restart, time_stamp)
+  call save_restart(calving_restart)
   call free_restart_type(calving_restart)
 
 end subroutine write_restart
