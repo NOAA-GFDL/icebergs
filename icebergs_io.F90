@@ -18,6 +18,7 @@ use fms_io_mod, only: get_instance_filename
 use fms_io_mod, only : save_restart, restart_file_type, free_restart_type, set_meta_global
 use fms_io_mod, only : register_restart_axis, register_restart_field, set_domain, nullify_domain
 use fms_io_mod, only : read_unlimited_axis =>read_compressed, field_exist, get_field_size
+use fms2_io_mod, only: register_global_attribute, open_file, close_file, fms2_io_write_restart=>write_restart, register_unlimited_compressed_axis, FmsNetcdfDomainFile_t, fms2_io_register_restart_field => register_restart_field
 
 use mpp_mod,    only : mpp_clock_begin, mpp_clock_end, mpp_clock_id
 use mpp_mod,    only : CLOCK_COMPONENT, CLOCK_SUBCOMPONENT, CLOCK_LOOP
@@ -159,6 +160,8 @@ integer, allocatable, dimension(:) :: ine,              &
 
 integer :: grdi, grdj
 
+type(FmsNetcdfDomainFile_t) :: fileobj        !< Fms2_io fileobj
+
 ! Get the stderr unit number
  stderrunit=stderr()
 
@@ -203,95 +206,87 @@ integer :: grdi, grdj
    allocate(id_cnt(nbergs))
    allocate(id_ij(nbergs))
 
+   i = 0
+   do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+     this=>bergs%list(grdi,grdj)%first
+     do while(associated(this))
+       i = i + 1
+       lon(i) = this%lon; lat(i) = this%lat
+       uvel(i) = this%uvel; vvel(i) = this%vvel
+       ine(i) = this%ine; jne(i) = this%jne
+       mass(i) = this%mass; thickness(i) = this%thickness
+       axn(i) = this%axn; ayn(i) = this%ayn !Added by Alon
+       bxn(i) = this%bxn; byn(i) = this%byn !Added by Alon
+       width(i) = this%width; length(i) = this%length
+       start_lon(i) = this%start_lon; start_lat(i) = this%start_lat
+       start_year(i) = this%start_year; start_day(i) = this%start_day
+       start_mass(i) = this%start_mass; mass_scaling(i) = this%mass_scaling
+       static_berg(i) = this%static_berg
+       call split_id(this%id, id_cnt(i), id_ij(i))
+       mass_of_bits(i) = this%mass_of_bits; heat_density(i) = this%heat_density
+       this=>this%next
+     enddo
+   enddo ; enddo
 
   filename = trim("icebergs.res.nc")
-  call set_domain(bergs%grd%domain)
-  call register_restart_axis(bergs_restart,filename,'i',nbergs)
-  call set_meta_global(bergs_restart,'file_format_major_version',ival=(/file_format_major_version/))
-  call set_meta_global(bergs_restart,'file_format_minor_version',ival=(/file_format_minor_version/))
-  call set_meta_global(bergs_restart,'time_axis',ival=(/0/))
+
+  if (open_file(fileobj, filename, "overwrite", bergs%grd%domain, is_restart=.true.)) then
+  call register_unlimited_compressed_axis(fileobj, "i", nbergs)
+  call register_global_attribute(fileobj,"file_format_major_version", file_format_major_version)
+  call register_global_attribute(fileobj,"file_format_minor_version", file_format_minor_version)
+  call register_global_attribute(fileobj,"time_axis", 0)
+  call fms2_io_register_restart_field(fileobj, "lon", lon, (/"i"/))
+  call fms2_io_register_restart_field(fileobj, "lat", lat, (/"i"/))
+  call fms2_io_register_restart_field(fileobj, "uvel", uvel, (/"i"/))
+  call fms2_io_register_restart_field(fileobj, "vvel", vvel, (/"i"/))
+  call fms2_io_register_restart_field(fileobj, "mass", mass, (/"i"/))
+
+  if (.not. bergs%Runge_not_Verlet) then
+  call fms2_io_register_restart_field(fileobj,'axn',axn,(/"i"/))
+  call fms2_io_register_restart_field(fileobj,'ayn',ayn,(/"i"/))
+  call fms2_io_register_restart_field(fileobj,'bxn',bxn,(/"i"/))
+  call fms2_io_register_restart_field(fileobj,'byn',byn,(/"i"/))
+  endif
+  
+  call fms2_io_register_restart_field(fileobj,'ine',ine,(/"i"/))
+  call fms2_io_register_restart_field(fileobj,'jne',jne,(/"i"/))
+  call fms2_io_register_restart_field(fileobj,'thickness',thickness,(/"i"/))
+  call fms2_io_register_restart_field(fileobj,'width',width,(/"i"/))
+  call fms2_io_register_restart_field(fileobj,'length',length,(/"i"/))
+  call fms2_io_register_restart_field(fileobj,'start_lon',start_lon,(/"i"/))
+  call fms2_io_register_restart_field(fileobj,'start_lat',start_lat,(/"i"/))
+  call fms2_io_register_restart_field(fileobj,'start_year',start_year,(/"i"/))
+  call fms2_io_register_restart_field(fileobj,'id_cnt',id_cnt,(/"i"/))
+  call fms2_io_register_restart_field(fileobj,'id_ij',id_ij,(/"i"/))
+  call fms2_io_register_restart_field(fileobj,'start_day',start_day,(/"i"/))
+  call fms2_io_register_restart_field(fileobj,'start_mass',start_mass,(/"i"/))
+  call fms2_io_register_restart_field(fileobj,'mass_scaling',mass_scaling,(/"i"/))
+  call fms2_io_register_restart_field(fileobj,'mass_of_bits',mass_of_bits,(/"i"/))
+  call fms2_io_register_restart_field(fileobj,'heat_density',heat_density,(/"i"/))
+
+!Checking if any icebergs are static in order to decide whether to save static_berg
+   n_static_bergs = 0
+   do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+     this=>bergs%list(grdi,grdj)%first
+     do while (associated(this))
+       n_static_bergs=n_static_bergs+this%static_berg
+       this=>this%next
+     enddo
+   enddo ; enddo
+   call mpp_sum(n_static_bergs)
+   if (n_static_bergs .gt. 0) &
+    call fms2_io_register_restart_field(fileobj,'static_berg',static_berg,(/"i"/))
+
+
+  call fms2_io_write_restart(fileobj)
+
+  call close_file(fileobj)
+  endif
+
 
   !Now start writing in the io_tile_root_pe if there are any bergs in the I/O list
 
-  ! Define Variables
-  id = register_restart_field(bergs_restart,filename,'lon',lon,longname='longitude',units='degrees_E')
-  id = register_restart_field(bergs_restart,filename,'lat',lat,longname='latitude',units='degrees_N')
-  id = register_restart_field(bergs_restart,filename,'uvel',uvel,longname='zonal velocity',units='m/s')
-  id = register_restart_field(bergs_restart,filename,'vvel',vvel,longname='meridional velocity',units='m/s')
-  id = register_restart_field(bergs_restart,filename,'mass',mass,longname='mass',units='kg')
-  if (.not. bergs%Runge_not_Verlet) then
-    id = register_restart_field(bergs_restart,filename,'axn',axn,longname='explicit zonal acceleration',units='m/s^2')
-    id = register_restart_field(bergs_restart,filename,'ayn',ayn,longname='explicit meridional acceleration',units='m/s^2')
-    id = register_restart_field(bergs_restart,filename,'bxn',bxn,longname='inplicit zonal acceleration',units='m/s^2')
-    id = register_restart_field(bergs_restart,filename,'byn',byn,longname='implicit meridional acceleration',units='m/s^2')
-  endif
-  id = register_restart_field(bergs_restart,filename,'ine',ine,longname='i index',units='none')
-  id = register_restart_field(bergs_restart,filename,'jne',jne,longname='j index',units='none')
-  id = register_restart_field(bergs_restart,filename,'thickness',thickness,longname='thickness',units='m')
-  id = register_restart_field(bergs_restart,filename,'width',width,longname='width',units='m')
-  id = register_restart_field(bergs_restart,filename,'length',length,longname='length',units='m')
-  id = register_restart_field(bergs_restart,filename,'start_lon',start_lon, &
-                                            longname='longitude of calving location',units='degrees_E')
-  id = register_restart_field(bergs_restart,filename,'start_lat',start_lat, &
-                                            longname='latitude of calving location',units='degrees_N')
-  id = register_restart_field(bergs_restart,filename,'start_year',start_year, &
-                                            longname='calendar year of calving event', units='years')
-  id = register_restart_field(bergs_restart,filename,'id_cnt',id_cnt, &
-                                            longname='counter component of iceberg id', units='dimensionless')
-  id = register_restart_field(bergs_restart,filename,'id_ij',id_ij, &
-                                            longname='position component of iceberg id', units='dimensionless')
-  id = register_restart_field(bergs_restart,filename,'start_day',start_day, &
-                                            longname='year day of calving event',units='days')
-  id = register_restart_field(bergs_restart,filename,'start_mass',start_mass, &
-                                            longname='initial mass of calving berg',units='kg')
-  id = register_restart_field(bergs_restart,filename,'mass_scaling',mass_scaling, &
-                                            longname='scaling factor for mass of calving berg',units='none')
-  id = register_restart_field(bergs_restart,filename,'mass_of_bits',mass_of_bits, &
-                                            longname='mass of bergy bits',units='kg')
-  id = register_restart_field(bergs_restart,filename,'heat_density',heat_density, &
-                                            longname='heat density',units='J/kg')
 
-  !Checking if any icebergs are static in order to decide whether to save static_berg
-  n_static_bergs = 0
-  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
-    this=>bergs%list(grdi,grdj)%first
-    do while (associated(this))
-      n_static_bergs=n_static_bergs+this%static_berg
-      this=>this%next
-    enddo
-  enddo ; enddo
-  call mpp_sum(n_static_bergs)
-  if (n_static_bergs .gt. 0) &
-    id = register_restart_field(bergs_restart,filename,'static_berg',static_berg, &
-                                              longname='static_berg',units='dimensionless')
-
-  ! Write variables
-
-  i = 0
-  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
-    this=>bergs%list(grdi,grdj)%first
-    do while(associated(this))
-      i = i + 1
-      lon(i) = this%lon; lat(i) = this%lat
-      uvel(i) = this%uvel; vvel(i) = this%vvel
-      ine(i) = this%ine; jne(i) = this%jne
-      mass(i) = this%mass; thickness(i) = this%thickness
-      axn(i) = this%axn; ayn(i) = this%ayn !Added by Alon
-      bxn(i) = this%bxn; byn(i) = this%byn !Added by Alon
-      width(i) = this%width; length(i) = this%length
-      start_lon(i) = this%start_lon; start_lat(i) = this%start_lat
-      start_year(i) = this%start_year; start_day(i) = this%start_day
-      start_mass(i) = this%start_mass; mass_scaling(i) = this%mass_scaling
-      static_berg(i) = this%static_berg
-      call split_id(this%id, id_cnt(i), id_ij(i))
-      mass_of_bits(i) = this%mass_of_bits; heat_density(i) = this%heat_density
-      this=>this%next
-    enddo
-  enddo ; enddo
-
-
-  call save_restart(bergs_restart, time_stamp)
-  call free_restart_type(bergs_restart)
 
   deallocate(              &
              lon,          &
