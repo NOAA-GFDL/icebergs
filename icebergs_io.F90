@@ -160,7 +160,7 @@ integer, allocatable, dimension(:) :: ine,              &
 
 integer :: grdi, grdj
 
-type(FmsNetcdfDomainFile_t) :: fileobj        !< Fms2_io fileobj
+type(FmsNetcdfDomainFile_t) :: fileobj_icebergs_res        !< Fms2_io fileobj_iceberg_res
 
 ! Get the stderr unit number
  stderrunit=stderr()
@@ -230,39 +230,39 @@ type(FmsNetcdfDomainFile_t) :: fileobj        !< Fms2_io fileobj
 
   filename = trim("icebergs.res.nc")
 
-  if (open_file(fileobj, filename, "overwrite", bergs%grd%domain, is_restart=.true.)) then
-  call register_unlimited_compressed_axis(fileobj, "i", nbergs)
-  call register_global_attribute(fileobj,"file_format_major_version", file_format_major_version)
-  call register_global_attribute(fileobj,"file_format_minor_version", file_format_minor_version)
-  call register_global_attribute(fileobj,"time_axis", 0)
-  call fms2_io_register_restart_field(fileobj, "lon", lon, (/"i"/))
-  call fms2_io_register_restart_field(fileobj, "lat", lat, (/"i"/))
-  call fms2_io_register_restart_field(fileobj, "uvel", uvel, (/"i"/))
-  call fms2_io_register_restart_field(fileobj, "vvel", vvel, (/"i"/))
-  call fms2_io_register_restart_field(fileobj, "mass", mass, (/"i"/))
+  if (open_file(fileobj_icebergs_res, filename, "overwrite", bergs%grd%domain, is_restart=.true.)) then
+  call register_unlimited_compressed_axis(fileobj_icebergs_res, "i", nbergs)
+  call register_global_attribute(fileobj_icebergs_res,"file_format_major_version", file_format_major_version)
+  call register_global_attribute(fileobj_icebergs_res,"file_format_minor_version", file_format_minor_version)
+  call register_global_attribute(fileobj_icebergs_res,"time_axis", 0)
+  call fms2_io_register_restart_field(fileobj_icebergs_res, "lon", lon, (/"i"/))
+  call fms2_io_register_restart_field(fileobj_icebergs_res, "lat", lat, (/"i"/))
+  call fms2_io_register_restart_field(fileobj_icebergs_res, "uvel", uvel, (/"i"/))
+  call fms2_io_register_restart_field(fileobj_icebergs_res, "vvel", vvel, (/"i"/))
+  call fms2_io_register_restart_field(fileobj_icebergs_res, "mass", mass, (/"i"/))
 
   if (.not. bergs%Runge_not_Verlet) then
-  call fms2_io_register_restart_field(fileobj,'axn',axn,(/"i"/))
-  call fms2_io_register_restart_field(fileobj,'ayn',ayn,(/"i"/))
-  call fms2_io_register_restart_field(fileobj,'bxn',bxn,(/"i"/))
-  call fms2_io_register_restart_field(fileobj,'byn',byn,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_icebergs_res,'axn',axn,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_icebergs_res,'ayn',ayn,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_icebergs_res,'bxn',bxn,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_icebergs_res,'byn',byn,(/"i"/))
   endif
   
-  call fms2_io_register_restart_field(fileobj,'ine',ine,(/"i"/))
-  call fms2_io_register_restart_field(fileobj,'jne',jne,(/"i"/))
-  call fms2_io_register_restart_field(fileobj,'thickness',thickness,(/"i"/))
-  call fms2_io_register_restart_field(fileobj,'width',width,(/"i"/))
-  call fms2_io_register_restart_field(fileobj,'length',length,(/"i"/))
-  call fms2_io_register_restart_field(fileobj,'start_lon',start_lon,(/"i"/))
-  call fms2_io_register_restart_field(fileobj,'start_lat',start_lat,(/"i"/))
-  call fms2_io_register_restart_field(fileobj,'start_year',start_year,(/"i"/))
-  call fms2_io_register_restart_field(fileobj,'id_cnt',id_cnt,(/"i"/))
-  call fms2_io_register_restart_field(fileobj,'id_ij',id_ij,(/"i"/))
-  call fms2_io_register_restart_field(fileobj,'start_day',start_day,(/"i"/))
-  call fms2_io_register_restart_field(fileobj,'start_mass',start_mass,(/"i"/))
-  call fms2_io_register_restart_field(fileobj,'mass_scaling',mass_scaling,(/"i"/))
-  call fms2_io_register_restart_field(fileobj,'mass_of_bits',mass_of_bits,(/"i"/))
-  call fms2_io_register_restart_field(fileobj,'heat_density',heat_density,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_icebergs_res,'ine',ine,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_icebergs_res,'jne',jne,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_icebergs_res,'thickness',thickness,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_icebergs_res,'width',width,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_icebergs_res,'length',length,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_icebergs_res,'start_lon',start_lon,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_icebergs_res,'start_lat',start_lat,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_icebergs_res,'start_year',start_year,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_icebergs_res,'id_cnt',id_cnt,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_icebergs_res,'id_ij',id_ij,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_icebergs_res,'start_day',start_day,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_icebergs_res,'start_mass',start_mass,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_icebergs_res,'mass_scaling',mass_scaling,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_icebergs_res,'mass_of_bits',mass_of_bits,(/"i"/))
+  call fms2_io_register_restart_field(fileobj_icebergs_res,'heat_density',heat_density,(/"i"/))
 
 !Checking if any icebergs are static in order to decide whether to save static_berg
    n_static_bergs = 0
@@ -275,12 +275,12 @@ type(FmsNetcdfDomainFile_t) :: fileobj        !< Fms2_io fileobj
    enddo ; enddo
    call mpp_sum(n_static_bergs)
    if (n_static_bergs .gt. 0) &
-    call fms2_io_register_restart_field(fileobj,'static_berg',static_berg,(/"i"/))
+    call fms2_io_register_restart_field(fileobj_icebergs_res,'static_berg',static_berg,(/"i"/))
 
 
-  call fms2_io_write_restart(fileobj)
+  call fms2_io_write_restart(fileobj_icebergs_res)
 
-  call close_file(fileobj)
+  call close_file(fileobj_icebergs_res)
   endif
 
 
@@ -335,6 +335,7 @@ type(FmsNetcdfDomainFile_t) :: fileobj        !< Fms2_io fileobj
   allocate(first_berg_jne(nbonds))
   allocate(other_berg_ine(nbonds))
   allocate(other_berg_jne(nbonds))
+  
 
   call get_instance_filename("bonds_iceberg.res.nc", filename_bonds)
   call set_domain(bergs%grd%domain)
@@ -379,8 +380,6 @@ type(FmsNetcdfDomainFile_t) :: fileobj        !< Fms2_io fileobj
 
   call save_restart(bergs_bond_restart, time_stamp)
   call free_restart_type(bergs_bond_restart)
-
-
   deallocate(first_id_cnt,          &
              other_id_cnt,          &
              first_id_ij,           &
