@@ -18,7 +18,7 @@ use fms_io_mod, only: get_instance_filename
 use fms_io_mod, only : save_restart, restart_file_type, free_restart_type, set_meta_global
 use fms_io_mod, only : register_restart_axis, register_restart_field, set_domain, nullify_domain
 use fms_io_mod, only : read_unlimited_axis =>read_compressed, field_exist, get_field_size
-use fms2_io_mod, only: register_global_attribute, open_file, close_file, fms2_io_write_restart=>write_restart, &
+use fms2_io_mod, only: register_global_attribute, open_file, close_file, unlimited,fms2_io_write_restart=>write_restart, &
 register_unlimited_compressed_axis, FmsNetcdfDomainFile_t, fms2_io_register_restart_field => register_restart_field, fms2_io_register_restart_axis => register_axis
 
 use mpp_mod,    only : mpp_clock_begin, mpp_clock_end, mpp_clock_id
@@ -113,8 +113,11 @@ type(bond), pointer :: current_bond
 integer :: i,j,id
 character(len=35) :: filename
 character(len=35) :: filename_bonds
+character(len=8), dimension(4) :: dim_names_4d
+character(len=8), dimension(3) ::dim_names_3d
 type(iceberg), pointer :: this=>NULL()
 integer :: stderrunit
+
 !I/O vars
 type(restart_file_type) :: bergs_restart
 type(restart_file_type) :: bergs_bond_restart
@@ -160,9 +163,10 @@ integer, allocatable, dimension(:) :: ine,              &
 
 
 integer :: grdi, grdj
-
-type(FmsNetcdfDomainFile_t) :: fileobj_icebergs_res        !< Fms2_io fileobj_icebergs_res
+type(FmsNetcdfDomainFile_t) :: fileobj_icebergs_res         !< Fms2_io fileobj_icebergs_res
 type(FmsNetcdfDomainFile_t) :: fileobj_bonds_iceberg        !< Fms2_io fileobj_bonds_iceberg
+type(FmsNetcdfDomainFile_t) :: fileobj_calving              !< Fms2_io fileobj_calving
+
 
 
 ! Get the stderr unit number
@@ -399,7 +403,11 @@ type(FmsNetcdfDomainFile_t) :: fileobj_bonds_iceberg        !< Fms2_io fileobj_b
   endif
 
   ! Write stored ice
+
   filename='calving.res.nc'
+
+  dim_names_4d = (/"xaxis_1", "yaxis_1", "zaxis_1", "Time   "/)
+  dim_names_3d = (/"xaxis_1", "yaxis_1", "Time   "/)
   if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stderrunit,'(2a)') 'diamonds, write_restart: writing ',filename
   call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'write stored_ice')
   call grd_chksum2(bergs%grd, bergs%grd%stored_heat, 'write stored_heat')
@@ -407,18 +415,24 @@ type(FmsNetcdfDomainFile_t) :: fileobj_bonds_iceberg        !< Fms2_io fileobj_b
     call grd_chksum2(bergs%grd, bergs%grd%rmean_calving, 'write mean calving')
     call grd_chksum2(bergs%grd, bergs%grd%rmean_calving_hflx, 'write mean calving_hflx')
   endif
-
-  call set_domain(bergs%grd%domain)
-  id = register_restart_field(calving_restart,filename,'stored_ice',bergs%grd%stored_ice,longname='STORED_ICE',units='none')
-  id = register_restart_field(calving_restart,filename,'stored_heat',bergs%grd%stored_heat,longname='STORED_HEAT',units='none')
-  id = register_restart_field(calving_restart,filename,'iceberg_counter_grd',bergs%grd%iceberg_counter_grd,longname='ICEBERG_COUNTER_GRD',units='none')
+  
+  if (open_file(fileobj_calving, filename, "overwrite", bergs%grd%domain, is_restart=.true.)) then
+  call fms2_io_register_restart_axis(fileobj_calving, "xaxis_1", "x")
+  call fms2_io_register_restart_axis(fileobj_calving, "yaxis_1", "y")
+  call fms2_io_register_restart_axis(fileobj_calving, "zaxis_1", size(bergs%grd%stored_ice, 3))
+  call fms2_io_register_restart_axis(fileobj_calving, "Time", unlimited)
+  call fms2_io_register_restart_field(fileobj_calving,'stored_ice',bergs%grd%stored_ice,dim_names_4d)
+  call fms2_io_register_restart_field(fileobj_calving,'stored_heat',bergs%grd%stored_heat,dim_names_3d)
+  call fms2_io_register_restart_field(fileobj_calving,'iceberg_counter_grd',bergs%grd%iceberg_counter_grd,dim_names_3d)
+ 
   if (bergs%tau_calving>0.) then
-    id = register_restart_field(calving_restart,filename,'rmean_calving',bergs%grd%rmean_calving,longname='RMEAN_CALVING',units='none')
-    id = register_restart_field(calving_restart,filename,'rmean_calving_hflx',bergs%grd%rmean_calving_hflx,longname='RMEAN_CALVING_HFLX',units='none')
+    call fms2_io_register_restart_field(fileobj_calving,'rmean_calving',bergs%grd%rmean_calving,dim_names_3d)
+    call fms2_io_register_restart_field(fileobj_calving,'rmean_calving_hflx',bergs%grd%rmean_calving_hflx,dim_names_3d)
+  endif
   endif
 
-  call save_restart(calving_restart)
-  call free_restart_type(calving_restart)
+  call fms2_io_write_restart(fileobj_calving)
+  call close_file(fileobj_calving)
 
 end subroutine write_restart
 
