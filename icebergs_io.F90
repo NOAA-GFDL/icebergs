@@ -1225,19 +1225,20 @@ end subroutine read_restart_calving
 !> Read ocean depth from file
 subroutine read_ocean_depth(grd)
 ! Arguments
-type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+type(icebergs_gridded), pointer :: grd         !< Container for gridded fields
+type(FmsNetcdfDomainFile_t) :: fileobj_topog   !< Fms2_io fileobj_topog
 ! Local variables
 character(len=37) :: filename
 
   ! Read stored ice
-  filename=trim(restart_input_dir)//'topog.nc'
-  if (file_exist(filename)) then
-    if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') &
-     'diamonds, read_ocean_depth: reading ',filename
-    if (field_exist(filename, 'depth')) then
+  filename=trim('topog.nc')
+
+  !< open the file, register the axis and replace field_exist and read_data with fms2_io’s variable_exists, and read_data
+  if (open_file(fileobj_topog, filename, "read", ocean_depth%grd%domain)) then
+     if (variable_exist(filename, file_obj)) then
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
        'diamonds, read_ocean_depth: reading depth from topog file.'
-      call read_data(filename, 'depth', grd%ocean_depth, grd%domain)
+      call fms2_io_read_data(fileobj_topog,filename, 'depth', ocean_depth%grd%domain)
     else
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
      'diamonds, read_ocean_depth: depth WAS NOT FOUND in the file. Setting to 0.'
@@ -1247,7 +1248,7 @@ character(len=37) :: filename
     if (mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
      'diamonds, read_ocean_depth: Ocean depth file (topog.nc) not present)'
   endif
-
+ endif
   !call grd_chksum2(bergs%grd, bergs%grd%ocean_depth, 'read_ocean_depth, ocean_depth')
 end subroutine read_ocean_depth
 
