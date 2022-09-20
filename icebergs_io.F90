@@ -19,7 +19,9 @@ use fms_io_mod, only : save_restart, restart_file_type, free_restart_type, set_m
 use fms_io_mod, only : register_restart_axis, register_restart_field, set_domain, nullify_domain
 use fms_io_mod, only : read_unlimited_axis =>read_compressed, field_exist, get_field_size
 use fms2_io_mod, only: register_global_attribute, open_file, close_file, unlimited,fms2_io_write_restart=>write_restart, &
-register_unlimited_compressed_axis, FmsNetcdfDomainFile_t, fms2_io_register_restart_field => register_restart_field, fms2_io_register_restart_axis => register_axis
+register_unlimited_compressed_axis, FmsNetcdfDomainFile_t, variable_exists, &
+fms2_io_register_restart_field => register_restart_field, fms2_io_register_restart_axis => register_axis, &
+fms2_io_read_data => read_data
 
 use mpp_mod,    only : mpp_clock_begin, mpp_clock_end, mpp_clock_id
 use mpp_mod,    only : CLOCK_COMPONENT, CLOCK_SUBCOMPONENT, CLOCK_LOOP
@@ -1234,11 +1236,11 @@ character(len=37) :: filename
   filename=trim('topog.nc')
 
   !< open the file, register the axis and replace field_exist and read_data with fms2_io’s variable_exists, and read_data
-  if (open_file(fileobj_topog, filename, "read", ocean_depth%grd%domain)) then
-     if (variable_exist(filename, file_obj)) then
+  if (open_file(fileobj_topog, filename, "read", grd%domain)) then
+     if (variable_exists(fileobj_topog, "depth")) then
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
        'diamonds, read_ocean_depth: reading depth from topog file.'
-      call fms2_io_read_data(fileobj_topog,filename, 'depth', ocean_depth%grd%domain)
+      call fms2_io_read_data(fileobj_topog, 'depth', grd%ocean_depth)
     else
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
      'diamonds, read_ocean_depth: depth WAS NOT FOUND in the file. Setting to 0.'
