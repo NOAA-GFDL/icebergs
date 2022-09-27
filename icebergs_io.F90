@@ -1127,6 +1127,7 @@ subroutine read_restart_calving(bergs)
 use random_numbers_mod, only: initializeRandomNumberStream, getRandomNumbers, randomNumberStream
 ! Arguments
 type(icebergs), pointer :: bergs !< Icebergs container
+type(FmsNetcdfDomainFile_t) :: fileobj_calving !< Fms2_io fileobj_calving
 ! Local variables
 integer :: k,i,j
 character(len=37) :: filename, actual_filename
@@ -1138,46 +1139,45 @@ type(randomNumberStream) :: rns
   grd=>bergs%grd
 
   ! Read stored ice
-  filename=trim(restart_input_dir)//'calving.res.nc'
-  if (file_exist(filename)) then
-    if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') &
-     'diamonds, read_restart_calving: reading ',filename
-    call read_data(filename, 'stored_ice', grd%stored_ice, grd%domain)
-    if (field_exist(filename, 'stored_heat')) then
+  filename=trim('calving.res.nc')
+ 
+  if (open_file(fileobj_calving, filename, "read", grd%domain)) then
+    call fms2_io_read_data(fileobj_calving, 'stored_heat', grd%domain)
+    if (variable_exists(fileobj_calving, 'stored_heat')) then
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
-       'diamonds, read_restart_calving: reading stored_heat from restart file.'
-      call read_data(filename, 'stored_heat', grd%stored_heat, grd%domain)
-    else
-      if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
+      'diamonds, read_restart_calving: reading stored_heat from restart file.'
+      call fms2_io_read_data(fileobj_calving, 'stored_heat', grd%stored_heat)
+     else
+     if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
      'diamonds, read_restart_calving: stored_heat WAS NOT FOUND in the file. Setting to 0.'
-      grd%stored_heat(:,:)=0.
+    ! grd%stored_heat(:,:)=0
     endif
-    if (field_exist(filename, 'rmean_calving')) then
+    if (variable_exists(fileobj_calving,'rmean_calving')) then
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
-       'diamonds, read_restart_calving: reading rmean_calving from restart file.'
-      call read_data(filename, 'rmean_calving', grd%rmean_calving, grd%domain)
+      'diamonds, read_restart_calving: reading rmean_calving from restart file.'
+      call fms2_io_read_data(fileobj_calving, 'rmean_calving', grd%rmean_calving)
       grd%rmean_calving_initialized=.true.
     else
-      if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
+     if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
      'diamonds, read_restart_calving: rmean_calving WAS NOT FOUND in the file. Setting to 0.'
     endif
-    if (field_exist(filename, 'rmean_calving_hflx')) then
+    if (variable_exists(fileobj_calving, 'rmean_calving_hflx')) then
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
-       'diamonds, read_restart_calving: reading rmean_calving_hflx from restart file.'
-      call read_data(filename, 'rmean_calving_hflx', grd%rmean_calving_hflx, grd%domain)
+      'diamonds, read_restart_calving: reading rmean_calving_hflx from restart file.'
+      call fms2_io_read_data(fileobj_calving, 'rmean_calving_hflx', grd%rmean_calving_hflx)
       grd%rmean_calving_hflx_initialized=.true.
     else
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
-     'diamonds, read_restart_calving: rmean_calving_hflx WAS NOT FOUND in the file. Setting to 0.'
+      'diamonds, read_restart_calving: rmean_calving_hflx WAS NOT FOUND in the file. Setting to 0.'
     endif
-    if (field_exist(filename, 'iceberg_counter_grd')) then
+    if (variable_exists(fileobj_calving, 'iceberg_counter_grd')) then
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
-       'diamonds, read_restart_calving: reading iceberg_counter_grd from restart file.'
-      call read_data(filename, 'iceberg_counter_grd', grd%iceberg_counter_grd, grd%domain)
+      'diamonds, read_restart_calving: reading iceberg_counter_grd from restart file.'
+      call fms2_io_read_data(fileobj_calving, 'iceberg_counter_grd', grd%iceberg_counter_grd)
     else
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
      'diamonds, read_restart_calving: iceberg_counter_grd WAS NOT FOUND in the file. Setting to 0.'
-      grd%iceberg_counter_grd(:,:) = 0
+    !  grd%iceberg_counter_grd(:,:) = 0
     endif
     bergs%restarted=.true.
   else
@@ -1250,7 +1250,6 @@ character(len=37) :: filename
     if (mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
      'diamonds, read_ocean_depth: Ocean depth file (topog.nc) not present)'
   endif
- endif
   !call grd_chksum2(bergs%grd, bergs%grd%ocean_depth, 'read_ocean_depth, ocean_depth')
 end subroutine read_ocean_depth
 
