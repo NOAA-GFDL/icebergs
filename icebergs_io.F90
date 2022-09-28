@@ -19,9 +19,9 @@ use fms_io_mod, only : save_restart, restart_file_type, free_restart_type, set_m
 use fms_io_mod, only : register_restart_axis, register_restart_field, set_domain, nullify_domain
 use fms_io_mod, only : read_unlimited_axis =>read_compressed, field_exist, get_field_size
 use fms2_io_mod, only: register_global_attribute, open_file, close_file, unlimited,fms2_io_write_restart=>write_restart, &
-register_unlimited_compressed_axis, FmsNetcdfDomainFile_t, variable_exists, &
+register_unlimited_compressed_axis, FmsNetcdfDomainFile_t, variable_exists, get_dimension_size, &
 fms2_io_register_restart_field => register_restart_field, fms2_io_register_restart_axis => register_axis, &
-fms2_io_read_data => read_data
+fms2_io_read_data => read_data, fms2_io_read_restart => read_restart
 
 use mpp_mod,    only : mpp_clock_begin, mpp_clock_end, mpp_clock_id
 use mpp_mod,    only : CLOCK_COMPONENT, CLOCK_SUBCOMPONENT, CLOCK_LOOP
@@ -469,6 +469,7 @@ subroutine read_restart_bergs(bergs,Time)
 ! Arguments
 type(icebergs), pointer :: bergs !< Icebergs container
 type(time_type), intent(in) :: Time !< Model time
+type(FmsNetcdfDomainFile_t) :: fileobj_bergs !< Fms2_io fileobj_bergs
 ! Local variables
 integer :: k, siz(4), nbergs_in_file, nbergs_read
 logical :: lres, found_restart, found, replace_iceberg_num
@@ -519,16 +520,14 @@ integer, allocatable, dimension(:) :: ine,        &
   ! Zero out nbergs_in_file
   nbergs_in_file = 0
 
-  filename_base=trim(restart_input_dir)//'icebergs.res.nc'
+  filename=trim('icebergs.res.nc')
 
-  found_restart = find_restart_file(filename_base, filename, multiPErestart, io_tile_id(1))
-
-  if (found_restart) then
-     filename = filename_base
-     call get_field_size(filename,'i',siz, field_found=found, domain=bergs%grd%domain)
+  if (open_file(fileobj_bergs, filename, "overwrite", bergs%grd%domain, is_restart=.true.)) then
+     call get_dimension_size(fileobj_bergs, 'i', siz(1))
+     
      nbergs_in_file = siz(1)
 
-     replace_iceberg_num = field_exist(filename, 'iceberg_num') ! True if using 32-bit iceberg_num in restart file
+     replace_iceberg_num = variable_exists(fileobj_bergs, 'iceberg_num') ! True if using 32-bit iceberg_num in restart file
      allocate(lon(nbergs_in_file))
      allocate(lat(nbergs_in_file))
      allocate(uvel(nbergs_in_file))
@@ -552,6 +551,7 @@ integer, allocatable, dimension(:) :: ine,        &
      allocate(ine(nbergs_in_file))
      allocate(jne(nbergs_in_file))
      allocate(start_year(nbergs_in_file))
+
      if (replace_iceberg_num) then
        call error_mesg('read_restart_bergs', "Calculating new iceberg ID's", WARNING)
        allocate(iceberg_num(nbergs_in_file))
@@ -560,35 +560,35 @@ integer, allocatable, dimension(:) :: ine,        &
        allocate(id_ij(nbergs_in_file))
      endif
 
-     call read_unlimited_axis(filename,'lon',lon,domain=grd%domain)
-     call read_unlimited_axis(filename,'lat',lat,domain=grd%domain)
-     call read_unlimited_axis(filename,'uvel',uvel,domain=grd%domain)
-     call read_unlimited_axis(filename,'vvel',vvel,domain=grd%domain)
-     call read_unlimited_axis(filename,'mass',mass,domain=grd%domain)
-     call read_real_vector(filename,'axn',axn,grd%domain,value_if_not_in_file=0.)
-     call read_real_vector(filename,'ayn',ayn,grd%domain,value_if_not_in_file=0.)
-     call read_real_vector(filename,'bxn',bxn,grd%domain,value_if_not_in_file=0.)
-     call read_real_vector(filename,'byn',byn,grd%domain,value_if_not_in_file=0.)
-     call read_unlimited_axis(filename,'thickness',thickness,domain=grd%domain)
-     call read_unlimited_axis(filename,'width',width,domain=grd%domain)
-     call read_unlimited_axis(filename,'length',length,domain=grd%domain)
-     call read_unlimited_axis(filename,'start_lon',start_lon,domain=grd%domain)
-     call read_unlimited_axis(filename,'start_lat',start_lat,domain=grd%domain)
-     call read_unlimited_axis(filename,'start_day',start_day,domain=grd%domain)
-     call read_unlimited_axis(filename,'start_mass',start_mass,domain=grd%domain)
-     call read_unlimited_axis(filename,'mass_scaling',mass_scaling,domain=grd%domain)
-     call read_real_vector(filename,'mass_of_bits',mass_of_bits,domain=grd%domain,value_if_not_in_file=0.)
-     call read_real_vector(filename,'heat_density',heat_density,domain=grd%domain,value_if_not_in_file=0.)
-     call read_unlimited_axis(filename,'ine',ine,domain=grd%domain)
-     call read_unlimited_axis(filename,'jne',jne,domain=grd%domain)
-     call read_unlimited_axis(filename,'start_year',start_year,domain=grd%domain)
+     call fms2_io_register_restart_field(fileobj_bergs,'lon',lon,(/"i"/))
+     call fms2_io_register_restart_field(fileobj_bergs,'lat',lat,(/"i"/))
+     call fms2_io_register_restart_field(fileobj_bergs,'uvel',uvel,(/"i"/))
+     call fms2_io_register_restart_field(fileobj_bergs,'vvel',vvel,(/"i"/))
+     call fms2_io_register_restart_field(fileobj_bergs,'mass',mass,(/"i"/))
+     call fms2_io_register_restart_field(fileobj_bergs,'axn',axn,(/"I"/), is_optional=.true.)
+     call fms2_io_register_restart_field(fileobj_bergs,'ayn',ayn,(/"I"/), is_optional=.true.)
+     call fms2_io_register_restart_field(fileobj_bergs,'bxn',bxn,(/"I"/), is_optional=.true.)
+     call fms2_io_register_restart_field(fileobj_bergs,'byn',byn,(/"I"/), is_optional=.true.)
+     call fms2_io_register_restart_field(fileobj_bergs,'thickness',thickness,(/"i"/))
+     call fms2_io_register_restart_field(fileobj_bergs,'width',width,(/"i"/))
+     call fms2_io_register_restart_field(fileobj_bergs,'length',length,(/"i"/))
+     call fms2_io_register_restart_field(fileobj_bergs,'start_lon',start_lon,(/"i"/))
+     call fms2_io_register_restart_field(fileobj_bergs,'start_lat',start_lat,(/"i"/))
+     call fms2_io_register_restart_field(fileobj_bergs,'start_day',start_day,(/"i"/))
+     call fms2_io_register_restart_field(fileobj_bergs,'start_mass',start_mass,(/"i"/))
+     call fms2_io_register_restart_field(fileobj_bergs,'mass_scaling',mass_scaling,(/"i"/))
+     call fms2_io_register_restart_field(fileobj_bergs,'mass_of_bits',mass_of_bits,(/"I"/), is_optional=.true.)
+     call fms2_io_register_restart_field(fileobj_bergs,'heat_density',heat_density,(/"I"/), is_optional=.true.)
+     call fms2_io_register_restart_field(fileobj_bergs,'ine',ine,(/"i"/))
+     call fms2_io_register_restart_field(fileobj_bergs,'jne',jne,(/"i"/))
+     call fms2_io_register_restart_field(fileobj_bergs,'start_year',start_year,(/"i"/))
      if (replace_iceberg_num) then
-       call read_int_vector(filename,'iceberg_num',iceberg_num,grd%domain,value_if_not_in_file=-1)
+       call fms2_io_register_restart_field(fileobj_bergs,'iceberg_num',iceberg_num,(/"I"/), is_optional=.true.)
      else
-       call read_int_vector(filename,'id_cnt',id_cnt,grd%domain)
-       call read_int_vector(filename,'id_ij',id_ij,grd%domain)
+       call fms2_io_register_restart_field(fileobj_bergs,'id_cnt',id_cnt,(/"i"/))
+       call fms2_io_register_restart_field(fileobj_bergs,'id_ij',id_ij,(/"i"/))
      endif
-     call read_real_vector(filename,'static_berg',static_berg,grd%domain,value_if_not_in_file=0.)
+     call fms2_io_register_restart_field(fileobj_bergs,'static_berg',static_berg,(/"I"/), is_optional=.true.)
   endif
 
   ! Find approx outer bounds for tile
@@ -738,7 +738,9 @@ integer, allocatable, dimension(:) :: ine,        &
   bergs%bergy_mass_start=sum_mass(bergs,justbits=.true.)
   call mpp_sum( bergs%bergy_mass_start )
   if (mpp_pe().eq.mpp_root_pe().and.verbose) write(*,'(a)') 'diamonds, read_restart_bergs: completed'
-
+  
+  call fms2_io_read_restart(fileobj_bergs)
+  call close_file(fileobj_bergs)
 end subroutine read_restart_bergs
 
 !> Read a vector of reals from file and use a default value if variable is missing
