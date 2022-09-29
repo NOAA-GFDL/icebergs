@@ -12,16 +12,11 @@ use mpp_mod, only: mpp_send, mpp_recv, mpp_gather, mpp_chksum, mpp_sync_self
 use mpp_mod, only: COMM_TAG_11, COMM_TAG_12, COMM_TAG_13, COMM_TAG_14
 
 use fms_mod, only: stdlog, stderr, error_mesg, FATAL, WARNING, NOTE
-use fms_mod, only: field_exist, file_exist, read_data, write_data
 
-use fms_io_mod, only: get_instance_filename
-use fms_io_mod, only : save_restart, restart_file_type, free_restart_type, set_meta_global
-use fms_io_mod, only : register_restart_axis, register_restart_field, set_domain, nullify_domain
-use fms_io_mod, only : read_unlimited_axis =>read_compressed, field_exist, get_field_size
 use fms2_io_mod, only: register_global_attribute, open_file, close_file, unlimited,fms2_io_write_restart=>write_restart, &
 register_unlimited_compressed_axis, FmsNetcdfDomainFile_t, variable_exists, get_dimension_size, &
 fms2_io_register_restart_field => register_restart_field, fms2_io_register_restart_axis => register_axis, &
-fms2_io_read_data => read_data, fms2_io_read_restart => read_restart
+fms2_io_read_data => read_data, fms2_io_read_restart => read_restart, get_instance_filename
 
 use mpp_mod,    only : mpp_clock_begin, mpp_clock_end, mpp_clock_id
 use mpp_mod,    only : CLOCK_COMPONENT, CLOCK_SUBCOMPONENT, CLOCK_LOOP
@@ -121,9 +116,6 @@ type(iceberg), pointer :: this=>NULL()
 integer :: stderrunit
 
 !I/O vars
-type(restart_file_type) :: bergs_restart
-type(restart_file_type) :: bergs_bond_restart
-type(restart_file_type) :: calving_restart
 integer :: nbergs, nbonds
 integer :: n_static_bergs
 logical :: check_bond_quality
@@ -326,7 +318,6 @@ type(FmsNetcdfDomainFile_t) :: fileobj_calving              !< Fms2_io fileobj_c
              id_ij,     &
              start_year )
 
-  call nullify_domain()
 
 !########## Creating bond restart file ######################
 
@@ -400,7 +391,6 @@ type(FmsNetcdfDomainFile_t) :: fileobj_calving              !< Fms2_io fileobj_c
              other_berg_jne )
 
 
-  call nullify_domain()
   endif
   endif
 
@@ -743,35 +733,6 @@ integer, allocatable, dimension(:) :: ine,        &
   call close_file(fileobj_bergs)
 end subroutine read_restart_bergs
 
-!> Read a vector of reals from file and use a default value if variable is missing
-subroutine read_real_vector(filename, varname, values, domain, value_if_not_in_file)
-  character(len=*), intent(in)  :: filename !< Name of file to read from
-  character(len=*), intent(in)  :: varname !< Name of variable to read
-  real,             intent(out) :: values(:) !< Returned vector of reals
-  type(domain2D),   intent(in)  :: domain !< Parallel decomposition
-  real, optional,   intent(in)  :: value_if_not_in_file !< Value to use if variable is not in file
-
-  if (present(value_if_not_in_file).and..not.field_exist(filename, varname)) then
-    values(:)=value_if_not_in_file
-  else
-    call read_unlimited_axis(filename,varname,values,domain=domain)
-  endif
-end subroutine read_real_vector
-
-!> Read a vector of integers from file and use a default value if variable is missing
-subroutine read_int_vector(filename, varname, values, domain, value_if_not_in_file)
-  character(len=*),  intent(in)  :: filename !< Name of file to read from
-  character(len=*),  intent(in)  :: varname !< Name of variable to read
-  integer,           intent(out) :: values(:) !< Returned vector of integers
-  type(domain2D),    intent(in)  :: domain !< Parallel decomposition
-  integer, optional, intent(in)  :: value_if_not_in_file !< Value to use if variable is not in file
-
-  if (present(value_if_not_in_file).and..not.field_exist(filename, varname)) then
-    values(:)=value_if_not_in_file
-  else
-    call read_unlimited_axis(filename,varname,values,domain=domain)
-  endif
-end subroutine read_int_vector
 
 !> Generate bergs for the purpose of debugging
 subroutine generate_bergs(bergs,Time)
