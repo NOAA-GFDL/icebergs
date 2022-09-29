@@ -885,6 +885,7 @@ end subroutine loc_set_berg_pos
 subroutine read_restart_bonds(bergs,Time)
 ! Arguments
 type(icebergs), pointer :: bergs !< Icebergs container
+type(FmsNetcdfDomainFile_t) :: fileobj_bonds !< Fms2_io fileobj_bonds
 type(time_type), intent(in) :: Time !< Model time
 ! Local variables
 integer :: k, siz(4), nbonds_in_file
@@ -928,69 +929,68 @@ integer(kind=8), allocatable, dimension(:) :: first_id,   &
   nbonds_in_file = 0
   all_pe_number_perfect_bonds=0
 
-  filename_base=trim(restart_input_dir)//'bonds_iceberg.res.nc'
+  filename=trim('bonds_iceberg.res.nc')
 
-  found_restart = find_restart_file(filename_base, filename, multiPErestart, io_tile_id(1))
-  call error_mesg('read_restart_bonds_bergs_new', 'Using icebergs bond restart read', NOTE)
-
-  filename = filename_base
-  call get_field_size(filename,'i',siz, field_found=found, domain=bergs%grd%domain)
-  nbonds_in_file = siz(1)
+   if (open_file(fileobj_bonds, filename, "overwrite", bergs%grd%domain, is_restart=.true.)) then
+      call error_mesg('read_restart_bonds_bergs_new', 'Using icebergs bond restart read', NOTE)
+      call get_dimension_size(fileobj_bonds,'i',siz(1))
+    
+      nbonds_in_file = siz(1)
 
     if (mpp_pe() .eq. mpp_root_pe()) then
       write(stderrunit,*)  'diamonds, bond read restart : ','Number of bonds in file',  nbonds_in_file
     endif
 
-  if (nbonds_in_file .gt. 0) then
+    if (nbonds_in_file .gt. 0) then
 
-    allocate(first_id(nbonds_in_file))
-    allocate(other_id(nbonds_in_file))
-    allocate(id_cnt(nbonds_in_file))
-    allocate(id_ij(nbonds_in_file))
-    allocate(first_berg_jne(nbonds_in_file))
-    allocate(first_berg_ine(nbonds_in_file))
-    allocate(other_berg_ine(nbonds_in_file))
-    allocate(other_berg_jne(nbonds_in_file))
+      allocate(first_id(nbonds_in_file))
+      allocate(other_id(nbonds_in_file))
+      allocate(id_cnt(nbonds_in_file))
+      allocate(id_ij(nbonds_in_file))
+      allocate(first_berg_jne(nbonds_in_file))
+      allocate(first_berg_ine(nbonds_in_file))
+      allocate(other_berg_ine(nbonds_in_file))
+      allocate(other_berg_jne(nbonds_in_file))
 
 
-    call read_unlimited_axis(filename,'first_id_cnt',id_cnt,domain=grd%domain)
-    call read_unlimited_axis(filename,'first_id_ij',id_ij,domain=grd%domain)
-    do k=1, nbonds_in_file
-      first_id(k) = id_from_2_ints( id_cnt(k), id_ij(k) )
-    enddo
-    call read_unlimited_axis(filename,'other_id_cnt',id_cnt,domain=grd%domain)
-    call read_unlimited_axis(filename,'other_id_ij',id_ij,domain=grd%domain)
-    do k=1, nbonds_in_file
-      other_id(k) = id_from_2_ints( id_cnt(k), id_ij(k) )
-    enddo
-    deallocate(id_cnt, id_ij)
-    call read_unlimited_axis(filename,'first_berg_jne',first_berg_jne,domain=grd%domain)
-    call read_unlimited_axis(filename,'first_berg_ine',first_berg_ine,domain=grd%domain)
-    call read_unlimited_axis(filename,'other_berg_jne',other_berg_jne,domain=grd%domain)
-    call read_unlimited_axis(filename,'other_berg_ine',other_berg_ine,domain=grd%domain)
+      call fms2_io_register_restart_field(fileobj_bonds,'first_id_cnt',id_cnt,(/"i"/))
+      call fms2_io_register_restart_field(fileobj_bonds,'first_id_ij',id_ij,(/"i"/))
+      do k=1, nbonds_in_file
+        first_id(k) = id_from_2_ints( id_cnt(k), id_ij(k) )
+      enddo
+      call fms2_io_register_restart_field(fileobj_bonds,'other_id_cnt',id_cnt,(/"i"/))
+      call fms2_io_register_restart_field(fileobj_bonds,'other_id_ij',id_ij,(/"i"/))
+      do k=1, nbonds_in_file
+        other_id(k) = id_from_2_ints( id_cnt(k), id_ij(k) )
+      enddo
+      deallocate(id_cnt, id_ij)
+      call fms2_io_register_restart_field(fileobj_bonds,'first_berg_jne',first_berg_jne,(/"i"/))
+      call fms2_io_register_restart_field(fileobj_bonds,'first_berg_ine',first_berg_ine,(/"i"/))
+      call fms2_io_register_restart_field(fileobj_bonds,'other_berg_jne',other_berg_jne,(/"i"/))
+      call fms2_io_register_restart_field(fileobj_bonds,'other_berg_ine',other_berg_ine,(/"i"/))
 
-    number_first_bonds_matched=0
-    number_second_bonds_matched=0
-    number_perfect_bonds=0
-    number_partial_bonds=0
-    number_perfect_bonds_with_first_on_pe=0
+      number_first_bonds_matched=0
+      number_second_bonds_matched=0
+      number_perfect_bonds=0
+      number_partial_bonds=0
+      number_perfect_bonds_with_first_on_pe=0
 
-    do k=1, nbonds_in_file
+      do k=1, nbonds_in_file
 
        ! If i,j in restart files are not good, then we find the berg position of the bond addresses manually:
-       if (ignore_ij_restart) then
-         !Finding first iceberg in bond
-         ine=999 ; jne=999 ; berg_found=0.0 ; search_data_domain=.true.
-         call find_individual_iceberg(bergs,first_id(k), ine, jne,berg_found,search_data_domain)
-         berg_found_all_pe=berg_found
-         call mpp_sum(berg_found_all_pe)
-         if (berg_found_all_pe .gt. 0.5) then
-             first_berg_ine(k)=ine
-             first_berg_jne(k)=jne
-         else
-           print * , 'First bond berg not located: ', first_id(k),berg_found, mpp_pe(),ine, jne
-           call error_mesg('read_restart_bonds_bergs_new', 'First iceberg in bond not found on any pe', FATAL)
-         endif
+        if (ignore_ij_restart) then
+          !Finding first iceberg in bond
+          ine=999 ; jne=999 ; berg_found=0.0 ; search_data_domain=.true.
+           call find_individual_iceberg(bergs,first_id(k), ine, jne,berg_found,search_data_domain)
+           berg_found_all_pe=berg_found
+           call mpp_sum(berg_found_all_pe)
+           if (berg_found_all_pe .gt. 0.5) then
+              first_berg_ine(k)=ine
+              first_berg_jne(k)=jne
+           else
+              print * , 'First bond berg not located: ', first_id(k),berg_found, mpp_pe(),ine, jne
+              call error_mesg('read_restart_bonds_bergs_new', 'First iceberg in bond not found on any pe', FATAL)
+           endif
          !else
 
          !Finding other iceberg other iceberg
@@ -1008,11 +1008,11 @@ integer(kind=8), allocatable, dimension(:) :: first_id,   &
          else
           call error_mesg('read_restart_bonds_bergs_new', 'Other iceberg in bond not found on any pe', FATAL)
          endif
-         if (berg_found_all_pe .lt. 0.5) then
+        if (berg_found_all_pe .lt. 0.5) then
                  print * , 'First bond berg not located: ', other_id(k),berg_found, mpp_pe(),ine, jne
              call error_mesg('read_restart_bonds_bergs_new', 'First bond iceberg not located', FATAL)
-         endif
-       endif
+        endif
+      endif
 
       ! Decide whether the first iceberg is on the processeor
       if ( (first_berg_ine(k)>=grd%isd) .and. (first_berg_ine(k)<=grd%ied) .and. &
@@ -1109,19 +1109,21 @@ integer(kind=8), allocatable, dimension(:) :: first_id,   &
       write(stderrunit,*)  'diamonds, bond read restart : ','Computational bond, first second:', all_pe_number_second_bonds_matched , nbonds_in_file
       call error_mesg('read_restart_bonds_bergs_new', 'Computational perfect bonds do not match those in file', NOTE)
     endif
-
+    endif
     deallocate(               &
             first_berg_ine,   &
             first_berg_jne,   &
             other_berg_ine,  &
             other_berg_jne )
-  endif
+ 
 
   if (mpp_pe() .eq. mpp_root_pe()) then
     write(stderrunit,*)  'diamonds, bond read restart : ','Number of bonds (including halos)',  all_pe_number_perfect_bonds
     write(stderrunit,*)  'diamonds, bond read restart : ','Number of true bonds created',  all_pe_number_perfect_bonds_with_first_on_pe
   endif
-
+  endif
+  call fms2_io_read_restart(fileobj_bonds)
+  call close_file(fileobj_bonds)
 end subroutine read_restart_bonds
 
 !> Reading calving and gridded restart data
