@@ -1,5 +1,5 @@
 !> Handles reading/writing of restart files and trajectory-based diagnostic files
-module ice_bergs_io
+module icebergs_fmsio
 
 ! This file is part of NOAA-GFDL/icebergs. See LICENSE.md for the license.
 
