@@ -512,7 +512,7 @@ integer, allocatable, dimension(:) :: ine,        &
 
   filename=trim('icebergs.res.nc')
 
-  if (open_file(fileobj_bergs, filename, "overwrite", bergs%grd%domain, is_restart=.true.)) then
+  if (open_file(fileobj_bergs, filename, "read", bergs%grd%domain, is_restart=.true.)) then
      call get_dimension_size(fileobj_bergs, 'i', siz(1))
      
      nbergs_in_file = siz(1)
@@ -892,7 +892,7 @@ integer(kind=8), allocatable, dimension(:) :: first_id,   &
 
   filename=trim('bonds_iceberg.res.nc')
 
-   if (open_file(fileobj_bonds, filename, "overwrite", bergs%grd%domain, is_restart=.true.)) then
+   if (open_file(fileobj_bonds, filename, "read", bergs%grd%domain, is_restart=.true.)) then
       call error_mesg('read_restart_bonds_bergs_new', 'Using icebergs bond restart read', NOTE)
       call get_dimension_size(fileobj_bonds,'i',siz(1))
     
