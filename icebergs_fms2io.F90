@@ -510,9 +510,11 @@ integer, allocatable, dimension(:) :: ine,        &
   ! Zero out nbergs_in_file
   nbergs_in_file = 0
 
-  filename=trim('icebergs.res.nc')
+  filename="INPUT/"//trim('icebergs.res.nc')
 
-  if (open_file(fileobj_bergs, filename, "read", bergs%grd%domain, is_restart=.true.)) then
+  found_restart = open_file(fileobj_bergs, filename, "read", bergs%grd%domain, is_restart=.true.)
+  
+  if (found_restart) then
      call get_dimension_size(fileobj_bergs, 'i', siz(1))
      
      nbergs_in_file = siz(1)
@@ -715,6 +717,8 @@ integer, allocatable, dimension(:) :: ine,        &
     !  endif
     !endif
 
+    call fms2_io_read_restart(fileobj_bergs)
+    call close_file(fileobj_bergs)
   elseif(.not. found_restart .and. bergs%nbergs_start==0 .and. generate_test_icebergs) then
     call generate_bergs(bergs,Time)
   endif
@@ -729,8 +733,6 @@ integer, allocatable, dimension(:) :: ine,        &
   call mpp_sum( bergs%bergy_mass_start )
   if (mpp_pe().eq.mpp_root_pe().and.verbose) write(*,'(a)') 'diamonds, read_restart_bergs: completed'
   
-  call fms2_io_read_restart(fileobj_bergs)
-  call close_file(fileobj_bergs)
 end subroutine read_restart_bergs
 
 
