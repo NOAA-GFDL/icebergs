@@ -16,8 +16,10 @@ use fms_mod, only: stdlog, stderr, error_mesg, FATAL, WARNING, NOTE
 use fms2_io_mod, only: register_global_attribute, open_file, close_file, unlimited,fms2_io_write_restart=>write_restart, &
 register_unlimited_compressed_axis, FmsNetcdfDomainFile_t, variable_exists, get_dimension_size, &
 fms2_io_register_restart_field => register_restart_field, fms2_io_register_restart_axis => register_axis, &
-fms2_io_read_data => read_data, fms2_io_read_restart => read_restart, get_instance_filename
+fms2_io_read_data => read_data, fms2_io_read_restart => read_restart, get_instance_filename, register_field, &
+register_variable_attribute
 
+use mpp_mod,    only : mpp_get_current_pelist, mpp_chksum
 use mpp_mod,    only : mpp_clock_begin, mpp_clock_end, mpp_clock_id
 use mpp_mod,    only : CLOCK_COMPONENT, CLOCK_SUBCOMPONENT, CLOCK_LOOP
 use fms_mod,    only : clock_flag_default
@@ -65,6 +67,12 @@ integer :: clock_trw,clock_trp
 #else
   character(len=128) :: version = 'unknown'
 #endif
+
+interface fms2_io_register_restart_field_wrap
+  module procedure :: fms2_io_register_restart_field_wrap_1d
+  module procedure :: fms2_io_register_restart_field_wrap_2d
+  module procedure :: fms2_io_register_restart_field_wrap_3d
+end interface
 
 contains
 
@@ -229,14 +237,16 @@ type(FmsNetcdfDomainFile_t) :: fileobj_calving              !< Fms2_io fileobj_c
      enddo
    enddo ; enddo
 
-  filename = trim("icebergs.res.nc")
+  filename = "RESTART/"//trim("icebergs.res.nc")
 
   if (open_file(fileobj_icebergs_res, filename, "overwrite", bergs%grd%domain, is_restart=.true.)) then
   call register_unlimited_compressed_axis(fileobj_icebergs_res, "i", nbergs)
   call register_global_attribute(fileobj_icebergs_res,"file_format_major_version", file_format_major_version)
   call register_global_attribute(fileobj_icebergs_res,"file_format_minor_version", file_format_minor_version)
   call register_global_attribute(fileobj_icebergs_res,"time_axis", 0)
-  call fms2_io_register_restart_field(fileobj_icebergs_res, "lon", lon, (/"i"/))
+
+  call fms2_io_register_restart_field_wrap(fileobj_icebergs_res, "lon", lon, (/"i"/), &
+                                           longname='longitude', units='degrees_E')
   call fms2_io_register_restart_field(fileobj_icebergs_res, "lat", lat, (/"i"/))
   call fms2_io_register_restart_field(fileobj_icebergs_res, "uvel", uvel, (/"i"/))
   call fms2_io_register_restart_field(fileobj_icebergs_res, "vvel", vvel, (/"i"/))
@@ -396,7 +406,7 @@ type(FmsNetcdfDomainFile_t) :: fileobj_calving              !< Fms2_io fileobj_c
 
   ! Write stored ice
 
-  filename='calving.res.nc'
+  filename='RESTART/calving.res.nc'
 
   dim_names_4d = (/"xaxis_1", "yaxis_1", "zaxis_1", "Time   "/)
   dim_names_3d = (/"xaxis_1", "yaxis_1", "Time   "/)
@@ -407,7 +417,7 @@ type(FmsNetcdfDomainFile_t) :: fileobj_calving              !< Fms2_io fileobj_c
     call grd_chksum2(bergs%grd, bergs%grd%rmean_calving, 'write mean calving')
     call grd_chksum2(bergs%grd, bergs%grd%rmean_calving_hflx, 'write mean calving_hflx')
   endif
-  
+
   if (open_file(fileobj_calving, filename, "overwrite", bergs%grd%domain, is_restart=.true.)) then
   call fms2_io_register_restart_axis(fileobj_calving, "xaxis_1", "x")
   call fms2_io_register_restart_axis(fileobj_calving, "yaxis_1", "y")
@@ -416,7 +426,7 @@ type(FmsNetcdfDomainFile_t) :: fileobj_calving              !< Fms2_io fileobj_c
   call fms2_io_register_restart_field(fileobj_calving,'stored_ice',bergs%grd%stored_ice,dim_names_4d)
   call fms2_io_register_restart_field(fileobj_calving,'stored_heat',bergs%grd%stored_heat,dim_names_3d)
   call fms2_io_register_restart_field(fileobj_calving,'iceberg_counter_grd',bergs%grd%iceberg_counter_grd,dim_names_3d)
- 
+
   if (bergs%tau_calving>0.) then
     call fms2_io_register_restart_field(fileobj_calving,'rmean_calving',bergs%grd%rmean_calving,dim_names_3d)
     call fms2_io_register_restart_field(fileobj_calving,'rmean_calving_hflx',bergs%grd%rmean_calving_hflx,dim_names_3d)
@@ -1106,7 +1116,7 @@ type(randomNumberStream) :: rns
   grd=>bergs%grd
 
   ! Read stored ice
-  filename=trim('calving.res.nc')
+  filename="INPUT/"//trim('calving.res.nc')
  
   if (open_file(fileobj_calving, filename, "read", grd%domain)) then
     call fms2_io_read_data(fileobj_calving, 'stored_heat', grd%domain)
@@ -1739,5 +1749,118 @@ logical function find_restart_file(filename, actual_file, multiPErestart, tile_i
   multiPErestart=.false.
 
 end function find_restart_file
+
+subroutine fms2_io_register_restart_field_wrap_1d(fileobj, varname, vdata, dimensions, &
+                                               longname, units)
+  type(FmsNetcdfDomainFile_t), intent(inout) :: fileobj
+  character(len=*),            intent(in)    :: varname
+  class(*),                    intent(in)    :: vdata(:)
+  character(len=*),            intent(in)    :: dimensions(:)
+  character(len=*),            intent(in),  optional  :: longname
+  character(len=*),            intent(in),  optional  :: units
+
+  integer(8) :: chksum_val
+  integer, allocatable :: all_pe(:)
+  character(len=32) :: chksum
+
+  call fms2_io_register_restart_field(fileobj, varname, vdata, dimensions)
+
+  allocate(all_pe(mpp_npes()))
+  call mpp_get_current_pelist(all_pe)
+
+  select type (vdata)
+  type is (real)
+    chksum_val = mpp_chksum(vdata, all_pe)
+  type is (integer)
+    chksum_val = mpp_chksum(vdata, all_pe)
+    call register_variable_attribute(fileobj, varname, "packing", int(0))
+  end select
+
+  chksum = ""
+  write(chksum, "(Z16)") chksum_val
+
+  call add_variable_metadata(fileobj, varname, chksum=chksum, longname=longname, &
+                             units=units)
+end subroutine fms2_io_register_restart_field_wrap_1d
+
+subroutine fms2_io_register_restart_field_wrap_2d(fileobj, varname, vdata, dimensions, &
+                                               longname, units)
+  type(FmsNetcdfDomainFile_t), intent(inout) :: fileobj
+  character(len=*),            intent(in)    :: varname
+  class(*),                    intent(in)    :: vdata(:,:)
+  character(len=*),            intent(in)    :: dimensions(:)
+  character(len=*),            intent(in),  optional  :: longname
+  character(len=*),            intent(in),  optional  :: units
+
+  integer(8) :: chksum_val
+  integer, allocatable :: all_pe(:)
+  character(len=32) :: chksum
+
+  call fms2_io_register_restart_field(fileobj, varname, vdata, dimensions)
+
+  allocate(all_pe(mpp_npes()))
+  call mpp_get_current_pelist(all_pe)
+
+  select type (vdata)
+  type is (real)
+    chksum_val = mpp_chksum(vdata, all_pe)
+  type is (integer)
+    chksum_val = mpp_chksum(vdata, all_pe)
+    call register_variable_attribute(fileobj, varname, "packing", int(0))
+  end select
+
+  chksum = ""
+  write(chksum, "(Z16)") chksum_val
+
+  call add_variable_metadata(fileobj, varname, chksum=chksum, longname=longname, &
+                             units=units)
+end subroutine fms2_io_register_restart_field_wrap_2d
+
+subroutine fms2_io_register_restart_field_wrap_3d(fileobj, varname, vdata, dimensions, &
+                                               longname, units)
+  type(FmsNetcdfDomainFile_t), intent(inout) :: fileobj
+  character(len=*),            intent(in)    :: varname
+  class(*),                    intent(in)    :: vdata(:,:,:)
+  character(len=*),            intent(in)    :: dimensions(:)
+  character(len=*),            intent(in),  optional  :: longname
+  character(len=*),            intent(in),  optional  :: units
+
+  integer(8) :: chksum_val
+  integer, allocatable :: all_pe(:)
+  character(len=32) :: chksum
+
+  call fms2_io_register_restart_field(fileobj, varname, vdata, dimensions)
+
+  allocate(all_pe(mpp_npes()))
+  call mpp_get_current_pelist(all_pe)
+
+  select type (vdata)
+  type is (real)
+    chksum_val = mpp_chksum(vdata, all_pe)
+  type is (integer)
+    chksum_val = mpp_chksum(vdata, all_pe)
+    call register_variable_attribute(fileobj, varname, "packing", int(0))
+  end select
+
+  chksum = ""
+  write(chksum, "(Z16)") chksum_val
+
+  call add_variable_metadata(fileobj, varname, chksum=chksum, longname=longname, &
+                             units=units)
+end subroutine fms2_io_register_restart_field_wrap_3d
+
+subroutine add_variable_metadata(fileobj, varname, chksum, longname, units)
+  type(FmsNetcdfDomainFile_t), intent(inout)          :: fileobj
+  character(len=*),            intent(in)             :: varname
+  character(len=*),            intent(in),  optional  :: chksum
+  character(len=*),            intent(in),  optional  :: longname
+  character(len=*),            intent(in),  optional  :: units
+
+  call register_variable_attribute(fileobj, varname, "long_name", trim(longname), &
+                                   str_len=len_trim(longname))
+  call register_variable_attribute(fileobj, varname, "units", trim(units), &
+                                   str_len=len_trim(units))
+  call register_variable_attribute(fileobj, varname, "checksum", chksum, str_len=32)
+end subroutine add_variable_metadata
 
 end module
