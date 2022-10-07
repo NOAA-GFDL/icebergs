@@ -247,33 +247,55 @@ type(FmsNetcdfDomainFile_t) :: fileobj_calving              !< Fms2_io fileobj_c
 
   call fms2_io_register_restart_field_wrap(fileobj_icebergs_res, "lon", lon, (/"i"/), &
                                            longname='longitude', units='degrees_E')
-  call fms2_io_register_restart_field(fileobj_icebergs_res, "lat", lat, (/"i"/))
-  call fms2_io_register_restart_field(fileobj_icebergs_res, "uvel", uvel, (/"i"/))
-  call fms2_io_register_restart_field(fileobj_icebergs_res, "vvel", vvel, (/"i"/))
-  call fms2_io_register_restart_field(fileobj_icebergs_res, "mass", mass, (/"i"/))
+  call fms2_io_register_restart_field_wrap(fileobj_icebergs_res, "lat", lat, (/"i"/), &
+                                           longname='latitude', units='degrees_N')
+  call fms2_io_register_restart_field_wrap(fileobj_icebergs_res, "uvel", uvel, (/"i"/), &
+                                           longname='zonal velocity', units='m/s')
+  call fms2_io_register_restart_field_wrap(fileobj_icebergs_res, "vvel", vvel, (/"i"/), &
+                                           longname='meridional velocity', units='m/s')
+  call fms2_io_register_restart_field_wrap(fileobj_icebergs_res, "mass", mass, (/"i"/), &
+                                           longname='mass',units='kg')
 
   if (.not. bergs%Runge_not_Verlet) then
-  call fms2_io_register_restart_field(fileobj_icebergs_res,'axn',axn,(/"i"/))
-  call fms2_io_register_restart_field(fileobj_icebergs_res,'ayn',ayn,(/"i"/))
-  call fms2_io_register_restart_field(fileobj_icebergs_res,'bxn',bxn,(/"i"/))
+  call fms2_io_register_restart_field_wrap(fileobj_icebergs_res,'axn',axn,(/"i"/), &
+                                           longname='explicit zonal acceleration',units='m/s^2')
+  call fms2_io_register_restart_field_wrap(fileobj_icebergs_res,'ayn',ayn,(/"i"/), &
+                                           longname='explicit meridional acceleration',units='m/s^2')
+  call fms2_io_register_restart_field_wrap(fileobj_icebergs_res,'bxn',bxn,(/"i"/), &
+                                           longname='inplicit zonal acceleration',units='m/s^2')
   call fms2_io_register_restart_field(fileobj_icebergs_res,'byn',byn,(/"i"/))
   endif
   
-  call fms2_io_register_restart_field(fileobj_icebergs_res,'ine',ine,(/"i"/))
-  call fms2_io_register_restart_field(fileobj_icebergs_res,'jne',jne,(/"i"/))
-  call fms2_io_register_restart_field(fileobj_icebergs_res,'thickness',thickness,(/"i"/))
-  call fms2_io_register_restart_field(fileobj_icebergs_res,'width',width,(/"i"/))
-  call fms2_io_register_restart_field(fileobj_icebergs_res,'length',length,(/"i"/))
-  call fms2_io_register_restart_field(fileobj_icebergs_res,'start_lon',start_lon,(/"i"/))
-  call fms2_io_register_restart_field(fileobj_icebergs_res,'start_lat',start_lat,(/"i"/))
-  call fms2_io_register_restart_field(fileobj_icebergs_res,'start_year',start_year,(/"i"/))
-  call fms2_io_register_restart_field(fileobj_icebergs_res,'id_cnt',id_cnt,(/"i"/))
-  call fms2_io_register_restart_field(fileobj_icebergs_res,'id_ij',id_ij,(/"i"/))
-  call fms2_io_register_restart_field(fileobj_icebergs_res,'start_day',start_day,(/"i"/))
-  call fms2_io_register_restart_field(fileobj_icebergs_res,'start_mass',start_mass,(/"i"/))
-  call fms2_io_register_restart_field(fileobj_icebergs_res,'mass_scaling',mass_scaling,(/"i"/))
-  call fms2_io_register_restart_field(fileobj_icebergs_res,'mass_of_bits',mass_of_bits,(/"i"/))
-  call fms2_io_register_restart_field(fileobj_icebergs_res,'heat_density',heat_density,(/"i"/))
+  call fms2_io_register_restart_field_wrap(fileobj_icebergs_res,'ine',ine,(/"i"/), &
+                                           longname='i index',units='none')
+  call fms2_io_register_restart_field_wrap(fileobj_icebergs_res,'jne',jne,(/"i"/), &
+                                           longname='j index',units='none')
+  call fms2_io_register_restart_field_wrap(fileobj_icebergs_res,'thickness',thickness,(/"i"/), &
+                                           longname='thickness',units='m')
+  call fms2_io_register_restart_field_wrap(fileobj_icebergs_res,'width',width,(/"i"/), &
+                                           longname='width',units='m')
+  call fms2_io_register_restart_field_wrap(fileobj_icebergs_res,'length',length,(/"i"/),&
+                                           longname='length',units='m')
+  call fms2_io_register_restart_field_wrap(fileobj_icebergs_res,'start_lon',start_lon,(/"i"/), &
+                                           longname='longitude of calving location',units='degrees_E')
+  call fms2_io_register_restart_field_wrap(fileobj_icebergs_res,'start_lat',start_lat,(/"i"/), &
+                                           longname='latitude of calving location',units='degrees_N')
+  call fms2_io_register_restart_field_wrap(fileobj_icebergs_res,'start_year',start_year,(/"i"/), &
+                                           longname='calendar year of calving event', units='years')
+  call fms2_io_register_restart_field_wrap(fileobj_icebergs_res,'id_cnt',id_cnt,(/"i"/), &
+                                           longname='counter component of iceberg id', units='dimensionless')
+  call fms2_io_register_restart_field_wrap(fileobj_icebergs_res,'id_ij',id_ij,(/"i"/), &
+                                           longname='position component of iceberg id', units='dimensionless')
+  call fms2_io_register_restart_field_wrap(fileobj_icebergs_res,'start_day',start_day,(/"i"/), &
+                                           longname='year day of calving event',units='days')
+  call fms2_io_register_restart_field_wrap(fileobj_icebergs_res,'start_mass',start_mass,(/"i"/), &
+                                           longname='initial mass of calving berg',units='kg')
+  call fms2_io_register_restart_field_wrap(fileobj_icebergs_res,'mass_scaling',mass_scaling,(/"i"/), &
+                                           longname='scaling factor for mass of calving berg',units='none')
+  call fms2_io_register_restart_field_wrap(fileobj_icebergs_res,'mass_of_bits',mass_of_bits,(/"i"/), &
+                                           longname='mass of bergy bits',units='kg')
+  call fms2_io_register_restart_field_wrap(fileobj_icebergs_res,'heat_density',heat_density,(/"i"/), &
+                                           longname='heat density',units='J/kg')
 
 !Checking if any icebergs are static in order to decide whether to save static_berg
    n_static_bergs = 0
@@ -286,7 +308,8 @@ type(FmsNetcdfDomainFile_t) :: fileobj_calving              !< Fms2_io fileobj_c
    enddo ; enddo
    call mpp_sum(n_static_bergs)
    if (n_static_bergs .gt. 0) &
-    call fms2_io_register_restart_field(fileobj_icebergs_res,'static_berg',static_berg,(/"i"/))
+    call fms2_io_register_restart_field_wrap(fileobj_icebergs_res,'static_berg',static_berg,(/"i"/), &
+                                             longname='static_berg',units='dimensionless')
 
 
   call fms2_io_write_restart(fileobj_icebergs_res)
@@ -356,14 +379,22 @@ type(FmsNetcdfDomainFile_t) :: fileobj_calving              !< Fms2_io fileobj_c
 
   !Now start writing in the io_tile_root_pe if there are any bergs in the I/O list
 
-  call fms2_io_register_restart_field(fileobj_bonds_iceberg,'first_berg_ine',first_berg_ine,(/"i"/))
-  call fms2_io_register_restart_field(fileobj_bonds_iceberg,'first_berg_jne',first_berg_jne,(/"i"/))
-  call fms2_io_register_restart_field(fileobj_bonds_iceberg,'first_id_cnt',first_id_cnt,(/"i"/))
-  call fms2_io_register_restart_field(fileobj_bonds_iceberg,'first_id_ij',first_id_ij,(/"i"/))
-  call fms2_io_register_restart_field(fileobj_bonds_iceberg,'other_berg_ine',other_berg_ine,(/"i"/))
-  call fms2_io_register_restart_field(fileobj_bonds_iceberg,'other_berg_jne',other_berg_jne,(/"i"/))
-  call fms2_io_register_restart_field(fileobj_bonds_iceberg,'other_id_cnt',other_id_cnt,(/"i"/))
-  call fms2_io_register_restart_field(fileobj_bonds_iceberg,'other_id_ij',other_id_ij,(/"i"/))
+  call fms2_io_register_restart_field_wrap(fileobj_bonds_iceberg,'first_berg_ine',first_berg_ine,(/"i"/), &
+                                           longname='iceberg ine of first berg in bond',units='dimensionless')
+  call fms2_io_register_restart_field_wrap(fileobj_bonds_iceberg,'first_berg_jne',first_berg_jne,(/"i"/), &
+                                           longname='iceberg jne of first berg in bond',units='dimensionless')
+  call fms2_io_register_restart_field_wrap(fileobj_bonds_iceberg,'first_id_cnt',first_id_cnt,(/"i"/), &
+                                           longname='counter component of iceberg id first berg in bond',units='dimensionless')
+  call fms2_io_register_restart_field_wrap(fileobj_bonds_iceberg,'first_id_ij',first_id_ij,(/"i"/), &
+                                           longname='position component of iceberg id first berg in bond',units='dimensionless')
+  call fms2_io_register_restart_field_wrap(fileobj_bonds_iceberg,'other_berg_ine',other_berg_ine,(/"i"/), &
+                                           longname='iceberg ine of second berg in bond',units='dimensionless')
+  call fms2_io_register_restart_field_wrap(fileobj_bonds_iceberg,'other_berg_jne',other_berg_jne,(/"i"/), &
+                                            longname='iceberg jne of second berg in bond',units='dimensionless')
+  call fms2_io_register_restart_field_wrap(fileobj_bonds_iceberg,'other_id_cnt',other_id_cnt,(/"i"/), &
+                                      longname='counter component of iceberg id second berg in bond',units='dimensionless')
+  call fms2_io_register_restart_field_wrap(fileobj_bonds_iceberg,'other_id_ij',other_id_ij,(/"i"/), &
+                                           longname='position component of iceberg id second berg in bond',units='dimensionless')
 
 
   ! Write variables
@@ -423,13 +454,18 @@ type(FmsNetcdfDomainFile_t) :: fileobj_calving              !< Fms2_io fileobj_c
   call fms2_io_register_restart_axis(fileobj_calving, "yaxis_1", "y")
   call fms2_io_register_restart_axis(fileobj_calving, "zaxis_1", size(bergs%grd%stored_ice, 3))
   call fms2_io_register_restart_axis(fileobj_calving, "Time", unlimited)
-  call fms2_io_register_restart_field(fileobj_calving,'stored_ice',bergs%grd%stored_ice,dim_names_4d)
-  call fms2_io_register_restart_field(fileobj_calving,'stored_heat',bergs%grd%stored_heat,dim_names_3d)
-  call fms2_io_register_restart_field(fileobj_calving,'iceberg_counter_grd',bergs%grd%iceberg_counter_grd,dim_names_3d)
+  call fms2_io_register_restart_field_wrap(fileobj_calving,'stored_ice',bergs%grd%stored_ice,dim_names_4d, &
+                                           longname='STORED_ICE',units='none')
+  call fms2_io_register_restart_field_wrap(fileobj_calving,'stored_heat',bergs%grd%stored_heat,dim_names_3d, &
+                                           longname='STORED_HEAT',units='none' )
+  call fms2_io_register_restart_field_wrap(fileobj_calving,'iceberg_counter_grd',bergs%grd%iceberg_counter_grd, &
+                                           dim_names_3d, longname='ICEBERG_COUNTER_GRD',units='none')
 
   if (bergs%tau_calving>0.) then
-    call fms2_io_register_restart_field(fileobj_calving,'rmean_calving',bergs%grd%rmean_calving,dim_names_3d)
-    call fms2_io_register_restart_field(fileobj_calving,'rmean_calving_hflx',bergs%grd%rmean_calving_hflx,dim_names_3d)
+    call fms2_io_register_restart_field_wrap(fileobj_calving,'rmean_calving',bergs%grd%rmean_calving, &
+                                             dim_names_3d,longname='RMEAN_CALVING',units='none')
+    call fms2_io_register_restart_field_wrap(fileobj_calving,'rmean_calving_hflx',bergs%grd%rmean_calving_hflx, &
+                                             dim_names_3d, longname='RMEAN_CALVING_HFLX',units='none')
   endif
   endif
 
