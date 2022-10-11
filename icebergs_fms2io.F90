@@ -369,7 +369,7 @@ type(FmsNetcdfDomainFile_t) :: fileobj_calving              !< Fms2_io fileobj_c
   allocate(other_berg_ine(nbonds))
   allocate(other_berg_jne(nbonds))
   
-  filename_bonds = trim("bonds_iceberg.res.nc")
+  filename = "RESTART/"//trim("bonds_iceberg.res.nc")
 
   if (open_file(fileobj_bonds_iceberg, filename, "overwrite", bergs%grd%domain, is_restart=.true.)) then
   call register_unlimited_compressed_axis(fileobj_bonds_iceberg,'i',nbonds)
@@ -437,7 +437,7 @@ type(FmsNetcdfDomainFile_t) :: fileobj_calving              !< Fms2_io fileobj_c
 
   ! Write stored ice
 
-  filename='RESTART/calving.res.nc'
+  filename="RESTART/"//trim("calving.res.nc")
 
   dim_names_4d = (/"xaxis_1", "yaxis_1", "zaxis_1", "Time   "/)
   dim_names_3d = (/"xaxis_1", "yaxis_1", "Time   "/)
@@ -938,7 +938,7 @@ integer(kind=8), allocatable, dimension(:) :: first_id,   &
   nbonds_in_file = 0
   all_pe_number_perfect_bonds=0
 
-  filename=trim('bonds_iceberg.res.nc')
+  filename = "INPUT/"//trim('bonds_iceberg.res.nc')
 
    if (open_file(fileobj_bonds, filename, "read", bergs%grd%domain, is_restart=.true.)) then
       call error_mesg('read_restart_bonds_bergs_new', 'Using icebergs bond restart read', NOTE)
@@ -1152,7 +1152,7 @@ type(randomNumberStream) :: rns
   grd=>bergs%grd
 
   ! Read stored ice
-  filename="INPUT/"//trim('calving.res.nc')
+  filename = "INPUT/"//trim('calving.res.nc')
  
   if (open_file(fileobj_calving, filename, "read", grd%domain)) then
     call fms2_io_read_data(fileobj_calving, 'stored_heat', grd%domain)
@@ -1246,8 +1246,8 @@ type(FmsNetcdfDomainFile_t) :: fileobj_topog   !< Fms2_io fileobj_topog
 character(len=37) :: filename
 
   ! Read stored ice
-  filename=trim('topog.nc')
-
+  filename = "INPUT/"//trim('topog.nc')
+ 
   !< open the file, register the axis and replace field_exist and read_data with fms2_io’s variable_exists, and read_data
   if (open_file(fileobj_topog, filename, "read", grd%domain)) then
      if (variable_exists(fileobj_topog, "depth")) then
