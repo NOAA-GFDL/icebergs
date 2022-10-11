@@ -17,7 +17,7 @@ use fms2_io_mod, only: register_global_attribute, open_file, close_file, unlimit
 register_unlimited_compressed_axis, FmsNetcdfDomainFile_t, variable_exists, get_dimension_size, &
 fms2_io_register_restart_field => register_restart_field, fms2_io_register_restart_axis => register_axis, &
 fms2_io_read_data => read_data, fms2_io_read_restart => read_restart, get_instance_filename, register_field, &
-register_variable_attribute
+register_variable_attribute, get_global_io_domain_indices, write_data
 
 use mpp_mod,    only : mpp_get_current_pelist, mpp_chksum
 use mpp_mod,    only : mpp_clock_begin, mpp_clock_end, mpp_clock_id
@@ -124,7 +124,7 @@ type(iceberg), pointer :: this=>NULL()
 integer :: stderrunit
 
 !I/O vars
-integer :: nbergs, nbonds
+integer :: nbergs, nbonds, global_nbergs
 integer :: n_static_bergs
 logical :: check_bond_quality
 type(icebergs_gridded), pointer :: grd
@@ -312,7 +312,11 @@ type(FmsNetcdfDomainFile_t) :: fileobj_calving              !< Fms2_io fileobj_c
                                              longname='static_berg',units='dimensionless')
 
 
+  call register_field(fileobj_icebergs_res, "i", "int")
   call fms2_io_write_restart(fileobj_icebergs_res)
+
+  call get_dimension_size(fileobj_icebergs_res, "i", global_nbergs)
+  call write_data(fileobj_icebergs_res, "i", global_nbergs)
 
   call close_file(fileobj_icebergs_res)
   endif
@@ -454,6 +458,9 @@ type(FmsNetcdfDomainFile_t) :: fileobj_calving              !< Fms2_io fileobj_c
   call fms2_io_register_restart_axis(fileobj_calving, "yaxis_1", "y")
   call fms2_io_register_restart_axis(fileobj_calving, "zaxis_1", size(bergs%grd%stored_ice, 3))
   call fms2_io_register_restart_axis(fileobj_calving, "Time", unlimited)
+
+  call write_axis_metadata(fileobj_calving)
+
   call fms2_io_register_restart_field_wrap(fileobj_calving,'stored_ice',bergs%grd%stored_ice,dim_names_4d, &
                                            longname='STORED_ICE',units='none')
   call fms2_io_register_restart_field_wrap(fileobj_calving,'stored_heat',bergs%grd%stored_heat,dim_names_3d, &
@@ -470,6 +477,7 @@ type(FmsNetcdfDomainFile_t) :: fileobj_calving              !< Fms2_io fileobj_c
   endif
 
   call fms2_io_write_restart(fileobj_calving)
+  call write_axis_data(fileobj_calving, size(bergs%grd%stored_ice, 3))
   call close_file(fileobj_calving)
 
 end subroutine write_restart
@@ -1898,5 +1906,56 @@ subroutine add_variable_metadata(fileobj, varname, chksum, longname, units)
                                    str_len=len_trim(units))
   call register_variable_attribute(fileobj, varname, "checksum", chksum, str_len=32)
 end subroutine add_variable_metadata
+
+subroutine write_axis_data(fileobj, z_size)
+  type(FmsNetcdfDomainFile_t), intent(inout)          :: fileobj
+  integer,                     intent(in)             :: z_size
+
+  integer, dimension(:), allocatable :: buffer !< Buffer with axis data
+  integer :: is, ie !< Starting and Ending indices for data
+  integer :: i !< For do loops
+
+  call get_global_io_domain_indices(fileobj, "xaxis_1", is, ie, indices=buffer)
+  call write_data(fileobj, "xaxis_1", buffer)
+  deallocate(buffer)
+
+  call get_global_io_domain_indices(fileobj, "yaxis_1", is, ie, indices=buffer)
+  call write_data(fileobj, "yaxis_1", buffer)
+  deallocate(buffer)
+
+  allocate(buffer(z_size))
+  buffer = (/ (i, i=1,z_size)/)
+  call write_data(fileobj, "zaxis_1", buffer)
+
+  call write_data(fileobj, "Time", 1)
+
+end subroutine write_axis_data
+
+subroutine write_axis_metadata(fileobj)
+  type(FmsNetcdfDomainFile_t), intent(inout)          :: fileobj
+
+  !< Register the dimensions as variables too
+  call register_field(fileobj, "xaxis_1", "double", (/"xaxis_1"/))
+  call register_field(fileobj, "yaxis_1", "double", (/"yaxis_1"/))
+  call register_field(fileobj, "zaxis_1", "double", (/"zaxis_1"/))
+  call register_field(fileobj, "Time", "double", (/"Time"/))
+
+  call register_variable_attribute(fileobj, "xaxis_1", "long_name", "xaxis_1", str_len=7)
+  call register_variable_attribute(fileobj, "xaxis_1", "cartesian_axis", "X", str_len=1)
+  call register_variable_attribute(fileobj, "xaxis_1", "units", "none", str_len=4)
+
+  call register_variable_attribute(fileobj, "yaxis_1", "long_name", "yaxis_1", str_len=7)
+  call register_variable_attribute(fileobj, "yaxis_1", "cartesian_axis", "Y", str_len=1)
+  call register_variable_attribute(fileobj, "yaxis_1", "units", "none", str_len=4)
+
+  call register_variable_attribute(fileobj, "zaxis_1", "long_name", "zaxis_1", str_len=7)
+  call register_variable_attribute(fileobj, "zaxis_1", "cartesian_axis", "Z", str_len=1)
+  call register_variable_attribute(fileobj, "zaxis_1", "units", "none", str_len=4)
+
+  call register_variable_attribute(fileobj, "Time", "long_name", "Time", str_len=4)
+  call register_variable_attribute(fileobj, "Time", "cartesian_axis", "T", str_len=1)
+  call register_variable_attribute(fileobj, "Time", "units", "time level", str_len=10)
+
+end subroutine
 
 end module
