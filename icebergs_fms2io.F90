@@ -11,13 +11,14 @@ use mpp_mod, only: mpp_npes, mpp_pe, mpp_root_pe, mpp_sum, mpp_min, mpp_max, NUL
 use mpp_mod, only: mpp_send, mpp_recv, mpp_gather, mpp_chksum, mpp_sync_self
 use mpp_mod, only: COMM_TAG_11, COMM_TAG_12, COMM_TAG_13, COMM_TAG_14
 
-use fms_mod, only: stdlog, stderr, error_mesg, FATAL, WARNING, NOTE
+use fms_mod, only: stdlog, stderr, error_mesg, FATAL, WARNING, NOTE, lowercase
 
 use fms2_io_mod, only: register_global_attribute, open_file, close_file, unlimited,fms2_io_write_restart=>write_restart, &
 register_unlimited_compressed_axis, FmsNetcdfDomainFile_t, variable_exists, get_dimension_size, &
 fms2_io_register_restart_field => register_restart_field, fms2_io_register_restart_axis => register_axis, &
 fms2_io_read_data => read_data, fms2_io_read_restart => read_restart, get_instance_filename, register_field, &
-register_variable_attribute, get_global_io_domain_indices, write_data
+register_variable_attribute, get_global_io_domain_indices, write_data, variable_exists, variable_att_exists, &
+get_variable_attribute, get_num_dimensions, get_dimension_names
 
 use mpp_mod,    only : mpp_get_current_pelist, mpp_chksum
 use mpp_mod,    only : mpp_clock_begin, mpp_clock_end, mpp_clock_id
@@ -637,6 +638,8 @@ integer, allocatable, dimension(:) :: ine,        &
      call fms2_io_register_restart_field(fileobj_bergs,'static_berg',static_berg,(/"I"/), is_optional=.true.)
   endif
 
+  call fms2_io_read_restart(fileobj_bergs)
+
   ! Find approx outer bounds for tile
   lon0=minval( grd%lon(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
   lon1=maxval( grd%lon(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
@@ -713,8 +716,6 @@ integer, allocatable, dimension(:) :: ine,        &
        endif
 
       if (really_debug) call print_berg(stderrunit, bergs%list(localberg%ine,localberg%jne)%first, 'read_restart_bergs, add_new_berg_to_list')
-    elseif (multiPErestart .and. io_tile_id(1) .lt. 0) then
-      call error_mesg('diamonds, read_restart_bergs', 'berg in PE file was not on PE!', FATAL)
     endif
   enddo
 
@@ -771,7 +772,6 @@ integer, allocatable, dimension(:) :: ine,        &
     !  endif
     !endif
 
-    call fms2_io_read_restart(fileobj_bergs)
     call close_file(fileobj_bergs)
   elseif(.not. found_restart .and. bergs%nbergs_start==0 .and. generate_test_icebergs) then
     call generate_bergs(bergs,Time)
@@ -1163,6 +1163,13 @@ type(randomNumberStream) :: rns
   filename = "INPUT/"//trim('calving.res.nc')
  
   if (open_file(fileobj_calving, filename, "read", grd%domain)) then
+<<<<<<< HEAD
+=======
+    call register_axis_wrapper(fileobj_calving)
+    if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') &
+     'diamonds, read_restart_calving: reading ',filename
+    call fms2_io_read_data(fileobj_calving, 'stored_ice', grd%stored_ice)
+>>>>>>> 1964b4d31e0ec4ac74d39cfb26ab220053b5cb49
     if (variable_exists(fileobj_calving, 'stored_heat')) then
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
       'diamonds, read_restart_calving: reading stored_heat from restart file.'
@@ -1254,9 +1261,14 @@ character(len=37) :: filename
 
   ! Read stored ice
   filename = "INPUT/"//trim('topog.nc')
+<<<<<<< HEAD
  
+=======
+
+>>>>>>> 1964b4d31e0ec4ac74d39cfb26ab220053b5cb49
   !< open the file, register the axis and replace field_exist and read_data with fms2_io’s variable_exists, and read_data
   if (open_file(fileobj_topog, filename, "read", grd%domain)) then
+     call register_axis_wrapper(fileobj_topog)
      if (variable_exists(fileobj_topog, "depth")) then
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
        'diamonds, read_ocean_depth: reading depth from topog file.'
@@ -1956,5 +1968,50 @@ subroutine write_axis_metadata(fileobj)
   call register_variable_attribute(fileobj, "Time", "units", "time level", str_len=10)
 
 end subroutine
+
+subroutine register_axis_wrapper(fileobj)
+  type(FmsNetcdfDomainFile_t), intent(inout)          :: fileobj
+
+    character(len=20), dimension(:), allocatable :: file_dim_names !< Array of dimension names
+    integer :: i !< No description
+    integer :: dim_size !< Size of the dimension
+    integer :: ndims !< Number of dimensions in the file
+    logical :: is_domain_decomposed !< Flag indication if domain decomposed
+    character(len=1) :: buffer !< string buffer
+
+    ndims = get_num_dimensions(fileobj)
+    allocate(file_dim_names(ndims))
+
+    call get_dimension_names(fileobj, file_dim_names)
+
+    do i = 1, ndims
+       is_domain_decomposed = .false.
+
+       !< Check if the dimension is also a variable
+       if (variable_exists(fileobj, file_dim_names(i))) then
+
+          !< If the variable exists look for the "cartesian_axis" or "axis" variable attribute
+          if (variable_att_exists(fileobj, file_dim_names(i), "axis")) then
+              call get_variable_attribute(fileobj, file_dim_names(i), "axis", buffer)
+
+              !< If the attribute exists and it is "x" or "y" register it as a domain decomposed dimension
+              if (lowercase(buffer) .eq. "x" .or. lowercase(buffer) .eq. "y" ) then
+                  is_domain_decomposed = .true.
+                  call fms2_io_register_restart_axis(fileobj, file_dim_names(i), buffer)
+              endif
+
+          else if (variable_att_exists(fileobj, file_dim_names(i), "cartesian_axis")) then
+              call get_variable_attribute(fileobj, file_dim_names(i), "cartesian_axis", buffer)
+
+              !< If the attribute exists and it "x" or "y" register it as a domain decomposed dimension
+              if (lowercase(buffer) .eq. "x" .or. lowercase(buffer) .eq. "y" ) then
+                  is_domain_decomposed = .true.
+                  call fms2_io_register_restart_axis(fileobj, file_dim_names(i), buffer)
+              endif
+
+          endif !< If variable attribute exists
+       endif !< If variable exists
+   enddo
+end subroutine register_axis_wrapper
 
 end module
