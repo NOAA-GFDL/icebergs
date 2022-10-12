@@ -1163,7 +1163,6 @@ type(randomNumberStream) :: rns
   filename = "INPUT/"//trim('calving.res.nc')
  
   if (open_file(fileobj_calving, filename, "read", grd%domain)) then
-    call fms2_io_read_data(fileobj_calving, 'stored_heat', grd%domain)
     if (variable_exists(fileobj_calving, 'stored_heat')) then
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
       'diamonds, read_restart_calving: reading stored_heat from restart file.'
