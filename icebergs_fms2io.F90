@@ -606,6 +606,16 @@ integer, allocatable, dimension(:) :: ine,        &
        allocate(id_cnt(nbergs_in_file))
        allocate(id_ij(nbergs_in_file))
      endif
+    
+     !Set initial values to zero if argument is_optional is available 
+     axn = 0
+     ayn = 0
+     bxn = 0
+     byn = 0
+     mass_of_bits = 0
+     heat_density = 0
+     iceberg_num = 0
+     static_berg = 0
 
      call fms2_io_register_restart_field(fileobj_bergs,'lon',lon,(/"i"/))
      call fms2_io_register_restart_field(fileobj_bergs,'lat',lat,(/"i"/))
@@ -636,9 +646,8 @@ integer, allocatable, dimension(:) :: ine,        &
        call fms2_io_register_restart_field(fileobj_bergs,'id_ij',id_ij,(/"i"/))
      endif
      call fms2_io_register_restart_field(fileobj_bergs,'static_berg',static_berg,(/"I"/), is_optional=.true.)
-  endif
-
-  call fms2_io_read_restart(fileobj_bergs)
+     call fms2_io_read_restart(fileobj_bergs)
+   endif
 
   ! Find approx outer bounds for tile
   lon0=minval( grd%lon(grd%isc-1:grd%iec,grd%jsc-1:grd%jec) )
@@ -1163,13 +1172,10 @@ type(randomNumberStream) :: rns
   filename = "INPUT/"//trim('calving.res.nc')
  
   if (open_file(fileobj_calving, filename, "read", grd%domain)) then
-<<<<<<< HEAD
-=======
     call register_axis_wrapper(fileobj_calving)
     if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') &
      'diamonds, read_restart_calving: reading ',filename
     call fms2_io_read_data(fileobj_calving, 'stored_ice', grd%stored_ice)
->>>>>>> 1964b4d31e0ec4ac74d39cfb26ab220053b5cb49
     if (variable_exists(fileobj_calving, 'stored_heat')) then
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
       'diamonds, read_restart_calving: reading stored_heat from restart file.'
@@ -1261,12 +1267,7 @@ character(len=37) :: filename
 
   ! Read stored ice
   filename = "INPUT/"//trim('topog.nc')
-<<<<<<< HEAD
- 
-=======
-
->>>>>>> 1964b4d31e0ec4ac74d39cfb26ab220053b5cb49
-  !< open the file, register the axis and replace field_exist and read_data with fms2_io’s variable_exists, and read_data
+  
   if (open_file(fileobj_topog, filename, "read", grd%domain)) then
      call register_axis_wrapper(fileobj_topog)
      if (variable_exists(fileobj_topog, "depth")) then
