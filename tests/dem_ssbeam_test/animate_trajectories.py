@@ -38,7 +38,7 @@ def main(args):
     with nc.Dataset(filename) as file:
         x = file.variables['lon'][:] #/1.e3
         y = file.variables['lat'][:] #/1.e3
-        day = file.variables['day'][:]
+        day = file.variables['day'][:]*24*60*60
         length = file.variables['length'][:]
         width = file.variables['width'][:]
         hs = file.variables['thickness'][:]
@@ -48,10 +48,11 @@ def main(args):
 
     #print('day',day)
     crop=False
-    tc=1.25
+    tc=2e-5#1.25
     if crop:
         x=x[day<=tc]
         y=y[day<=tc]
+        radius=radius[day<=tc]
         day=day[day<=tc]
 
     ud = np.unique(day)
@@ -97,7 +98,7 @@ def main(args):
         scat.set_edgecolor('k')
 
         t = ud[i]
-        time_text.set_text('time = %.1f days' % t )
+        time_text.set_text('time = %.1f sec' % t )
 
         r1 = radius[day == ud[i]]
         scat.set_sizes(r1/psize)

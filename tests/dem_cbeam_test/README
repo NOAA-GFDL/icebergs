@@ -1,2 +1,5 @@
-This is the cantilever beam test from Section 3.2 of Wang 2020 "A scale-invariant bonded particle model for simulating large deformation and failure of continua"
+This is the cantilever beam test from Section 3.2 of Wang 2020 "A scale-invariant bonded particle model for simulating large deformation and failure of continua" https://doi.org/10.1016/j.compgeo.2020.103735. It tests the discrete-element/bonded-particle model that underlies iKID.
 
+When the results are animated (animate_trajectories.py), the beam should bend into alignment with the plotted line.
+
+By default, run with 4 PEs

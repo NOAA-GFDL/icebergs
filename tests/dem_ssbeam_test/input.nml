@@ -1,3 +1,10 @@
+! KID, bergs_chksum: write_restart berg chksum=1546149565 chksum2=-1486497579 chksum3=-1459704404 chksum4=-1459704404 chksum5=0 #=29
+! KID, grd_chksum2: # of bergs/cell chksum=0 chksum2=0 min= 0.000000000E+00 max= 0.000000000E+00 mean= 0.000000000E+00 rms= 0.000000000E+00 sd= 0.000000000E+00
+!  Total number of bonds is:56
+!  All iceberg bonds are connected and working well
+! KID, grd_chksum3:   write stored_ice chksum=-540079793 chksum2=-1237287029 min= 6.393358811E+05 max= 7.380127765E+11 mean= 8.033602570E+10 rms= 1.613270384E+11 sd= 1.399018810E+11
+
+
 &icebergs_driver_nml
   ni=20 !number of elements, x direction
   nj=20 !number of elements, y direction
@@ -8,7 +15,7 @@
   ibvi=0.0 !ice y velocity
   ibhrs=200 !total simulation hours
   write_time_inc = 1 !600 !increment at which time is written to screen
-  nmax=30 !1200  !max number of timesteps
+  nmax=10 !1200  !max number of timesteps
   saverestart=.true.
   halo=3
   debug=.true.
