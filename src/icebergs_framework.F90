@@ -850,7 +850,7 @@ logical :: scale_damping_by_pmag=.true. ! Scales damping by magnitude of (projec
 logical :: critical_interaction_damping_on=.true. ! Sets the damping on relative iceberg velocity to critical value - Added by Alon
 logical :: tang_crit_int_damp_on=.true. ! Critical interaction damping for tangential component?
 logical :: do_unit_tests=.false. ! Conduct some unit tests
-logical :: input_freq_distribution=.true. ! Flag to show if input distribution is freq or mass dist (=1 if input is a freq dist, =0 to use an input mass dist)
+logical :: input_freq_distribution=.false. ! Flag to show if input distribution is freq or mass dist (=1 if input is a freq dist, =0 to use an input mass dist)
 logical :: read_old_restarts=.false. ! Legacy option that does nothing
 logical :: use_old_spreading=.true. ! If true, spreads iceberg mass as if the berg is one grid cell wide
 logical :: read_ocean_depth_from_file=.false. ! If true, ocean depth is read from a file.
