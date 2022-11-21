@@ -221,15 +221,12 @@ integer :: grdi, grdj
    allocate(thickness(nbergs))
    allocate(width(nbergs))
    allocate(length(nbergs))
-   allocate(fl_k(nbergs))
    allocate(start_lon(nbergs))
    allocate(start_lat(nbergs))
    allocate(start_day(nbergs))
    allocate(start_mass(nbergs))
    allocate(mass_scaling(nbergs))
    allocate(mass_of_bits(nbergs))
-   allocate(mass_of_fl_bits(nbergs))
-   allocate(mass_of_fl_bergy_bits(nbergs))
    allocate(heat_density(nbergs))
    allocate(static_berg(nbergs))
 
@@ -238,6 +235,12 @@ integer :: grdi, grdj
    allocate(start_year(nbergs))
    allocate(id_cnt(nbergs))
    allocate(id_ij(nbergs))
+
+   if (bergs%fl_r>0) then
+     allocate(fl_k(nbergs))
+     allocate(mass_of_fl_bits(nbergs))
+     allocate(mass_of_fl_bergy_bits(nbergs))
+   end if
 
    if (mts) then
      allocate(axn_fast(nbergs))
@@ -285,7 +288,6 @@ integer :: grdi, grdj
   id = register_restart_field(bergs_restart,filename,'thickness',thickness,longname='thickness',units='m')
   id = register_restart_field(bergs_restart,filename,'width',width,longname='width',units='m')
   id = register_restart_field(bergs_restart,filename,'length',length,longname='length',units='m')
-  id = register_restart_field(bergs_restart,filename,'fl_k',fl_k,longname='footloose calving k',units='m')
   id = register_restart_field(bergs_restart,filename,'start_lon',start_lon, &
                                             longname='longitude of calving location',units='degrees_E')
   id = register_restart_field(bergs_restart,filename,'start_lat',start_lat, &
@@ -304,12 +306,16 @@ integer :: grdi, grdj
                                             longname='scaling factor for mass of calving berg',units='none')
   id = register_restart_field(bergs_restart,filename,'mass_of_bits',mass_of_bits, &
                                             longname='mass of bergy bits',units='kg')
-  id = register_restart_field(bergs_restart,filename,'mass_of_fl_bits',mass_of_fl_bits, &
-                                            longname='mass of footloose bits',units='kg')
-  id = register_restart_field(bergs_restart,filename,'mass_of_fl_bergy_bits',mass_of_fl_bergy_bits, &
-                                            longname='mass of bergy bits associated with footloose bits',units='kg')
   id = register_restart_field(bergs_restart,filename,'heat_density',heat_density, &
                                             longname='heat density',units='J/kg')
+
+  if (bergs%fl_r>0) then
+    id = register_restart_field(bergs_restart,filename,'fl_k',fl_k,longname='footloose calving k',units='m')
+    id = register_restart_field(bergs_restart,filename,'mass_of_fl_bits',mass_of_fl_bits, &
+      longname='mass of footloose bits',units='kg')
+    id = register_restart_field(bergs_restart,filename,'mass_of_fl_bergy_bits',mass_of_fl_bergy_bits, &
+      longname='mass of bergy bits associated with footloose bits',units='kg')
+   end if
 
   if (mts) then
     id = register_restart_field(bergs_restart,filename,'axn_fast',axn_fast,&
@@ -370,14 +376,20 @@ integer :: grdi, grdj
       axn(i) = this%axn; ayn(i) = this%ayn !Added by Alon
       bxn(i) = this%bxn; byn(i) = this%byn !Added by Alon
       width(i) = this%width; length(i) = this%length
-      fl_k(i) = this%fl_k
       start_lon(i) = this%start_lon; start_lat(i) = this%start_lat
       start_year(i) = this%start_year; start_day(i) = this%start_day
       start_mass(i) = this%start_mass; mass_scaling(i) = this%mass_scaling
       static_berg(i) = this%static_berg
       call split_id(this%id, id_cnt(i), id_ij(i))
-      mass_of_bits(i) = this%mass_of_bits; mass_of_fl_bits(i) = this%mass_of_fl_bits
-      mass_of_fl_bergy_bits(i) = this%mass_of_fl_bergy_bits; heat_density(i) = this%heat_density
+      mass_of_bits(i) = this%mass_of_bits
+      heat_density(i) = this%heat_density
+
+      if (bergs%fl_r>0) then
+        fl_k(i) = this%fl_k
+        mass_of_fl_bits(i) = this%mass_of_fl_bits
+        mass_of_fl_bergy_bits(i) = this%mass_of_fl_bergy_bits
+      end if
+
       if (mts) then
         axn_fast(i) = this%axn_fast
         ayn_fast(i) = this%ayn_fast
@@ -418,17 +430,21 @@ integer :: grdi, grdj
              thickness,    &
              width,        &
              length,       &
-             fl_k,         &
              start_lon,    &
              start_lat,    &
              start_day,    &
              start_mass,   &
              mass_scaling, &
              mass_of_bits, &
-             mass_of_fl_bits, &
-             mass_of_fl_bergy_bits, &
              static_berg,  &
              heat_density)
+
+  if (bergs%fl_r>0.) then
+    deallocate(                   &
+                 fl_k,            &
+                 mass_of_fl_bits, &
+                 mass_of_fl_bergy_bits)
+  end if
   if (mts) then
     deallocate(            &
              axn_fast,     &

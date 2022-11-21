@@ -2437,14 +2437,22 @@ subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, r
   grd=>bergs%grd
 
   ! Interpolate gridded fields to berg
-  !if (bergs%mts) then
-    !gridded fields already saved on berg
+  ! !if (bergs%mts) then
+  !   !gridded fields already saved on berg
+  !   uo=berg%uo; vo=berg%vo; ua=berg%ua; va=berg%va; ui=berg%ui; vi=berg%vi;
+  !   ssh_x=berg%ssh_x; ssh_y=berg%ssh_y; sst=berg%sst; sss=berg%sss;  cn=berg%cn; hi=berg%hi; od=berg%od
+  ! !else
+  ! !  call interp_flds(grd, berg%lon, berg%lat, i, j, xi, yj, rx, ry, uo, vo, ui, vi, ua, va, ssh_x, &
+  ! !    ssh_y, sst, sss, cn, hi, od)
+  !   !end if
+
+  if (bergs%old_interp_flds_order) then
+    call interp_flds(grd, berg%lon, berg%lat, i, j, xi, yj, rx, ry, uo, vo, ui, vi, ua, va, ssh_x, &
+      ssh_y, sst, sss, cn, hi, od)
+  else
     uo=berg%uo; vo=berg%vo; ua=berg%ua; va=berg%va; ui=berg%ui; vi=berg%vi;
     ssh_x=berg%ssh_x; ssh_y=berg%ssh_y; sst=berg%sst; sss=berg%sss;  cn=berg%cn; hi=berg%hi; od=berg%od
-  !else
-  !  call interp_flds(grd, berg%lon, berg%lat, i, j, xi, yj, rx, ry, uo, vo, ui, vi, ua, va, ssh_x, &
-  !    ssh_y, sst, sss, cn, hi, od)
-  !end if
+  end if
 
   if ((grd%grid_is_latlon) .and. (.not. bergs%use_f_plane)) then
      f_cori=(2.*omega)*sin(pi_180*lat)
@@ -3355,9 +3363,13 @@ subroutine thermodynamics(bergs)
     this=>bergs%list(grdi,grdj)%first
     do while(associated(this))
       if (debug) call check_position(grd, this, 'thermodynamics (top)')
-      ! call interp_flds(grd, this%lon, this%lat, this%ine, this%jne, this%xi, this%yj, 0., 0., &
-      !                  this%uo, this%vo, this%ui, this%vi, this%ua, this%va, this%ssh_x, &
-      !                  this%ssh_y, this%sst, this%sss,this%cn, this%hi)
+
+      if (bergs%old_interp_flds_order) then
+        call interp_flds(grd, this%lon, this%lat, this%ine, this%jne, this%xi, this%yj, 0., 0., &
+          this%uo, this%vo, this%ui, this%vi, this%ua, this%va, this%ssh_x, &
+          this%ssh_y, this%sst, this%sss,this%cn, this%hi)
+      end if
+
       SST=this%sst
       SSS=this%sss
       IC=min(1.,this%cn+bergs%sicn_shift) ! Shift sea-ice concentration
@@ -6012,7 +6024,9 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
     if (mpp_pe()==0) write(*,'(a)') 'KID, iceberg_run: completed first visit initialization'
   endif
 
-  if (.not. bergs%mts) call interp_gridded_fields_to_bergs(bergs)
+  !if (.not. bergs%mts) call interp_gridded_fields_to_bergs(bergs)
+  !call this for footloose
+  if ((.not. bergs%mts) .and. (.not. bergs%old_interp_flds_order)) call interp_gridded_fields_to_bergs(bergs)
 
   ! For each berg, evolve
   call mpp_clock_begin(bergs%clock_mom)
@@ -6063,7 +6077,7 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
         call set_conglom_ids(bergs)
       endif
     endif
-    call interp_gridded_fields_to_bergs(bergs)
+    if (.not. bergs%old_interp_flds_order) call interp_gridded_fields_to_bergs(bergs)
   endif
   if (debug) call bergs_chksum(bergs, 'run bergs (exchanged)')
   if (debug) call checksum_gridded(bergs%grd, 's/r run after exchange')
@@ -6976,9 +6990,12 @@ subroutine calve_icebergs(bergs)
             call getRandomNumbers(rns, ry)
             rx = 2.*rx - 1.; ry = 2.*ry - 1.
           endif
-          call interp_flds(grd, newberg%lon, newberg%lat, i, j, xi, yj, rx, ry, newberg%uo, newberg%vo, newberg%ui, &
-            newberg%vi, newberg%ua, newberg%va, newberg%ssh_x, newberg%ssh_y, newberg%sst, newberg%sss, newberg%cn, &
-            newberg%hi, newberg%od)
+
+          if (.not. bergs%old_interp_flds_order) then
+            call interp_flds(grd, newberg%lon, newberg%lat, i, j, xi, yj, rx, ry, newberg%uo, newberg%vo, newberg%ui, &
+              newberg%vi, newberg%ua, newberg%va, newberg%ssh_x, newberg%ssh_y, newberg%sst, newberg%sss, newberg%cn, &
+              newberg%hi, newberg%od)
+          end if
 
           call add_new_berg_to_list(bergs%list(i,j)%first, newberg)
           calved_to_berg=initial_mass*mass_scaling ! Units of kg

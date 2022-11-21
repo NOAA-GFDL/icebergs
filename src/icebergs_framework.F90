@@ -686,6 +686,9 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   real :: fl_bits_scale_l=0.9 !< For determining dimensions of FL bits berg; FL_bits length    = fl_bits_scale_l * 3*l_b
   real :: fl_bits_scale_w=0.9 !< For determining dimensions of FL bits berg; FL_bits width     = fl_bits_scale_w * 3*l_b
   real :: fl_bits_scale_t=0.9 !< For determining dimensions of FL bits berg; FL_bits thickness = fl_bits_scale_t * T
+
+  !backwards compatibility
+  logical :: old_interp_flds_order=.false. !< Use old order of when to interpolate grid variables to bergs. Will be false if MTS, DEM, or footloose (.not. fl_r>0)
 end type icebergs
 
 !> Read original restarts. Needs to be module global so can be public to icebergs_mod.
@@ -1624,6 +1627,9 @@ endif
         'monitor_energy does not yet account for dem tangential force terms', FATAL)
     endif
   endif
+
+  !backwards compatibility
+  if (.not. (bergs%mts .or. bergs%dem .or. bergs%fl_r>0.)) bergs%old_interp_flds_order=.true.
 
   if (bergs%contact_distance>0) then
     dx_dlon=1; dy_dlat=1
