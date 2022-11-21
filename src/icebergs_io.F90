@@ -1751,6 +1751,7 @@ type(xyt), pointer :: trajectory !< An iceberg trajectory
 logical, intent(in) :: save_short_traj !< If true, record less data
 logical, intent(in) :: save_fl_traj !< If true, save masses and footloose data
 real, intent(in) :: fl_r !< If >0 and save_fl_traj, save footloose params
+character(len=70) :: traj_name !< name of trajectory file
 ! Local variables
 integer :: iret, ncid, i_dim, i
 integer :: lonid, latid, yearid, dayid, uvelid, vvelid, idcntid, idijid
@@ -1762,7 +1763,7 @@ integer :: axnid,aynid,bxnid,bynid,axnfid,aynfid,bxnfid,bynfid, msid
 integer :: eecid,edcid,eeid,edid,aeid,efid
 integer :: eectid, edctid, eetid, edtid, aetid
 integer :: avid, aaid, rid, abrid
-character(len=70) :: filename, traj_name
+character(len=70) :: filename
 character(len=7) :: pe_name
 type(xyt), pointer :: this, next
 integer :: stderrunit, cnt, ij
@@ -2319,6 +2320,7 @@ end subroutine write_trajectory
 subroutine write_bond_trajectory(trajectory, bond_traj_name)
 ! Arguments
 type(bond_xyt), pointer :: trajectory !< An iceberg bond trajectory
+character(len=70) :: bond_traj_name !<file name of bond trajectories
 ! Local variables
 integer :: iret, ncid, i_dim, i
 integer :: lonid, latid, yearid, dayid, lenid,n1id, n2id, peid
@@ -2326,7 +2328,7 @@ integer :: rotid,rrotid,nsid,nsrid, damid
 integer :: idcnt1_id, idcnt2_id, idij1_id, idij2_id, eeid, edid
 integer :: axid,ayid,bxid,byid
 integer :: td1id,td2id,dnsid,dssid
-character(len=70) :: filename, bond_traj_name
+character(len=70) :: filename
 character(len=7) :: pe_name
 type(bond_xyt), pointer :: this, next
 integer :: stderrunit, cnt, ij
