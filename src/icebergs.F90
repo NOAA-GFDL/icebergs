@@ -3364,7 +3364,7 @@ subroutine thermodynamics(bergs)
     do while(associated(this))
       if (debug) call check_position(grd, this, 'thermodynamics (top)')
 
-      if (bergs%old_interp_flds_order) then
+      if (bergs%old_interp_flds_order .or. (.not. mts .and. .not. dem .and. this%halo_berg.ge.0.5)) then
         call interp_flds(grd, this%lon, this%lat, this%ine, this%jne, this%xi, this%yj, 0., 0., &
           this%uo, this%vo, this%ui, this%vi, this%ua, this%va, this%ssh_x, &
           this%ssh_y, this%sst, this%sss,this%cn, this%hi)

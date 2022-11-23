@@ -1,0 +1,5 @@
+rm iceberg_trajectories.nc
+rm iceberg_trajectories.nc.*
+srun -n1 ./../../build/bergs.x
+
+
