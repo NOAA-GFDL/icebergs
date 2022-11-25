@@ -2,6 +2,6 @@ rm iceberg_trajectories.nc
 rm iceberg_trajectories.nc.*
 rm bond_trajectories.nc
 rm bond_trajectories.nc.*
-srun -n9 ./../../build/bergs.x
+srun -n4 ./../../build/bergs.x
 
 

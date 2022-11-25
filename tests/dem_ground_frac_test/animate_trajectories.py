@@ -19,7 +19,7 @@ def parseCommandLine():
     epilog='Written by Alex Huth, 2020')
     parser.add_argument('-fname', type=str, default='iceberg_trajectories.nc',
                     help=''' provide filename to plot''')
-    parser.add_argument('-s', type=int, default='3500',
+    parser.add_argument('-s', type=int, default='14000',
                         help='''plotted particle size''')
     optCmdLineArgs = parser.parse_args()
     return optCmdLineArgs
@@ -53,9 +53,12 @@ def main(args):
     #for determining if grounded:
     rho_bergs=850.
     rho_seawater=1025.
-    h_to_ground=200.
+    h_to_ground=20 #200.
     draught=(rho_bergs/rho_seawater)*thick
-    groundfrac=1.-(od-draught)/h_to_ground
+    if (h_to_ground==0):
+        groundfrac=draught-od
+    else:
+        groundfrac=1.-(od-draught)/h_to_ground
     groundfrac[groundfrac<0.]=0.
     groundfrac[groundfrac>1.]=1.
 
@@ -69,10 +72,10 @@ def main(args):
     #frame_len = 1000.0*movie_len/num_frames/10000000
     frame_len = movie_len/num_frames/1000
 
-    xmin = 0
-    xmax = 30
-    ymin = xmin
-    ymax = xmax
+    xmin = 40
+    xmax = 100
+    ymin = 20 #xmin
+    ymax = 80 #xmax
 
     anim_running = True
 

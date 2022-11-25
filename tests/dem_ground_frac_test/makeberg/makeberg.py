@@ -250,12 +250,13 @@ def create_empty_iceberg_restart_file(Empty_restart_filename):
 # flip2ndconglom=True#False
 # offset2ndconglom=True#False
 
-grdxmin=0; grdxmax=45000e3
-grdymin=0; grdymax=45000e3
-grdres=1000.0
+grdxmin=0; grdxmax=225000e3
+grdymin=0; grdymax=225000e3
+grdres=5000.0
 R_frac=0.45 #1st option
 #R_frac=0.5*0.45 #2nd option
-radius=(np.sqrt(3)/2.)*(R_frac*grdres) #S is < 0.5 grid res
+#radius=(np.sqrt(3)/2.)*(R_frac*grdres) #S is < 0.5 grid res
+radius=1.5e3 #/2
 #radius2=(np.sqrt(3)/2.)*(R_frac2*grdres) #S is < 0.5 grid res
 thickness1=200.0
 thickness2=200.0
@@ -265,9 +266,9 @@ rho_ice=850.0
 nbergs=1 #number of conglomerates
 
 #center coords of each (rectangular) conglomerate berg (CB=conglomerate berg)
-CBxc=np.array([3500]); CByc=np.array([15000])
+CBxc=np.array([50000]); CByc=np.array([50000])
 #side lengths
-CBxl=np.array([4000]); CByl=np.array([8000])
+CBxl=np.array([15000]); CByl=np.array([35000])
 
 
 CByl=CByl.astype(int); CBxl=CBxl.astype(int)
@@ -324,7 +325,7 @@ for i in range(nbergs):
         x_val=x_start
         offset=0.0
         # if (i==0):
-        uvel=0.#1
+        uvel=0.1#1
         # else:
         #         uvel=-0.15#-0.05
         #         if (offset2ndconglom):
