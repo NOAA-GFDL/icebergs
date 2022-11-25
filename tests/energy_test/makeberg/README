@@ -1,4 +1,0 @@
-RUN makes a conglomerate berg with 60 elements
-RUN2 makes a conglomerate berg with 2 elements
-
-For both conglomerate, the right half of the particles are initialized with an x-velocity>0, which the left half has x-velocity=0. All y-velocity is zero.

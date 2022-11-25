@@ -1,3 +1,0 @@
-rm ./output_files/Generic*
-./makeberg2.py
-cp ./output_files/Generic_icebergs.res.nc ./../INPUT/icebergs.res.nc

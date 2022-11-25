@@ -1,7 +1,0 @@
-1. Make the iceberg input files: cd makeberg; ./RUN; cd .. 
-2.(optional) edit input.nml
-3. run the model: ./RUN
-4, animate the results: animate_trajectories.py
-
-This is a good test for visualizing fracture dependence on particle size. Try running makeberg.py with the full radius and then half the radius, and with regular vs dem nmls. Make sure to edit the nmls so that contact distance is halved when radius is halved
-

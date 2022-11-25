@@ -1,7 +1,0 @@
-A simple test for momentum and energy conservation. In ./makeberg, a conglomerate berg with 60 (./makeberg/RUN) or 2 (./makeberg/RUN2) elements can be initialized. The right half of each conglomerate of elements has an initial x-velocity of 0.2, while all other element velocities are zero.
-
-1. Make the iceberg input files: cd makeberg; ./RUN; cd .. 
-2.(optional) edit input.nml
-3. run the model: ./RUN
-4, animate the results: animate_trajectories.py
-

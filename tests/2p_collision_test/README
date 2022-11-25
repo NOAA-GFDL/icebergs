@@ -1,5 +1,0 @@
-1. Make the iceberg input files: cd makeberg; ./RUN; cd .. 
-2.(optional) edit input.nml
-3. run the model: ./RUN
-4, animate the results: animate_trajectories.py
-

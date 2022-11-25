@@ -185,7 +185,7 @@ def main(args):
     fig2 = plt.figure(2)
     ax = plt.subplot(111)
     ax.plot(ud[step0:], tot_momentum_x[step0:],  color='k', label='x momentum')
-    #ax.plot(ud[step0:], tot_momentum_x2[step0:],  color='y', label='x momentum 2', linestyle='dashed')
+    ax.plot(ud[step0:], tot_momentum_x2[step0:],  color='y', label='x momentum 2', linestyle='dashed')
     chartBox = ax.get_position()
     ax.set_position([chartBox.x0, chartBox.y0, chartBox.width*0.6, chartBox.height])
     ax.legend(loc='upper center', bbox_to_anchor=(1.45, 0.8), shadow=True, ncol=1)
@@ -194,8 +194,8 @@ def main(args):
     fig3 = plt.figure(3)
     ax = plt.subplot(111)
     ax.plot(ud[step0:], tot_momentum_y[step0:],  color='k', label='y momentum')
-    #if (abs(mom_y0_tot2)>0):
-    #    ax.plot(ud[step0:], tot_momentum_y2[step0:],  color='y', label='y momentum 2', linestyle='dashed')
+    if (abs(mom_y0_tot2)>0):
+        ax.plot(ud[step0:], tot_momentum_y2[step0:],  color='y', label='y momentum 2', linestyle='dashed')
     chartBox = ax.get_position()
     ax.set_position([chartBox.x0, chartBox.y0, chartBox.width*0.6, chartBox.height])
     ax.legend(loc='upper center', bbox_to_anchor=(1.45, 0.8), shadow=True, ncol=1)

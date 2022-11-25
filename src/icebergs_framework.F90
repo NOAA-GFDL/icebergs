@@ -5855,7 +5855,7 @@ bond_matched=.false.
     call count_bonds(bergs, nbonds,check_bond_quality)
   endif
 
-  if (save_bond_forces .and. link_bond_pairs) then
+  if (save_bond_forces .and. link_bond_pairs .and. bergs%dem) then
     do grdj = grd%jsd+1,grd%jed ; do grdi = grd%isd+1,grd%ied
       berg=>bergs%list(grdi,grdj)%first
       do while (associated(berg)) ! loop over all bergs
