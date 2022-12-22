@@ -2174,18 +2174,6 @@ subroutine accel_explicit_inner_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, 
     IA_x=IA_x+F_x/M; IA_y=IA_y+F_y/M
     IAd_x=IAd_x+Fd_x/M; IAd_y=IAd_y+Fd_y/M
 
-    if (bergs%add_curl_to_torque) then
-      dragfrac = 1.0
-      if ((bergs%iceberg_bonds_on) .and. (bergs%internal_bergs_for_drag)) then
-        dragfrac = 1. - berg%n_bonds/bergs%max_bonds
-      else
-        dragfrac = 1.0
-      endif
-      T = T + (R1**4.)*rho_seawater*bergs%ocean_drag_scale*&
-        (0.2*pi*R1*Cd_wh + 0.5*Cd_wv*dragfrac*berg%thickness*(bergs%rho_bergs/rho_seawater)) * &
-        (0.5*berg%curl_o-berg%ang_vel)*abs(0.5*berg%curl_o-berg%ang_vel)
-    endif
-
     ! !torque from grounding drag
     ! !start to feel grounded with draught of bergs%h_to_init_grounding meters of the sea floor topography
     ! !at groundfrac=0, apply no grounding force. at groundfrac=1, apply max grounding force
@@ -5186,7 +5174,6 @@ subroutine interp_gridded_fields_to_bergs(bergs)
         endif
         call interp_flds(grd, berg%lon, berg%lat, berg%ine, berg%jne, berg%xi, berg%yj, rx, ry, berg%uo, berg%vo, &
           berg%ui, berg%vi, berg%ua, berg%va, berg%ssh_x, berg%ssh_y, berg%sst, berg%sss, berg%cn, berg%hi, berg%od)
-        if (bergs%add_curl_to_torque) call interp_curl(grd,berg)
       endif
       berg=>berg%next
     enddo
@@ -5413,95 +5400,6 @@ subroutine interp_flds(grd, x, y, i, j, xi, yj, rx, ry, uo, vo, ui, vi, ua, va, 
     endif
   endif
 end subroutine interp_flds
-
-!> Interpolates ocean (and atmospheric?) torque fields to an iceberg (DEM-mode required)
-subroutine interp_curl(grd,berg)
-  type(icebergs_gridded), pointer :: grd
-  type(iceberg), pointer :: berg
-  ! Local variables
-  integer :: i,j
-  real :: xi,yj
-  real :: hxp_o, hxp_a, hxm_o, hxm_a
-  real :: duo_dy, dua_dy, duo_dx, dua_dx
-  real :: dvo_dy, dva_dy, dvo_dx, dva_dx
-  real :: cos_rot, sin_rot
-
-  i =berg%ine;  j=berg%jne
-  xi=berg%xi;  yj=berg%yj
-
-  if (yj>=0.5) then
-    hxp_o=(yj-0.5)*ddx_v_point(grd,grd%vo,i  ,j+1,.true. )+(1.5-yj)*ddx_v_point(grd,grd%vo,i  ,j  ,.true. )
-    hxm_o=(yj-0.5)*ddx_v_point(grd,grd%vo,i-1,j+1,.true. )+(1.5-yj)*ddx_v_point(grd,grd%vo,i-1,j  ,.true. )
-    !hxp_a=(yj-0.5)*ddx_v_point(grd,grd%va,i  ,j+1,.false.)+(1.5-yj)*ddx_v_point(grd,grd%va,i  ,j  ,.false.)
-    !hxm_a=(yj-0.5)*ddx_v_point(grd,grd%va,i-1,j+1,.false.)+(1.5-yj)*ddx_v_point(grd,grd%va,i-1,j  ,.false.)
-  else
-    hxp_o=(yj+0.5)*ddx_v_point(grd,grd%vo,i  ,j  ,.true. )+(0.5-yj)*ddx_v_point(grd,grd%vo,i  ,j-1,.true. )
-    hxm_o=(yj+0.5)*ddx_v_point(grd,grd%vo,i-1,j  ,.true. )+(0.5-yj)*ddx_v_point(grd,grd%vo,i-1,j-1,.true. )
-    !hxp_a=(yj+0.5)*ddx_v_point(grd,grd%va,i  ,j  ,.false.)+(0.5-yj)*ddx_v_point(grd,grd%va,i  ,j-1,.false.)
-    !hxm_a=(yj+0.5)*ddx_v_point(grd,grd%va,i-1,j  ,.false.)+(0.5-yj)*ddx_v_point(grd,grd%va,i-1,j-1,.false.)
-  endif
-  dvo_dx=xi*hxp_o+(1.-xi)*hxm_o
-  !dva_dx=xi*hxp_a+(1.-xi)*hxm_a
-  if (xi>=0.5) then
-    hxp_o=(xi-0.5)*ddy_u_point(grd,grd%uo,i+1,j  ,.true. )+(1.5-xi)*ddy_u_point(grd,grd%uo,i  ,j  ,.true. )
-    hxm_o=(xi-0.5)*ddy_u_point(grd,grd%uo,i+1,j-1,.true. )+(1.5-xi)*ddy_u_point(grd,grd%uo,i  ,j-1,.true. )
-    !hxp_a=(xi-0.5)*ddy_u_point(grd,grd%ua,i+1,j  ,.false.)+(1.5-xi)*ddy_u_point(grd,grd%ua,i  ,j  ,.false.)
-    !hxm_a=(xi-0.5)*ddy_u_point(grd,grd%ua,i+1,j-1,.false.)+(1.5-xi)*ddy_u_point(grd,grd%ua,i  ,j-1,.false.)
-  else
-    hxp_o=(xi+0.5)*ddy_u_point(grd,grd%uo,i  ,j  ,.true. )+(0.5-xi)*ddy_u_point(grd,grd%uo,i-1,j  ,.true. )
-    hxm_o=(xi+0.5)*ddy_u_point(grd,grd%uo,i  ,j-1,.true. )+(0.5-xi)*ddy_u_point(grd,grd%uo,i-1,j-1,.true. )
-    !hxp_a=(xi+0.5)*ddy_u_point(grd,grd%ua,i  ,j  ,.false.)+(0.5-xi)*ddy_u_point(grd,grd%uo,i-1,j  ,.false.)
-    !hxm_a=(xi+0.5)*ddy_u_point(grd,grd%ua,i  ,j-1,.false.)+(0.5-xi)*ddy_u_point(grd,grd%uo,i-1,j-1,.false.)
-  endif
-  duo_dy=yj*hxp_o+(1.-yj)*hxm_o
-  !dua_dy=yj*hxp_a+(1.-yj)*hxm_a
-
-  cos_rot=bilin(grd, grd%cos, i, j, xi, yj) ! If true, uses the inverted bilin function
-  sin_rot=bilin(grd, grd%sin, i, j, xi, yj)
-
-  if ((cos_rot .ne. 1.0) .or. (sin_rot .ne. 0.0)) then
-    if (yj>=0.5) then
-      hxp_o=(yj-0.5)*ddx_v_point(grd,grd%uo,i  ,j+1,.true. )+(1.5-yj)*ddx_v_point(grd,grd%uo,i  ,j  ,.true. )
-      hxm_o=(yj-0.5)*ddx_v_point(grd,grd%uo,i-1,j+1,.true. )+(1.5-yj)*ddx_v_point(grd,grd%uo,i-1,j  ,.true. )
-      !hxp_a=(yj-0.5)*ddx_v_point(grd,grd%ua,i  ,j+1,.false.)+(1.5-yj)*ddx_v_point(grd,grd%ua,i  ,j  ,.false.)
-      !hxm_a=(yj-0.5)*ddx_v_point(grd,grd%ua,i-1,j+1,.false.)+(1.5-yj)*ddx_v_point(grd,grd%ua,i-1,j  ,.false.)
-    else
-      hxp_o=(yj+0.5)*ddx_v_point(grd,grd%uo,i  ,j  ,.true. )+(0.5-yj)*ddx_v_point(grd,grd%uo,i  ,j-1,.true. )
-      hxm_o=(yj+0.5)*ddx_v_point(grd,grd%uo,i-1,j  ,.true. )+(0.5-yj)*ddx_v_point(grd,grd%uo,i-1,j-1,.true. )
-      !hxp_a=(yj+0.5)*ddx_v_point(grd,grd%ua,i  ,j  ,.false.)+(0.5-yj)*ddx_v_point(grd,grd%ua,i  ,j-1,.false.)
-      !hxm_a=(yj+0.5)*ddx_v_point(grd,grd%ua,i-1,j  ,.false.)+(0.5-yj)*ddx_v_point(grd,grd%ua,i-1,j-1,.false.)
-    endif
-    duo_dx=xi*hxp_o+(1.-xi)*hxm_o
-    !dua_dx=xi*hxp_a+(1.-xi)*hxm_a
-    if (xi>=0.5) then
-      hxp_o=(xi-0.5)*ddy_u_point(grd,grd%vo,i+1,j,  .true. )+(1.5-xi)*ddy_u_point(grd,grd%vo,i  ,j,  .true. )
-      hxm_o=(xi-0.5)*ddy_u_point(grd,grd%vo,i+1,j-1,.true. )+(1.5-xi)*ddy_u_point(grd,grd%vo,i  ,j-1,.true. )
-      !hxp_a=(xi-0.5)*ddy_u_point(grd,grd%va,i+1,j,  .false.)+(1.5-xi)*ddy_u_point(grd,grd%va,i  ,j,  .false.)
-      !hxm_a=(xi-0.5)*ddy_u_point(grd,grd%va,i+1,j-1,.false.)+(1.5-xi)*ddy_u_point(grd,grd%va,i  ,j-1,.false.)
-    else
-      hxp_o=(xi+0.5)*ddy_u_point(grd,grd%vo,i  ,j,  .true. )+(0.5-xi)*ddy_u_point(grd,grd%vo,i-1,j,  .true. )
-      hxm_o=(xi+0.5)*ddy_u_point(grd,grd%vo,i  ,j-1,.true. )+(0.5-xi)*ddy_u_point(grd,grd%vo,i-1,j-1,.true. )
-      !hxp_a=(xi+0.5)*ddy_u_point(grd,grd%va,i  ,j,  .false.)+(0.5-xi)*ddy_u_point(grd,grd%vo,i-1,j,  .false.)
-      !hxm_a=(xi+0.5)*ddy_u_point(grd,grd%va,i  ,j-1,.false.)+(0.5-xi)*ddy_u_point(grd,grd%vo,i-1,j-1,.false.)
-    endif
-    dvo_dy=yj*hxp_o+(1.-yj)*hxm_o
-    !dva_dy=yj*hxp_a+(1.-yj)*hxm_a
-    call rotate(duo_dx, dvo_dx, cos_rot, sin_rot)
-    call rotate(duo_dy, dvo_dy, cos_rot, sin_rot)
-    !call rotate(dua_dx, dva_dx, cos_rot, sin_rot)
-    !call rotate(dua_dy, dva_dy, cos_rot, sin_rot)
-  endif
-
-  if ((dvo_dx.ne.dvo_dx) .or. (duo_dy.ne.duo_dy)) then
-    dvo_dx=0.; duo_dy=0.
-  endif
-  !if ((dva_dx.ne.dva_dx) .or. (dua_dy.ne.dua_dy)) then
-  !  dva_dx=0.; dua_dy=0.
-  !endif
-
-  berg%curl_o=dvo_dx-duo_dy
-  !berg%curl_a=dva_dx-dua_dy
-end subroutine interp_curl
 
 !> Returns zonal slope of sea-surface height across the east face of cell i,j
 real function ddx_ssh(grd,i,j)
@@ -7195,10 +7093,6 @@ subroutine calve_fl_icebergs(bergs,pberg,k,l_b,fl_disp_x,fl_disp_y,berg_from_bit
   if (bergs%dem) then
     allocate(cberg%ang_vel,cberg%ang_accel,cberg%rot)
     cberg%ang_vel=0.; cberg%ang_accel=0.; cberg%rot=0.
-    if (bergs%add_curl_to_torque) then
-      allocate(cberg%curl_o)!,cberg%curl_a)
-      cberg%curl_o=pberg%curl_o!; cberg%curl_a=pberg%curl_a;
-    endif
   endif
 
   if (monitor_energy) then

@@ -44,7 +44,7 @@ use ice_bergs_framework, only: split_id, id_from_2_ints, generate_id
 use ice_bergs_framework, only: mts,save_bond_traj
 use ice_bergs_framework, only: push_bond_posn, append_bond_posn
 use ice_bergs_framework, only: pack_bond_traj_into_buffer2,unpack_bond_traj_from_buffer2
-use ice_bergs_framework, only: monitor_energy, use_damage, dem, add_curl_to_torque, fracture_criterion, iceberg_bonds_on
+use ice_bergs_framework, only: monitor_energy, use_damage, dem, fracture_criterion, iceberg_bonds_on
 
 implicit none ; private
 
@@ -160,8 +160,6 @@ real, allocatable, dimension(:) :: lon,          &
                                    ang_vel,      &
                                    ang_accel,    &
                                    rot,          &
-                                   curl_o,       &
-                                   !curl_a,       &
                                    lon_prev,     &
                                    lat_prev,     &
                                    accum_bond_rotation, &
@@ -252,10 +250,6 @@ integer :: grdi, grdj
      allocate(ang_vel(nbergs))
      allocate(ang_accel(nbergs))
      allocate(rot(nbergs))
-     if (add_curl_to_torque) then
-       allocate(curl_o(nbergs))
-       !allocate(curl_a(nbergs))
-    endif
    elseif (fracture_criterion.ne.'none') then
      allocate(lon_prev(nbergs))
      allocate(lat_prev(nbergs))
@@ -335,12 +329,6 @@ integer :: grdi, grdj
       longname='dem angular acceleration',units='rad/s^2')
     id = register_restart_field(bergs_restart,filename,'rot',rot,&
       longname='dem accumulated rotation',units='rad')
-    if (add_curl_to_torque) then
-      id = register_restart_field(bergs_restart,filename,'curl_o',curl_o,&
-        longname='curl of ocean velocity',units='1/s')
-      !id = register_restart_field(bergs_restart,filename,'curl_a',curl_a,&
-      !  longname='curl of atmospheric velocity',units='1/s')
-    endif
   elseif (fracture_criterion.ne.'none') then
     id = register_restart_field(bergs_restart,filename,'lon_prev',lon_prev,longname='previous longitude',units='degrees_E')
     id = register_restart_field(bergs_restart,filename,'lat_prev',lat_prev,longname='previous latitude',units='degrees_N')
@@ -400,10 +388,6 @@ integer :: grdi, grdj
         ang_vel(i) = this%ang_vel
         ang_accel(i) = this%ang_accel
         rot(i) = this%rot
-        if (add_curl_to_torque) then
-          curl_o(i) = this%curl_o
-          !curl_a(i) = this%curl_a
-        endif
       elseif (fracture_criterion.ne.'none') then
         lon_prev(i) = this%lon_prev
         lat_prev(i) = this%lat_prev
@@ -457,11 +441,6 @@ integer :: grdi, grdj
              ang_vel,      &
              ang_accel,    &
              rot)
-    if (add_curl_to_torque) then
-      deallocate(          &
-             curl_o) !,       &
-             !curl_a)
-    endif
   elseif (fracture_criterion.ne.'none') then
     deallocate(            &
              lon_prev,     &
@@ -834,10 +813,6 @@ integer, allocatable, dimension(:) :: ine,        &
        allocate(ang_vel(nbergs_in_file))
        allocate(ang_accel(nbergs_in_file))
        allocate(rot(nbergs_in_file))
-       if (add_curl_to_torque) then
-         allocate(localberg%curl_o)!, localberg%curl_a)
-         localberg%curl_o=0.0!; localberg%curl_a=0.0
-       endif
      elseif (fracture_criterion.ne.'none') then
        allocate(lon_prev(nbergs_in_file))
        allocate(lat_prev(nbergs_in_file))
@@ -1154,10 +1129,6 @@ logical :: lres
     allocate(localberg%ang_vel)
     allocate(localberg%ang_accel)
     allocate(localberg%rot)
-    if (add_curl_to_torque) then
-      allocate(localberg%curl_o)
-      !allocate(localberg%curl_a)
-    endif
   elseif (fracture_criterion.ne.'none') then
     allocate(localberg%accum_bond_rotation)
   endif
@@ -1211,10 +1182,6 @@ logical :: lres
         localberg%ang_vel=0.
         localberg%ang_accel=0.
         localberg%rot=0.
-        if (add_curl_to_torque) then
-          localberg%curl_o=0.
-          !localberg%curl_a=0.
-        endif
       elseif (fracture_criterion.ne.'none') then
         localberg%accum_bond_rotation=0.
       endif
@@ -1755,7 +1722,7 @@ character(len=70) :: traj_name !< name of trajectory file
 ! Local variables
 integer :: iret, ncid, i_dim, i
 integer :: lonid, latid, yearid, dayid, uvelid, vvelid, idcntid, idijid
-integer :: uvelpid,vvelpid, curloid, curlaid
+integer :: uvelpid,vvelpid
 integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid, sssid
 integer :: cnid, hiid, hsid
 integer :: mid, smid, did, wid, lid, mbid, mflbid, mflbbid, hdid, nbid, odid, flkid
@@ -1951,10 +1918,6 @@ integer :: ntrajs_sent_io,ntrajs_rcvd_io
           avid = inq_varid(ncid, 'ang_vel')
           aaid = inq_varid(ncid, 'ang_accel')
           rid  = inq_varid(ncid, 'rot')
-          if (add_curl_to_torque) then
-            curloid = inq_varid(ncid, 'curl_o')
-            !curlaid = inq_varid(ncid, 'curl_a')
-          endif
         elseif (fracture_criterion .ne. 'none') then
           abrid = inq_varid(ncid, 'accum_bond_rotation')
         endif
@@ -2042,10 +2005,6 @@ integer :: ntrajs_sent_io,ntrajs_rcvd_io
           avid = def_var(ncid, 'ang_vel', NF_DOUBLE, i_dim)
           aaid = def_var(ncid, 'ang_accel', NF_DOUBLE, i_dim)
           rid  = def_var(ncid, 'rot', NF_DOUBLE, i_dim)
-          if (add_curl_to_torque) then
-            curloid = def_var(ncid, 'curl_o', NF_DOUBLE, i_dim)
-            !curlaid = def_var(ncid, 'curl_a', NF_DOUBLE, i_dim)
-          endif
         elseif (fracture_criterion .ne. 'none') then
           abrid = def_var(ncid, 'accum_bond_rotation', NF_DOUBLE, i_dim)
         endif
@@ -2190,12 +2149,6 @@ integer :: ntrajs_sent_io,ntrajs_rcvd_io
           call put_att(ncid, aaid, 'units', 'rad/s^2')
           call put_att(ncid, rid, 'long_name', 'accumulated rotation')
           call put_att(ncid, rid, 'units', 'rad')
-          if (add_curl_to_torque) then
-            call put_att(ncid, curloid, 'long_name', 'curl of ocean velocity')
-            call put_att(ncid, curloid, 'units', '1/s')
-            !call put_att(ncid, curlaid, 'long_name', 'curl of atmospheric velocity')
-            !call put_att(ncid, curlaid, 'units', '1/s')
-          endif
         elseif (fracture_criterion .ne. 'none') then
           call put_att(ncid, abrid, 'long_name', 'accumulated bond rotation')
           call put_att(ncid, abrid, 'units', 'radians')
@@ -2293,10 +2246,6 @@ integer :: ntrajs_sent_io,ntrajs_rcvd_io
           call put_double(ncid, avid, i, this%ang_vel)
           call put_double(ncid, aaid, i, this%ang_accel)
           call put_double(ncid, rid,  i, this%rot)
-          if (add_curl_to_torque) then
-            call put_double(ncid, curloid, i, this%curl_o)
-            !call put_double(ncid, curlaid, i, this%curl_a)
-          endif
         elseif (fracture_criterion .ne. 'none') then
           call put_double(ncid, abrid, i, this%accum_bond_rotation)
         endif

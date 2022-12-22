@@ -60,7 +60,6 @@ logical :: A68_test=.false. !< If True, grounding will not be allowed west of 38
 real :: A68_xdisp=0.
 real :: A68_ydisp=0.
 logical :: rev_mind=.false.
-logical :: add_curl_to_torque=.false. !include torque from the curl of ocean and atmospheric velocities (DEM-mode only)
 character(len=11) :: fracture_criterion='none' !<'energy','stress','strain_rate','strain',or 'none'
 logical :: use_damage=.false. !< Damage on bonds. Can evolve and serve as fracture criterion, or just to represent weaker bond
 logical :: orig_dem_moment_of_inertia=.false.
@@ -74,7 +73,7 @@ public verbose, really_debug, debug, restart_input_dir,make_calving_reproduce,ol
 public ignore_ij_restart, use_slow_find,generate_test_icebergs,old_bug_rotated_weights,budget
 public orig_read, force_all_pes_traj
 public mts,new_mts,save_bond_traj,ewsame,monitor_energy,iceberg_bonds_on
-public dem, save_bond_forces, add_curl_to_torque, fracture_criterion, orig_dem_moment_of_inertia
+public dem, save_bond_forces, fracture_criterion, orig_dem_moment_of_inertia
 public power_ground, short_step_mts_grounding, radius_based_drag
 public A68_test, A68_xdisp, A68_ydisp
 
@@ -301,8 +300,6 @@ type :: xyt
   real, allocatable :: ang_vel !< Angular velocity
   real, allocatable :: ang_accel !< Angular acceleration
   real, allocatable :: rot !< Accumulated rotation
-  real, allocatable :: curl_o !< curl of ocean velocity
-  real, allocatable :: curl_a !< curl of atmospheric velocity
 end type xyt
 
 !> An iceberg object, used as a link in a linked list
@@ -391,8 +388,6 @@ type :: iceberg
   real, allocatable :: ang_vel !< Angular velocity
   real, allocatable :: ang_accel !< Angular acceleration
   real, allocatable :: rot !< Accumulated rotation
-  real, allocatable :: curl_o !< curl of ocean velocity
-  real, allocatable :: curl_a !< curl of atmospheric velocity
 end type iceberg
 
 !> A bond object connecting two bergs, used as a link in a linked list
@@ -659,7 +654,6 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   logical :: uniaxial_test=.false. !adds a tensile stress to the east-most berg element
   real :: dem_tests_start_lon !starting lon of west-most berg element for uniaxial/dem tests
   real :: dem_tests_end_lon !starting lon of east-most berg element for uniaxial/dem tests
-  logical :: add_curl_to_torque=.false. !include torque from the curl of ocean and atmospheric velocities
   ! Element interactions
   logical :: constant_interaction_LW=.false. !< Use a constant element length & width during berg interactions
   real :: constant_length=0.!< If constant_interaction_LW, the constant length. If 0, will be set to max initial length
@@ -938,7 +932,7 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          initial_mass_n, distribution_n, mass_scaling_n, initial_thickness_n, fl_use_l_scale, fl_l_scale,&
          fl_l_scale_erosion_only, fl_youngs, fl_strength,  save_all_traj_year, save_nonfl_traj_by_class,&
          save_traj_by_class_start_mass_thres_n, save_traj_by_class_start_mass_thres_s,traj_area_thres_sntbc,&
-         traj_area_thres_fl,tau_is_velocity, add_curl_to_torque,ocean_drag_scale, A68_test, &
+         traj_area_thres_fl,tau_is_velocity, ocean_drag_scale, A68_test, &
          A68_xdisp,A68_ydisp,&
          orig_dem_moment_of_inertia, break_bonds_on_sub_steps, skip_first_outer_mts_step, rev_mind, &
          no_frac_first_ts, use_grounding_torque, power_ground, short_step_mts_grounding, radius_based_drag, save_bond_forces
@@ -1397,10 +1391,6 @@ if (dem) then
   buffer_width=buffer_width+3+(max_bonds*5)
   buffer_width_traj=buffer_width_traj+3
   buffer_width_bond_traj=buffer_width_bond_traj+4+1
-  if (add_curl_to_torque) then
-    buffer_width=buffer_width+1 !2
-    buffer_width_traj=buffer_width_traj+1 !2
-  endif
 elseif (fracture_criterion .ne. 'none') then
   buffer_width=buffer_width+1+(max_bonds*3)
   buffer_width_traj=buffer_width_traj+1
@@ -1589,7 +1579,6 @@ endif
   endif
   bergs%ocean_drag_scale=ocean_drag_scale
   bergs%dem_shear_for_frac_only=dem_shear_for_frac_only
-  bergs%add_curl_to_torque=add_curl_to_torque
   ! Footloose calving parameters
   bergs%fl_use_poisson_distribution=fl_use_poisson_distribution
   bergs%fl_use_perimeter=fl_use_perimeter
@@ -3457,10 +3446,6 @@ type(bond), pointer :: current_bond
     call push_buffer_value(buff%data(:,n), counter, berg%ang_vel)
     call push_buffer_value(buff%data(:,n), counter, berg%ang_accel)
     call push_buffer_value(buff%data(:,n), counter, berg%rot)
-    if (add_curl_to_torque) then
-      call push_buffer_value(buff%data(:,n), counter, berg%curl_o)
-      !call push_buffer_value(buff%data(:,n), counter, berg%curl_a)
-    endif
   elseif (fracture_criterion .ne. 'none') then
     call push_buffer_value(buff%data(:,n), counter, berg%accum_bond_rotation)
   endif
@@ -3691,9 +3676,6 @@ real :: temp_lon,temp_lat,length
 
   if (dem) then
     allocate(localberg%ang_vel,localberg%ang_accel,localberg%rot)
-    if (add_curl_to_torque) then
-      allocate(localberg%curl_o) !,localberg%curl_a)
-    endif
   elseif (fracture_criterion .ne. 'none') then
     allocate(localberg%accum_bond_rotation)
   endif
@@ -3779,10 +3761,6 @@ real :: temp_lon,temp_lat,length
     call pull_buffer_value(buff%data(:,n), counter, localberg%ang_vel)
     call pull_buffer_value(buff%data(:,n), counter, localberg%ang_accel)
     call pull_buffer_value(buff%data(:,n), counter, localberg%rot)
-    if (add_curl_to_torque) then
-      call pull_buffer_value(buff%data(:,n), counter, localberg%curl_o)
-      !call pull_buffer_value(buff%data(:,n), counter, localberg%curl_a)
-    endif
   elseif (fracture_criterion .ne. 'none') then
     call pull_buffer_value(buff%data(:,n), counter, localberg%accum_bond_rotation)
   endif
@@ -4078,10 +4056,6 @@ subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj, save_fl_traj, 
       call push_buffer_value(buff%data(:,n), counter, traj%ang_vel)
       call push_buffer_value(buff%data(:,n), counter, traj%ang_accel)
       call push_buffer_value(buff%data(:,n), counter, traj%rot)
-      if (add_curl_to_torque) then
-        call push_buffer_value(buff%data(:,n), counter, traj%curl_o)
-        !call push_buffer_value(buff%data(:,n), counter, traj%curl_a)
-      endif
     elseif (fracture_criterion .ne. 'none') then
       call push_buffer_value(buff%data(:,n), counter, traj%accum_bond_rotation)
     endif
@@ -4119,7 +4093,6 @@ subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj, save_fl_tra
 
   if (dem) then
     allocate(traj%ang_vel,traj%ang_accel,traj%rot)
-    if (add_curl_to_torque) allocate(traj%curl_o) !,traj%curl_a)
   elseif (fracture_criterion .ne. 'none') then
     allocate(traj%accum_bond_rotation)
   endif
@@ -4203,10 +4176,6 @@ subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj, save_fl_tra
       call pull_buffer_value(buff%data(:,n), counter, traj%ang_vel)
       call pull_buffer_value(buff%data(:,n), counter, traj%ang_accel)
       call pull_buffer_value(buff%data(:,n), counter, traj%rot)
-      if (add_curl_to_torque) then
-        call pull_buffer_value(buff%data(:,n), counter, traj%curl_o)
-        !call pull_buffer_value(buff%data(:,n), counter, traj%curl_a)
-      endif
     elseif (fracture_criterion .ne. 'none') then
       call pull_buffer_value(buff%data(:,n), counter, traj%accum_bond_rotation)
     endif
@@ -4820,7 +4789,6 @@ integer :: stderrunit
   endif
   if (dem) then
     allocate(berg%ang_vel,berg%ang_accel,berg%rot)
-    if (add_curl_to_torque) allocate(berg%curl_o) !,berg%curl_a)
   elseif (fracture_criterion .ne. 'none') then
     allocate(berg%accum_bond_rotation)
   endif
@@ -6129,7 +6097,6 @@ endif
 
   if (dem) then
     allocate(posn%ang_vel,posn%ang_accel,posn%rot)
-    if (add_curl_to_torque) allocate(posn%curl_o) !,posn%curl_a)
   elseif (fracture_criterion .ne. 'none') then
     allocate(posn%accum_bond_rotation)
   endif
@@ -6251,10 +6218,6 @@ endif
             posn%ang_vel=this%ang_vel
             posn%ang_accel=this%ang_accel
             posn%rot=this%rot
-            if (add_curl_to_torque) then
-              posn%curl_o=this%curl_o
-              !posn%curl_a=this%curl_a
-            endif
           elseif (fracture_criterion .ne. 'none') then
             posn%accum_bond_rotation=this%accum_bond_rotation
           endif
@@ -6349,7 +6312,6 @@ type(xyt), pointer :: new_posn
 
   if (dem) then
     allocate(new_posn%ang_vel,new_posn%ang_accel,new_posn%rot)
-    if (add_curl_to_torque) allocate(new_posn%curl_o) !,new_posn%curl_a)
   elseif (fracture_criterion .ne. 'none') then
     allocate(new_posn%accum_bond_rotation)
   endif
@@ -6415,7 +6377,6 @@ type(xyt), pointer :: new_posn,next,last
 
   if (dem) then
     allocate(new_posn%ang_vel,new_posn%ang_accel,new_posn%rot)
-    if (add_curl_to_torque) allocate(new_posn%curl_o) !,new_posn%curl_a)
   elseif (fracture_criterion .ne. 'none' .and. (.not. dem)) then
     allocate(new_posn%accum_bond_rotation)
   endif
