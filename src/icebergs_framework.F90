@@ -422,6 +422,7 @@ type :: bond
   real, allocatable :: tangd2 !< Accumulated tangential displacement, y-component (m)
   real, allocatable :: nstress !< Normal stress (Pa)
   real, allocatable :: sstress !< Shear stress (Pa)
+  integer, allocatable :: broken !< Is a bond broken (1) or not (0)?
   type(bond), pointer :: other_bond=>null() !< Matching bond
   ! If save_bond_forces
   real, allocatable :: F_x !< Zonal force
@@ -463,6 +464,7 @@ type :: bond_xyt
   real, allocatable :: tangd2 !< Accumulated tangential displacement, y-component (m)
   real, allocatable :: nstress
   real, allocatable :: sstress
+  integer, allocatable :: broken !< Is bond broken (1) or not(0)?
 end type bond_xyt
 
 ! A dynamic buffer, used for communication, that packs types into rectangular memory
@@ -648,6 +650,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   real :: poisson=0.3 ! Poisson's ratio
   real :: dem_spring_coef=0.
   real :: dem_damping_coef=0.1
+  logical :: use_broken_bonds_for_substep_contact=.false. !only evaluate sub-step contact between particles with a broken bond
   logical :: bond_break_detected=.false.
   logical :: dem_shear_for_frac_only=.false. !< If true, DEM shear is calculated for fracture, but zeroed for berg interactions
   integer :: dem_beam_test=0 !1=Simply supported beam,2=cantilever beam,3=angular vel tes
@@ -768,7 +771,6 @@ real :: contact_spring_coef=0. !Spring coef for berg collisions (is set to sprin
 logical :: uniaxial_test=.false. !adds a tensile stress to the east-most berg element
 real :: cdrag_grounding=0.0 ! Drag coefficient against ocean bottom
 real :: h_to_init_grounding=100.0
-!character(len=11) :: fracture_criterion ! 'energy','stress','strain_rate','strain',or 'none'
 real :: frac_thres_n=0.0 !normal fracture strain threshold
 real :: frac_thres_t=0.0 !tangential fracture strain threshold
 logical :: damage_test_1=.false. ! Sets initial damage for bonds that overlap y=17000.0
@@ -876,6 +878,7 @@ logical :: ignore_tangential_force=.false.
 real :: poisson=0.3 ! Poisson's ratio
 real :: dem_spring_coef=0.
 real :: dem_damping_coef=0.1
+logical :: use_broken_bonds_for_substep_contact=.false. ! only evaluate sub-step contact between particles with a broken bond
 logical :: dem_shear_for_frac_only=.false. ! If true, DEM shear is calculated for fracture, but zeroed for berg interactions
 integer :: dem_beam_test=0 !1=Simply supported beam,2=cantilever beam,3=angular vel test
 ! Element Interactions
@@ -933,7 +936,7 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          fl_l_scale_erosion_only, fl_youngs, fl_strength,  save_all_traj_year, save_nonfl_traj_by_class,&
          save_traj_by_class_start_mass_thres_n, save_traj_by_class_start_mass_thres_s,traj_area_thres_sntbc,&
          traj_area_thres_fl,tau_is_velocity, ocean_drag_scale, A68_test, &
-         A68_xdisp,A68_ydisp,&
+         A68_xdisp,A68_ydisp,use_broken_bonds_for_substep_contact,&
          orig_dem_moment_of_inertia, break_bonds_on_sub_steps, skip_first_outer_mts_step, rev_mind, &
          no_frac_first_ts, use_grounding_torque, power_ground, short_step_mts_grounding, radius_based_drag, save_bond_forces
 
@@ -1388,9 +1391,9 @@ if (monitor_energy) then
 endif
 
 if (dem) then
-  buffer_width=buffer_width+3+(max_bonds*5)
+  buffer_width=buffer_width+3+(max_bonds*6)
   buffer_width_traj=buffer_width_traj+3
-  buffer_width_bond_traj=buffer_width_bond_traj+4+1
+  buffer_width_bond_traj=buffer_width_bond_traj+6
 elseif (fracture_criterion .ne. 'none') then
   buffer_width=buffer_width+1+(max_bonds*3)
   buffer_width_traj=buffer_width_traj+1
@@ -1561,6 +1564,16 @@ endif
   bergs%dem_spring_coef=dem_spring_coef
   bergs%dem_K_damp=2.*bergs%dem_spring_coef/(3.*(1.-bergs%poisson**2)) !damping factor
   bergs%dem_damping_coef=dem_damping_coef
+  if (break_bonds_on_sub_steps) then
+    if (use_broken_bonds_for_substep_contact .and. .not. (bergs%dem .and. bergs%iceberg_bonds_on)) then
+      call error_mesg('KID, framework', &
+        'use_broken_bonds_for_substep_contact requires dem and iceberg_bonds_on', FATAL)
+    else
+      bergs%use_broken_bonds_for_substep_contact=use_broken_bonds_for_substep_contact
+    endif
+  else
+    bergs%use_broken_bonds_for_substep_contact=.false.
+  end if
   bergs%dem_beam_test=dem_beam_test
   bergs%constant_interaction_LW=constant_interaction_LW
   bergs%constant_length=constant_length
@@ -2772,6 +2785,18 @@ subroutine set_conglom_ids(bergs)
     enddo
   enddo;enddo
 
+  if (bergs%use_broken_bonds_for_substep_contact) then
+    do grdj = grd%jsd,grd%jed; do grdi = grd%isd,grd%ied
+      this=>bergs%list(grdi,grdj)%first
+      do while (associated(this))
+        if (this%n_bonds<bergs%max_bonds) then
+          call remove_broken_bonds_between_congloms(this)
+        endif
+        this=>this%next
+      enddo
+    enddo;enddo
+  endif
+
 end subroutine set_conglom_ids
 
 !> Assign initial velocities and energies for energy tracking tests
@@ -2820,18 +2845,83 @@ recursive subroutine label_conglomerates(berg, new_conglom_id)
   type(bond) , pointer :: current_bond
 
   current_bond=>berg%first_bond
-  do while (associated(current_bond))
-    if  (associated(current_bond%other_berg)) then
-      other_berg=>current_bond%other_berg
-      if (other_berg%conglom_id.ne.new_conglom_id) then
-        other_berg%conglom_id=new_conglom_id
-        if (other_berg%halo_berg==10) other_berg%halo_berg=2
-        call label_conglomerates(other_berg,new_conglom_id)
+
+  if (dem) then
+    do while (associated(current_bond))
+      if (current_bond%broken.ne.1) then
+        if  (associated(current_bond%other_berg)) then
+          other_berg=>current_bond%other_berg
+          if (other_berg%conglom_id.ne.new_conglom_id) then
+            other_berg%conglom_id=new_conglom_id
+            if (other_berg%halo_berg==10) other_berg%halo_berg=2
+            call label_conglomerates(other_berg,new_conglom_id)
+          endif
+        endif
       endif
-    endif
-    current_bond=>current_bond%next_bond
-  enddo
+      current_bond=>current_bond%next_bond
+    enddo
+  else
+    !same as above with no broken bond check
+    do while (associated(current_bond))
+      if  (associated(current_bond%other_berg)) then
+        other_berg=>current_bond%other_berg
+        if (other_berg%conglom_id.ne.new_conglom_id) then
+          other_berg%conglom_id=new_conglom_id
+          if (other_berg%halo_berg==10) other_berg%halo_berg=2
+          call label_conglomerates(other_berg,new_conglom_id)
+        endif
+      endif
+      current_bond=>current_bond%next_bond
+    enddo
+  endif
 end subroutine label_conglomerates
+
+!> Remove broken bonds between two different conglomerates
+subroutine remove_broken_bonds_between_congloms(berg)
+  type(iceberg), pointer :: berg !< Berg to start search from
+  ! Local variables
+  type(iceberg), pointer :: other_berg
+  type(bond) , pointer :: current_bond, other_bond, kick_the_bucket
+
+  current_bond=>berg%first_bond
+  do while (associated(current_bond))
+
+    if (current_bond%broken.eq.1) then
+      if  (associated(current_bond%other_berg)) then
+        other_berg=>current_bond%other_berg
+        if (other_berg%conglom_id.ne.berg%conglom_id) then
+          !broken bond exists between two different conglomerates
+          !remove matching bond from other berg
+          if (save_bond_forces .and. associated(current_bond%other_bond)) then
+            other_bond=>current_bond%other_bond
+            call delete_bond_from_list(other_berg,other_bond)
+          else
+            other_bond=>other_berg%first_bond
+            do while (associated(other_bond)) ! loop over all bonds
+              if (other_bond%other_id.eq.berg%id) then
+                kick_the_bucket=>other_bond
+                other_bond=>null()
+                call delete_bond_from_list(other_berg,kick_the_bucket)
+              else
+                other_bond=>other_bond%next_bond
+              endif
+            enddo
+          endif
+          !remove bond from current berg
+          kick_the_bucket=>current_bond
+          current_bond=>current_bond%next_bond
+          call delete_bond_from_list(berg,kick_the_bucket)
+        else
+          current_bond=>current_bond%next_bond
+        endif
+      else
+        current_bond=>current_bond%next_bond
+      endif
+    else
+      current_bond=>current_bond%next_bond
+    endif
+  enddo
+end subroutine remove_broken_bonds_between_congloms
 
 !> Keep only the bergs which are part of, or within contact distance of, a conglomerate that overlaps
 !! the computational domain, or which are halo_berg=1
@@ -3480,6 +3570,7 @@ type(bond), pointer :: current_bond
           call push_buffer_value(buff%data(:,n), counter, current_bond%nstress)
           call push_buffer_value(buff%data(:,n), counter, current_bond%sstress)
           call push_buffer_value(buff%data(:,n), counter, current_bond%rel_rotation)
+          call push_buffer_value(buff%data(:,n), counter, current_bond%broken)
         elseif (fracture_criterion .ne. 'none') then
           call push_buffer_value(buff%data(:,n), counter, current_bond%rotation)
           call push_buffer_value(buff%data(:,n), counter, current_bond%rel_rotation)
@@ -3514,6 +3605,7 @@ type(bond), pointer :: current_bond
         endif
 
         if (dem) then
+          call push_buffer_value(buff%data(:,n), counter, 0)
           call push_buffer_value(buff%data(:,n), counter, 0)
           call push_buffer_value(buff%data(:,n), counter, 0)
           call push_buffer_value(buff%data(:,n), counter, 0)
@@ -3901,6 +3993,7 @@ real :: temp_lon,temp_lat,length
           call pull_buffer_value(buff%data(:,n), counter, current_bond%nstress)
           call pull_buffer_value(buff%data(:,n), counter, current_bond%sstress)
           call pull_buffer_value(buff%data(:,n), counter, current_bond%rel_rotation)
+          call pull_buffer_value(buff%data(:,n), counter, current_bond%broken)
         elseif (fracture_criterion .ne. 'none') then
           call pull_buffer_value(buff%data(:,n), counter, current_bond%rotation)
           call pull_buffer_value(buff%data(:,n), counter, current_bond%rel_rotation)
@@ -4232,6 +4325,7 @@ subroutine pack_bond_traj_into_buffer2(bond_traj, buff, n)
     call push_buffer_value(buff%data(:,n),counter,bond_traj%nstress)
     call push_buffer_value(buff%data(:,n),counter,bond_traj%sstress)
     call push_buffer_value(buff%data(:,n),counter,bond_traj%rel_rotation)
+    call push_buffer_value(buff%data(:,n),counter,bond_traj%broken)
   elseif (fracture_criterion.ne.'none') then
     call push_buffer_value(buff%data(:,n),counter,bond_traj%rotation)
     call push_buffer_value(buff%data(:,n),counter,bond_traj%rel_rotation)
@@ -4307,6 +4401,7 @@ subroutine unpack_bond_traj_from_buffer2(first, buff, n)
     call pull_buffer_value(buff%data(:,n),counter,bond_traj%nstress)
     call pull_buffer_value(buff%data(:,n),counter,bond_traj%sstress)
     call pull_buffer_value(buff%data(:,n),counter,bond_traj%rel_rotation)
+    call pull_buffer_value(buff%data(:,n),counter,bond_traj%broken)
   elseif (fracture_criterion.ne.'none') then
     call pull_buffer_value(buff%data(:,n),counter,bond_traj%rotation)
     call pull_buffer_value(buff%data(:,n),counter,bond_traj%rel_rotation)
@@ -5413,29 +5508,13 @@ subroutine break_bonds_dem(bergs)
 
           if (bergs%fracture_criterion=='stress') then
             if (current_bond%nstress>frac_thres_n .or. current_bond%sstress>frac_thres_t) then
-              if (current_bond%nstress>frac_thres_n .and. current_bond%sstress>frac_thres_t) then
-                print *,'T and S break',this%lat,current_bond%nstress,current_bond%sstress
-              elseif (current_bond%nstress>frac_thres_n) then
-                print *,'TENSILE break',this%lat,current_bond%nstress,current_bond%sstress
-              else
-                print *,'SHEAR   break',this%lat,current_bond%nstress,current_bond%sstress
-              endif
-              current_bond%other_id=-1
-            endif
-          elseif (bergs%fracture_criterion=='computed') then
-            Rsig=current_bond%nstress/frac_thres_n
-            Rtau=current_bond%sstress/frac_thres_t
-            frac=0.5*Rsig+sqrt((0.5*Rsig)**2. + Rtau**2.)
-            if (frac > 1.) then
-              print *,'BREAK',this%lat,frac,Rsig,Rtau
-              current_bond%other_id=-1
-            endif
-          elseif (bergs%fracture_criterion=='computed_s') then
-            Rsig=current_bond%nstress/bergs%frac_thres_n
-            Rtau=current_bond%sstress/bergs%frac_thres_t
-            frac=sqrt(Rsig**2. + Rtau**2.)
-            if (frac > 1.) then
-              print *,'BREAK',this%lat,frac,Rsig,Rtau
+              ! if (current_bond%nstress>frac_thres_n .and. current_bond%sstress>frac_thres_t) then
+              !   print *,'T and S break',this%lat,current_bond%nstress,current_bond%sstress
+              ! elseif (current_bond%nstress>frac_thres_n) then
+              !   print *,'TENSILE break',this%lat,current_bond%nstress,current_bond%sstress
+              ! else
+              !   print *,'SHEAR   break',this%lat,current_bond%nstress,current_bond%sstress
+              ! endif
               current_bond%other_id=-1
             endif
           else
@@ -5454,21 +5533,7 @@ subroutine break_bonds_dem(bergs)
                   if (other_bond%other_id.eq.this%id) then
                     other_bond%other_id=-1
                     if (debug) then
-                      if (bergs%fracture_criterion=='computed') then
-                        Rsig=other_bond%nstress/frac_thres_n
-                        Rtau=other_bond%sstress/frac_thres_t
-                        frac=0.5*Rsig+sqrt((0.5*Rsig)**2. + Rtau**2.)
-                        if (frac <= 1.) then
-                          print *,'Other bond did not fracture!'
-                        endif
-                      elseif(bergs%fracture_criterion=='computed_s') then
-                        Rsig=current_bond%nstress/bergs%frac_thres_n
-                        Rtau=current_bond%sstress/bergs%frac_thres_t
-                        frac=sqrt(Rsig**2. + Rtau**2.)
-                        if (frac <= 1.) then
-                          print *,'Other bond did not fracture!'
-                        endif
-                      elseif (other_bond%nstress<=frac_thres_n .and. other_bond%sstress<=frac_thres_t) then
+                      if (other_bond%nstress<=frac_thres_n .and. other_bond%sstress<=frac_thres_t) then
                         print *,'Other bond did not fracture!'
                         print *,'current and other bond nstress,',current_bond%nstress, other_bond%nstress
                         print *,'current and other bond sstress,',current_bond%sstress, other_bond%sstress
@@ -5565,6 +5630,8 @@ if (berg%id .ne. other_id) then
     new_bond%nstress=0.; new_bond%sstress=0.
     allocate(new_bond%rel_rotation)
     new_bond%rel_rotation=0.
+    allocate(new_bond%broken)
+    new_bond%broken=0
     if (save_bond_forces) then
       allocate(new_bond%F_x, new_bond%F_y, new_bond%Fd_x, new_bond%Fd_y, new_bond%T, new_bond%T_d)
       new_bond%F_x=0.; new_bond%F_y=0.; new_bond%Fd_x=0.; new_bond%Fd_y=0.; new_bond%T=0.; new_bond%T_d=0.

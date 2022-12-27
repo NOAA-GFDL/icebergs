@@ -1174,12 +1174,25 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
         if (current_bond%nstress>bergs%frac_thres_n .or. current_bond%sstress>bergs%frac_thres_t) then
           bergs%bond_break_detected=.true.
 
+          if (current_bond%broken.ne.1) then
+            current_bond%broken=1
+            if (current_bond%nstress>bergs%frac_thres_n .and. current_bond%sstress>bergs%frac_thres_t) then
+              print *,'T and S break',berg%lat,current_bond%nstress,current_bond%sstress
+            elseif (current_bond%nstress>bergs%frac_thres_n) then
+              print *,'TENSILE break',berg%lat,current_bond%nstress,current_bond%sstress
+            else
+              print *,'SHEAR   break',berg%lat,current_bond%nstress,current_bond%sstress
+            endif
+          endif
+
           if (current_bond%nstress<0) then
             !if fail under shear with normal compression, then should still feel contact force
             damping_coef = bergs%dem_damping_coef*sqrt(bergs%dem_K_damp*M1*M2/(M1+M2))
             Fd_x = Fd_x-damping_coef*ur; Fd_y = Fd_y-damping_coef*vr  !linear damping force
             F_x = F_x + Fn_x; F_y = F_y + Fn_y !linear forces
           endif
+
+          if (bergs%use_broken_bonds_for_substep_contact) berg%n_bonds=berg%n_bonds-1
 
           if (savestress .and. save_bond_forces) then
             current_bond%T=0.; current_bond%T_d=0.
@@ -1201,29 +1214,17 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
             current_bond%other_bond%tangd1       = -current_bond%tangd1
             current_bond%other_bond%tangd2       = -current_bond%tangd2
             current_bond%other_bond%length       = current_bond%length
+            current_bond%other_bond%broken=1
             current_bond%other_bond%other_id=-current_bond%other_bond%other_id
+            if (bergs%use_broken_bonds_for_substep_contact) then
+              current_bond%other_berg%n_bonds=current_bond%other_berg%n_bonds-1
+            endif
           endif
           return !Broken bond. Return without adding forces and torques
         endif
-      elseif (bergs%fracture_criterion=='computed') then
-        Rsig=current_bond%nstress/bergs%frac_thres_n
-        Rtau=current_bond%sstress/bergs%frac_thres_t
-        if ((0.5*Rsig+sqrt((0.5*Rsig)**2. + Rtau**2.)) > 1) then
-          bergs%bond_break_detected=.true.
-          if (save_bond_forces) current_bond%other_bond%other_id=-current_bond%other_bond%other_id
-          return
-        endif
-      elseif (bergs%fracture_criterion=='computed_s') then
-        Rsig=current_bond%nstress/bergs%frac_thres_n
-        Rtau=current_bond%sstress/bergs%frac_thres_t
-        if (sqrt(Rsig**2. + Rtau**2.) > 1) then
-          if (save_bond_forces) current_bond%other_bond%other_id=-current_bond%other_bond%other_id
-          bergs%bond_break_detected=.true.
-          return
-        endif
       else
         call error_mesg('KID, calculate_force_dem', &
-          'break_bond_on_sub_steps currently only possible with fracture critera=computed or stress', FATAL)
+          'break_bond_on_sub_steps currently only possible with fracture critera=stress', FATAL)
       endif
     endif
 
@@ -1611,7 +1612,11 @@ subroutine accel_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, d
       ! Determining number of bonds
       current_bond=>berg%first_bond
       do while (associated(current_bond)) ! loop over all bonds
-        N_bonds=N_bonds+1.0
+        if (bergs%dem) then
+          if (current_bond%broken.ne.1) N_bonds=N_bonds+1.0
+        else
+          N_bonds=N_bonds+1.0
+        endif
         current_bond=>current_bond%next_bond
       enddo
       dragfrac = ((N_max-N_bonds)/N_max)
@@ -2039,7 +2044,9 @@ subroutine accel_explicit_inner_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, 
           if (current_bond%other_id<0) then
             current_bond%other_id=-current_bond%other_id
             other_berg=>current_bond%other_berg
-            other_berg%id=-other_berg%id !mark, as to not repeat in contact search below
+            if (.not. bergs%use_broken_bonds_for_substep_contact) then
+              other_berg%id=-other_berg%id !mark, as to not repeat in contact search below
+            endif
 
             bond_matched=.true.
             F_x=F_x+current_bond%F_x; F_y=F_y+current_bond%F_y
@@ -2055,15 +2062,22 @@ subroutine accel_explicit_inner_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, 
           call error_mesg('KID,bond interactions', 'Trying to do Bond interactions with unassosiated berg!' ,FATAL)
         else
           if (bergs%dem) then
-            call calculate_force_dem(bergs,berg,other_berg,current_bond,&
-              dt,F_x,F_y,T,Fd_x,Fd_y,T_d,savestress=.true.)
-            other_berg%id=-other_berg%id !mark, as to not repeat in contact search below
+            if (current_bond%broken.eq.1) then
+              call calculate_unbonded_same_conglom_dem_force(bergs, berg, other_berg, &
+                IA_x, IA_y, IAd_x, IAd_y, uvel0, vvel0, uvel0, vvel0)
+            else
+              call calculate_force_dem(bergs,berg,other_berg,current_bond,&
+                dt,F_x,F_y,T,Fd_x,Fd_y,T_d,savestress=.true.)
+            endif
+            if (.not. bergs%use_broken_bonds_for_substep_contact) then
+              other_berg%id=-other_berg%id !mark, as to not repeat in contact search below
+            endif
           else
             P_ia_11=0. ; P_ia_12=0. ;  P_ia_21=0.;  P_ia_22=0.
             P_ia_times_u_x=0. ; P_ia_times_u_y=0.
             call calculate_force(bergs, berg, other_berg, IA_x, IA_y, uvel0, vvel0, uvel0, vvel0,  &
               P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y,bonded)
-            other_berg%id=-other_berg%id !mark, as to not repeat in contact search below
+            other_berg%id=-other_berg%id !mark, as to not repeat in contact search below (dem required for use_broken_bonds_for_substep_contact)
             IAd_x=IAd_x+P_ia_11*(other_berg%uvel_old-berg%uvel_old)+P_ia_12*(other_berg%vvel_old-berg%vvel_old)
             IAd_y=IAd_y+P_ia_12*(other_berg%uvel_old-berg%uvel_old)+P_ia_22*(other_berg%vvel_old-berg%vvel_old)
           endif
@@ -2077,7 +2091,7 @@ subroutine accel_explicit_inner_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, 
 
     !for dem-mode, do not bother running the contact algorithm if the particle is within interior of conglomerate
     if (bergs%iceberg_bonds_on .and. bergs%dem) then
-      if (berg%n_bonds .eq. bergs%max_bonds) then
+      if ((berg%n_bonds .eq. bergs%max_bonds).or. bergs%use_broken_bonds_for_substep_contact) then
         run_contact=.false.
       else
         run_contact=.true.
@@ -2107,14 +2121,15 @@ subroutine accel_explicit_inner_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, 
         enddo
       enddo;enddo
     endif
-
-    !unmark the bonded bergs
-    current_bond=>berg%first_bond
-    do while (associated(current_bond))
-      other_berg=>current_bond%other_berg
-      other_berg%id=abs(other_berg%id)
-      current_bond=>current_bond%next_bond
-    enddo
+    if (.not. bergs%use_broken_bonds_for_substep_contact) then
+      !unmark the bonded bergs
+      current_bond=>berg%first_bond
+      do while (associated(current_bond))
+        other_berg=>current_bond%other_berg
+        other_berg%id=abs(other_berg%id)
+        current_bond=>current_bond%next_bond
+      enddo
+    endif
   endif
 
   if (bergs%dem) then
@@ -2511,7 +2526,11 @@ subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, r
     ! Determining number of bonds
     current_bond=>berg%first_bond
     do while (associated(current_bond)) ! loop over all bonds
-      N_bonds=N_bonds+1.0
+      if (bergs%dem) then
+        if (current_bond%broken.ne.1) N_bonds=N_bonds+1.0
+      else
+        N_bonds=N_bonds+1.0
+      endif
       current_bond=>current_bond%next_bond
     enddo
     dragfrac = ((N_max-N_bonds)/N_max)
@@ -3397,7 +3416,11 @@ subroutine thermodynamics(bergs)
             ! Determining number of bonds
             ! current_bond=>this%first_bond
             ! do while (associated(current_bond)) ! loop over all bonds
+            ! if (bergs%dem) then
+            !   if (current_bond%broken.ne.1) N_bonds=N_bonds+1.0
+            ! else
             !   N_bonds=N_bonds+1.0
+            ! endif
             !   current_bond=>current_bond%next_bond
             ! enddo
           endif
@@ -7343,8 +7366,6 @@ subroutine evolve_icebergs_mts(bergs)
     skip_first_outer_mts_step=.false.
   endif
 
-
-
   ! PART 3: MTS fast sub-steps (bonded interactions only):
   ! Position and velocity are updated by:
   ! X2 = X1+dt*V1+((dt^2)/2)*a_k +((dt^2)/2)*b_k
@@ -7434,10 +7455,6 @@ subroutine evolve_icebergs_mts(bergs)
           uvel1=berg%uvel ;   vvel1=berg%vvel
           i=berg%ine      ;   j=berg%jne
           xi=berg%xi      ;   yj=berg%yj
-
-          ! if (latn>50.e3 .or. latn<10.e3 .or. lonn > 45.e3) then
-          !   print *,'id,lat,lon',berg%id,latn,lonn
-          ! endif
 
           if (new_mts) then
             axn = axn+bxn; ayn=ayn+byn
@@ -7637,7 +7654,9 @@ subroutine evolve_icebergs_mts(bergs)
       enddo ! loop over all bergs
     enddo; enddo ! update 'old' velocities
 
-    if (break_bonds_on_sub_steps .and. bergs%bond_break_detected) call break_bonds_dem(bergs)
+    if (.not. bergs%use_broken_bonds_for_substep_contact) then
+      if (break_bonds_on_sub_steps .and. bergs%bond_break_detected) call break_bonds_dem(bergs)
+    endif
   enddo ! loop over sub-steps
 
   !reset interactive_forces

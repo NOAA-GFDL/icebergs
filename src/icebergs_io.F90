@@ -185,7 +185,8 @@ integer, allocatable, dimension(:) :: ine,              &
                                       first_berg_jne,         &
                                       first_berg_ine,         &
                                       other_berg_jne,         &
-                                      other_berg_ine
+                                      other_berg_ine,         &
+                                      broken
 
 
 integer :: grdi, grdj
@@ -481,6 +482,7 @@ integer :: grdi, grdj
     allocate(nstress(nbonds))
     allocate(sstress(nbonds))
     allocate(rel_rotation(nbonds))
+    allocate(broken(nbonds))
   elseif (fracture_criterion.ne.'none') then
     allocate(rotation(nbonds))
     allocate(rel_rotation(nbonds))
@@ -525,6 +527,8 @@ integer :: grdi, grdj
       longname='shear stress',units='Pa')
     id = register_restart_field(bergs_bond_restart,filename_bonds,'rel_rotation',rel_rotation,&
       longname='relative rotation',units='rad')
+     id = register_restart_field(bergs_bond_restart,filename_bonds,'broken',broken,&
+      longname='broken status',units='none')
   elseif (fracture_criterion.ne.'none') then
     id = register_restart_field(bergs_bond_restart,filename_bonds,'rotation',rotation,&
       longname='rotation',units='rad')
@@ -564,6 +568,7 @@ integer :: grdi, grdj
           nstress(i)=current_bond%nstress
           sstress(i)=current_bond%sstress
           rel_rotation(i)=current_bond%rel_rotation
+          broken(i)=current_bond%broken
         elseif (fracture_criterion.ne.'none') then
           rotation(i)=current_bond%rotation
           rel_rotation(i)=current_bond%rel_rotation
@@ -599,7 +604,8 @@ integer :: grdi, grdj
              tangd2,                &
              nstress,               &
              sstress,               &
-             rel_rotation)
+             rel_rotation,          &
+             broken)
   elseif (fracture_criterion.ne.'none') then
     deallocate(                     &
              rotation,              &
@@ -1278,7 +1284,8 @@ integer, allocatable, dimension(:) :: id_cnt, id_ij,    &
                                       first_berg_jne,   &
                                       first_berg_ine,   &
                                       other_berg_jne,   &
-                                      other_berg_ine
+                                      other_berg_ine,   &
+                                      broken
 real, allocatable, dimension(:) ::    tangd1,           &
                                       tangd2,           &
                                       nstress,          &
@@ -1332,6 +1339,7 @@ integer(kind=8), allocatable, dimension(:) :: first_id,   &
       allocate(nstress(nbonds_in_file))
       allocate(sstress(nbonds_in_file))
       allocate(rel_rotation(nbonds_in_file))
+      allocate(broken(nbonds_in_file))
     elseif (fracture_criterion.ne.'none') then
       allocate(rotation(nbonds_in_file))
       allocate(rel_rotation(nbonds_in_file))
@@ -1365,6 +1373,7 @@ integer(kind=8), allocatable, dimension(:) :: first_id,   &
       call read_real_vector(filename,'nstress',nstress,grd%domain,value_if_not_in_file=0.)
       call read_real_vector(filename,'sstress',sstress,grd%domain,value_if_not_in_file=0.)
       call read_real_vector(filename,'rel_rotation',rel_rotation,grd%domain,value_if_not_in_file=0.)
+      call read_int_vector(filename,'broken',broken,grd%domain,value_if_not_in_file=0)
     elseif (fracture_criterion.ne.'none') then
       call read_real_vector(filename,'rotation',rotation,grd%domain,value_if_not_in_file=0.)
       call read_real_vector(filename,'rel_rotation',rel_rotation,grd%domain,value_if_not_in_file=0.)
@@ -1477,6 +1486,7 @@ integer(kind=8), allocatable, dimension(:) :: first_id,   &
               current_bond%nstress=nstress(k)
               current_bond%sstress=sstress(k)
               current_bond%rel_rotation=rel_rotation(k)
+              current_bond%broken=broken(k)
             elseif (fracture_criterion.ne.'none') then
               current_bond%rotation=rotation(k)
               current_bond%rel_rotation=rel_rotation(k)
@@ -1550,7 +1560,8 @@ integer(kind=8), allocatable, dimension(:) :: first_id,   &
                tangd2,                &
                nstress,               &
                sstress,               &
-               rel_rotation)
+               rel_rotation,          &
+               broken)
     elseif (fracture_criterion.ne.'none') then
       deallocate(                     &
                rotation,              &
@@ -2273,7 +2284,7 @@ character(len=70) :: bond_traj_name !<file name of bond trajectories
 ! Local variables
 integer :: iret, ncid, i_dim, i
 integer :: lonid, latid, yearid, dayid, lenid,n1id, n2id, peid
-integer :: rotid,rrotid,nsid,nsrid, damid
+integer :: rotid,rrotid,nsid,nsrid, damid, brid
 integer :: idcnt1_id, idcnt2_id, idij1_id, idij2_id, eeid, edid
 integer :: axid,ayid,bxid,byid
 integer :: td1id,td2id,dnsid,dssid
@@ -2405,7 +2416,7 @@ logical :: io_is_in_append_mode
       if (dem) then
         td1id = inq_varid(ncid, 'tangd1');  td2id = inq_varid(ncid, 'tangd2')
         dnsid = inq_varid(ncid, 'nstress'); dssid = inq_varid(ncid, 'sstress')
-        rrotid = inq_varid(ncid, 'rel_rotation')
+        rrotid = inq_varid(ncid, 'rel_rotation'); brid = inq_varid(ncid, 'broken')
       elseif (fracture_criterion.ne.'none') then
         rotid = inq_varid(ncid, 'rotation');    rrotid = inq_varid(ncid, 'rel_rotation')
         nsid = inq_varid(ncid, 'n_frac_var')
@@ -2444,6 +2455,7 @@ logical :: io_is_in_append_mode
         td1id = def_var(ncid, 'tangd1',  NF_DOUBLE, i_dim); td2id = def_var(ncid, 'tangd2',  NF_DOUBLE, i_dim)
         dnsid = def_var(ncid, 'nstress', NF_DOUBLE, i_dim); dssid = def_var(ncid, 'sstress', NF_DOUBLE, i_dim)
         rrotid = def_var(ncid, 'rel_rotation', NF_DOUBLE, i_dim)
+        brid = def_var(ncid, 'broken', NF_INT, i_dim)
       elseif (fracture_criterion.ne.'none') then
         rotid = def_var(ncid, 'rotation', NF_DOUBLE, i_dim); rrotid = def_var(ncid, 'rel_rotation', NF_DOUBLE, i_dim)
         nsid = def_var(ncid, 'n_frac_var', NF_DOUBLE, i_dim)
@@ -2500,6 +2512,7 @@ logical :: io_is_in_append_mode
         call put_att(ncid, dnsid, 'long_name', 'normal stress'); call put_att(ncid, dnsid, 'units', 'Pa')
         call put_att(ncid, dssid, 'long_name', 'shear stress');  call put_att(ncid, dssid, 'units', 'Pa')
         call put_att(ncid, rrotid, 'long_name', 'relative rotation');      call put_att(ncid, rrotid, 'units', 'rad')
+        call put_att(ncid, brid, 'long_name', 'broken status');      call put_att(ncid, brid, 'units', 'none')
       elseif (fracture_criterion.ne.'none') then
         call put_att(ncid, rotid, 'long_name', 'rotation');                call put_att(ncid, rotid, 'units', 'rad')
         call put_att(ncid, rrotid, 'long_name', 'relative rotation');      call put_att(ncid, rrotid, 'units', 'rad')
@@ -2548,7 +2561,7 @@ logical :: io_is_in_append_mode
       if (dem) then
         call put_double(ncid,td1id,i,this%tangd1);  call put_double(ncid,td2id,i,this%tangd2)
         call put_double(ncid,dnsid,i,this%nstress); call put_double(ncid,dssid,i,this%sstress)
-        call put_double(ncid,rrotid,i,this%rel_rotation)
+        call put_double(ncid,rrotid,i,this%rel_rotation); call put_int(ncid,brid,i,this%broken)
       elseif (fracture_criterion.ne.'none') then
         call put_double(ncid,rotid,i,this%rotation);  call put_double(ncid,rrotid,i,this%rel_rotation)
         call put_double(ncid,nsid,i,this%n_frac_var)
