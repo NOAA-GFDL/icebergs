@@ -1,0 +1,14 @@
+TO RUN THE EXPERIMENT IN THE PAPER:
+
+I. Make the iceberg input files:
+   cd makeberg; ./RUN_for_paper; cd ..
+
+II. Some quick processing of the hourly data
+   cd data; source recombine_nc.sh; cd ..
+   (note that the recombine_nc.sh requires cdo or nco -- edit it accordingly)
+
+III. The full run from the paper:
+   ./long_run_for_paper.sh
+
+IV. Animate the results:
+./animate_trajectories.py -fname=longrun_od_17.8_tn_ng_ydn.1_ss90_ns18_rx-37.51_ry-55.2166.nc

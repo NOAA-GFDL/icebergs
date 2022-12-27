@@ -260,6 +260,7 @@ def main(args):
         oscar=xr.load_dataset(f'{dir}/a68_experiment_ocean_surf_vel_oscar_dec2020_HOURLY_ll_p125.nc')
         #oscar.isel(time=400).plot.quiver(x="lon",y="lat",u="uo",v="vo",hue='vel',vmax=0.2, scale=8)
         vv=oscar.isel(time=400)
+        vv['vel']=np.sqrt(vv.uo*vv.uo+vv.vo*vv.vo)
         norm=plt.cm.colors.Normalize(vmin=0,vmax=0.35)
         if (old==False):
             ax1.quiver(vv.lon.values,vv.lat.values,vv.uo.values,vv.vo.values,vv.vel.values,scale=8,cmap='viridis',norm=norm,transform=ccrs.PlateCarree())

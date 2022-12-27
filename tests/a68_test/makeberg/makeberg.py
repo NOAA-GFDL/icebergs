@@ -16,7 +16,7 @@ import netCDF4 as nc
 
 
 import sys
-pypath = '/lustre/f2/dev/gfdl/Alexander.Huth/MOM6-examples/src/icebergs/tests/Iceberg_repository'
+pypath = '.'
 for dir_name in os.listdir(pypath):
         dir_path = os.path.join(pypath, dir_name)
         if os.path.isdir(dir_path):
@@ -66,13 +66,13 @@ def parseCommandLine():
 
         parser.add_argument('-ang_vel_prescribed', type=float, default=0.0,
                           help='''Prescibed angular velocity   ''')
-        
+
         parser.add_argument('-dx', type=float, default=250.0,
                           help='''dx for regrid   ''')
-        
+
         parser.add_argument('-icethres', type=float, default=0.5,
                           help='''threshold for whether a grid cell is ice or not   ''')
-        
+
         #Iceberg setup flags
         parser.add_argument('-only_choose_one_berg', type='bool', default=False,
                           help=''' When true, only one iceberg (with number chosen_berg_num) is written to icebergs.res. This is for debugging  ''')
