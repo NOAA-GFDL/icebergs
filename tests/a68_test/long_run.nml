@@ -71,7 +71,6 @@
 
     monitor_energy=.false.
     !defaults given in parentheses:
-    new_mts=.true.
     mts=.true. !(F) for using the Multiple Time Stepping Velocity Verlet scheme
     mts_sub_steps=<ss> !# of mts sub-steps
     force_convergence=.true. !(F) experimental MTS convergence scheme to better conserve momentum during collisions

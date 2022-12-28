@@ -36,7 +36,6 @@
     dem_spring_coef=1.e9 !(1.e-8) Spring const for berg interactions (dflt~highest stable value)
 
     monitor_energy=.false. !(F)save total elastic (spring+collision),external,dissipated,&fracture energy
-    new_mts=.true. !(F) If T, implicit accel is added 50% at the current time step and 50% at the next time step
     mts=.true. !(F) for using the Multiple Time Stepping Velocity Verlet scheme
     mts_sub_steps=1e5 !20 !00  !(-1) # of mts sub-steps (-1=automatically determine # from spring const)
 

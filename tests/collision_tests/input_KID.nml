@@ -24,7 +24,6 @@
 
     !defaults given in parentheses:
     ! explicit_inner_mts=.true.
-    ! new_mts=.true.
     ! mts=.true. !(F) for using the Multiple Time Stepping Velocity Verlet scheme
     ! mts_sub_steps=60 !1 !30 !(-1) # of mts sub-steps (-1=automatically determine # from spring const)
     ! contact_distance=1.75e3 !2.e3 !(0) unbonded bergs contact at max(contact_dist,sum of their radii)

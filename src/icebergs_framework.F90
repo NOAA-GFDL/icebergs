@@ -46,21 +46,20 @@ logical :: fix_restart_dates=.true. !< After a restart, check that bergs were cr
 logical :: do_unit_tests=.false. !< Conduct some unit tests
 logical :: force_all_pes_traj=.false. !< Force all pes write trajectory files regardless of io_layout
 logical :: mts=.false. !< Use multiple time stepping scheme
-logical :: new_mts=.false. !If T, implicit accel is added 50% at the current time step and 50% at the next time step
 logical :: save_bond_traj=.false. !<Save trajectory files for bonds
 logical :: ewsame=.false. !<(F) set T if periodic and 2 PEs along the x direction (zonal) (i.e. E/W PEs are the same)
 logical :: monitor_energy=.false. !<monitors energies: elastic (spring+collision), external, dissipated, fracture
 logical :: iceberg_bonds_on=.False. ! True=Allow icebergs to have bonds, False=don't allow.
 logical :: dem=.false. !< If T, run in DEM-mode with angular terms, variable stiffness, etc
-logical :: save_bond_forces=.true. !< If T, saves forces on bonds (TODO save on bond traj, too), so that only 1 of 2 bonds in a pair need to be processed during DEM-MTS explicit sub-steps
+logical :: save_bond_forces=.true. !< Saves forces on bonds so only 1 of 2 bonds in a pair need processing during DEM-MTS explicit sub-steps
 logical :: short_step_mts_grounding=.false.
 logical :: radius_based_drag=.false. !if T, hex bergs, and dem, 2r is used as the area of the vert face for drag/wave forces
-logical :: A68_test=.false. !< If True, grounding will not be allowed west of 38 deg W nor North of 54.85 S
-real :: A68_xdisp=0.
-real :: A68_ydisp=0.
-logical :: rev_mind=.false.
+logical :: A68_test=.false. !< If True, enforces grounding zone in the A68 test case (Huth et al., 2022)
+real :: A68_xdisp=0. !< longitude of the SW corner of the grounding zone in the A68 test case
+real :: A68_ydisp=0. !< latitude of the SW corner of the grounding zone in the A68 test case
+logical :: rev_mind=.false. !< Alterate option for staggering the 3x3 cells used for quadratic mapping of ocean depth to particles
 character(len=11) :: fracture_criterion='none' !<'energy','stress','strain_rate','strain',or 'none'
-logical :: orig_dem_moment_of_inertia=.false.
+logical :: orig_dem_moment_of_inertia=.false. !< Use Potyondy & Cundall,2004 torque from relative particle rotation (rather than Wang, 2020)
 logical :: break_bonds_on_sub_steps=.false.
 logical :: skip_first_outer_mts_step=.false.
 logical :: no_frac_first_ts=.false.
@@ -70,7 +69,7 @@ public nclasses,buffer_width,buffer_width_traj,buffer_width_bond_traj
 public verbose, really_debug, debug, restart_input_dir,make_calving_reproduce,old_bug_bilin,use_roundoff_fix
 public ignore_ij_restart, use_slow_find,generate_test_icebergs,old_bug_rotated_weights,budget
 public orig_read, force_all_pes_traj
-public mts,new_mts,save_bond_traj,ewsame,monitor_energy,iceberg_bonds_on
+public mts,save_bond_traj,ewsame,monitor_energy,iceberg_bonds_on
 public dem, save_bond_forces, fracture_criterion, orig_dem_moment_of_inertia
 public short_step_mts_grounding, radius_based_drag
 public A68_test, A68_xdisp, A68_ydisp
@@ -646,8 +645,8 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   real :: dem_spring_coef=0.
   real :: dem_damping_coef=0.1
   logical :: use_broken_bonds_for_substep_contact=.false. !only evaluate sub-step contact between particles with a broken bond
+  logical :: print_fracture=.true. !when a bond breaks, print fracture type, lat, lon, and stresses
   logical :: bond_break_detected=.false.
-  logical :: dem_shear_for_frac_only=.false. !< If true, DEM shear is calculated for fracture, but zeroed for berg interactions
   integer :: dem_beam_test=0 !1=Simply supported beam,2=cantilever beam,3=angular vel tes
   logical :: uniaxial_test=.false. !adds a tensile stress to the east-most berg element
   real :: dem_tests_start_lon !starting lon of west-most berg element for uniaxial/dem tests
@@ -873,7 +872,7 @@ real :: poisson=0.3 ! Poisson's ratio
 real :: dem_spring_coef=0.
 real :: dem_damping_coef=0.1
 logical :: use_broken_bonds_for_substep_contact=.false. ! only evaluate sub-step contact between particles with a broken bond
-logical :: dem_shear_for_frac_only=.false. ! If true, DEM shear is calculated for fracture, but zeroed for berg interactions
+logical :: print_fracture=.true. !when a bond breaks, print fracture type, lat, lon, and stresses
 integer :: dem_beam_test=0 !1=Simply supported beam,2=cantilever beam,3=angular vel test
 ! Element Interactions
 logical :: constant_interaction_LW=.false. ! Always use the initial, globally constant, element length & width during berg interactions
@@ -918,19 +917,19 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          const_gamma, Gamma_T_3EQ, ignore_traj, debug_iceberg_with_id,use_updated_rolling_scheme, tip_parameter, &
          read_old_restarts, tau_calving, read_ocean_depth_from_file, melt_cutoff,apply_thickness_cutoff_to_gridded_melt,&
          apply_thickness_cutoff_to_bergs_melt, use_mixed_melting, internal_bergs_for_drag, coastal_drift, tidal_drift,&
-         mts,new_mts,ewsame,monitor_energy,mts_sub_steps,contact_distance,length_for_manually_initialize_bonds,&
+         mts,ewsame,monitor_energy,mts_sub_steps,contact_distance,length_for_manually_initialize_bonds,&
          manually_initialize_bonds_from_radii,contact_spring_coef,fracture_criterion, uniaxial_test, &
          debug_write,cdrag_grounding,h_to_init_grounding,frac_thres_scaling,frac_thres_n,frac_thres_t,save_bond_traj,&
          remove_unused_bergs,force_convergence,explicit_inner_mts,convergence_tolerance,dem,ignore_tangential_force,poisson,&
          dem_spring_coef,dem_damping_coef,dem_beam_test,constant_interaction_LW,constant_length,constant_width,&
-         dem_shear_for_frac_only,fl_use_poisson_distribution, fl_use_perimeter, fl_r, fl_r_s,displace_fl_bergs,&
+         fl_use_poisson_distribution, fl_use_perimeter, fl_r, fl_r_s,displace_fl_bergs,&
          fl_style,fl_bits_erosion_to_bergy_bits,fl_k_scale_by_perimeter,use_spring_for_land_contact, save_fl_traj,&
          new_berg_from_fl_bits_mass_thres,fl_bits_scale_l,fl_bits_scale_w,fl_bits_scale_t,separate_distrib_for_n_hemisphere,&
          initial_mass_n, distribution_n, mass_scaling_n, initial_thickness_n, fl_use_l_scale, fl_l_scale,&
          fl_l_scale_erosion_only, fl_youngs, fl_strength,  save_all_traj_year, save_nonfl_traj_by_class,&
          save_traj_by_class_start_mass_thres_n, save_traj_by_class_start_mass_thres_s,traj_area_thres_sntbc,&
          traj_area_thres_fl,tau_is_velocity, ocean_drag_scale, A68_test, &
-         A68_xdisp,A68_ydisp,use_broken_bonds_for_substep_contact,&
+         A68_xdisp,A68_ydisp,use_broken_bonds_for_substep_contact,print_fracture,&
          orig_dem_moment_of_inertia, break_bonds_on_sub_steps, skip_first_outer_mts_step, rev_mind, &
          no_frac_first_ts, use_grounding_torque, short_step_mts_grounding, radius_based_drag, save_bond_forces
 
@@ -1180,8 +1179,7 @@ real :: dx,dy,dx_dlon,dy_dlat,lat_ref2,lon_ref
 
 
   if ( (mpp_pe() == 0) .and. (Lx .ne. 360.) .and. .not. (grid_is_latlon) ) then
-    print *,''
-    print *,'pe0 x-domain before periodicity fix'
+    write(*,'(/,a)') 'pe0 x-domain before periodicity fix'
     write(*,'(f12.2)') (grd%lon(i,grd%jsd), i=grd%isd,grd%ied)
   endif
 
@@ -1246,20 +1244,9 @@ real :: dx,dy,dx_dlon,dy_dlat,lat_ref2,lon_ref
     write(stderrunit,'(a,i3,a,4i4)') 'KID, icebergs_init: (',mpp_pe(),') [ij][se]c=', &
           grd%isc,grd%iec,grd%jsc,grd%jec
 
-    !print *,'minval(grd%lon)',minval(grd%lon)
-    !print *,'maxval(grd%lon)',maxval(grd%lon)
-    !print *,'minval(grd%lat)',minval(grd%lat)
-    !print *,'maxval(grd%lat)',maxval(grd%lat)
-
     write(stderrunit,'(a,4f10.2)') '[Lon|lat][min|max]=', &
           minval(grd%lon),maxval(grd%lon),minval(grd%lat),maxval(grd%lat)
   endif
-
- ! if ( (mpp_pe() == 0) .and. (Lx .ne. -1.) .and. .not. (grid_is_latlon) ) then
- !   print *,''
- !   print *,'pe 0 x-domain after periodicity fix'
- !   write(*,'(f12.2)') (grd%lon(i,grd%jsd), i=grd%isd,grd%ied)
- ! end if
 
  !if (mpp_pe().eq.5) then
  !  write(stderrunit,'(a3,32i7)') 'Lon',(i,i=grd%isd,grd%ied)
@@ -1562,6 +1549,7 @@ endif
   else
     bergs%use_broken_bonds_for_substep_contact=.false.
   end if
+  bergs%print_fracture=print_fracture
   bergs%dem_beam_test=dem_beam_test
   bergs%constant_interaction_LW=constant_interaction_LW
   bergs%constant_length=constant_length
@@ -1579,7 +1567,6 @@ endif
     endif
   endif
   bergs%ocean_drag_scale=ocean_drag_scale
-  bergs%dem_shear_for_frac_only=dem_shear_for_frac_only
   ! Footloose calving parameters
   bergs%fl_use_poisson_distribution=fl_use_poisson_distribution
   bergs%fl_use_perimeter=fl_use_perimeter
@@ -1649,8 +1636,6 @@ endif
     bergs%contact_cells_lon = 1
     bergs%contact_cells_lat = 1
   endif
-
-  !print *,'# contact cells lon/lat',bergs%contact_cells_lon,bergs%contact_cells_lat
 
   !necessary?
   if (.not. mts) then
@@ -5418,6 +5403,7 @@ subroutine break_bonds_dem(bergs)
   type(bond) , pointer :: current_bond,other_bond,kick_the_bucket
   real :: frac_thres_n,frac_thres_t
   real :: Rsig,Rtau,frac
+  integer :: stderrunit
 
   if (no_frac_first_ts) then
     return
@@ -5439,13 +5425,6 @@ subroutine break_bonds_dem(bergs)
 
           if (bergs%fracture_criterion=='stress') then
             if (current_bond%nstress>frac_thres_n .or. current_bond%sstress>frac_thres_t) then
-              ! if (current_bond%nstress>frac_thres_n .and. current_bond%sstress>frac_thres_t) then
-              !   print *,'T and S break',this%lat,current_bond%nstress,current_bond%sstress
-              ! elseif (current_bond%nstress>frac_thres_n) then
-              !   print *,'TENSILE break',this%lat,current_bond%nstress,current_bond%sstress
-              ! else
-              !   print *,'SHEAR   break',this%lat,current_bond%nstress,current_bond%sstress
-              ! endif
               current_bond%other_id=-1
             endif
           else
@@ -5465,9 +5444,10 @@ subroutine break_bonds_dem(bergs)
                     other_bond%other_id=-1
                     if (debug) then
                       if (other_bond%nstress<=frac_thres_n .and. other_bond%sstress<=frac_thres_t) then
-                        print *,'Other bond did not fracture!'
-                        print *,'current and other bond nstress,',current_bond%nstress, other_bond%nstress
-                        print *,'current and other bond sstress,',current_bond%sstress, other_bond%sstress
+                        stderrunit=stderr()
+                        call error_mesg('KID, break_bonds_dem', 'Other bond did not fracture!', WARNING)
+                        write(stderrunit,*) 'current and other bond nstress',current_bond%nstress, other_bond%nstress
+                        write(stderrunit,*) 'current and other bond sstress',current_bond%sstress, other_bond%sstress
                       endif
                     endif
                   endif

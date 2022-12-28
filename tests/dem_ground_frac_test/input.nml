@@ -54,7 +54,6 @@
 
     monitor_energy=.false.
     !defaults given in parentheses:
-    new_mts=.true.
     mts=.true. !(F) for using the Multiple Time Stepping Velocity Verlet scheme
     mts_sub_steps=200 !(-1) # of mts sub-steps
     explicit_inner_mts=.true.

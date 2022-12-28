@@ -51,7 +51,7 @@ use ice_bergs_framework, only: save_bond_traj
 use ice_bergs_framework, only: fracture_testing_initialization, orig_bond_length
 use ice_bergs_framework, only: update_and_break_bonds,break_bonds_dem,assign_n_bonds,reset_bond_rotation
 use ice_bergs_framework, only: update_bond_angles
-use ice_bergs_framework, only: monitor_energy, energy_tests_init, mts, new_mts
+use ice_bergs_framework, only: monitor_energy, energy_tests_init, mts
 use ice_bergs_framework, only: dem_tests_init
 use ice_bergs_framework, only: dem, init_dem_params, save_bond_forces
 use ice_bergs_framework, only: orig_dem_moment_of_inertia, no_frac_first_ts
@@ -1078,7 +1078,7 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
     r_dist_y=(berg%lat_old-other_berg%lat_old)*dy_dlat
     current_bond%length=sqrt( (r_dist_x**2) + (r_dist_y**2) ) !(Stern et al 2017, Eqn 3)
 
-    if (current_bond%length==0) print *,'r_dist,berg%lat_old,berg%lon_old,other_berg%lat_old,other_berg%lon_old',current_bond%length,berg%lat,berg%lon,other_berg%lat,other_berg%lon
+    if (current_bond%length==0) call error_mesg('KID, calculate_force_dem', 'bond with zero length!', FATAL)
     !unit vec
     n1=r_dist_x/current_bond%length; n2=r_dist_y/current_bond%length
 
@@ -1175,12 +1175,17 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
 
           if (current_bond%broken.ne.1) then
             current_bond%broken=1
-            if (current_bond%nstress>bergs%frac_thres_n .and. current_bond%sstress>bergs%frac_thres_t) then
-              print *,'T and S break',berg%lat,current_bond%nstress,current_bond%sstress
-            elseif (current_bond%nstress>bergs%frac_thres_n) then
-              print *,'TENSILE break',berg%lat,current_bond%nstress,current_bond%sstress
-            else
-              print *,'SHEAR   break',berg%lat,current_bond%nstress,current_bond%sstress
+            if (bergs%print_fracture) then
+              if (current_bond%nstress>bergs%frac_thres_n .and. current_bond%sstress>bergs%frac_thres_t) then
+                write(*,'(a,4(x,a,es12.2))'),'T and S break: ',&
+                  'lat',berg%lat,'lon',berg%lon,'nstress',current_bond%nstress,'sstress',current_bond%sstress
+              elseif (current_bond%nstress>bergs%frac_thres_n) then
+                write(*,'(a,4(x,a,es12.2))'),'TENSILE break: ',&
+                  'lat',berg%lat,'lon',berg%lon,'nstress',current_bond%nstress,'sstress',current_bond%sstress
+              else
+                write(*,'(a,4(x,a,es12.2))'),'SHEAR break:   ',&
+                  'lat',berg%lat,'lon',berg%lon,'nstress',current_bond%nstress,'sstress',current_bond%sstress
+              endif
             endif
           endif
 
@@ -1258,10 +1263,6 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
 
     Fd_x = Fd_x-damping_coef*ur; Fd_y = Fd_y-damping_coef*vr  !linear damping force
     T_d  = T_d-damping_coef*(berg%ang_vel-other_berg%ang_vel) !damping torque
-
-    if (bergs%dem_shear_for_frac_only) then
-      Fs_x=0.; Fs_y=0.
-    endif
 
     !final forces
     T = T + (Ts + Tr) !torque
@@ -1495,7 +1496,7 @@ subroutine accel_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, d
   logical :: use_new_predictive_corrective !Flad to use Bob's predictive corrective scheme. (default off)
   integer :: itloop
   integer :: stderrunit
-  real :: dragfrac, N_bonds, N_max, groundfrac, c_gnd, drag_gnd, scaling
+  real :: dragfrac, N_bonds, N_max, groundfrac, c_gnd, drag_gnd, scaling=0.5
   real :: minfricvel=3.17e-12 !m/s (~0.0001 m/a)
   type(bond), pointer :: current_bond
   real :: IAd_x, IAd_y, sum_bond_Ee, sum_bond_Ed, oneoverkn, M2
@@ -1517,12 +1518,6 @@ subroutine accel_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, d
     !might as well set it for the berg velocity, too.
     uvel0=berg%uvel;  vvel0=berg%vvel
     uvel=berg%uvel;   vvel=berg%vvel
-  endif
-
-  if (new_mts) then
-    scaling=0.5
-  else
-    scaling=1.0
   endif
 
   ! Initializing accelerations
@@ -1576,12 +1571,6 @@ subroutine accel_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, d
       c_gnd=0.0
     endif
     if (short_step_mts_grounding) c_gnd=0.
-
-    !For testing sensitivity to number of short steps
-    ! if ((groundfrac.ne.0.) .and. (bergs%mts_sub_steps>200)) then
-    !   print *,'changing # of ss to 200'
-    !   bergs%mts_sub_steps=200
-    ! endif
 
     ! Wave radiation (Stern et al 2017, Eqs A4-A5)
     uwave=ua-uo; vwave=va-vo  ! Use wind speed rel. to ocean for wave model (aja)
@@ -1732,15 +1721,9 @@ subroutine accel_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, d
     axn=axn+f_cori*vveln; ayn=ayn-f_cori*uveln    !for Crank Nicolson Coriolis
   endif
 
-  if (new_mts) then
-    !ax = 0.5*(axn + bxn)
-    !where uvel_new = uvel_old + dt*ax
-    bxn = 2*ax-axn; byn = 2*ay-ayn
-  else
-    !ax = axn/2 + bxn
-    !where uvel_new = uvel_old + dt*ax
-    bxn= ax-(axn/2); byn= ay-(ayn/2) !Alon
-  endif
+  !ax = 0.5*(axn + bxn)
+  !where uvel_new = uvel_old + dt*ax
+  bxn = 2*ax-axn; byn = 2*ay-ayn
 
   if (bergs%mts_part==1) then
     !collisional elastic forces
@@ -1776,11 +1759,11 @@ subroutine accel_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, d
             (uvel0 + u_star)*M*current_bond%axn_fast +&
             (vvel0 + v_star)*M*current_bond%ayn_fast)
 
-          if (new_mts) then
-            current_bond%Ed=current_bond%Ed - 0.25*dt*(&
-              (uvel0 + u_star)*M*current_bond%bxn_fast +&
-              (vvel0 + v_star)*M*current_bond%byn_fast)
-          endif
+
+          current_bond%Ed=current_bond%Ed - 0.25*dt*(&
+            (uvel0 + u_star)*M*current_bond%bxn_fast +&
+            (vvel0 + v_star)*M*current_bond%byn_fast)
+
         endif
 
         !the rest:
@@ -1811,17 +1794,10 @@ subroutine accel_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, d
             (u_star + uveln)*M*IA_x + &
             (v_star + vveln)*M*IA_y)
 
-
-          if (new_mts) then
-            !V{i+0.5} to V{i+1}
-            current_bond%Ed=current_bond%Ed- 0.25*dt*(&
-              (u_star + uveln)*M*IAd_x + &
-              (v_star + vveln)*M*IAd_y)
-          else
-            current_bond%Ed=current_bond%Ed - 0.5*dt*(&
-              (u_star + uveln)*M*IAd_x + &
-              (v_star + vveln)*M*IAd_y)
-          endif
+          !V{i+0.5} to V{i+1}
+          current_bond%Ed=current_bond%Ed- 0.25*dt*(&
+            (u_star + uveln)*M*IAd_x + &
+            (v_star + vveln)*M*IAd_y)
 
           sum_bond_Ee = sum_bond_Ee + current_bond%Ee
           sum_bond_Ed = sum_bond_Ed + current_bond%Ed
@@ -2185,27 +2161,6 @@ subroutine accel_explicit_inner_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, 
     IA_x=IA_x+F_x/M; IA_y=IA_y+F_y/M
     IAd_x=IAd_x+Fd_x/M; IAd_y=IAd_y+Fd_y/M
 
-    ! !torque from grounding drag
-    ! !start to feel grounded with draught of bergs%h_to_init_grounding meters of the sea floor topography
-    ! !at groundfrac=0, apply no grounding force. at groundfrac=1, apply max grounding force
-    ! D=(bergs%rho_bergs/rho_seawater)*berg%thickness ! draught (keel depth)
-    ! if (bergs%h_to_init_grounding>0.0) then
-    !   groundfrac=1.0-(berg%od-D)/bergs%h_to_init_grounding
-    !   groundfrac=max(groundfrac,0.0); groundfrac=min(groundfrac,1.0)
-    ! else
-    !   if (D>berg%od) then
-    !     groundfrac=1.0
-    !   else
-    !     groundfrac=0.0
-    !   endif
-    ! endif
-    ! if (groundfrac>0.0) then
-    !   print *,'T_prev,T_d,groundfrac,nbonds,angvel',T,T_d,groundfrac,berg%n_bonds,berg%ang_vel
-    !   print *,'T ground',-bergs%cdrag_grounding*groundfrac*0.5*pi*(R1**4.)*berg%ang_vel
-    !   T=T-bergs%cdrag_grounding*groundfrac*0.5*pi*(R1**4.)*berg%ang_vel !treat berg as disk?
-    !   print *,'T_after',T
-    ! endif
-
     at=(T+T_d)/(0.5*M*R1**2) !torque acceleration
     berg%ang_accel = at
   endif
@@ -2213,11 +2168,7 @@ subroutine accel_explicit_inner_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, 
   axn=IA_x+IAd_x; ayn=IA_y+IAd_y
   bxn=0.0; byn=0.0
 
-  if (new_mts) then
-    ax=0.5*(axn+bxn); ay=0.5*(ayn+byn)
-  else
-    ax=0.5*axn+bxn; ay=0.5*ayn+byn
-  endif
+  ax=0.5*(axn+bxn); ay=0.5*(ayn+byn)
 
   uveln=u_star+dt*ax; vveln=v_star+dt*ay
 
@@ -2235,12 +2186,10 @@ subroutine accel_explicit_inner_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, 
             (uvel0 + u_star)*M*current_bond%axn_fast +&
             (vvel0 + v_star)*M*current_bond%ayn_fast)
 
-          if (new_mts) then
-            !here, bxn_fast and byn_fast are explicit damping accel (not implicit!)
-            current_bond%Ed=current_bond%Ed - 0.25*dt*(&
-              (uvel0 + u_star)*M*current_bond%bxn_fast +&
-              (vvel0 + v_star)*M*current_bond%byn_fast)
-          endif
+          !here, bxn_fast and byn_fast are explicit damping accel (not implicit!)
+          current_bond%Ed=current_bond%Ed - 0.25*dt*(&
+            (uvel0 + u_star)*M*current_bond%bxn_fast +&
+            (vvel0 + v_star)*M*current_bond%byn_fast)
         endif
 
         !the rest:
@@ -2305,17 +2254,10 @@ subroutine accel_explicit_inner_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, 
             (u_star + uveln)*M*IA_x + &
             (v_star + vveln)*M*IA_y)
 
-
-          if (new_mts) then
-            !V{i+0.5} to V{i+1}
-            current_bond%Ed=current_bond%Ed- 0.25*dt*(&
-              (u_star + uveln)*M*IAd_x + &
-              (v_star + vveln)*M*IAd_y)
-          else
-            current_bond%Ed=current_bond%Ed - 0.5*dt*(&
-              (u_star + uveln)*M*IAd_x + &
-              (v_star + vveln)*M*IAd_y)
-          endif
+          !V{i+0.5} to V{i+1}
+          current_bond%Ed=current_bond%Ed- 0.25*dt*(&
+            (u_star + uveln)*M*IAd_x + &
+            (v_star + vveln)*M*IAd_y)
 
           current_bond%axn_fast=IA_x;  current_bond%ayn_fast=IA_y
 
@@ -3225,7 +3167,6 @@ subroutine delete_fully_fl_calved_edge_elements(bergs)
         !berg is marked to delete
         kick_the_bucket=>this
         this=>this%next
-        print *,'deleting berg',this%id
         call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
       else
         this=>this%next
@@ -5362,52 +5303,17 @@ subroutine interp_flds(grd, x, y, i, j, xi, yj, rx, ry, uo, vo, ui, vi, ua, va, 
   ! Ocean depth is only needed for grounding friction, used with the MTS model only?
   if (present(od)) then
     if (mts) then
-      !od=quad_interp_from_agrid(grd,grd%ocean_depth,x,y,i,j,xi,yj)+quad_interp_from_agrid(grd,grd%ssh,x,y,i,j,xi,yj)
-
-      !od=quad_interp_from_agrid(grd,grd%ocean_depth+grd%ssh,x,y,i,j,xi,yj)
-
       if (A68_test) then
-
-        ! if (x<(-37.1+360) .and. x>(-37.38+360) .and. y<-54.68 .and. y>-54.86) then
-        !   od=0
-        ! else
-        !   od=1000
-        ! endif
-
-        od=1000.
-        !if ((x>-37.3861+360).and.(y>-54.9778)) od=0.
-        !if ((x>-37.2752+360).and.(y>-55.1341)) od=0.
-        !if ((x>-37.3458+360).and.(y>-55.1038)) od=0.
-
-        !od17.8 dy=-0.1
-        !if ((x>-37.2954+360).and.(y>-55.2975)) od=0.
-        if ((x>A68_xdisp+360).and.(y>A68_ydisp)) od=0.
-
-        ! p1y=p1y+A68_ydisp; p2y=p2y+A68_ydisp; p3y=p3y+A68_ydisp
-        ! p1x=p1x+A68_xdisp; p2x=p2x+A68_xdisp; p3x=p3x+A68_xdisp
-
-        ! od=1000.0
-        ! if (x>p1x .and. x<p2x .and. y>p1y .and. y<p3y) then
-        !   alpha = ((p2y - p3y)*(x - p3x) + (p3x - p2x)*(y - p3y)) /&
-        !     ((p2y - p3y)*(p1x - p3x) + (p3x - p2x)*(p1y - p3y))
-        !   if (alpha>0.) then
-        !     beta = ((p3y - p1y)*(x - p3x) + (p1x - p3x)*(y - p3y)) /&
-        !       ((p2y - p3y)*(p1x - p3x) + (p3x - p2x)*(p1y - p3y))
-        !     if (beta>0.) then
-        !       gamma = 1. - alpha - beta
-        !       if (gamma>0.) then
-        !         od=0.
-        !       endif
-        !     endif
-        !   endif
-        ! endif
-
-        ! p1y=p1y-A68_ydisp; p2y=p2y-A68_ydisp; p3y=p3y-A68_ydisp
-        ! p1x=p1x-A68_xdisp; p2x=p2x-A68_xdisp; p3x=p3x-A68_xdisp
+        if ((x>A68_xdisp+360).and.(y>A68_ydisp)) then
+          !ocean depth of the grounding zone
+          od=0.
+        else
+          !ocean depth elsewhere, sufficient to prevent grounding
+          od=1000.
+        endif
       else
         od=quad_interp_from_agrid(grd,grd%ocean_depth+grd%ssh,x,y,i,j,xi,yj)
       endif
-
     else
       od=grd%ocean_depth(i,j)+grd%ssh(i,j)
     endif
@@ -7326,17 +7232,8 @@ subroutine evolve_icebergs_mts(bergs)
           berg%lat_prev = berg%lat; berg%lon_prev = berg%lon
           berg%uvel=berg%uvel_prev; berg%vvel=berg%vvel_prev
 
-          if (new_mts) then
-            berg%uvel = berg%uvel + dt_2*(berg%axn+berg%bxn)
-            berg%vvel = berg%vvel + dt_2*(berg%ayn+berg%byn)
-          else
-            ! TODO: make this work with latlon coords (or just get rid of the depreciated non-new_mts option)
-            if (grd%grid_is_latlon) stop
-            berg%uvel = berg%uvel + dt_2*berg%axn
-            berg%vvel = berg%vvel + dt_2*berg%ayn
-            berg%lat = berg%lat + 0.5*(dt**2)*berg%byn
-            berg%lon = berg%lon + 0.5*(dt**2)*berg%bxn
-          endif
+          berg%uvel = berg%uvel + dt_2*(berg%axn+berg%bxn)
+          berg%vvel = berg%vvel + dt_2*(berg%ayn+berg%byn)
 
           berg%uvel_old=berg%uvel; berg%vvel_old=berg%vvel
 
@@ -7405,13 +7302,8 @@ subroutine evolve_icebergs_mts(bergs)
           berg%lon_old=lonn  ;  berg%lat_old=latn
 
           !Set uvel_old to ustar for berg interactions?
-          if (new_mts) then
-            berg%uvel_old=berg%uvel+dt_2*(berg%axn_fast+berg%bxn_fast)
-            berg%vvel_old=berg%vvel+dt_2*(berg%ayn_fast+berg%bxn_fast)
-          else
-            berg%uvel_old=berg%uvel+dt_2*(berg%axn_fast)
-            berg%vvel_old=berg%vvel+dt_2*(berg%ayn_fast)
-          endif
+          berg%uvel_old=berg%uvel+dt_2*(berg%axn_fast+berg%bxn_fast)
+          berg%vvel_old=berg%vvel+dt_2*(berg%ayn_fast+berg%bxn_fast)
         end if
         berg=>berg%next
       enddo !loop over all bergs
@@ -7446,9 +7338,7 @@ subroutine evolve_icebergs_mts(bergs)
           i=berg%ine      ;   j=berg%jne
           xi=berg%xi      ;   yj=berg%yj
 
-          if (new_mts) then
-            axn = axn+bxn; ayn=ayn+byn
-          endif
+          axn = axn+bxn; ayn=ayn+byn
 
           ! Turn the velocities into u_star, v_star.(uvel3 is v_star) - (possible issues with tangent plane?)
           uvel3=uvel1+(dt_2*axn)                  !(Stern et al 2017, Eq B4)
@@ -7552,13 +7442,8 @@ subroutine evolve_icebergs_mts(bergs)
             !update old velocities for interactions
             berg%uvel_old=berg%uvel; berg%vvel_old=berg%vvel
 
-            if (new_mts) then
-              berg%uvel=berg%uvel-dt_2*(berg%axn_fast+berg%bxn_fast)-dt_2*(berg%axn+berg%bxn)
-              berg%vvel=berg%vvel-dt_2*(berg%ayn_fast+berg%byn_fast)-dt_2*(berg%ayn+berg%byn)
-            else
-              berg%uvel=berg%uvel-dt_2*(berg%axn_fast+2.0*berg%bxn_fast)-dt_2*berg%axn
-              berg%vvel=berg%vvel-dt_2*(berg%ayn_fast+2.0*berg%byn_fast)-dt_2*berg%ayn
-            endif
+            berg%uvel=berg%uvel-dt_2*(berg%axn_fast+berg%bxn_fast)-dt_2*(berg%axn+berg%bxn)
+            berg%vvel=berg%vvel-dt_2*(berg%ayn_fast+berg%byn_fast)-dt_2*(berg%ayn+berg%byn)
             berg%axn_fast=berg%axn; berg%ayn_fast=berg%ayn
             berg%bxn_fast=berg%bxn; berg%byn_fast=berg%byn
           endif
@@ -7581,7 +7466,7 @@ subroutine evolve_icebergs_mts(bergs)
           berg%uvel_old=berg%uvel; berg%vvel_old=berg%vvel
 
           if (bergs%use_grounding_torque) then
-            !torque from grounding drag
+            !torque from grounding drag (WARNING: EXPERIMENTAL)
             !start to feel grounded with draught of bergs%h_to_init_grounding meters of the sea floor topography
             !at groundfrac=0, apply no grounding force. at groundfrac=1, apply max grounding force
             D=(bergs%rho_bergs/rho_seawater)*berg%thickness ! draught (keel depth)
@@ -7675,11 +7560,6 @@ subroutine evolve_icebergs_mts(bergs)
   enddo; enddo ! update 'old' velocities
 
   no_frac_first_ts=.false.
-  ! for testing:
-  ! maxii=ii; minii=ii
-  ! call mpp_max(maxii); call mpp_min(minii); call mpp_max(maxjj); call mpp_min(minjj)
-  !if (maxii>2 .or. maxjj>2) print *,'outer max iters, inner max iters',maxii,maxjj
-
 end subroutine evolve_icebergs_mts
 
 
@@ -7711,69 +7591,35 @@ subroutine mts_energy_part_1(bergs, berg, ax1, ay1, axn, ayn, bxn, byn, Fec_x, F
 
   !derived from Mayrhofer,Hager, and Kloss 2017 (MHK17) and Asmar et al 2003
   M = berg%mass
-  if (new_mts) then
-    Fex = M * 2*ax1; Fey = M * 2*ay1 !external forces
-    Fex = Fex - Fec_x - Fdc_x; Fey = Fey - Fec_y - Fdc_y !external forces minus collisional
 
-    uveln=berg%uvel+(dt*ax1); vveln=berg%vvel+(dt*ay1)
-    ustar=berg%uvel; vstar=berg%vvel
+  Fex = M * 2*ax1; Fey = M * 2*ay1 !external forces
+  Fex = Fex - Fec_x - Fdc_x; Fey = Fey - Fec_y - Fdc_y !external forces minus collisional
 
-    !dEext=0.5*(V_{i+1} + V_{i+0.5})*F_{ext,i+1}*dt/2
-    berg%Eext=berg%Eext_temp - 0.25*dt*(&
-      (uveln + ustar)*Fex + (vveln + vstar)*Fey)
+  uveln=berg%uvel+(dt*ax1); vveln=berg%vvel+(dt*ay1)
+  ustar=berg%uvel; vstar=berg%vvel
 
-    berg%Ee_contact=berg%Ee_contact_temp - 0.25*dt*(&
-      (uveln + ustar)*Fec_x + (vveln + vstar)*Fec_y)
+  !dEext=0.5*(V_{i+1} + V_{i+0.5})*F_{ext,i+1}*dt/2
+  berg%Eext=berg%Eext_temp - 0.25*dt*(&
+    (uveln + ustar)*Fex + (vveln + vstar)*Fey)
 
-    berg%Ed_contact=berg%Ed_contact_temp - 0.25*dt*(&
-      (uveln + ustar)*Fdc_x + (vveln + vstar)*Fdc_y)
+  berg%Ee_contact=berg%Ee_contact_temp - 0.25*dt*(&
+    (uveln + ustar)*Fec_x + (vveln + vstar)*Fec_y)
 
-    !The following is for part II
-    !V{i+1.5}
-    uveln_star = uveln + dt*ax1; vveln_star = vveln + dt*ay1
+  berg%Ed_contact=berg%Ed_contact_temp - 0.25*dt*(&
+    (uveln + ustar)*Fdc_x + (vveln + vstar)*Fdc_y)
 
-    berg%Eext_temp=berg%Eext - 0.25*dt*(&
-      (uveln + uveln_star)*Fex + (vveln + vveln_star)*Fey)
+  !The following is for part II
+  !V{i+1.5}
+  uveln_star = uveln + dt*ax1; vveln_star = vveln + dt*ay1
 
-    berg%Ee_contact_temp=berg%Ee_contact - 0.25*dt*(&
-      (uveln + uveln_star)*Fec_x + (vveln + vveln_star)*Fec_y)
+  berg%Eext_temp=berg%Eext - 0.25*dt*(&
+    (uveln + uveln_star)*Fex + (vveln + vveln_star)*Fey)
 
-    berg%Ed_contact_temp=berg%Ed_contact - 0.25*dt*(&
-      (uveln + uveln_star)*Fdc_x + (vveln + vveln_star)*Fdc_y)
+  berg%Ee_contact_temp=berg%Ee_contact - 0.25*dt*(&
+    (uveln + uveln_star)*Fec_x + (vveln + vveln_star)*Fec_y)
 
-  else
-    Fex = M * axn; Fey = M * ayn !explicit forces
-    Fex = Fex - Fec_x; Fey = Fey - Fec_y !explicit forces minus collisional elastic
-    Fex_i = M * bxn;     Fey_i= M * byn !implicit forces
-    Fex_i = Fex_i - Fdc_x; Fey_i = Fey_i - Fdc_y !implicit forces minus collisional damping
-
-    uveln=berg%uvel+(dt*ax1); vveln=berg%vvel+(dt*ay1)
-    ustar=berg%uvel; vstar=berg%vvel
-
-    !explicit:
-    !dEext=0.5*(V_{i+1} + V_{i+0.5})*F_{ext,i+1}*dt/2
-    berg%Eext=berg%Eext_temp - 0.25*dt*(&
-      (uveln + ustar)*Fex + (vveln + vstar)*Fey)
-
-    berg%Ee_contact=berg%Ee_contact_temp - 0.25*dt*(&
-      (uveln + ustar)*Fec_x + (vveln + vstar)*Fec_y)
-
-    berg%Eext=berg%Eext - 0.5*dt*(&
-      (uveln + ustar)*Fex_i + (vveln + vstar)*Fey_i)
-
-    berg%Ed_contact=berg%Ed_contact - 0.5*dt*(&
-      (uveln + ustar)*Fdc_x + (vveln + vstar)*Fdc_y)
-
-    !The following is for part II
-    !V{i+1.5}
-    uveln_star = uveln + 0.5*dt*axn; vveln_star = vveln + 0.5*dt*ayn
-
-    berg%Eext_temp=berg%Eext - 0.25*dt*(&
-      (uveln + uveln_star)*Fex + (vveln + vveln_star)*Fey)
-
-    berg%Ee_contact_temp=berg%Ee_contact - 0.25*dt*(&
-      (uveln + uveln_star)*Fec_x + (vveln + vveln_star)*Fec_y)
-  endif
+  berg%Ed_contact_temp=berg%Ed_contact - 0.25*dt*(&
+    (uveln + uveln_star)*Fdc_x + (vveln + vveln_star)*Fdc_y)
 
   berg%Ee=berg%Ee_temp; berg%Ed=berg%Ed_temp
 end subroutine mts_energy_part_1
@@ -7800,17 +7646,11 @@ subroutine mts_energy_part_3(bergs,berg,ustar,vstar,wt)
     (ustar + berg%uvel)*Fex + &
     (vstar + berg%vvel)*Fey)
 
-  if (new_mts) then   !for i to i+1/2 or i+1/2 to i+1
-    Fdx = M * berg%bxn_fast; Fdy = M * berg%byn_fast !damping forces
-    berg%Ed_temp=berg%Ed_temp - 0.25*dt*(&
-      (ustar + berg%uvel)*Fdx + &
-      (vstar + berg%vvel)*Fdy)
-  elseif (wt==2) then !for i+1/2 to i+1
-    Fdx = M * berg%bxn_fast; Fdy = M * berg%byn_fast !damping forces
-    berg%Ed_temp=berg%Ed_temp - 0.5*dt*(&
-      (ustar + berg%uvel)*Fdx + &
-      (vstar + berg%vvel)*Fdy)
-  endif
+  Fdx = M * berg%bxn_fast; Fdy = M * berg%byn_fast !damping forces
+  berg%Ed_temp=berg%Ed_temp - 0.25*dt*(&
+    (ustar + berg%uvel)*Fdx + &
+    (vstar + berg%vvel)*Fdy)
+
 end subroutine mts_energy_part_3
 
 !> Evolves icebergs forward by updating velocity and position with a time-stepping scheme
