@@ -103,9 +103,8 @@ public split_id, id_from_2_ints, generate_id, cij_from_old_id, convert_old_id
 public update_latlon,set_conglom_ids,transfer_mts_bergs,quad_interp_from_agrid
 public pack_bond_traj_into_buffer2, unpack_bond_traj_from_buffer2, push_bond_posn, append_bond_posn
 public update_and_break_bonds,break_bonds_dem,assign_n_bonds,reset_bond_rotation,update_bond_angles
-public fracture_testing_initialization, orig_bond_length
+public orig_bond_length
 public energy_tests_init,dem_tests_init
-public init_dem_params
 public set_constant_interaction_length_and_width
 public break_bonds_on_sub_steps, skip_first_outer_mts_step, no_frac_first_ts
 
@@ -648,9 +647,8 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   logical :: print_fracture=.true. !when a bond breaks, print fracture type, lat, lon, and stresses
   logical :: bond_break_detected=.false.
   integer :: dem_beam_test=0 !1=Simply supported beam,2=cantilever beam,3=angular vel tes
-  logical :: uniaxial_test=.false. !adds a tensile stress to the east-most berg element
-  real :: dem_tests_start_lon !starting lon of west-most berg element for uniaxial/dem tests
-  real :: dem_tests_end_lon !starting lon of east-most berg element for uniaxial/dem tests
+  real :: dem_tests_start_lon !starting lon of west-most berg element for dem tests
+  real :: dem_tests_end_lon !starting lon of east-most berg element for dem tests
   ! Element interactions
   logical :: constant_interaction_LW=.false. !< Use a constant element length & width during berg interactions
   real :: constant_length=0.!< If constant_interaction_LW, the constant length. If 0, will be set to max initial length
@@ -658,7 +656,6 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   real :: constant_area
   real :: constant_radius
   real :: ocean_drag_scale=1. !< Scaling factor for the ocean drag coefficients
-  logical :: use_spring_for_land_contact=.false. !< Treat contact with masked (land) cells like contact with a static berg
   ! Footloose calving parameters
   logical :: fl_use_poisson_distribution=.true. !< fl_r is (T) mean of Poisson distribution to determine k, or (F) k=fl_r
   logical :: fl_use_perimeter=.false. !< scale number of footloose bergs to calve by perimeter of the parent berg
@@ -762,7 +759,6 @@ integer :: max_bonds=6 ! Maximum number of iceberg bond passed between processor
 real :: rho_bergs=850. ! Density of icebergs
 real :: spring_coef=1.e-8 ! Spring constant for iceberg interactions (this seems to be the highest stable value)
 real :: contact_spring_coef=0. !Spring coef for berg collisions (is set to spring_coef if not specified)
-logical :: uniaxial_test=.false. !adds a tensile stress to the east-most berg element
 real :: cdrag_grounding=0.0 ! Drag coefficient against ocean bottom
 real :: h_to_init_grounding=100.0
 real :: frac_thres_n=0.0 !normal fracture strain threshold
@@ -879,7 +875,6 @@ logical :: constant_interaction_LW=.false. ! Always use the initial, globally co
 real :: constant_length=0. ! If constant_interaction_LW, the constant length used. If zero in the nml, will be set to max initial L
 real :: constant_width=0. ! If constant_interaction_LW, the constant width used. If zero in the nml, will be set to max initial W
 real :: ocean_drag_scale=1. !< Scaling factor for the ocean drag coefficients
-logical :: use_spring_for_land_contact=.false. ! Treat contact with masked (land) cells like contact with a static berg
 ! Footloose calving parameters [England et al (2020) Modeling the breakup of tabular icebergs. Sci. Adv.]
 logical :: fl_use_poisson_distribution=.true. ! fl_r is (T) mean of Poisson distribution to determine k, or (F) k=fl_r
 logical :: fl_use_perimeter=.false. ! scale number of footloose bergs to calve by perimeter of the parent berg
@@ -918,12 +913,12 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          read_old_restarts, tau_calving, read_ocean_depth_from_file, melt_cutoff,apply_thickness_cutoff_to_gridded_melt,&
          apply_thickness_cutoff_to_bergs_melt, use_mixed_melting, internal_bergs_for_drag, coastal_drift, tidal_drift,&
          mts,ewsame,monitor_energy,mts_sub_steps,contact_distance,length_for_manually_initialize_bonds,&
-         manually_initialize_bonds_from_radii,contact_spring_coef,fracture_criterion, uniaxial_test, &
+         manually_initialize_bonds_from_radii,contact_spring_coef,fracture_criterion, &
          debug_write,cdrag_grounding,h_to_init_grounding,frac_thres_scaling,frac_thres_n,frac_thres_t,save_bond_traj,&
          remove_unused_bergs,force_convergence,explicit_inner_mts,convergence_tolerance,dem,ignore_tangential_force,poisson,&
          dem_spring_coef,dem_damping_coef,dem_beam_test,constant_interaction_LW,constant_length,constant_width,&
          fl_use_poisson_distribution, fl_use_perimeter, fl_r, fl_r_s,displace_fl_bergs,&
-         fl_style,fl_bits_erosion_to_bergy_bits,fl_k_scale_by_perimeter,use_spring_for_land_contact, save_fl_traj,&
+         fl_style,fl_bits_erosion_to_bergy_bits,fl_k_scale_by_perimeter, save_fl_traj,&
          new_berg_from_fl_bits_mass_thres,fl_bits_scale_l,fl_bits_scale_w,fl_bits_scale_t,separate_distrib_for_n_hemisphere,&
          initial_mass_n, distribution_n, mass_scaling_n, initial_thickness_n, fl_use_l_scale, fl_l_scale,&
          fl_l_scale_erosion_only, fl_youngs, fl_strength,  save_all_traj_year, save_nonfl_traj_by_class,&
@@ -1452,7 +1447,6 @@ endif
   bergs%spring_coef=spring_coef
   bergs%contact_spring_coef=contact_spring_coef !Alex
   bergs%fracture_criterion=fracture_criterion
-  bergs%uniaxial_test=uniaxial_test
   bergs%cdrag_grounding=cdrag_grounding
   bergs%h_to_init_grounding=h_to_init_grounding
   bergs%frac_thres_n=frac_thres_n*frac_thres_scaling
@@ -1520,7 +1514,6 @@ endif
   bergs%add_weight_to_ocean=add_weight_to_ocean
   bergs%use_old_spreading=use_old_spreading
   bergs%debug_iceberg_with_id=debug_iceberg_with_id
-  bergs%use_spring_for_land_contact=use_spring_for_land_contact
   bergs%mts=mts
   bergs%mts_fast_dt = mts_fast_dt
   bergs%mts_sub_steps = mts_sub_steps
@@ -4982,32 +4975,6 @@ real :: dist
   enddo; enddo
 end subroutine orig_bond_length
 
-!> Initialize fracture parameters for non-DEM style fracture
-subroutine fracture_testing_initialization(bergs)
-type(icebergs), pointer :: bergs !< Container for all types and memory
-type(iceberg), pointer :: this
-type(bond) , pointer :: current_bond
-type(icebergs_gridded), pointer :: grd
-integer :: grdi, grdj
-
-  grd=>bergs%grd
-  do grdj=grd%jsd,grd%jed ; do grdi=grd%isd,grd%ied !loop over all cells
-    this=>bergs%list(grdi,grdj)%first
-    do while (associated(this)) ! loop over all bergs in cell
-      this%accum_bond_rotation=0.0
-      current_bond=>this%first_bond
-      do while (associated(current_bond)) ! loop over all bonds
-        current_bond%rotation=0.0
-        current_bond%rel_rotation=0.0
-        current_bond%n_frac_var=0.0
-        current_bond%n_strain_rate=0.0
-        current_bond=>current_bond%next_bond
-      enddo
-      this=>this%next
-    enddo
-  enddo;enddo
-end subroutine fracture_testing_initialization
-
 !> Save number of bonds on element
 subroutine assign_n_bonds(bergs)
 type(icebergs), pointer :: bergs !< Container for all types and memory
@@ -5122,26 +5089,6 @@ real :: minlon,maxlon
   endif
 
 end subroutine dem_tests_init
-
-!> Initialize berg element parameters for DEM-style simulations
-subroutine init_dem_params(bergs)
-type(icebergs), pointer :: bergs !< Container for all types and memory
-type(iceberg), pointer :: this
-type(icebergs_gridded), pointer :: grd
-integer :: grdi, grdj
-real :: maxlon
-
-  grd=>bergs%grd
-  do grdj=grd%jsd,grd%jed ; do grdi=grd%isd,grd%ied !loop over all cells
-    this=>bergs%list(grdi,grdj)%first
-    do while (associated(this)) ! loop over all bergs in cell
-      !this%ang_vel=0.
-      this%ang_accel=0.
-      this%rot=0.
-      this=>this%next
-    enddo
-  enddo;enddo
-end subroutine init_dem_params
 
 !> Set the accumulated bond rotation to zero for all bergs
 subroutine reset_bond_rotation(bergs)

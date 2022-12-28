@@ -48,12 +48,12 @@ use ice_bergs_framework, only: generate_id
 use ice_bergs_framework, only: update_latlon,set_conglom_ids,transfer_mts_bergs
 use ice_bergs_framework, only: quad_interp_from_agrid
 use ice_bergs_framework, only: save_bond_traj
-use ice_bergs_framework, only: fracture_testing_initialization, orig_bond_length
+use ice_bergs_framework, only: orig_bond_length
 use ice_bergs_framework, only: update_and_break_bonds,break_bonds_dem,assign_n_bonds,reset_bond_rotation
 use ice_bergs_framework, only: update_bond_angles
 use ice_bergs_framework, only: monitor_energy, energy_tests_init, mts
 use ice_bergs_framework, only: dem_tests_init
-use ice_bergs_framework, only: dem, init_dem_params, save_bond_forces
+use ice_bergs_framework, only: dem, save_bond_forces
 use ice_bergs_framework, only: orig_dem_moment_of_inertia, no_frac_first_ts
 use ice_bergs_framework, only: A68_test, A68_xdisp, A68_ydisp
 use ice_bergs_framework, only: set_constant_interaction_length_and_width, skip_first_outer_mts_step
@@ -156,7 +156,6 @@ subroutine icebergs_init(bergs, &
   if (bergs%read_ocean_depth_from_file) call read_ocean_depth(bergs%grd)
 
   if (monitor_energy) call energy_tests_init(bergs)
-  !if (bergs%dem) call init_dem_params(bergs)
 
   if (bergs%iceberg_bonds_on) then
     if (bergs%manually_initialize_bonds) then
@@ -176,16 +175,16 @@ subroutine icebergs_init(bergs, &
     check_bond_quality=.True.
     call count_bonds(bergs, nbonds,check_bond_quality)
     call assign_n_bonds(bergs)
-    !call fracture_testing_initialization(bergs)
   endif
 
-  if (bergs%uniaxial_test .or. bergs%dem_beam_test>0) call dem_tests_init(bergs)
+  if (bergs%dem_beam_test>0) call dem_tests_init(bergs)
 
   if (bergs%constant_interaction_LW .and. (bergs%constant_length==0. .or. bergs%constant_width==0.)) then
     call set_constant_interaction_length_and_width(bergs)
   endif
 end subroutine icebergs_init
 
+!> For debugging. Call to write all particle and bond trajectories, including within halos. Then, end the simulation.
 subroutine debugwriteandstop(bergs)
   type(icebergs), pointer :: bergs !< Container for all types and memory
   bergs%debug_write=.true.
@@ -196,7 +195,6 @@ subroutine debugwriteandstop(bergs)
   call mpp_sync()
   call error_mesg('KID', 'WRITE AND STOP!!!', FATAL)
 end subroutine debugwriteandstop
-
 
 !> Invoke some unit testing
 subroutine unit_testing(bergs)
@@ -583,14 +581,6 @@ subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
           other_berg=>other_berg%next
         enddo
       enddo; enddo
-      if (bergs%use_spring_for_land_contact) then
-        grd=>bergs%grd
-        do grdj = max(berg%jne-nc_y,bergs%grd%jsd),min(berg%jne+nc_y,bergs%grd%jed);&
-          do grdi = max(berg%ine-nc_x,bergs%grd%isd),min(berg%ine+nc_x,bergs%grd%ied)
-          if (grd%msk(grdi,grdj)==0) call calculate_force_land_contact(bergs, berg, grd, grdi, grdj, &
-            IA_x, IA_y, P_ia_11, P_ia_12, P_ia_21, P_ia_22) !, P_ia_times_u_x, P_ia_times_u_y)
-        enddo; enddo
-      endif
     endif
 
   else
@@ -619,14 +609,6 @@ subroutine interactive_force(bergs, berg, IA_x, IA_y, u0, v0, u1, v1,&
         endif
         current_bond=>current_bond%next_bond
       enddo
-    endif
-    if (bergs%use_spring_for_land_contact) then
-      grd=>bergs%grd
-      do grdj = max(berg%jne-nc_y,bergs%grd%jsd),min(berg%jne+nc_y,bergs%grd%jed);&
-        do grdi = max(berg%ine-nc_x,bergs%grd%isd),min(berg%ine+nc_x,bergs%grd%ied)
-        if (grd%msk(grdi,grdj)==0) call calculate_force_land_contact(bergs, berg, grd, grdi, grdj, &
-          IA_x, IA_y, P_ia_11, P_ia_12, P_ia_21, P_ia_22) !, P_ia_times_u_x, P_ia_times_u_y)
-      enddo; enddo
     endif
   endif
 end subroutine interactive_force
@@ -768,11 +750,6 @@ subroutine calculate_force(bergs, berg, other_berg, IA_x, IA_y, u0, v0, u1, v1, 
     if (bonded .and. .not. (bergs%mts .or. (bergs%contact_distance>0.) .or. &
       (bergs%contact_spring_coef .ne. bergs%spring_coef) )) then
       if (.not. (r_dist>crit_dist)) tbonded=.false.
-    endif
-
-    if (bergs%uniaxial_test) then
-      if (berg%start_lon==bergs%dem_tests_start_lon) IA_x=IA_x-1.e-5
-      if (berg%start_lon==bergs%dem_tests_end_lon)   IA_x=IA_x+1.e-5
     endif
 
     if  ((r_dist>0.) .and. ( tbonded .or. (r_dist<crit_dist .and. .not. bonded) )) then
@@ -931,11 +908,6 @@ subroutine calculate_unbonded_same_conglom_dem_force(bergs, berg, other_berg, IA
       endif
     endif
 
-    if (bergs%uniaxial_test) then
-      if (berg%start_lon==bergs%dem_tests_start_lon) IA_x=IA_x-1.e-5
-      if (berg%start_lon==bergs%dem_tests_end_lon)   IA_x=IA_x+1.e-5
-    endif
-
     if  ((r_dist>0.) .and. (r_dist<crit_dist)) then
 
       !Spring force (Stern et al 2017, Eqn 7):
@@ -1092,8 +1064,11 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
     !bond width (determined at contact point)
     L=2.0*(Rmin+(Rmin-half_delta)*abs(R1-R2)/current_bond%length)
 
-    Thick=T_Rmin+(Rmin-half_delta)*abs(berg%thickness-other_berg%thickness)/current_bond%length !thickness as determined at contact point
-    !Thick=min(berg%thickness,other_berg%thickness) !minimum thickness
+    !thickness as determined at contact point
+    Thick=T_Rmin+(Rmin-half_delta)*abs(berg%thickness-other_berg%thickness)/current_bond%length
+
+    !some other possible definitions of thickness:
+    !Thick=min(berg%thickness,other_berg%thickness)  !minimum thickness
     !Thick=0.5*(berg%thickness+other_berg%thickness) !average thickness
 
     !normal force:
@@ -1150,11 +1125,13 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
 
     !Torque from relative particle rotation
     if (.not. orig_dem_moment_of_inertia) then
+      !Wang, 2020
       theta=sin(berg%rot-other_berg%rot)
       !theta_old=sin(berg%rot-other_berg%rot)
       !theta=sin(current_bond%rel_rotation)
       Tr = -bergs%dem_spring_coef*(L**3.)*Thick*theta/(12.*l0) !should be same as below, except for theta
     else
+      !Potyondy & Cundall, 2004
       !For testing purposes. All particles should have same radius and thickness.
       theta=berg%rot-other_berg%rot
       !theta_old=berg%rot-other_berg%rot
@@ -1270,149 +1247,6 @@ subroutine calculate_force_dem(bergs, berg, other_berg, current_bond, &
   endif
 
 end subroutine calculate_force_dem
-
-!> Experimental subroutine to calculate interactive force between a berg and a land cell
-!> Should prevent grounding.
-subroutine calculate_force_land_contact(bergs, berg, grd, i, j, IA_x, IA_y, &
-  P_ia_11, P_ia_12, P_ia_21, P_ia_22) !, P_ia_times_u_x, P_ia_times_u_y)
-  ! Arguments
-  type(icebergs), pointer :: bergs !< Container for all types and memory
-  type(iceberg), pointer :: berg !< Primary berg
-  type(icebergs_gridded), pointer :: grd !< Container for gridded fields
-  integer, intent(in) :: i !< Grid cell i to contact
-  integer, intent(in) :: j !< Grid cell j to contact
-  real, intent(inout) :: IA_x !< Net zonal acceleration of berg due to interactions (m/s2)
-  real, intent(inout) :: IA_y !< Net meridional acceleration of berg due to interactions (m/s2)
-  real, intent(inout) :: P_ia_11 !< Damping projection matrix, xx component (kg/s)
-  real, intent(inout) :: P_ia_12 !< Damping projection matrix, xy component (kg/s)
-  real, intent(inout) :: P_ia_22 !< Damping projection matrix, yy component (kg/s)
-  real, intent(inout) :: P_ia_21 !< Damping projection matrix, yx component (kg/s)
-  !not needed because "other" iceberg is assumed to have velocity = 0
-  !real, intent(inout) :: P_ia_times_u_x !< Zonal damping projection (without new berg velocity) (kg m/s)
-  !real, intent(inout) :: P_ia_times_u_y !< Meridional damping projection (without new berg velocity) (kg m/s)
-
-  ! Local variables
-  real :: T1, L1, W1, lon1, lat1, R1, A1 ! Current iceberg
-  real :: lon2, lat2 ! "Other" iceberg
-  real :: dlon, dlat
-  real :: r_dist_x, r_dist_y, r_dist
-  real :: P_11, P_12, P_21, P_22
-  !real :: u2, v2
-  real :: lat_ref, dx_dlon, dy_dlat, crit_dist
-  logical :: critical_interaction_damping_on
-  real :: spring_coef, accel_spring, radial_damping_coef, p_ia_coef, tangental_damping_coef
-
-  if (i == berg%ine .and. j == berg%jne) return
-
-  lon1=berg%lon_old; lat1=berg%lat_old  ! From Berg 1
-
-  ! Find the location on the edge/corner of the land cell that is closest to the berg. The force is
-  ! calculated  as if there is a second berg at this location, with identical size to the input berg,
-  ! but with velocities set to zero
-  !u2=0;  v2=0 !"other berg" velocities are assumed to be zero
-  if (berg%ine==i) then
-    lon2=lon1
-    if (berg%jne>j) then !N of cell
-      lat2=grd%lat(i,j)
-    else !S of cell
-      lat2=grd%lat(i,j-1)
-    endif
-  elseif (berg%ine>i) then
-    if (berg%jne==j) then !E of cell
-      lon2=grd%lon(i,j)
-      lat2=lat1
-    elseif (berg%jne>j) then !NE of cell
-      lon2=grd%lon(i,j)
-      lat2=grd%lat(i,j)
-    else !SE of cell
-      lon2=grd%lon(i,j-1)
-      lat2=grd%lat(i,j-1)
-    endif
-  else
-    if (berg%jne==j) then !W of cell
-      lon2=grd%lon(i-1,j)
-      lat2=lat1
-    elseif (berg%jne>j) then !NW of cell
-      lon2=grd%lon(i-1,j)
-      lat2=grd%lat(i-1,j)
-    else !SW of cell
-      lon2=grd%lon(i-1,j-1)
-      lat2=grd%lat(i-1,j-1)
-    endif
-  endif
-
-  L1=berg%length; W1=berg%width; A1=L1*W1
-  dlon=lon1-lon2; dlat=lat1-lat2
-
-  ! Note that this is not the exact distance along a great circle.
-  ! Approximation for small distances. Should be fine.
-  lat_ref=0.5*(lat1+lat2)
-  call convert_from_grid_to_meters(lat_ref,bergs%grd%grid_is_latlon,dx_dlon,dy_dlat)
-
-  r_dist_x=dlon*dx_dlon; r_dist_y=dlat*dy_dlat
-  r_dist=sqrt( (r_dist_x**2) + (r_dist_y**2) ) !(Stern et al 2017, Eqn 3)
-
-  !Stern et al 2017, Eqn 4: radius of circle inscribed within hexagon or square with area A1 or A2
-  if (bergs%hexagonal_icebergs) then
-    R1=sqrt(A1/(2.*sqrt(3.)))
-  else !square packing
-    if (bergs%iceberg_bonds_on) then
-      R1=0.5*sqrt(A1)
-    else
-      R1=sqrt(A1/pi) ! Interaction radius of the iceberg (assuming circular icebergs)
-    endif
-  endif
-
-  !Calculating spring force (Stern et al 2017, Eqn 6):
-  spring_coef=bergs%contact_spring_coef
-  crit_dist=max(2*R1,bergs%contact_distance)
-
-  radial_damping_coef=bergs%radial_damping_coef
-  tangental_damping_coef=bergs%tangental_damping_coef
-  critical_interaction_damping_on=bergs%critical_interaction_damping_on
-
-  ! Using critical values for damping rather than manually setting the damping.
-  if (critical_interaction_damping_on) then
-    radial_damping_coef=2.*sqrt(spring_coef) ! Critical damping
-    if (bergs%tang_crit_int_damp_on) then
-      tangental_damping_coef=(2.*sqrt(spring_coef))/4 ! Critical damping (just a guess)
-    endif
-  endif
-
-  if  (r_dist<crit_dist) then
-    !Spring force (Stern et al 2017, Eqn 7):
-    accel_spring=spring_coef*(crit_dist-r_dist)
-    IA_x=IA_x+(accel_spring*(r_dist_x/r_dist))
-    IA_y=IA_y+(accel_spring*(r_dist_y/r_dist))
-
-    ! Damping force (Stern et al 2017, Eqn 8):
-    ! Parallel velocity
-    !projection matrix in Stern et al 2017, Eqn 8:
-    P_11=(r_dist_x*r_dist_x)/(r_dist**2)
-    P_12=(r_dist_x*r_dist_y)/(r_dist**2)
-    P_21=(r_dist_x*r_dist_y)/(r_dist**2)
-    P_22=(r_dist_y*r_dist_y)/(r_dist**2)
-    p_ia_coef=radial_damping_coef
-    P_ia_11=P_ia_11+p_ia_coef*P_11
-    P_ia_12=P_ia_12+p_ia_coef*P_12
-    P_ia_21=P_ia_21+p_ia_coef*P_21
-    P_ia_22=P_ia_22+p_ia_coef*P_22
-    !not needed because u2 and v2 are zero
-    !P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
-    !P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
-
-    ! Normal velocities
-    P_11=1-P_11  ;  P_12=-P_12 ; P_21= -P_21 ;    P_22=1-P_22
-    p_ia_coef=tangental_damping_coef
-    P_ia_11=P_ia_11+p_ia_coef*P_11
-    P_ia_12=P_ia_12+p_ia_coef*P_12
-    P_ia_21=P_ia_21+p_ia_coef*P_21
-    P_ia_22=P_ia_22+p_ia_coef*P_22
-    !not needed because u2 and v2 are zero
-    !P_ia_times_u_x=P_ia_times_u_x+ (p_ia_coef* ((P_11*u2) +(P_12*v2)))
-    !P_ia_times_u_y=P_ia_times_u_y+ (p_ia_coef* ((P_12*u2) +(P_22*v2)))
-  endif
-end subroutine calculate_force_land_contact
 
 !> Calculates area of overlap between two circular bergs
 subroutine overlap_area(R1, R2, d, A, trapped)
@@ -2385,7 +2219,7 @@ subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, r
   ! !else
   ! !  call interp_flds(grd, berg%lon, berg%lat, i, j, xi, yj, rx, ry, uo, vo, ui, vi, ua, va, ssh_x, &
   ! !    ssh_y, sst, sss, cn, hi, od)
-  !   !end if
+  ! !end if
 
   if (bergs%old_interp_flds_order) then
     call interp_flds(grd, berg%lon, berg%lat, i, j, xi, yj, rx, ry, uo, vo, ui, vi, ua, va, ssh_x, &
@@ -5841,7 +5675,6 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
     if (mpp_pe()==0) write(*,'(a)') 'KID, iceberg_run: completed first visit initialization'
   endif
 
-  !if (.not. bergs%mts) call interp_gridded_fields_to_bergs(bergs)
   !call this for footloose
   if ((.not. bergs%mts) .and. (.not. bergs%old_interp_flds_order)) call interp_gridded_fields_to_bergs(bergs)
 
