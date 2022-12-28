@@ -57,8 +57,8 @@ use ice_bergs_framework, only: dem, init_dem_params, save_bond_forces
 use ice_bergs_framework, only: orig_dem_moment_of_inertia, no_frac_first_ts
 use ice_bergs_framework, only: A68_test, A68_xdisp, A68_ydisp
 use ice_bergs_framework, only: set_constant_interaction_length_and_width, skip_first_outer_mts_step
-use ice_bergs_framework, only: use_damage, damage_test_1_init, break_bonds_on_sub_steps
-use ice_bergs_framework, only: power_ground, short_step_mts_grounding, radius_based_drag
+use ice_bergs_framework, only: break_bonds_on_sub_steps
+use ice_bergs_framework, only: short_step_mts_grounding, radius_based_drag
 
 use ice_bergs_io,        only: ice_bergs_io_init, write_restart, write_trajectory, write_bond_trajectory
 use ice_bergs_io,        only: read_restart_bergs, read_restart_calving
@@ -180,7 +180,6 @@ subroutine icebergs_init(bergs, &
   endif
 
   if (bergs%uniaxial_test .or. bergs%dem_beam_test>0) call dem_tests_init(bergs)
-  if (bergs%damage_test_1) call damage_test_1_init(bergs)
 
   if (bergs%constant_interaction_LW .and. (bergs%constant_length==0. .or. bergs%constant_width==0.)) then
     call set_constant_interaction_length_and_width(bergs)
@@ -1684,9 +1683,6 @@ subroutine accel_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, d
       drag_atm=c_atm*0.5*(sqrt( (uveln-ua)**2+(vveln-va)**2 )+sqrt( (uvel0-ua)**2+(vvel0-va)**2 ))
       drag_ice=c_ice*0.5*(sqrt( (uveln-ui)**2+(vveln-vi)**2 )+sqrt( (uvel0-ui)**2+(vvel0-vi)**2 ))
       drag_gnd=c_gnd
-      if (power_ground) then
-        drag_gnd=c_gnd*max(0.5*(sqrt(uveln**2+vveln**2)+sqrt(uvel0**2+vvel0**2)),minfricvel)**(-2./3.)
-      endif
       !RHS ~ similar to accel terms in Stern et al 2017, Eqn B5
       RHS_x=(axn/2) + scaling*(-drag_ocn*(u_star-uo) -drag_atm*(u_star-ua) -drag_ice*(u_star-ui) -drag_gnd*u_star)
       RHS_y=(ayn/2) + scaling*(-drag_ocn*(v_star-vo) -drag_atm*(v_star-va) -drag_ice*(v_star-vi) -drag_gnd*v_star)
@@ -2608,9 +2604,6 @@ subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, r
     drag_atm=c_atm*0.5*(sqrt( (uveln-ua)**2+(vveln-va)**2 )+sqrt( (uvel0-ua)**2+(vvel0-va)**2 ))
     drag_ice=c_ice*0.5*(sqrt( (uveln-ui)**2+(vveln-vi)**2 )+sqrt( (uvel0-ui)**2+(vvel0-vi)**2 ))
     drag_gnd=c_gnd
-    if (power_ground) then
-      drag_gnd=c_gnd*max(0.5*(sqrt(uveln**2+vveln**2)+sqrt(uvel0**2+vvel0**2)),minfricvel)**(1.0/3.0 - 1.0)
-    endif
   else
     !Original Scheme
     us=0.5*(uveln+uvel); vs=0.5*(vveln+vvel)
@@ -2618,9 +2611,6 @@ subroutine accel(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, r
     drag_atm=c_atm*sqrt( (us-ua)**2+(vs-va)**2 )
     drag_ice=c_ice*sqrt( (us-ui)**2+(vs-vi)**2 )
     drag_gnd=c_gnd
-    if (power_ground) then
-      drag_gnd=c_gnd*max(sqrt(us**2+vs**2),minfricvel)**(1.0/3.0 - 1.0)
-    endif
   endif
 
   !RHS ~ similar to accel terms in Stern et al 2017, Eqn B5

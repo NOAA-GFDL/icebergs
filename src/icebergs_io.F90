@@ -44,7 +44,7 @@ use ice_bergs_framework, only: split_id, id_from_2_ints, generate_id
 use ice_bergs_framework, only: mts,save_bond_traj
 use ice_bergs_framework, only: push_bond_posn, append_bond_posn
 use ice_bergs_framework, only: pack_bond_traj_into_buffer2,unpack_bond_traj_from_buffer2
-use ice_bergs_framework, only: monitor_energy, use_damage, dem, fracture_criterion, iceberg_bonds_on
+use ice_bergs_framework, only: monitor_energy, dem, fracture_criterion, iceberg_bonds_on
 
 implicit none ; private
 
@@ -156,7 +156,6 @@ real, allocatable, dimension(:) :: lon,          &
                                    ayn_fast,     &
                                    bxn_fast,     &
                                    byn_fast,     &
-                                   damage,       &
                                    ang_vel,      &
                                    ang_accel,    &
                                    rot,          &
@@ -475,7 +474,6 @@ integer :: grdi, grdj
   allocate(other_berg_ine(nbonds))
   allocate(other_berg_jne(nbonds))
 
-  if (use_damage) allocate(damage(nbonds))
   if (dem) then
     allocate(tangd1(nbonds))
     allocate(tangd2(nbonds))
@@ -512,10 +510,6 @@ integer :: grdi, grdj
   id = register_restart_field(bergs_bond_restart,filename_bonds,'other_id_cnt',other_id_cnt,longname='counter component of iceberg id second berg in bond',units='dimensionless')
   id = register_restart_field(bergs_bond_restart,filename_bonds,'other_id_ij',other_id_ij,longname='position component of iceberg id second berg in bond',units='dimensionless')
 
-  if (use_damage) then
-    id = register_restart_field(bergs_bond_restart,filename_bonds,'damage',damage,&
-      longname='damage',units='dimensionless')
-  endif
   if (dem) then
     id = register_restart_field(bergs_bond_restart,filename_bonds,'tangd1',tangd1,&
       longname='zonal tangential displacement',units='m')
@@ -561,7 +555,6 @@ integer :: grdi, grdj
         other_berg_ine(i)=current_bond%other_berg%ine
         other_berg_jne(i)=current_bond%other_berg%jne
 
-        if (use_damage) damage(i)=current_bond%damage
         if (dem) then
           tangd1(i)=current_bond%tangd1
           tangd2(i)=current_bond%tangd2
@@ -2284,7 +2277,7 @@ character(len=70) :: bond_traj_name !<file name of bond trajectories
 ! Local variables
 integer :: iret, ncid, i_dim, i
 integer :: lonid, latid, yearid, dayid, lenid,n1id, n2id, peid
-integer :: rotid,rrotid,nsid,nsrid, damid, brid
+integer :: rotid,rrotid,nsid,nsrid, brid
 integer :: idcnt1_id, idcnt2_id, idij1_id, idij2_id, eeid, edid
 integer :: axid,ayid,bxid,byid
 integer :: td1id,td2id,dnsid,dssid
@@ -2403,10 +2396,6 @@ logical :: io_is_in_append_mode
       idcnt1_id = inq_varid(ncid, 'id_cnt1'); idij1_id = inq_varid(ncid, 'id_ij1')
       idcnt2_id = inq_varid(ncid, 'id_cnt2'); idij2_id = inq_varid(ncid, 'id_ij2')
 
-      if (use_damage) then
-        damid = inq_varid(ncid, 'damage')
-      endif
-
       if (monitor_energy) then
         eeid = inq_varid(ncid, 'Ee');       edid = inq_varid(ncid, 'Ed')
         axid = inq_varid(ncid, 'axn_fast'); ayid = inq_varid(ncid, 'ayn_fast')
@@ -2440,10 +2429,6 @@ logical :: io_is_in_append_mode
 
       idcnt1_id = def_var(ncid, 'id_cnt1', NF_INT, i_dim); idij1_id = def_var(ncid, 'id_ij1', NF_INT, i_dim)
       idcnt2_id = def_var(ncid, 'id_cnt2', NF_INT, i_dim); idij2_id = def_var(ncid, 'id_ij2', NF_INT, i_dim)
-
-      if (use_damage) then
-        damid = def_var(ncid, 'damage', NF_DOUBLE, i_dim)
-      endif
 
       if (monitor_energy) then
         eeid = def_var(ncid, 'Ee', NF_DOUBLE, i_dim);       edid = def_var(ncid, 'Ed', NF_DOUBLE, i_dim)
@@ -2485,11 +2470,6 @@ logical :: io_is_in_append_mode
       call put_att(ncid, idcnt2_id, 'units', 'dimensionless')
       call put_att(ncid, idij2_id, 'long_name', 'position component of second connected iceberg id')
       call put_att(ncid, idij2_id, 'units', 'dimensionless')
-
-      if (use_damage) then
-        call put_att(ncid, damid, 'long_name', 'damage')
-        call put_att(ncid, damid, 'units', 'none')
-      endif
 
       if (monitor_energy) then
         call put_att(ncid, eeid, 'long_name', 'elastic energy'); call put_att(ncid, eeid, 'units', 'J')
@@ -2547,10 +2527,6 @@ logical :: io_is_in_append_mode
       call put_int(ncid, idcnt1_id, i, cnt);        call put_int(ncid, idij1_id, i, ij)
       call split_id(this%id2, cnt, ij)
       call put_int(ncid, idcnt2_id, i, cnt);        call put_int(ncid, idij2_id, i, ij)
-
-      if (use_damage) then
-        call put_double(ncid,damid,i,this%damage)
-      endif
 
       if (monitor_energy) then
         call put_double(ncid,eeid,i,this%Ee);       call put_double(ncid,edid,i,this%Ed)

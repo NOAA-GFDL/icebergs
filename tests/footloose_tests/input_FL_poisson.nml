@@ -106,7 +106,7 @@
     verbose_hrs=24 ! (24) Period between verbose messages
     traj_sample_hrs=1 !1 !(24) sampling period for trajectory storage
     traj_write_hrs=24 ! (480) Period for writing sampled trajectories to disk
-    budget=.true.!.false. !(T) Calculate budgets
+    budget=.false. !(T) Calculate budgets
     debug=.false. !(F) Turn on debugging
     really_debug=.false. !(F) Turn on debugging
     halo_debugging=.false. ! (F) Use for debugging halos (remove when its working)
