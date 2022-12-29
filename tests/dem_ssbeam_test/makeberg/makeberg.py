@@ -9,8 +9,8 @@ import argparse
 
 def parseCommandLine():
     parser = argparse.ArgumentParser(description=
-    '''Generate animation of iceberg trajectories.''',
-    epilog='Written by Alex Huth, 2020')
+    '''Generate icebergs.''',
+    epilog='Written by Alex Huth, 2020. Based on code from Alon Stern.')
     parser.add_argument('-t', type=int, default='1',
                     help='''which test case''')
     optCmdLineArgs = parser.parse_args()
@@ -284,13 +284,12 @@ def main(args):
         berg_uvel=[]; berg_vvel=[]
 
         x=xs
-        y=ys#-2*r
+        y=ys
 
         berg_count=0.
         while berg_count<nbergs:
                 berg_count=berg_count+1
                 if berg_count==1:
-                    #x=xs
                     y=y+2*r
                     static=0
                 else:

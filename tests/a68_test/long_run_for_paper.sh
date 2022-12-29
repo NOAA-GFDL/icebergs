@@ -25,6 +25,5 @@ for ((i = 0; i < ${#odrag[@]}; ++i)); do
 
     sed  "s/<od>/$drag/; s/<re>/$Rearth/; s/<ss>/$ss/; s/<ns>/$ns/; s/<gc>/$gc/; s/<xd>/$A68dx/; s/<yd>/$A68dy/; s/<name>/$fname/g" \
 	 long_run.nml > input.nml
-    ./RUN1p
-    # &>/dev/null &
+    ./RUN
 done

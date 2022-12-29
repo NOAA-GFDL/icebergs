@@ -36,7 +36,7 @@ def parseCommandLine():
         '''
         Generate files for iceberg and bond restart files, matching given ice thickness fields.
         ''',
-        epilog='Written by Alon Stern, Dec. 2016.')
+        epilog='Written by Alex Huth, 2021, based on Iceberg_repository code from Alon Stern.')
 
         #Adding an extra boolian type argument
         #p = argparse.ArgumentParser()
@@ -1806,7 +1806,6 @@ def main(args):
                         Radius= (np.sqrt(3)/2.) *(R_frac*dx)   #(S is < half the grid size)
         print ('Radius set to R= ' , Radius)
 
-        #lat_ref=np.max(y)
         #Define the positions,thickness, mass,  of the icebergs
 
         (Number_of_bergs,lon,lat,iceberg_num,dx_berg, dy_berg,thickness,ang_vel_out,uvel_out,vvel_out,mass,width,x,y,Radius,static_berg,N_bergs_before_bd)= Create_icebergs(lon_init,lat_init,\
@@ -1875,19 +1874,12 @@ def main(args):
                                                    plot_circles,h_ice,ice_mask_grid,lon_grid,lat_grid,plot_ice_mask,\
                                                    plot_ice_thickness,thickness,plot_icebergs_positions,static_berg,\
                                                    h_ice_new,plot_h_ice_new)
-                        # plotting_iceberg_positions(lat,lon,Number_of_bergs,R_earth,Radius,IA_scaling,Convert_to_lat_lon,\
-                        #                            plot_circles,h_ice,ice_mask,x,y,plot_ice_mask,plot_ice_thickness,\
-                        #                            thickness,plot_icebergs_positions,static_berg,h_ice_new,plot_h_ice_new)
+
                 if (plot_bonds==True) and (Create_icebergs_bonds):
                         plotting_iceberg_bonds(first_berg_lat,first_berg_lon,other_berg_lat,other_berg_lon,Number_of_bonds)
 
-        #field=New_mass/(rho_ice*grid_area)
         field=New_area/grid_area -1.
         M=field.shape
-        #print 'field',(field[M[0]-1,:])
-        #print 'field',(field[M[0]-2,:])
-        #print 'h_ice',h_ice_new[:,:]
-        #print 'h_ice-1',h_ice_new[:,:]-1.
         if Run_plotting_subroutine:
                 plt.show()
         print ('Script complete')

@@ -3,16 +3,4 @@
 *.nc
 *.csv
 core
-single_test/
-size_test_tab/
-steady_test/
-uniaxial_test/
-a68/
-collision_tests_2/
-a68_2/
-a68_3/
-a68_old/
 other_tests/
-nc2csv_bonds.py
-plot_bond_strain.py
-plot_energy.py

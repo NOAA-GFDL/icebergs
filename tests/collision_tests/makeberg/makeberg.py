@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
-from netCDF4 import Dataset  
-import numpy as np 
+from netCDF4 import Dataset
+import numpy as np
 import math
 #import os
 from pylab import *
@@ -10,8 +10,7 @@ import netCDF4 as nc
 
 nx = 20
 ny = 20
-New_ice_thickness_filename='testberg.nc'
-grid_res = 1.e3 #1 km 
+grid_res = 1.e3 #1 km
 grid_area = grid_res * grid_res
 h_ice = 300.0
 
@@ -24,8 +23,6 @@ thick_h=g.createVariable('thick','f8',('ny','nx'))
 area_h=g.createVariable('area','f8',('ny','nx'))
 lat_h=g.createVariable('lat','f8','ny')
 lon_h=g.createVariable('lon','f8','nx')
-#lat_h=g.createVariable('lat','f8',('ny','nx'))
-#lon_h=g.createVariable('lon','f8',('ny','nx'))
 
 thick_h.units = 'm'
 thick_h.standard_name = 'ice shelf thickness'
@@ -36,42 +33,33 @@ lon_h.standard_name = 'longitude'
 lat_h.unit = 'm'
 lat_h.standard_name = 'latitude'
 
-
-
-#g.variables['thick'][:]=h_ice
 g.variables['area'][:,:]=grid_area
 
 #create a circular tabular berg centered on the following coords (km)
 cy = 4.5e3
 cx = 4.5e3
-#cx2 = 15.5e3
 
 for i in range(nx):
 
-        tx = float(i) * grid_res 
+        tx = float(i) * grid_res
         g.variables['lon'][i] = tx
-        
+
         for j in range(ny):
-               
-                ty = float(j) * grid_res 
+
+                ty = float(j) * grid_res
                 dist = sqrt((tx-cx)*(tx-cx) + (ty-cy)*(ty-cy))
-                #dist2 =  sqrt((tx-cx2)*(tx-cx2) + (ty-cy)*(ty-cy))
-                #g.variables['lon'][i,j] = tx
-                #g.variables['lat'][i,j] = ty
-        
-                if (dist <1.e3): #or dist2<1.e3):
+
+                if (dist <1.e3):
                         g.variables['thick'][i,j]=h_ice
                 else:
                         g.variables['thick'][i,j]=0.0
 
-                        
+
 
 for j in range(ny):
-        g.variables['lat'][j] = float(j) * grid_res 
+        g.variables['lat'][j] = float(j) * grid_res
 
 print('Creating file: ' , New_ice_thickness_filename)
 
 g.sync()
 g.close()
-
-        

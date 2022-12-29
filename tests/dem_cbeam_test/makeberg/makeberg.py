@@ -9,8 +9,10 @@ import argparse
 
 def parseCommandLine():
     parser = argparse.ArgumentParser(description=
-    '''Generate animation of iceberg trajectories.''',
-    epilog='Written by Alex Huth, 2020')
+    '''
+    Generate files for iceberg and bond restart files, matching given ice thickness fields.
+    ''',
+    epilog='Written by Alex Huth, 2021, based on Iceberg_repository code from Alon Stern.')
     parser.add_argument('-t', type=int, default='1',
                     help='''which test case''')
     optCmdLineArgs = parser.parse_args()

@@ -6,10 +6,6 @@ from pylab import *
 #import pdb
 import netCDF4 as nc
 
-#
-# Initialize 2 iceberg elements, which can later be bonded in the fortran code if needed
-#
-
 def Create_iceberg_restart_file(Number_of_bergs, lon,lat,thickness,width,mass,mass_scaling,iceberg_num,Ice_geometry_source,static_berg,uvel,vvel):
 
 	print 'Writing iceberg restart files, with ' , Number_of_bergs  , 'icebergs..'

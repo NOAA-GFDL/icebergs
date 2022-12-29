@@ -6,10 +6,6 @@ from pylab import *
 #import pdb
 import netCDF4 as nc
 
-#
-# Initialize 2 iceberg elements, which can later be bonded in the fortran code if needed
-#
-
 def Create_iceberg_restart_file(Number_of_bergs, lon,lat,thickness,width,mass,mass_scaling,iceberg_num,Ice_geometry_source,static_berg,uvel,vvel):
 
 	print 'Writing iceberg restart files, with ' , Number_of_bergs  , 'icebergs..'
@@ -240,28 +236,18 @@ def create_empty_iceberg_restart_file(Empty_restart_filename):
 	f.sync()
 	f.close()
 
-
-
 #-----------------------------------#
 #               Main                #
 #-----------------------------------#
 
-# just2particles=False
-# flip2ndconglom=True#False
-# offset2ndconglom=True#False
-
 grdxmin=0; grdxmax=225000e3
 grdymin=0; grdymax=225000e3
 grdres=5000.0
-R_frac=0.45 #1st option
-#R_frac=0.5*0.45 #2nd option
-#radius=(np.sqrt(3)/2.)*(R_frac*grdres) #S is < 0.5 grid res
-radius=1.5e3 #/2
-#radius2=(np.sqrt(3)/2.)*(R_frac2*grdres) #S is < 0.5 grid res
+R_frac=0.45
+radius=1.5e3
 thickness1=200.0
 thickness2=200.0
 rho_ice=850.0
-
 
 nbergs=1 #number of conglomerates
 
@@ -280,11 +266,6 @@ CBymin=CByc-(0.5*CByl); CBymax=CByc+(0.5*CByl)
 CBxmin[CBxmin<grdxmin]=grdxmin; CBxmax[CBxmax>grdxmax]=grdxmax
 CBymin[CBxmin<grdymin]=grdymin; CBymax[CBymax>grdymax]=grdymax
 CBxc=0.5*(CBxmin+CBxmax); CByc=0.5*(CBymin+CBymax)
-
-# #if just want one particle per CB
-# if just2particles:
-#         CBxmin=CBxc; CBxmax=CBxc
-#         CBymin=CByc; CBymax=CByc
 
 #--- min and max thicknesses for each CB ---
 h1=thickness1
@@ -307,10 +288,6 @@ berg_count=0
 for i in range(nbergs):
         x_start=CBxmin[i]+(CBrad[i]*2./np.sqrt(3))
 
-        # if flip2ndconglom and i>0:
-        #         x_start=CBxmax[i]-(CBrad[i]*2./np.sqrt(3))
-
-        #pdb.set_trace()
         if x_start>CBxmax[i]:
                 x_start=CBxmax[i]
         y_start0=CBymin[i]+CBrad[i]
@@ -324,15 +301,10 @@ for i in range(nbergs):
         j=0
         x_val=x_start
         offset=0.0
-        # if (i==0):
-        uvel=0.1#1
-        # else:
-        #         uvel=-0.15#-0.05
-        #         if (offset2ndconglom):
-        #                 offset=250.0
-        vvel=0.0#25
-        #uvel=0;vvel=0
-        #berg_count_start=berg_count
+
+        uvel=0.1
+        vvel=0.0
+
         while x_val<=CBxmax[i] and x_val>=CBxmin[i]:
                 y_start=y_start0+((j%2)*CBrad[i])+offset
                 k=0
@@ -346,30 +318,21 @@ for i in range(nbergs):
                         #dist of berg elem from center of CB
                         bdistc=np.sqrt((x_val-CBxc[i])**2+(y_val-CByc[i])**2)
                         bh=CBhmin[i]*bdistc/cdistb + CBhmax[i]*(1-bdistc/cdistb)
-                        # if (just2particles):
-                        #         bh=h1
+
                         berg_h.append(bh) #thickness
                         berg_mass_scaling.append(1)
                         berg_mass.append(bh*rho_ice*element_area)
                         berg_static.append(0)
                         berg_uvel.append(uvel)
                         berg_vvel.append(vvel)
-                        # if (x_val<22000):
-                        #         berg_vvel.append(vvel)
-                        # else:
-                        #         berg_vvel.append(0.4)
-                        #berg_CBid.append(i)
+
                         k=k+1
                         y_val=y_start+(2*k*CBrad[i])
                 j=j+1
-                # if flip2ndconglom and i>0:
-                #         x_val=x_start-(np.sqrt(3)*CBrad[i]*j)
-                # else:
+
                 x_val=x_start+(np.sqrt(3)*CBrad[i]*j)
 
 print('Number of bergs',berg_count)
-
-#pdb.set_trace()
 
 #Create iceberg restart file
 Ice_geometry_source='Generic'
