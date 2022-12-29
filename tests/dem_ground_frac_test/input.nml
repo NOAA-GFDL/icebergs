@@ -52,7 +52,6 @@
     spring_coef=0.0007547062342348049 !if dem_spring_coef=5e6, r=1500, and hex pack?
     !spring_coef=0.00065359477124183  !if dem_spring_coef=5e6, r=1500, and square pack?
 
-    monitor_energy=.false.
     !defaults given in parentheses:
     mts=.true. !(F) for using the Multiple Time Stepping Velocity Verlet scheme
     mts_sub_steps=200 !(-1) # of mts sub-steps

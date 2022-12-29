@@ -51,7 +51,7 @@ use ice_bergs_framework, only: save_bond_traj
 use ice_bergs_framework, only: orig_bond_length
 use ice_bergs_framework, only: update_and_break_bonds,break_bonds_dem,assign_n_bonds,reset_bond_rotation
 use ice_bergs_framework, only: update_bond_angles
-use ice_bergs_framework, only: monitor_energy, energy_tests_init, mts
+use ice_bergs_framework, only: mts
 use ice_bergs_framework, only: dem_tests_init
 use ice_bergs_framework, only: dem, save_bond_forces
 use ice_bergs_framework, only: orig_dem_moment_of_inertia, no_frac_first_ts
@@ -154,8 +154,6 @@ subroutine icebergs_init(bergs, &
 
   !Reading ocean depth from a file
   if (bergs%read_ocean_depth_from_file) call read_ocean_depth(bergs%grd)
-
-  if (monitor_energy) call energy_tests_init(bergs)
 
   if (bergs%iceberg_bonds_on) then
     if (bergs%manually_initialize_bonds) then
@@ -1283,7 +1281,7 @@ end subroutine overlap_area
 
 !> For the MTS scheme, calculates the instantaneous acceleration of an iceberg
 subroutine accel_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt, rx, ry, &
-  ax, ay, axn, ayn, bxn, byn, save_bond_energy, Fec_x, Fec_y, Fdc_x, Fdc_y, debug_flag)
+  ax, ay, axn, ayn, bxn, byn, Fec_x, Fec_y, Fdc_x, Fdc_y, debug_flag)
   ! Arguments
   type(icebergs), pointer :: bergs !< Container for all types and memory
   type(iceberg), pointer :: berg !< An iceberg
@@ -1305,7 +1303,6 @@ subroutine accel_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, d
   real, intent(inout) :: ayn !< Explicit estimate of meridional acceleration (m/s2)
   real, intent(inout) :: bxn !< Implicit component of zonal acceleration (m/s2)
   real, intent(inout) :: byn !< Implicit component of meridional acceleration (m/s2)
-  logical, intent(in) :: save_bond_energy !< Track energy terms for bonds (when monitor_energy==T)
   real, optional, intent(out) :: Fec_x !< If bergs%mts_part==1: Zonal collisional elastic force (N)
   real, optional, intent(out) :: Fec_y !< If bergs%mts_part==1: Meridional collisional elastic force (N)
   real, optional, intent(out) :: Fdc_x !< If bergs%mts_part==1: Zonal collisional damping force (N)
@@ -1333,7 +1330,7 @@ subroutine accel_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, d
   real :: dragfrac, N_bonds, N_max, groundfrac, c_gnd, drag_gnd, scaling=0.5
   real :: minfricvel=3.17e-12 !m/s (~0.0001 m/a)
   type(bond), pointer :: current_bond
-  real :: IAd_x, IAd_y, sum_bond_Ee, sum_bond_Ed, oneoverkn, M2
+  real :: IAd_x, IAd_y, oneoverkn, M2
   type(iceberg), pointer :: other_berg
   real :: L2,W2
 
@@ -1570,79 +1567,6 @@ subroutine accel_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, d
       Fdc_x=berg%mass*( P_ia_times_u_x - (P_ia_11*uveln+P_ia_12*vveln))
       Fdc_y=berg%mass*( P_ia_times_u_y - (P_ia_21*uveln+P_ia_22*vveln))
     endif
-  elseif (save_bond_energy) then
-    !save bond energies
-    if (monitor_energy .or. bergs%fracture_criterion=='energy') then
-      sum_bond_Ee=0.0
-      sum_bond_Ed=0.0
-
-      if (bergs%constant_interaction_LW) then
-        ! mass according to constant length and width here, just for interactions
-        M=bergs%constant_length*bergs%constant_width*berg%thickness*bergs%rho_bergs
-      else
-        M=berg%mass
-      endif
-
-      current_bond=>berg%first_bond
-      do while (associated(current_bond)) ! loop over all bonds
-        other_berg=>current_bond%other_berg
-
-        if (monitor_energy) then
-          !first, the half-step:
-          current_bond%Ee=current_bond%Ee - 0.25*dt*(&
-            (uvel0 + u_star)*M*current_bond%axn_fast +&
-            (vvel0 + v_star)*M*current_bond%ayn_fast)
-
-
-          current_bond%Ed=current_bond%Ed - 0.25*dt*(&
-            (uvel0 + u_star)*M*current_bond%bxn_fast +&
-            (vvel0 + v_star)*M*current_bond%byn_fast)
-
-        endif
-
-        !the rest:
-        IA_x=0.0; IA_y=0.0 !explicit elastic force
-        P_ia_11=0.0; P_ia_12=0.0; P_ia_21=0.0; P_ia_22=0.0
-        call calculate_force(bergs, berg, other_berg, IA_x, IA_y, uveln, vveln, uveln, vveln,  &
-          P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y,bonded=.true.)
-        !implicit damping force
-        IAd_x=P_ia_11*(other_berg%uvel_old-uveln)+P_ia_12*(other_berg%vvel_old-vveln)
-        IAd_y=P_ia_12*(other_berg%uvel_old-uveln)+P_ia_22*(other_berg%vvel_old-vveln)
-
-        if (bergs%fracture_criterion=='energy') then
-          oneoverkn = 1./bergs%spring_coef
-          if (bergs%constant_interaction_LW) then
-            ! other_berg mass according to constant length and width here, just for interactions
-            M2=bergs%constant_length*bergs%constant_width*other_berg%thickness*bergs%rho_bergs
-          else
-            M2=other_berg%mass
-          endif
-
-          oneoverkn=oneoverkn*(M/min(M,other_berg%mass))
-          current_bond%spring_pe = 0.5*((M*IA_x)**2+(M*IA_y)**2)*oneoverkn
-        endif
-
-        if (monitor_energy) then
-          !work
-          current_bond%Ee=current_bond%Ee - 0.25*dt*(&
-            (u_star + uveln)*M*IA_x + &
-            (v_star + vveln)*M*IA_y)
-
-          !V{i+0.5} to V{i+1}
-          current_bond%Ed=current_bond%Ed- 0.25*dt*(&
-            (u_star + uveln)*M*IAd_x + &
-            (v_star + vveln)*M*IAd_y)
-
-          sum_bond_Ee = sum_bond_Ee + current_bond%Ee
-          sum_bond_Ed = sum_bond_Ed + current_bond%Ed
-
-          current_bond%axn_fast=IA_x;  current_bond%ayn_fast=IA_y
-          current_bond%bxn_fast=IAd_x; current_bond%byn_fast=IAd_y
-        endif
-
-        current_bond=>current_bond%next_bond
-      enddo
-    endif
   endif
 
   ! Limit speed of bergs based on a CFL criteria
@@ -1789,7 +1713,7 @@ end subroutine accel_mts
 !> Calculates the instantaneous acceleration of an iceberg due to berg interactions
 !> For the inner steps of the mts scheme only. Explicit velocity verlet (no implicit terms)
 subroutine accel_explicit_inner_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, uvel0, vvel0, dt,  &
-  ax, ay, axn, ayn, save_bond_energy, debug_flag)
+  ax, ay, axn, ayn, debug_flag)
   ! Arguments
   type(icebergs), pointer :: bergs !< Container for all types and memory
   type(iceberg), pointer :: berg !< An iceberg
@@ -1807,7 +1731,6 @@ subroutine accel_explicit_inner_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, 
   real, intent(out) :: ay !< Meridional acceleration (m/s2)
   real, intent(inout) :: axn !< Explicit estimate of zonal acceleration (m/s2)
   real, intent(inout) :: ayn !< Explicit estimate of meridional acceleration (m/s2)
-  logical, intent(in) :: save_bond_energy !< Track energy terms for bonds (when monitor_energy==T)
   logical, optional :: debug_flag !< If true, print debugging
   ! Local variables
   type(icebergs_gridded), pointer :: grd
@@ -1819,7 +1742,7 @@ subroutine accel_explicit_inner_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, 
   real :: P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y    !Added by Alon
   integer :: stderrunit
   type(bond), pointer :: current_bond
-  real :: IAd_x, IAd_y, sum_bond_Ee, sum_bond_Ed, oneoverkn, M2, D, groundfrac
+  real :: IAd_x, IAd_y, oneoverkn, M2, D, groundfrac
   type(iceberg), pointer :: other_berg
   integer :: grdi,grdj
   logical :: bonded, bond_matched, run_contact
@@ -2005,104 +1928,6 @@ subroutine accel_explicit_inner_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, 
   ax=0.5*(axn+bxn); ay=0.5*(ayn+byn)
 
   uveln=u_star+dt*ax; vveln=v_star+dt*ay
-
-  if (save_bond_energy) then
-
-    !save bond energies
-    if (monitor_energy .or. bergs%fracture_criterion=='energy') then
-      current_bond=>berg%first_bond
-      do while (associated(current_bond)) ! loop over all bonds
-        other_berg=>current_bond%other_berg
-
-        if (monitor_energy) then
-          !first, the half-step:
-          current_bond%Ee=current_bond%Ee - 0.25*dt*(&
-            (uvel0 + u_star)*M*current_bond%axn_fast +&
-            (vvel0 + v_star)*M*current_bond%ayn_fast)
-
-          !here, bxn_fast and byn_fast are explicit damping accel (not implicit!)
-          current_bond%Ed=current_bond%Ed - 0.25*dt*(&
-            (uvel0 + u_star)*M*current_bond%bxn_fast +&
-            (vvel0 + v_star)*M*current_bond%byn_fast)
-        endif
-
-        !the rest:
-
-        if (bergs%dem) then
-          F_x=0.; F_y=0.; T=0.; Fd_x=0.; Fd_y=0.; T_d=0.
-          call calculate_force_dem(bergs,berg,other_berg,current_bond,dt,&
-            F_x,F_y,T,Fd_x,Fd_y,T_d,savestress=.false.)
-          if (bergs%dem_beam_test>0) then
-            if (bergs%dem_beam_test==1) then
-              !3.1 (Wang,2020): Simply supported beam test
-              !no vertical load on ends of beam, add vertical load to center of beam
-              if (berg%start_lon==bergs%dem_tests_start_lon .or. berg%start_lon==bergs%dem_tests_end_lon) then
-                F_y=0.0; Fd_y=0.0
-              elseif (berg%start_lon==0.5*(bergs%dem_tests_start_lon+bergs%dem_tests_end_lon)) then
-                F_y = F_y - 1.5e5
-              endif
-            elseif (bergs%dem_beam_test==2) then
-              !3.2 (Wang,2020): Cantilever beam test
-              !add vertical load to end of the cantilever beam
-              if (berg%start_lon==bergs%dem_tests_end_lon) then
-                F_y = F_y - 1.5e10/3.
-              endif
-            elseif (bergs%dem_beam_test==3) then
-              !Angular velocity test (starting element has constant rot=-pi/2)
-              if (berg%start_lon==bergs%dem_tests_start_lon) then
-                T=0.0; T_d=0.0
-              endif
-            elseif (bergs%dem_beam_test==4) then
-              if (berg%start_lon==bergs%dem_tests_start_lon) then
-                F_y=0.0; Fd_y=0.0
-              endif
-            endif
-          endif
-          IA_x=F_x/M; IA_y=F_y/M; IAd_x=Fd_x/M; IAd_y=Fd_y/M
-        else
-          IA_x=0.0; IA_y=0.0 !explicit elastic force
-          P_ia_11=0.0; P_ia_12=0.0; P_ia_21=0.0; P_ia_22=0.0
-          call calculate_force(bergs, berg, other_berg, IA_x, IA_y, uvel0, vvel0, uvel0, vvel0,  &
-            P_ia_11, P_ia_12, P_ia_21, P_ia_22, P_ia_times_u_x, P_ia_times_u_y,bonded=.true.)
-          !damping force
-          IAd_x=P_ia_11*(other_berg%uvel_old-berg%uvel_old)+P_ia_12*(other_berg%vvel_old-berg%vvel_old)
-          IAd_y=P_ia_12*(other_berg%uvel_old-berg%uvel_old)+P_ia_22*(other_berg%vvel_old-berg%vvel_old)
-        endif
-
-        if (bergs%fracture_criterion=='energy') then
-          if (bergs%constant_interaction_LW) then
-            ! other_berg mass according to constant length and width here, just for interactions
-            M2=bergs%constant_length*bergs%constant_width*other_berg%thickness*bergs%rho_bergs
-          else
-            M2=other_berg%mass
-          endif
-
-          oneoverkn = 1./bergs%spring_coef
-          oneoverkn=oneoverkn*(M/min(M,M2))
-          current_bond%spring_pe = 0.5*((M*IA_x)**2+(M*IA_y)**2)*oneoverkn
-        endif
-
-        if (monitor_energy) then
-          !work
-          current_bond%Ee=current_bond%Ee - 0.25*dt*(&
-            (u_star + uveln)*M*IA_x + &
-            (v_star + vveln)*M*IA_y)
-
-          !V{i+0.5} to V{i+1}
-          current_bond%Ed=current_bond%Ed- 0.25*dt*(&
-            (u_star + uveln)*M*IAd_x + &
-            (v_star + vveln)*M*IAd_y)
-
-          current_bond%axn_fast=IA_x;  current_bond%ayn_fast=IA_y
-
-          !here, bxn_fast and byn_fast are explicit damping accel (not implicit!)
-          current_bond%bxn_fast=IAd_x; current_bond%byn_fast=IAd_y
-        endif
-
-        current_bond=>current_bond%next_bond
-      enddo
-    endif
-  endif
 
   ! Limit speed of bergs based on a CFL criteria
   if ((bergs%speed_limit>0.) .or. (bergs%speed_limit .eq.-1.)) then
@@ -5671,7 +5496,6 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
       call set_conglom_ids(bergs)
     endif
     if (bergs%iceberg_bonds_on) call orig_bond_length(bergs)
-    if (monitor_energy) call energy_tests_init(bergs)
     if (mpp_pe()==0) write(*,'(a)') 'KID, iceberg_run: completed first visit initialization'
   endif
 
@@ -6607,26 +6431,6 @@ subroutine calve_icebergs(bergs)
             newberg%ang_vel=0.; newberg%ang_accel=0.; newberg%rot=0.
           endif
 
-          if (monitor_energy) then
-            if (.not. allocations_done) then
-              if (.not. allocated(newberg%Ee)) allocate(newberg%Ee)
-              if (.not. allocated(newberg%Ed)) allocate(newberg%Ed)
-              if (.not. allocated(newberg%Eext)) allocate(newberg%Eext)
-              if (.not. allocated(newberg%Ee_contact)) allocate(newberg%Ee_contact)
-              if (.not. allocated(newberg%Ed_contact)) allocate(newberg%Ed_contact)
-              if (.not. allocated(newberg%Efrac)) allocate(newberg%Efrac)
-              if (.not. allocated(newberg%Ee_temp)) allocate(newberg%Ee_temp)
-              if (.not. allocated(newberg%Ed_temp)) allocate(newberg%Ed_temp)
-              if (.not. allocated(newberg%Eext_temp)) allocate(newberg%Eext_temp)
-              if (.not. allocated(newberg%Ee_contact_temp)) allocate(newberg%Ee_contact_temp)
-              if (.not. allocated(newberg%Ed_contact_temp)) allocate(newberg%Ed_contact_temp)
-            endif
-
-            newberg%Ee=0.; newberg%Ed=0.; newberg%Eext=0.; newberg%Ee_contact=0.; newberg%Ed_contact=0.
-            newberg%Efrac=0.; newberg%Ee_temp=0.; newberg%Ed_temp=0.;newberg%Eext_temp=0.;
-            newberg%Ee_contact_temp=0.; newberg%Ed_contact_temp =0.
-          endif
-
           if (bergs%fracture_criterion .ne. 'none' .and. (.not. bergs%dem)) then
             if (.not. allocations_done) then
               if (.not. allocated(newberg%accum_bond_rotation)) allocate(newberg%accum_bond_rotation)
@@ -6847,14 +6651,6 @@ subroutine calve_fl_icebergs(bergs,pberg,k,l_b,fl_disp_x,fl_disp_y,berg_from_bit
     cberg%ang_vel=0.; cberg%ang_accel=0.; cberg%rot=0.
   endif
 
-  if (monitor_energy) then
-    allocate(cberg%Ee,cberg%Ed,cberg%Eext,cberg%Ee_contact,cberg%Ed_contact,cberg%Efrac,&
-      cberg%Ee_temp,cberg%Ed_temp,cberg%Eext_temp,cberg%Ee_contact_temp,cberg%Ed_contact_temp)
-    cberg%Ee=0.; cberg%Ed=0.; cberg%Eext=0.; cberg%Ee_contact=0.; cberg%Ed_contact=0.
-    cberg%Efrac=0.; cberg%Ee_temp=0.; cberg%Ed_temp=0.;cberg%Eext_temp=0.;
-    cberg%Ee_contact_temp=0.; cberg%Ed_contact_temp =0.
-  endif
-
   if (bergs%fracture_criterion .ne. 'none' .and. (.not. bergs%dem)) then
     allocate(cberg%accum_bond_rotation)
     cberg%accum_bond_rotation=0.
@@ -6888,10 +6684,7 @@ subroutine evolve_icebergs_mts(bergs)
   real :: ax1,ay1
   real :: dt, dt_2
   logical :: on_tangential_plane, error_flag, bounced
-  !energy stuff
-  real :: dx,dy,M,Fex,Fey,Fex_prev,Fey_prev,Fdx_prev,Fdy_prev,Fdx,Fdy,Fx_tot,Fy_tot,Fx_tot_prev,Fy_tot_prev
-  logical :: save_bond_energy
-  real :: Fex_i, Fey_i, Fec_x, Fec_y, Fdc_x, Fdc_y, ustar, vstar, uveln_star, vveln_star
+  real :: Fec_x, Fec_y, Fdc_x, Fdc_y, ustar, vstar, uveln_star, vveln_star
   integer :: ii,jj,maxii,minii,maxjj,minjj
   real :: usum,usum1,usum2,normchange,denom
   real :: MM,AA,R1,groundfrac,gdrag,D
@@ -6946,7 +6739,6 @@ subroutine evolve_icebergs_mts(bergs)
   dt_2=0.5*dt
   rx = 0.0; ry = 0.0 !not needed, because interp_gridded_fields_to_bergs was already called
   ii = 0
-  save_bond_energy=.false.
   usum=0.0; usum1=0.0; usum2=0.0
   finished=.false.
   had_collision=.false.
@@ -6977,14 +6769,12 @@ subroutine evolve_icebergs_mts(bergs)
               xi=berg%xi      ;   yj=berg%yj
 
               call accel_mts(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, rx, ry, &
-                ax1, ay1, axn, ayn, bxn, byn, save_bond_energy,Fec_x, Fec_y, Fdc_x, Fdc_y)
+                ax1, ay1, axn, ayn, bxn, byn,Fec_x, Fec_y, Fdc_x, Fdc_y)
 
               if (Fdc_x .ne. 0. .or. Fdc_y .ne. 0. .and. bergs%force_convergence) then
                 had_collision=.true.
                 berg%static_berg=0.1
               endif
-              if (monitor_energy .and. last_iter) &
-                call mts_energy_part_1(bergs,berg,ax1,ay1,axn,ayn,bxn,byn,Fec_x,Fec_y,Fdc_x,Fdc_y)
 
               ! Saving all the iceberg variables
               berg%axn=axn; berg%ayn=ayn
@@ -7037,7 +6827,7 @@ subroutine evolve_icebergs_mts(bergs)
         finished=.true.
       endif
 
-      if (last_iter .and. .not. monitor_energy) finished=.true.
+      if (last_iter) finished=.true.
 
       usum1=0.0; usum2=0.0
 
@@ -7075,7 +6865,6 @@ subroutine evolve_icebergs_mts(bergs)
             berg%bxn=berg%bxn_fast; berg%byn=berg%byn_fast
           endif
 
-          !if (monitor energy): already did energy update in part I
         endif
         berg=>berg%next
       enddo
@@ -7145,7 +6934,7 @@ subroutine evolve_icebergs_mts(bergs)
     jj=0
     usum=0.0; usum1=0.0; usum2=0.0
     finished=.false.
-    save_bond_energy=.false.
+
     if (bergs%force_convergence .and. (.not. bergs%explicit_inner_mts)) then
       last_iter=.false.
     else
@@ -7156,140 +6945,134 @@ subroutine evolve_icebergs_mts(bergs)
 
       jj=jj+1
 
-      if (monitor_energy .and. last_iter) save_bond_energy=.true.
       bergs%bond_break_detected=.false.
-    ! update velocities
-    do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
-      berg=>bergs%list(grdi,grdj)%first
-      do while (associated(berg)) ! loop over all bergs
-        if (berg%static_berg .lt. 0.5 .and. berg%conglom_id.ne.0) then
-
-          latn = berg%lat ;   lonn = berg%lon
-          axn  = berg%axn_fast ;   ayn  = berg%ayn_fast
-          bxn  = berg%bxn_fast ;   byn  = berg%byn_fast
-          uvel1=berg%uvel ;   vvel1=berg%vvel
-          i=berg%ine      ;   j=berg%jne
-          xi=berg%xi      ;   yj=berg%yj
-
-          axn = axn+bxn; ayn=ayn+byn
-
-          ! Turn the velocities into u_star, v_star.(uvel3 is v_star) - (possible issues with tangent plane?)
-          uvel3=uvel1+(dt_2*axn)                  !(Stern et al 2017, Eq B4)
-          vvel3=vvel1+(dt_2*ayn)
-
-          if (monitor_energy .and. last_iter) call mts_energy_part_3(bergs,berg,uvel3,vvel3,wt=1)
-
-          if (bergs%explicit_inner_mts) then
-            call accel_explicit_inner_mts(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, &
-              ax1, ay1, axn, ayn, save_bond_energy)
-            bxn=0.; byn=0.
-
-            if (short_step_mts_grounding) then
-              D=(bergs%rho_bergs/rho_seawater)*berg%thickness ! draught (keel depth)
-              if (bergs%h_to_init_grounding>0.0) then
-                groundfrac=1.0-(berg%od-D)/bergs%h_to_init_grounding
-                groundfrac=max(groundfrac,0.0); groundfrac=min(groundfrac,1.0)
-              else
-                if (D>berg%od) then
-                  groundfrac=1.0
-                else
-                  groundfrac=0.0
-                endif
-              endif
-              if (groundfrac>0.0) then
-                if (bergs%constant_interaction_LW) then
-                  ! mass according to constant length and width here, just for interactions
-                  MM=bergs%constant_length*bergs%constant_width*berg%thickness*bergs%rho_bergs
-                  AA=bergs%constant_width*bergs%constant_length
-                else
-                  MM=berg%mass
-                  AA=berg%length*berg%width
-                endif
-                gdrag=-bergs%cdrag_grounding*groundfrac*AA/MM
-              else
-                gdrag=0.
-              endif
-              axn=axn+uvel1*gdrag; ayn=ayn+vvel1*gdrag
-              ax1=0.5*axn; ay1=0.5*ayn
-            endif
-
-          else
-            call accel_mts(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, rx, ry, &
-              ax1, ay1, axn, ayn, bxn, byn, save_bond_energy)
-          endif
-
-          ! Solving for the new velocity (Stern et al 2017, Eqn B5)
-          on_tangential_plane=.false.
-          if ((berg%lat>89.) .and. (bergs%grd%grid_is_latlon)) on_tangential_plane=.true.
-          if (on_tangential_plane) then
-            call rotvec_to_tang(lonn,uvel3,vvel3,xdot3,ydot3)
-            call rotvec_to_tang(lonn,ax1,ay1,xddot1,yddot1)
-            xdotn=xdot3+(dt*xddot1); ydotn=ydot3+(dt*yddot1)
-            call rotvec_from_tang(lonn,xdotn,ydotn,uveln,vveln)
-          else
-            !uvel3, vvel3 become uveln and vveln after they are put into lat/lon co-ordinates
-            uveln=uvel3+(dt*ax1); vveln=vvel3+(dt*ay1)
-          endif
-
-          if (bergs%force_convergence .and. (.not. bergs%explicit_inner_mts)) then
-            if (jj==1) usum=usum+berg%uvel_old**2 + berg%vvel_old**2
-            usum1=usum1 + uveln**2 + vveln**2
-            usum2=usum2+(uveln-berg%uvel_old)**2+(vveln-berg%vvel_old)**2
-          endif
-
-          ! Saving all the iceberg variables.
-          berg%axn_fast=axn; berg%ayn_fast=ayn
-          berg%bxn_fast=bxn; berg%byn_fast=byn
-          berg%uvel=uveln  ; berg%vvel=vveln
-
-          if (monitor_energy .and. last_iter) call mts_energy_part_3(bergs,berg,uvel3,vvel3,wt=2)
-
-        endif
-        berg=>berg%next
-      enddo ! loop over all bergs
-    enddo; enddo ! update velocities
-
-    if (bergs%force_convergence .and. .not. last_iter) then
-      if (jj>1) then
-        denom=sqrt(usum)+sqrt(usum1)
-        if (denom>0) then
-          normchange=2.0*sqrt(usum2)/denom
-        else
-          normchange=0.0
-        endif
-        if (normchange<bergs%convergence_tolerance) last_iter=.true.
-      endif
-      usum=usum1 !previous norm (squared)
-    else
-      finished=.true.
-    endif
-
-    if (last_iter .and. .not. monitor_energy) finished=.true.
-
-    if (bergs%force_convergence .and. (.not. finished)) then
+      ! update velocities
       do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
         berg=>bergs%list(grdi,grdj)%first
         do while (associated(berg)) ! loop over all bergs
           if (berg%static_berg .lt. 0.5 .and. berg%conglom_id.ne.0) then
 
-            !update old velocities for interactions
-            berg%uvel_old=berg%uvel; berg%vvel_old=berg%vvel
+            latn = berg%lat ;   lonn = berg%lon
+            axn  = berg%axn_fast ;   ayn  = berg%ayn_fast
+            bxn  = berg%bxn_fast ;   byn  = berg%byn_fast
+            uvel1=berg%uvel ;   vvel1=berg%vvel
+            i=berg%ine      ;   j=berg%jne
+            xi=berg%xi      ;   yj=berg%yj
 
-            berg%uvel=berg%uvel-dt_2*(berg%axn_fast+berg%bxn_fast)-dt_2*(berg%axn+berg%bxn)
-            berg%vvel=berg%vvel-dt_2*(berg%ayn_fast+berg%byn_fast)-dt_2*(berg%ayn+berg%byn)
-            berg%axn_fast=berg%axn; berg%ayn_fast=berg%ayn
-            berg%bxn_fast=berg%bxn; berg%byn_fast=berg%byn
+            axn = axn+bxn; ayn=ayn+byn
+
+            ! Turn the velocities into u_star, v_star.(uvel3 is v_star) - (possible issues with tangent plane?)
+            uvel3=uvel1+(dt_2*axn)                  !(Stern et al 2017, Eq B4)
+            vvel3=vvel1+(dt_2*ayn)
+
+            if (bergs%explicit_inner_mts) then
+              call accel_explicit_inner_mts(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, &
+                ax1, ay1, axn, ayn)
+              bxn=0.; byn=0.
+
+              if (short_step_mts_grounding) then
+                D=(bergs%rho_bergs/rho_seawater)*berg%thickness ! draught (keel depth)
+                if (bergs%h_to_init_grounding>0.0) then
+                  groundfrac=1.0-(berg%od-D)/bergs%h_to_init_grounding
+                  groundfrac=max(groundfrac,0.0); groundfrac=min(groundfrac,1.0)
+                else
+                  if (D>berg%od) then
+                    groundfrac=1.0
+                  else
+                    groundfrac=0.0
+                  endif
+                endif
+                if (groundfrac>0.0) then
+                  if (bergs%constant_interaction_LW) then
+                    ! mass according to constant length and width here, just for interactions
+                    MM=bergs%constant_length*bergs%constant_width*berg%thickness*bergs%rho_bergs
+                    AA=bergs%constant_width*bergs%constant_length
+                  else
+                    MM=berg%mass
+                    AA=berg%length*berg%width
+                  endif
+                  gdrag=-bergs%cdrag_grounding*groundfrac*AA/MM
+                else
+                  gdrag=0.
+                endif
+                axn=axn+uvel1*gdrag; ayn=ayn+vvel1*gdrag
+                ax1=0.5*axn; ay1=0.5*ayn
+              endif
+
+            else
+              call accel_mts(bergs, berg, i, j, xi, yj, latn, uvel1, vvel1, uvel1, vvel1, dt, rx, ry, &
+                ax1, ay1, axn, ayn, bxn, byn)
+            endif
+
+            ! Solving for the new velocity (Stern et al 2017, Eqn B5)
+            on_tangential_plane=.false.
+            if ((berg%lat>89.) .and. (bergs%grd%grid_is_latlon)) on_tangential_plane=.true.
+            if (on_tangential_plane) then
+              call rotvec_to_tang(lonn,uvel3,vvel3,xdot3,ydot3)
+              call rotvec_to_tang(lonn,ax1,ay1,xddot1,yddot1)
+              xdotn=xdot3+(dt*xddot1); ydotn=ydot3+(dt*yddot1)
+              call rotvec_from_tang(lonn,xdotn,ydotn,uveln,vveln)
+            else
+              !uvel3, vvel3 become uveln and vveln after they are put into lat/lon co-ordinates
+              uveln=uvel3+(dt*ax1); vveln=vvel3+(dt*ay1)
+            endif
+
+            if (bergs%force_convergence .and. (.not. bergs%explicit_inner_mts)) then
+              if (jj==1) usum=usum+berg%uvel_old**2 + berg%vvel_old**2
+              usum1=usum1 + uveln**2 + vveln**2
+              usum2=usum2+(uveln-berg%uvel_old)**2+(vveln-berg%vvel_old)**2
+            endif
+
+            ! Saving all the iceberg variables.
+            berg%axn_fast=axn; berg%ayn_fast=ayn
+            berg%bxn_fast=bxn; berg%byn_fast=byn
+            berg%uvel=uveln  ; berg%vvel=vveln
           endif
           berg=>berg%next
-        enddo
-      enddo; enddo
-    endif
+        enddo ! loop over all bergs
+      enddo; enddo ! update velocities
 
-    usum1=0.0; usum2=0.0
+      if (bergs%force_convergence .and. .not. last_iter) then
+        if (jj>1) then
+          denom=sqrt(usum)+sqrt(usum1)
+          if (denom>0) then
+            normchange=2.0*sqrt(usum2)/denom
+          else
+            normchange=0.0
+          endif
+          if (normchange<bergs%convergence_tolerance) last_iter=.true.
+        endif
+        usum=usum1 !previous norm (squared)
+      else
+        finished=.true.
+      endif
 
-    if (jj<minjj .and. finished) minjj=jj
-    if (jj>maxjj .and. finished) maxjj=jj
-  enddo
+      if (last_iter) finished=.true.
+
+      if (bergs%force_convergence .and. (.not. finished)) then
+        do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
+          berg=>bergs%list(grdi,grdj)%first
+          do while (associated(berg)) ! loop over all bergs
+            if (berg%static_berg .lt. 0.5 .and. berg%conglom_id.ne.0) then
+
+              !update old velocities for interactions
+              berg%uvel_old=berg%uvel; berg%vvel_old=berg%vvel
+
+              berg%uvel=berg%uvel-dt_2*(berg%axn_fast+berg%bxn_fast)-dt_2*(berg%axn+berg%bxn)
+              berg%vvel=berg%vvel-dt_2*(berg%ayn_fast+berg%byn_fast)-dt_2*(berg%ayn+berg%byn)
+              berg%axn_fast=berg%axn; berg%ayn_fast=berg%ayn
+              berg%bxn_fast=berg%bxn; berg%byn_fast=berg%byn
+            endif
+            berg=>berg%next
+          enddo
+        enddo; enddo
+      endif
+
+      usum1=0.0; usum2=0.0
+
+      if (jj<minjj .and. finished) minjj=jj
+      if (jj>maxjj .and. finished) maxjj=jj
+    enddo
 
     !update 'old' velocities used for interactions
     do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
@@ -7394,97 +7177,6 @@ subroutine evolve_icebergs_mts(bergs)
 
   no_frac_first_ts=.false.
 end subroutine evolve_icebergs_mts
-
-
-!> Energy calculations for MTS_part==1
-subroutine mts_energy_part_1(bergs, berg, ax1, ay1, axn, ayn, bxn, byn, Fec_x, Fec_y, Fdc_x, Fdc_y)
-  ! Arguments
-  type(icebergs), pointer :: bergs !< Container for all types and memory
-  type(iceberg), pointer :: berg !< Berg for which to do calculations
-  real, intent(in) :: ax1 !< Zonal acceleration [m s-2]
-  real, intent(in) :: ay1 !< Meridional acceleration [m s-2]
-  real, intent(in) :: axn !< Explicit estimate of zonal acceleration [m s-2]
-  real, intent(in) :: ayn !< Explicit estimate of meridional acceleration [m s-2]
-  real, intent(in) :: bxn !< Implicit estimate of zonal acceleration [m s-2]
-  real, intent(in) :: byn !< Implicit estimate of meridional acceleration [m s-2]
-  real, intent(in) :: Fec_x !< Zonal elastic force from collision with other conglomerate [N]
-  real, intent(in) :: Fec_y !< Meridional elastic force from collision with other conglomerate [N]
-  real, intent(in) :: Fdc_x !< !< Zonal damping force from collision with other conglomerate [N]
-  real, intent(in) :: Fdc_y !< !< Meridional damping force from collision with other conglomerate [N]
-  ! Local
-  real :: dt, M, Fex, Fey, Fex_i, Fey_i
-  real :: uveln, vveln, uveln_star, vveln_star, ustar, vstar
-
-  dt=bergs%dt
-
-  !Again, MTS part 1 solves for V_n+1 from the previous timestep
-  !"Temp" energy variables are from the previous cycle
-  !At the end of MTS part 1, the non-"temp" energy variables are saved for post-processing/analysis
-  !see plot_energy.py
-
-  !derived from Mayrhofer,Hager, and Kloss 2017 (MHK17) and Asmar et al 2003
-  M = berg%mass
-
-  Fex = M * 2*ax1; Fey = M * 2*ay1 !external forces
-  Fex = Fex - Fec_x - Fdc_x; Fey = Fey - Fec_y - Fdc_y !external forces minus collisional
-
-  uveln=berg%uvel+(dt*ax1); vveln=berg%vvel+(dt*ay1)
-  ustar=berg%uvel; vstar=berg%vvel
-
-  !dEext=0.5*(V_{i+1} + V_{i+0.5})*F_{ext,i+1}*dt/2
-  berg%Eext=berg%Eext_temp - 0.25*dt*(&
-    (uveln + ustar)*Fex + (vveln + vstar)*Fey)
-
-  berg%Ee_contact=berg%Ee_contact_temp - 0.25*dt*(&
-    (uveln + ustar)*Fec_x + (vveln + vstar)*Fec_y)
-
-  berg%Ed_contact=berg%Ed_contact_temp - 0.25*dt*(&
-    (uveln + ustar)*Fdc_x + (vveln + vstar)*Fdc_y)
-
-  !The following is for part II
-  !V{i+1.5}
-  uveln_star = uveln + dt*ax1; vveln_star = vveln + dt*ay1
-
-  berg%Eext_temp=berg%Eext - 0.25*dt*(&
-    (uveln + uveln_star)*Fex + (vveln + vveln_star)*Fey)
-
-  berg%Ee_contact_temp=berg%Ee_contact - 0.25*dt*(&
-    (uveln + uveln_star)*Fec_x + (vveln + vveln_star)*Fec_y)
-
-  berg%Ed_contact_temp=berg%Ed_contact - 0.25*dt*(&
-    (uveln + uveln_star)*Fdc_x + (vveln + vveln_star)*Fdc_y)
-
-  berg%Ee=berg%Ee_temp; berg%Ed=berg%Ed_temp
-end subroutine mts_energy_part_1
-
-!> Energy calculations for MTS_part==3
-subroutine mts_energy_part_3(bergs,berg,ustar,vstar,wt)
-  ! Arguments
-  type(icebergs), pointer :: bergs !< Container for all types and memory
-  type(iceberg), pointer :: berg !< Berg to do calculations for
-  real,intent(in) :: ustar !< u-component of half-step velocity [m s-1]
-  real,intent(in) :: vstar !< v-component of half-step velocity [m s-1]
-  integer,intent(in) :: wt !< integrate from time i to i+1/2 (wt==1) or i+1/2 to i+1 (wt==2)
-  ! Local
-  real :: dt, M, Fex, Fey, Fdx, Fdy
-
-
-  !MTS sub-step forces
-  dt = bergs%mts_fast_dt
-  M = berg%mass
-  Fex = M * berg%axn_fast; Fey = M * berg%ayn_fast !elastic forces
-
-  !for i to i+1/2 or i+1/2 to i+1
-  berg%Ee_temp=berg%Ee_temp - 0.25*dt*(&
-    (ustar + berg%uvel)*Fex + &
-    (vstar + berg%vvel)*Fey)
-
-  Fdx = M * berg%bxn_fast; Fdy = M * berg%byn_fast !damping forces
-  berg%Ed_temp=berg%Ed_temp - 0.25*dt*(&
-    (ustar + berg%uvel)*Fdx + &
-    (vstar + berg%vvel)*Fdy)
-
-end subroutine mts_energy_part_3
 
 !> Evolves icebergs forward by updating velocity and position with a time-stepping scheme
 subroutine evolve_icebergs(bergs)

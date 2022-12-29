@@ -44,7 +44,7 @@ use ice_bergs_framework, only: split_id, id_from_2_ints, generate_id
 use ice_bergs_framework, only: mts,save_bond_traj
 use ice_bergs_framework, only: push_bond_posn, append_bond_posn
 use ice_bergs_framework, only: pack_bond_traj_into_buffer2,unpack_bond_traj_from_buffer2
-use ice_bergs_framework, only: monitor_energy, dem, fracture_criterion, iceberg_bonds_on
+use ice_bergs_framework, only: dem, fracture_criterion, iceberg_bonds_on
 
 implicit none ; private
 
@@ -169,8 +169,7 @@ real, allocatable, dimension(:) :: lon,          &
                                    rotation,     &
                                    rel_rotation, &
                                    n_frac_var,   &
-                                   n_strain_rate,&
-                                   spring_pe
+                                   n_strain_rate
 
 integer, allocatable, dimension(:) :: ine,              &
                                       jne,              &
@@ -487,8 +486,6 @@ integer :: grdi, grdj
     allocate(n_frac_var(nbonds))
     if (fracture_criterion.eq.'strain_rate') then
       allocate(n_strain_rate(nbonds))
-    elseif (fracture_criterion.eq.'energy') then
-      allocate(spring_pe(nbonds))
     endif
   endif
 
@@ -533,9 +530,6 @@ integer :: grdi, grdj
     if (fracture_criterion.eq.'strain_rate') then
       id = register_restart_field(bergs_bond_restart,filename_bonds,'n_strain_rate',n_strain_rate,&
         longname='normal strain-rate',units='1/seconds')
-    elseif (fracture_criterion.eq.'energy') then
-      id = register_restart_field(bergs_bond_restart,filename_bonds,'spring_pe',spring_pe,&
-        longname='spring potential energy',units='J')
     endif
   endif
 
@@ -568,8 +562,6 @@ integer :: grdi, grdj
           n_frac_var(i)=current_bond%n_frac_var
           if (fracture_criterion.eq.'strain_rate') then
             n_strain_rate(i)=current_bond%n_strain_rate
-          elseif (fracture_criterion.eq.'energy') then
-            spring_pe(i)=current_bond%spring_pe
           endif
         endif
 
@@ -606,8 +598,6 @@ integer :: grdi, grdj
              n_frac_var)
     if (fracture_criterion.eq.'strain_rate') then
       deallocate(n_strain_rate)
-    elseif (fracture_criterion.eq.'energy') then
-      deallocate(spring_pe)
     endif
   endif
 
@@ -783,14 +773,6 @@ integer, allocatable, dimension(:) :: ine,        &
         allocate(localberg%n_bonds)
         localberg%n_bonds=0.
       end if
-
-      if (monitor_energy) then
-        allocate(localberg%Ee,localberg%Ed,localberg%Eext,localberg%Ee_contact,localberg%Ed_contact,localberg%Efrac,&
-          localberg%Ee_temp,localberg%Ed_temp,localberg%Eext_temp,localberg%Ee_contact_temp,localberg%Ed_contact_temp)
-        localberg%Ee=0.0; localberg%Ed=0.0; localberg%Eext=0.0; localberg%Ee_contact=0.0; localberg%Ed_contact=0.0
-        localberg%Efrac=0.0; localberg%Ee_temp=0.0; localberg%Ed_temp=0.0; localberg%Eext_temp=0.0
-        localberg%Ee_contact_temp=0.0; localberg%Ed_contact_temp=0.0
-      endif
 
       if (mts) then
         allocate(localberg%axn_fast)
@@ -1286,8 +1268,7 @@ real, allocatable, dimension(:) ::    tangd1,           &
                                       rotation,         &
                                       rel_rotation,     &
                                       n_frac_var,       &
-                                      n_strain_rate,    &
-                                      spring_pe
+                                      n_strain_rate
 integer(kind=8), allocatable, dimension(:) :: first_id,   &
                                               other_id
 !integer, allocatable, dimension(:,:) :: iceberg_counter_grd
@@ -1339,8 +1320,6 @@ integer(kind=8), allocatable, dimension(:) :: first_id,   &
       allocate(n_frac_var(nbonds_in_file))
       if (fracture_criterion.eq.'strain_rate') then
         allocate(n_strain_rate(nbonds_in_file))
-      elseif (fracture_criterion.eq.'energy') then
-        allocate(spring_pe(nbonds_in_file))
       endif
     endif
 
@@ -1373,8 +1352,6 @@ integer(kind=8), allocatable, dimension(:) :: first_id,   &
       call read_real_vector(filename,'n_frac_var',n_frac_var,grd%domain,value_if_not_in_file=0.)
       if (fracture_criterion.eq.'strain_rate') then
         call read_real_vector(filename,'n_strain_rate',n_strain_rate,grd%domain,value_if_not_in_file=0.)
-      elseif (fracture_criterion.eq.'energy') then
-        call read_real_vector(filename,'spring_pe',spring_pe,grd%domain,value_if_not_in_file=0.)
       endif
     endif
 
@@ -1486,8 +1463,6 @@ integer(kind=8), allocatable, dimension(:) :: first_id,   &
               current_bond%n_frac_var=n_frac_var(k)
               if (fracture_criterion.eq.'strain_rate') then
                 current_bond%n_strain_rate=n_strain_rate(k)
-              elseif (fracture_criterion.eq.'energy') then
-                current_bond%spring_pe=spring_pe(k)
               endif
             endif
 
@@ -1562,8 +1537,6 @@ integer(kind=8), allocatable, dimension(:) :: first_id,   &
                n_frac_var)
       if (fracture_criterion.eq.'strain_rate') then
         deallocate(n_strain_rate)
-      elseif (fracture_criterion.eq.'energy') then
-        deallocate(spring_pe)
       endif
     endif
   endif
@@ -1731,8 +1704,6 @@ integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid, sssid
 integer :: cnid, hiid, hsid
 integer :: mid, smid, did, wid, lid, mbid, mflbid, mflbbid, hdid, nbid, odid, flkid
 integer :: axnid,aynid,bxnid,bynid,axnfid,aynfid,bxnfid,bynfid, msid
-integer :: eecid,edcid,eeid,edid,aeid,efid
-integer :: eectid, edctid, eetid, edtid, aetid
 integer :: avid, aaid, rid, abrid
 character(len=70) :: filename
 character(len=7) :: pe_name
@@ -1904,20 +1875,6 @@ integer :: ntrajs_sent_io,ntrajs_rcvd_io
           nbid = inq_varid(ncid, 'n_bonds')
         end if
 
-        if (monitor_energy) then
-          eeid = inq_varid(ncid, 'Ee')
-          edid = inq_varid(ncid, 'Ed')
-          aeid = inq_varid(ncid, 'Eext')
-          eecid = inq_varid(ncid, 'Ee_contact')
-          edcid = inq_varid(ncid, 'Ed_contact')
-          efid =  inq_varid(ncid, 'Efrac')
-          ! eectid = inq_varid(ncid, 'Ee_contact_temp')
-          ! edctid = inq_varid(ncid, 'Ed_contact_temp')
-          ! eetid= inq_varid(ncid, 'Ee_temp')
-          ! edtid= inq_varid(ncid, 'Ed_temp')
-          ! aetid= inq_varid(ncid, 'Eext_temp')
-        endif
-
         if (dem) then
           avid = inq_varid(ncid, 'ang_vel')
           aaid = inq_varid(ncid, 'ang_accel')
@@ -1990,20 +1947,6 @@ integer :: ntrajs_sent_io,ntrajs_rcvd_io
         if (iceberg_bonds_on) then
           nbid = def_var(ncid, 'n_bonds', NF_INT, i_dim)
         end if
-
-        if (monitor_energy) then
-          eeid = def_var(ncid, 'Ee', NF_DOUBLE, i_dim)
-          edid = def_var(ncid, 'Ed', NF_DOUBLE, i_dim)
-          aeid = def_var(ncid, 'Eext', NF_DOUBLE, i_dim)
-          eecid = def_var(ncid, 'Ee_contact', NF_DOUBLE, i_dim)
-          edcid = def_var(ncid, 'Ed_contact', NF_DOUBLE, i_dim)
-          efid = def_var(ncid, 'Efrac', NF_DOUBLE, i_dim)
-          ! eectid = def_var(ncid, 'Ee_contact_temp', NF_DOUBLE, i_dim)
-          ! edctid = def_var(ncid, 'Ed_contact_temp', NF_DOUBLE, i_dim)
-          ! eetid= def_var(ncid, 'Ee_temp', NF_DOUBLE, i_dim)
-          ! edtid= def_var(ncid, 'Ed_temp', NF_DOUBLE, i_dim)
-          ! aetid= def_var(ncid, 'Eext_temp', NF_DOUBLE, i_dim)
-        endif
 
         if (dem) then
           avid = def_var(ncid, 'ang_vel', NF_DOUBLE, i_dim)
@@ -2121,31 +2064,6 @@ integer :: ntrajs_sent_io,ntrajs_rcvd_io
           call put_att(ncid, nbid, 'units', 'dimensionless')
         end if
 
-        if (monitor_energy) then
-          call put_att(ncid, eeid, 'long_name', 'bonded elastic energy')
-          call put_att(ncid, eeid, 'units', 'J')
-          call put_att(ncid, edid, 'long_name', 'bonded damping energy')
-          call put_att(ncid, edid, 'units', 'J')
-          call put_att(ncid, aeid, 'long_name', 'external energy')
-          call put_att(ncid, aeid, 'units', 'J')
-          call put_att(ncid, eecid, 'long_name', 'contact elastic energy')
-          call put_att(ncid, eecid, 'units', 'J')
-          call put_att(ncid, edcid, 'long_name', 'contact damping energy')
-          call put_att(ncid, edcid, 'units', 'J')
-          call put_att(ncid, efid, 'long_name', 'dissipated fracture energy')
-          call put_att(ncid, efid, 'units', 'J')
-          ! call put_att(ncid, eectid, 'long_name', 'contact elastic energy temp')
-          ! call put_att(ncid, eectid, 'units', 'J')
-          ! call put_att(ncid, edctid, 'long_name', 'contact damping energy temp')
-          ! call put_att(ncid, edctid, 'units', 'J')
-          ! call put_att(ncid, eetid, 'long_name', 'bonded elastic energy temp')
-          ! call put_att(ncid, eetid, 'units', 'J')
-          ! call put_att(ncid, edtid, 'long_name', 'bonded damping energy temp')
-          ! call put_att(ncid, edtid, 'units', 'J')
-          ! call put_att(ncid, aetid, 'long_name', 'external energy temp')
-          ! call put_att(ncid, aetid, 'units', 'J')
-        endif
-
         if (dem) then
           call put_att(ncid, avid, 'long_name', 'angular velocity')
           call put_att(ncid, avid, 'units', 'rad/s')
@@ -2232,20 +2150,6 @@ integer :: ntrajs_sent_io,ntrajs_rcvd_io
           call put_int(ncid, nbid, i, this%n_bonds)
         end if
 
-        if (monitor_energy) then
-          call put_double(ncid, eeid,   i, this%Ee)
-          call put_double(ncid, edid,   i, this%Ed)
-          call put_double(ncid, aeid,   i, this%Eext)
-          call put_double(ncid, eecid,  i, this%Ee_contact)
-          call put_double(ncid, edcid,  i, this%Ed_contact)
-          call put_double(ncid, efid,   i, this%Efrac)
-          ! call put_double(ncid, eectid, i, this%Ee_contact_temp)
-          ! call put_double(ncid, edctid, i, this%Ed_contact_temp)
-          ! call put_double(ncid, eetid,  i, this%Ee_temp)
-          ! call put_double(ncid, edtid,  i, this%Ed_temp)
-          ! call put_double(ncid, aetid,  i, this%Eext_temp)
-        endif
-
         if (dem) then
           call put_double(ncid, avid, i, this%ang_vel)
           call put_double(ncid, aaid, i, this%ang_accel)
@@ -2276,10 +2180,9 @@ type(bond_xyt), pointer :: trajectory !< An iceberg bond trajectory
 character(len=70) :: bond_traj_name !<file name of bond trajectories
 ! Local variables
 integer :: iret, ncid, i_dim, i
-integer :: lonid, latid, yearid, dayid, lenid,n1id, n2id, peid
+integer :: lonid, latid, yearid, dayid, lenid,n1id, n2id
 integer :: rotid,rrotid,nsid,nsrid, brid
-integer :: idcnt1_id, idcnt2_id, idij1_id, idij2_id, eeid, edid
-integer :: axid,ayid,bxid,byid
+integer :: idcnt1_id, idcnt2_id, idij1_id, idij2_id
 integer :: td1id,td2id,dnsid,dssid
 character(len=70) :: filename
 character(len=7) :: pe_name
@@ -2396,12 +2299,6 @@ logical :: io_is_in_append_mode
       idcnt1_id = inq_varid(ncid, 'id_cnt1'); idij1_id = inq_varid(ncid, 'id_ij1')
       idcnt2_id = inq_varid(ncid, 'id_cnt2'); idij2_id = inq_varid(ncid, 'id_ij2')
 
-      if (monitor_energy) then
-        eeid = inq_varid(ncid, 'Ee');       edid = inq_varid(ncid, 'Ed')
-        axid = inq_varid(ncid, 'axn_fast'); ayid = inq_varid(ncid, 'ayn_fast')
-        bxid = inq_varid(ncid, 'bxn_fast'); byid = inq_varid(ncid, 'byn_fast')
-      endif
-
       if (dem) then
         td1id = inq_varid(ncid, 'tangd1');  td2id = inq_varid(ncid, 'tangd2')
         dnsid = inq_varid(ncid, 'nstress'); dssid = inq_varid(ncid, 'sstress')
@@ -2411,8 +2308,6 @@ logical :: io_is_in_append_mode
         nsid = inq_varid(ncid, 'n_frac_var')
         if (fracture_criterion.eq.'strain_rate') then
           nsrid = inq_varid(ncid, 'n_strain_rate')
-        elseif (fracture_criterion.eq.'energy') then
-          peid = inq_varid(ncid, 'spring_pe')
         endif
       endif
 
@@ -2430,12 +2325,6 @@ logical :: io_is_in_append_mode
       idcnt1_id = def_var(ncid, 'id_cnt1', NF_INT, i_dim); idij1_id = def_var(ncid, 'id_ij1', NF_INT, i_dim)
       idcnt2_id = def_var(ncid, 'id_cnt2', NF_INT, i_dim); idij2_id = def_var(ncid, 'id_ij2', NF_INT, i_dim)
 
-      if (monitor_energy) then
-        eeid = def_var(ncid, 'Ee', NF_DOUBLE, i_dim);       edid = def_var(ncid, 'Ed', NF_DOUBLE, i_dim)
-        axid = def_var(ncid, 'axn_fast', NF_DOUBLE, i_dim); ayid = def_var(ncid, 'ayn_fast', NF_DOUBLE, i_dim)
-        bxid = def_var(ncid, 'bxn_fast', NF_DOUBLE, i_dim); byid = def_var(ncid, 'byn_fast', NF_DOUBLE, i_dim)
-      endif
-
       if (dem) then
         td1id = def_var(ncid, 'tangd1',  NF_DOUBLE, i_dim); td2id = def_var(ncid, 'tangd2',  NF_DOUBLE, i_dim)
         dnsid = def_var(ncid, 'nstress', NF_DOUBLE, i_dim); dssid = def_var(ncid, 'sstress', NF_DOUBLE, i_dim)
@@ -2446,8 +2335,6 @@ logical :: io_is_in_append_mode
         nsid = def_var(ncid, 'n_frac_var', NF_DOUBLE, i_dim)
         if (fracture_criterion.eq.'strain_rate') then
           nsrid = def_var(ncid, 'n_strain_rate', NF_DOUBLE, i_dim)
-        elseif (fracture_criterion.eq.'energy') then
-          peid = def_var(ncid, 'spring_pe', NF_DOUBLE, i_dim)
         endif
       endif
 
@@ -2471,19 +2358,6 @@ logical :: io_is_in_append_mode
       call put_att(ncid, idij2_id, 'long_name', 'position component of second connected iceberg id')
       call put_att(ncid, idij2_id, 'units', 'dimensionless')
 
-      if (monitor_energy) then
-        call put_att(ncid, eeid, 'long_name', 'elastic energy'); call put_att(ncid, eeid, 'units', 'J')
-        call put_att(ncid, edid, 'long_name', 'damping energy'); call put_att(ncid, edid, 'units', 'J')
-        call put_att(ncid, axid, 'long_name', 'explicit short-step zonal acceleration')
-        call put_att(ncid, axid, 'units', 'm/s^2')
-        call put_att(ncid, ayid, 'long_name', 'explicit short-step meridional acceleration')
-        call put_att(ncid, ayid, 'units', 'm/s^2')
-        call put_att(ncid, bxid, 'long_name', 'implicit short-step zonal acceleration')
-        call put_att(ncid, bxid, 'units', 'm/s^2')
-        call put_att(ncid, byid, 'long_name', 'implicit short-step meridional acceleration')
-        call put_att(ncid, byid, 'units', 'm/s^2')
-      endif
-
       if (dem) then
         call put_att(ncid, td1id, 'long_name', 'zonal tangential displacement')
         call put_att(ncid, td1id, 'units', 'm')
@@ -2499,8 +2373,6 @@ logical :: io_is_in_append_mode
         call put_att(ncid, nsid, 'long_name', 'normal fracture variable'); call put_att(ncid, nsid, 'units', 'varies')
         if (fracture_criterion.eq.'strain_rate') then
           call put_att(ncid, nsrid, 'long_name', 'normal strain-rate'); call put_att(ncid, nsrid, 'units', '1/seconds')
-        elseif (fracture_criterion.eq.'energy') then
-          call put_att(ncid, peid, 'long_name', 'spring potential energy'); call put_att(ncid, peid, 'units', 'J')
         endif
       endif
     endif
@@ -2528,12 +2400,6 @@ logical :: io_is_in_append_mode
       call split_id(this%id2, cnt, ij)
       call put_int(ncid, idcnt2_id, i, cnt);        call put_int(ncid, idij2_id, i, ij)
 
-      if (monitor_energy) then
-        call put_double(ncid,eeid,i,this%Ee);       call put_double(ncid,edid,i,this%Ed)
-        call put_double(ncid,axid,i,this%axn_fast); call put_double(ncid,ayid,i,this%ayn_fast)
-        call put_double(ncid,bxid,i,this%bxn_fast); call put_double(ncid,byid,i,this%byn_fast)
-      endif
-
       if (dem) then
         call put_double(ncid,td1id,i,this%tangd1);  call put_double(ncid,td2id,i,this%tangd2)
         call put_double(ncid,dnsid,i,this%nstress); call put_double(ncid,dssid,i,this%sstress)
@@ -2543,8 +2409,6 @@ logical :: io_is_in_append_mode
         call put_double(ncid,nsid,i,this%n_frac_var)
         if (fracture_criterion.eq.'strain_rate') then
           call put_double(ncid,nsrid,i,this%n_strain_rate)
-        elseif (fracture_criterion.eq.'energy') then
-          call put_double(ncid,peid,i,this%spring_pe)
         endif
       endif
 

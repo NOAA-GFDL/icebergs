@@ -42,7 +42,6 @@
     rho_bergs=900. ! (850) iceberg density
     dem_spring_coef=1.e9 !(1.e-8) Spring const for berg interactions (dflt~highest stable value)
 
-    monitor_energy=.false. !(F)save total elastic (spring+collision),external,dissipated,&fracture energy
     mts=.true. !(F) for using the Multiple Time Stepping Velocity Verlet scheme
     mts_sub_steps=2000  !(-1) # of mts sub-steps (-1=automatically determine # from spring const)
     force_convergence=.true. !(F) experimental MTS convergence scheme to better conserve momentum during collisions
