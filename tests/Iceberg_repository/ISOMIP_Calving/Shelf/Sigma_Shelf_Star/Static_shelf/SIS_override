@@ -1,8 +1,0 @@
-# Blank file in which we can put "overrides" for parameters
-DO_ICEBERGS =False              !   If true, use the icebergs module.
-
-!Time Stepping
-!#override DT_FORCING = 10.0              !   [s] default = 0.0
-!#override DT_RHEOLOGY = 10.0             ! The sub-cycling time step, in s, for iterating
-
-

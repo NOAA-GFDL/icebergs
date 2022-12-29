@@ -1,7 +1,0 @@
-A tabular icebergs breaks away from the ice shelf. Smaller pieces also break away, which allows the tabular iceberg to move more easily. The tabular icebergs is bonded together by numeric bonds. Icebergs are allowed to evolve freely
-
-Works best when started from restart file created by Static_berg simulation.
-
-Experimental setup is exactly the same as Moving_berg_Bond simulation, except that when icebergs.res is created, use the command line flag:
-./initialize_bergs_in_pattern.py -Make_icebergs_non_static_later=True
-

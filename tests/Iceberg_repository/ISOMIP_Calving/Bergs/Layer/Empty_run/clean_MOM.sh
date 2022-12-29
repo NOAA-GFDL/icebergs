@@ -1,1 +1,0 @@
-../../../common/clean_MOM.sh

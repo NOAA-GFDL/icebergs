@@ -1,1 +1,0 @@
-./initialize_bergs_in_pattern.py -Make_icebergs_non_static_later=False -Ice_geometry_source=Weddell -Use_default_radius=True -Create_icebergs_bonds=False -break_some_bonds=False -plot_icebergs_positions=False
