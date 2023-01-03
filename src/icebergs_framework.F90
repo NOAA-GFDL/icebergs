@@ -1539,6 +1539,13 @@ endif
   !backwards compatibility
   if (.not. (bergs%mts .or. bergs%dem .or. bergs%fl_r>0.)) bergs%old_interp_flds_order=.true.
 
+  if (bergs%Runge_not_Verlet) then
+    if (bergs%mts .or. bergs%dem .or. bergs%fl_r>0.) then
+      call error_mesg('KID, ice_bergs_framework_init', &
+        'Runge_not_Verlet must be false to use MTS, DEM, or footloose!', FATAL)
+    endif
+  endif
+
   if (bergs%contact_distance>0) then
     dx_dlon=1; dy_dlat=1
     if (grd%grid_is_latlon) dy_dlat=pi_180*Rearth

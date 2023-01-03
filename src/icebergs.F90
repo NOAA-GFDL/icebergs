@@ -2525,7 +2525,7 @@ subroutine footloose_calving(bergs, time)
   real, save :: N_max, youngs, poisson, l_c, lw_c, B_c, exp_nlambda, rn
   real, save :: e1, drho, sigmay, lfootparam
   real :: foot_l,foot_mass, foot_area
-  type(randomNumberStream),save :: rns ! Random numbers for stochastic tidal parameterization
+  type(randomNumberStream),save :: rns ! Random numbers
   logical, save :: Visited=.false.
   integer :: grdi, grdj
   integer, dimension(8) :: seed
@@ -6324,6 +6324,9 @@ subroutine calve_icebergs(bergs)
   ! For convenience
   grd=>bergs%grd
 
+  rx = 0.
+  ry = 0.
+
   iNg=(grd%ieg-grd%isg+1) ! Total number of points globally in i direction
   jNg=(grd%jeg-grd%jsg+1) ! Total number of points globally in j direction
 
@@ -6438,14 +6441,14 @@ subroutine calve_icebergs(bergs)
             newberg%accum_bond_rotation=0.
           endif
 
-          !interpolate gridded variables to new iceberg
-          if (grd%tidal_drift>0.) then
-            call getRandomNumbers(rns, rx)
-            call getRandomNumbers(rns, ry)
-            rx = 2.*rx - 1.; ry = 2.*ry - 1.
-          endif
-
           if (.not. bergs%old_interp_flds_order) then
+            !interpolate gridded variables to new iceberg
+            if (grd%tidal_drift>0.) then
+              call getRandomNumbers(rns, rx)
+              call getRandomNumbers(rns, ry)
+              rx = 2.*rx - 1.; ry = 2.*ry - 1.
+            endif
+
             call interp_flds(grd, newberg%lon, newberg%lat, i, j, xi, yj, rx, ry, newberg%uo, newberg%vo, newberg%ui, &
               newberg%vi, newberg%ua, newberg%va, newberg%ssh_x, newberg%ssh_y, newberg%sst, newberg%sss, newberg%cn, &
               newberg%hi, newberg%od)
