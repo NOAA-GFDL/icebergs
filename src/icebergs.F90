@@ -3082,26 +3082,28 @@ subroutine thermodynamics(bergs)
 
       !if footloose is based on length of foot, accumulate side mass loss on fl_k
       !note: this only works when bergs%use_operator_splitting=.true.
-      if (bergs%fl_use_l_scale .and. this%fl_k>=0) then
-        l_b3 = 3.*l_c*(lw_c*bergs%fl_youngs*B_c*(Tn**3.))**0.25 !child berg length x 3
-        if (L>l_b3) then !do not accumulate side made loss for sides < l_b3
-          fb = Tn*(1.-bergs%rho_bergs/rho_seawater) !freeboard
-          kd = Tn-fb !keel depth
-          if (W>l_b3) then
-            if (bergs%fl_l_scale_erosion_only) then
-              this%fl_k=this%fl_k + (dMe/fb - dMv/kd)/bergs%rho_bergs !horiz area from erosion - from buoy conv
-              if (this%fl_k<0) this%fl_k=0
+      if (bergs%fl_r>0.) then
+        if (bergs%fl_use_l_scale .and. this%fl_k>=0) then
+          l_b3 = 3.*l_c*(lw_c*bergs%fl_youngs*B_c*(Tn**3.))**0.25 !child berg length x 3
+          if (L>l_b3) then !do not accumulate side made loss for sides < l_b3
+            fb = Tn*(1.-bergs%rho_bergs/rho_seawater) !freeboard
+            kd = Tn-fb !keel depth
+            if (W>l_b3) then
+              if (bergs%fl_l_scale_erosion_only) then
+                this%fl_k=this%fl_k + (dMe/fb - dMv/kd)/bergs%rho_bergs !horiz area from erosion - from buoy conv
+                if (this%fl_k<0) this%fl_k=0
+              else
+                this%fl_k= this%fl_k + (dMe + dMv)/Tn
+              endif
             else
-              this%fl_k= this%fl_k + (dMe + dMv)/Tn
-            endif
-          else
-            dMv_l=dMv*(Wn1 + W)/(2.*(Ln1 + W)) !mass loss from length from buoyant convection
-            dMe_l=dMe*(Wn+ Wn1)/(2.*(Ln+ Wn1)) !mass loss from length from erosion
-            if (bergs%fl_l_scale_erosion_only) then
-              this%fl_k=this%fl_k + (dMe_l/fb - dMv_l/kd)/bergs%rho_bergs
-              if (this%fl_k<0) this%fl_k=0
-            else
-              this%fl_k= this%fl_k + (dMe_l + dMv_l)/Tn
+              dMv_l=dMv*(Wn1 + W)/(2.*(Ln1 + W)) !mass loss from length from buoyant convection
+              dMe_l=dMe*(Wn+ Wn1)/(2.*(Ln+ Wn1)) !mass loss from length from erosion
+              if (bergs%fl_l_scale_erosion_only) then
+                this%fl_k=this%fl_k + (dMe_l/fb - dMv_l/kd)/bergs%rho_bergs
+                if (this%fl_k<0) this%fl_k=0
+              else
+                this%fl_k= this%fl_k + (dMe_l + dMv_l)/Tn
+              endif
             endif
           endif
         endif
@@ -6374,14 +6376,16 @@ subroutine calve_icebergs(bergs)
           newberg%uvel=0.
           newberg%vvel=0.
           !--added by Alex:
-          newberg%uvel_prev=0.
-          newberg%vvel_prev=0.
-          newberg%uvel_old=0.
-          newberg%vvel_old=0.
-          newberg%lon_prev=newberg%lon
-          newberg%lat_prev=newberg%lat
-          newberg%lon_old=newberg%lon
-          newberg%lat_old=newberg%lat
+          if (bergs%interactive_icebergs_on) then
+            newberg%uvel_prev=0.
+            newberg%vvel_prev=0.
+            newberg%uvel_old=0.
+            newberg%vvel_old=0.
+            newberg%lon_prev=newberg%lon
+            newberg%lat_prev=newberg%lat
+            newberg%lon_old=newberg%lon
+            newberg%lat_old=newberg%lat
+          endif
           newberg%fl_k=0.
           !--added by Alon
           newberg%axn=0.

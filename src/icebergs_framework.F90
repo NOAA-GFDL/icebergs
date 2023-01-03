@@ -635,7 +635,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   real :: fl_bits_scale_t=0.9 !< For determining dimensions of FL bits berg; FL_bits thickness = fl_bits_scale_t * T
 
   !backwards compatibility
-  logical :: old_interp_flds_order=.false. !< Use old order of when to interpolate grid variables to bergs. Will be false if MTS, DEM, or footloose (.not. fl_r>0)
+  logical :: old_interp_flds_order=.false. !< Use old order of when to interpolate grid variables to bergs. Will be false if MTS, DEM, or footloose (fl_r>0)
 end type icebergs
 
 !> Read original restarts. Needs to be module global so can be public to icebergs_mod.
@@ -644,9 +644,9 @@ logical :: orig_read=.false.
 
 !> Version of file provided by CPP macro (usually set to git hash)
 #ifdef _FILE_VERSION
-character(len=128) :: version = _FILE_VERSION !< Version of file
+  character(len=128) :: version = _FILE_VERSION !< Version of file
 #else
-character(len=128) :: version = 'unknown' !< Version of file
+  character(len=128) :: version = 'unknown' !< Version of file
 #endif
 
 !> Set a value in the buffer at position (counter,n) after incrementing counter
