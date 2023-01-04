@@ -1,25 +1,11 @@
 Testing for footloose mechanism parameterization in (non-bonded mode only).
 
-"FL_poisson" tests a scheme similar to England et al 2020, where footloose child bergs are created according to a Poisson distribution.
+Tests the Huth et al 2022 scheme, where beam theory is used to determine when to calve footloose child bergs according to the size of the underwater foot on the parent berg, which is determined by tracking side melt and erosion over time.
 
-"FL_physical" tests the Huth et al 2022 scheme, where beam theory is used to determine when to calve footloose child bergs according to the size of the underwater foot on the parent berg, which is determined by tracking side melt and erosion over time.
-
-In both tests, we use the Huth et al 2022 footloose child berg binning scheme.
+This test uses the Huth et al 2022 footloose child berg binning scheme.
 
 1. Make the iceberg input files: cd makeberg; ./RUN; cd ..
-2. run the model: ./RUN_FL_poisson or ./RUN_FL_physical
+2. run the model: ./RUN
 3. animate the results:
 
-./animate_trajectories.py -fname="FL_poisson.nc"
-or
 ./animate_trajectories.py -fname="FL_physical.nc"
-
-
-!!for regression testing:
-Note the "write_restart berg" chksums in each of the .nml files that are called by the model run commands, and also printed below:
-
-FL_poisson:
-chksum=1239600118 chksum2=1239600118 chksum3=-1474195494 chksum4=-1474195494 chksum5=0 #=8
-
-FL_physical:
-chksum=-461793748 chksum2=-461793748 chksum3=-1042515716 chksum4=-1042515716 chksum5=0 #=12

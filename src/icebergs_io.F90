@@ -40,11 +40,13 @@ use ice_bergs_framework, only: ignore_ij_restart, use_slow_find,generate_test_ic
 use ice_bergs_framework, only: force_all_pes_traj
 use ice_bergs_framework, only: check_for_duplicates_in_parallel
 use ice_bergs_framework, only: split_id, id_from_2_ints, generate_id
-! for MTS/DEM/fracture:
+! for MTS/DEM/fracture/footloose:
 use ice_bergs_framework, only: mts,save_bond_traj
 use ice_bergs_framework, only: push_bond_posn, append_bond_posn
 use ice_bergs_framework, only: pack_bond_traj_into_buffer2,unpack_bond_traj_from_buffer2
 use ice_bergs_framework, only: dem, fracture_criterion, iceberg_bonds_on
+use ice_bergs_framework, only: footloose
+
 
 implicit none ; private
 
@@ -233,7 +235,7 @@ integer :: grdi, grdj
    allocate(id_cnt(nbergs))
    allocate(id_ij(nbergs))
 
-   if (bergs%fl_r>0) then
+   if (bergs%footloose) then
      allocate(fl_k(nbergs))
      allocate(mass_of_fl_bits(nbergs))
      allocate(mass_of_fl_bergy_bits(nbergs))
@@ -302,7 +304,7 @@ integer :: grdi, grdj
   id = register_restart_field(bergs_restart,filename,'heat_density',heat_density, &
                                             longname='heat density',units='J/kg')
 
-  if (bergs%fl_r>0) then
+  if (bergs%footloose) then
     id = register_restart_field(bergs_restart,filename,'fl_k',fl_k,longname='footloose calving k',units='m')
     id = register_restart_field(bergs_restart,filename,'mass_of_fl_bits',mass_of_fl_bits, &
       longname='mass of footloose bits',units='kg')
@@ -371,7 +373,7 @@ integer :: grdi, grdj
       mass_of_bits(i) = this%mass_of_bits
       heat_density(i) = this%heat_density
 
-      if (bergs%fl_r>0) then
+      if (bergs%footloose) then
         fl_k(i) = this%fl_k
         mass_of_fl_bits(i) = this%mass_of_fl_bits
         mass_of_fl_bergy_bits(i) = this%mass_of_fl_bergy_bits
@@ -422,7 +424,7 @@ integer :: grdi, grdj
              static_berg,  &
              heat_density)
 
-  if (bergs%fl_r>0.) then
+  if (bergs%footloose) then
     deallocate(                   &
                  fl_k,            &
                  mass_of_fl_bits, &
@@ -1689,12 +1691,11 @@ character(len=37) :: filename
 end subroutine read_ocean_depth
 
 !> Write a trajectory-based diagnostics file
-subroutine write_trajectory(trajectory, save_short_traj, save_fl_traj, fl_r, traj_name)
+subroutine write_trajectory(trajectory, save_short_traj, save_fl_traj, traj_name)
 ! Arguments
 type(xyt), pointer :: trajectory !< An iceberg trajectory
 logical, intent(in) :: save_short_traj !< If true, record less data
 logical, intent(in) :: save_fl_traj !< If true, save masses and footloose data
-real, intent(in) :: fl_r !< If >0 and save_fl_traj, save footloose params
 character(len=70) :: traj_name !< name of trajectory file
 ! Local variables
 integer :: iret, ncid, i_dim, i
@@ -1752,7 +1753,7 @@ integer :: ntrajs_sent_io,ntrajs_rcvd_io
            call increase_ibuffer(ibuffer_io, ntrajs_rcvd_io,buffer_width_traj)
            call mpp_recv(ibuffer_io%data, ntrajs_rcvd_io*buffer_width_traj,from_pe=from_pe, tag=COMM_TAG_12)
            do i=1, ntrajs_rcvd_io
-              call unpack_traj_from_buffer2(traj4io, ibuffer_io, i, save_short_traj, save_fl_traj, fl_r)
+              call unpack_traj_from_buffer2(traj4io, ibuffer_io, i, save_short_traj, save_fl_traj)
            enddo
        endif
      enddo
@@ -1760,7 +1761,7 @@ integer :: ntrajs_sent_io,ntrajs_rcvd_io
      ! Pack and send trajectories to the root PE for this I/O tile
      do while (associated(trajectory))
        ntrajs_sent_io = ntrajs_sent_io +1
-       call pack_traj_into_buffer2(trajectory, obuffer_io, ntrajs_sent_io, save_short_traj, save_fl_traj, fl_r)
+       call pack_traj_into_buffer2(trajectory, obuffer_io, ntrajs_sent_io, save_short_traj, save_fl_traj)
        this => trajectory ! Need to keep pointer in order to free up the links memory
        trajectory => trajectory%next ! This will eventually result in trajectory => null()
        deallocate(this) ! Delete the link from memory
@@ -1830,7 +1831,7 @@ integer :: ntrajs_sent_io,ntrajs_rcvd_io
         mbid = inq_varid(ncid, 'mass_of_bits')
         uvelid = inq_varid(ncid, 'uvel')
         vvelid = inq_varid(ncid, 'vvel')
-        if (fl_r>0) then
+        if (footloose) then
           msid = inq_varid(ncid, 'mass_scaling')
           mflbid = inq_varid(ncid, 'mass_of_fl_bits')
           mflbbid = inq_varid(ncid, 'mass_of_fl_bergy_bits')
@@ -1903,7 +1904,7 @@ integer :: ntrajs_sent_io,ntrajs_rcvd_io
         mbid = def_var(ncid, 'mass_of_bits', NF_DOUBLE, i_dim)
         uvelid = def_var(ncid, 'uvel', NF_DOUBLE, i_dim)
         vvelid = def_var(ncid, 'vvel', NF_DOUBLE, i_dim)
-        if (fl_r>0) then
+        if (footloose) then
           msid = def_var(ncid, 'mass_scaling', NF_DOUBLE, i_dim)
           mflbid = def_var(ncid, 'mass_of_fl_bits', NF_DOUBLE, i_dim)
           mflbbid = def_var(ncid, 'mass_of_fl_bergy_bits', NF_DOUBLE, i_dim)
@@ -1985,7 +1986,7 @@ integer :: ntrajs_sent_io,ntrajs_rcvd_io
         call put_att(ncid, uvelid, 'units', 'm/s')
         call put_att(ncid, vvelid, 'long_name', 'meridional spped')
         call put_att(ncid, vvelid, 'units', 'm/s')
-        if (fl_r>0) then
+        if (footloose) then
           call put_att(ncid, msid, 'long_name', 'mass_scaling')
           call put_att(ncid, msid, 'units', 'dimensionless')
           call put_att(ncid, mflbid, 'long_name', 'mass_of_fl_bits')
@@ -2105,7 +2106,7 @@ integer :: ntrajs_sent_io,ntrajs_rcvd_io
         call put_double(ncid, mbid, i, this%mass_of_bits)
         call put_double(ncid, uvelid, i, this%uvel)
         call put_double(ncid, vvelid, i, this%vvel)
-        if (fl_r>0) then
+        if (footloose) then
           call put_double(ncid, msid, i, this%mass_scaling)
           call put_double(ncid, mflbid, i, this%mass_of_fl_bits)
           call put_double(ncid, mflbbid, i, this%mass_of_fl_bergy_bits)

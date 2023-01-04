@@ -1,4 +1,0 @@
-rm iceberg_trajectories.nc
-rm iceberg_trajectories.nc.*
-cp input_FL_poisson.nml input.nml
-srun -n4 ./../../build/bergs.x

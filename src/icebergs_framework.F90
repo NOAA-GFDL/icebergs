@@ -62,6 +62,7 @@ logical :: orig_dem_moment_of_inertia=.false. !< Use Potyondy & Cundall,2004 tor
 logical :: break_bonds_on_sub_steps=.false.
 logical :: skip_first_outer_mts_step=.false.
 logical :: no_frac_first_ts=.false.
+logical :: footloose=.false. !< Turn footloose calving on/off
 
 !Public params !Niki: write a subroutine to expose these
 public nclasses,buffer_width,buffer_width_traj,buffer_width_bond_traj
@@ -72,6 +73,7 @@ public mts,save_bond_traj,ewsame,iceberg_bonds_on
 public dem, save_bond_forces, fracture_criterion, orig_dem_moment_of_inertia
 public short_step_mts_grounding, radius_based_drag
 public A68_test, A68_xdisp, A68_ydisp
+public footloose
 
 !Public types
 public icebergs_gridded, xyt, iceberg, icebergs, buffer, bond, bond_xyt
@@ -616,26 +618,17 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   real :: constant_radius
   real :: ocean_drag_scale=1. !< Scaling factor for the ocean drag coefficients
   ! Footloose calving parameters
-  logical :: fl_use_poisson_distribution=.true. !< fl_r is (T) mean of Poisson distribution to determine k, or (F) k=fl_r
-  logical :: fl_use_perimeter=.false. !< scale number of footloose bergs to calve by perimeter of the parent berg
+  logical :: footloose=.false. !< Turn footloose calving on/off
+  logical :: fl_init_child_xy_by_pe=.true. !< True: position of a new footloose child berg along the parent perimeter is random, yet constant for each PE (old bug). False: fully-random.
   real :: fl_youngs=1.e8 !< Young's modulus for footloose calculations (Pa)
   real :: fl_strength=500. !< yield stress for footloose calculations (kPa)
-  logical :: fl_use_l_scale=.false. !< footloose based on side melt and/or erosion
-  real :: fl_l_scale=1. !< scaling factor for footloose based on side melt
-  logical :: fl_l_scale_erosion_only=.true. !< fl according to erosion - buoyant convection
-  real :: fl_r=0. !< footloose average number of bergs calved per fl_r_s
-  real :: fl_r_s=0. !< seconds over which fl_r footloose bergs calve
   logical :: displace_fl_bergs=.true. !< footloose berg positions are randomly assigned along edges of parent berg
   character(len=11) :: fl_style='new_bergs' !< Evolve footloose bergs individually as 'new_bergs', or as a group with size 'fl_bits'
   logical :: fl_bits_erosion_to_bergy_bits=.true. !< Erosion from footloose bits becomes bergy bits
-  real :: fl_k_scale_by_perimeter=0 !< If greater than 0, scales FL k by (berg perimeter (m))/(this scaling (m))
   real :: new_berg_from_fl_bits_mass_thres=huge(0.) ! Create a new berg from FL bits when mass_of_fl_bits exceeds this value
-  real :: fl_bits_scale_l=0.9 !< For determining dimensions of FL bits berg; FL_bits length    = fl_bits_scale_l * 3*l_b
-  real :: fl_bits_scale_w=0.9 !< For determining dimensions of FL bits berg; FL_bits width     = fl_bits_scale_w * 3*l_b
-  real :: fl_bits_scale_t=0.9 !< For determining dimensions of FL bits berg; FL_bits thickness = fl_bits_scale_t * T
 
   !backwards compatibility
-  logical :: old_interp_flds_order=.false. !< Use old order of when to interpolate grid variables to bergs. Will be false if MTS, DEM, or footloose (fl_r>0)
+  logical :: old_interp_flds_order=.false. !< Use old order of when to interpolate grid variables to bergs. Will be false if MTS, DEM, or footloose
 end type icebergs
 
 !> Read original restarts. Needs to be module global so can be public to icebergs_mod.
@@ -644,9 +637,9 @@ logical :: orig_read=.false.
 
 !> Version of file provided by CPP macro (usually set to git hash)
 #ifdef _FILE_VERSION
-  character(len=128) :: version = _FILE_VERSION !< Version of file
+character(len=128) :: version = _FILE_VERSION !< Version of file
 #else
-  character(len=128) :: version = 'unknown' !< Version of file
+character(len=128) :: version = 'unknown' !< Version of file
 #endif
 
 !> Set a value in the buffer at position (counter,n) after incrementing counter
@@ -834,24 +827,15 @@ logical :: constant_interaction_LW=.false. ! Always use the initial, globally co
 real :: constant_length=0. ! If constant_interaction_LW, the constant length used. If zero in the nml, will be set to max initial L
 real :: constant_width=0. ! If constant_interaction_LW, the constant width used. If zero in the nml, will be set to max initial W
 real :: ocean_drag_scale=1. !< Scaling factor for the ocean drag coefficients
-! Footloose calving parameters [England et al (2020) Modeling the breakup of tabular icebergs. Sci. Adv.]
-logical :: fl_use_poisson_distribution=.true. ! fl_r is (T) mean of Poisson distribution to determine k, or (F) k=fl_r
-logical :: fl_use_perimeter=.false. ! scale number of footloose bergs to calve by perimeter of the parent berg
+! Footloose calving parameters
+!logical :: footloose=.false. !< Turn footloose calving on/off
+logical :: fl_init_child_xy_by_pe=.true. !< True: position of a new footloose child berg along the parent perimeter is random, yet constant for each PE (old bug). False: fully-random.
 real :: fl_youngs=1.e8 !< Young's modulus for footloose calculations (Pa)
 real :: fl_strength=500. !< yield stress for footloose calculations (kPa)
-logical :: fl_use_l_scale=.false. !< footloose based on side melt
-real :: fl_l_scale=1. !< scaling factor for footloose based on side melt and/or erosion
-logical :: fl_l_scale_erosion_only=.true. !< fl according to erosion - buoyant convection
-real :: fl_r=0. ! footloose average number of bergs calved per fl_r_s
-real :: fl_r_s=0. ! seconds over which fl_r footloose bergs calve
 logical :: displace_fl_bergs=.true. ! footloose berg positions are randomly assigned along edges of parent berg
 character(len=11) :: fl_style='new_bergs' ! Evolve footloose bergs individually as 'fl_bits', or as a group with size 'bergy_bits' or 'mean_size'
 logical :: fl_bits_erosion_to_bergy_bits=.true. ! Erosion from footloose bits becomes bergy bits
-real :: fl_k_scale_by_perimeter=0 ! If greater than 0, scales FL k by (berg perimeter (m))/(this scaling (m))
 real :: new_berg_from_fl_bits_mass_thres=huge(0.) ! Create a new berg from FL bits when mass_of_fl_bits exceeds this value
-real :: fl_bits_scale_l=0.9 ! For determining dimensions of FL bits berg; FL_bits length    = fl_bits_scale_l * 3*l_b
-real :: fl_bits_scale_w=0.9 ! For determining dimensions of FL bits berg; FL_bits width     = fl_bits_scale_w * l_b
-real :: fl_bits_scale_t=0.9 ! For determining dimensions of FL bits berg; FL_bits thickness = fl_bits_scale_t * T
 
 
 namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,traj_name,bond_traj_name,&
@@ -876,11 +860,11 @@ namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, t
          debug_write,cdrag_grounding,h_to_init_grounding,frac_thres_scaling,frac_thres_n,frac_thres_t,save_bond_traj,&
          remove_unused_bergs,force_convergence,explicit_inner_mts,convergence_tolerance,dem,ignore_tangential_force,poisson,&
          dem_spring_coef,dem_damping_coef,dem_beam_test,constant_interaction_LW,constant_length,constant_width,&
-         fl_use_poisson_distribution, fl_use_perimeter, fl_r, fl_r_s,displace_fl_bergs,&
-         fl_style,fl_bits_erosion_to_bergy_bits,fl_k_scale_by_perimeter, save_fl_traj,&
-         new_berg_from_fl_bits_mass_thres,fl_bits_scale_l,fl_bits_scale_w,fl_bits_scale_t,separate_distrib_for_n_hemisphere,&
-         initial_mass_n, distribution_n, mass_scaling_n, initial_thickness_n, fl_use_l_scale, fl_l_scale,&
-         fl_l_scale_erosion_only, fl_youngs, fl_strength,  save_all_traj_year, save_nonfl_traj_by_class,&
+         fl_init_child_xy_by_pe, footloose,displace_fl_bergs,&
+         fl_style,fl_bits_erosion_to_bergy_bits, save_fl_traj,&
+         new_berg_from_fl_bits_mass_thres,separate_distrib_for_n_hemisphere,&
+         initial_mass_n, distribution_n, mass_scaling_n, initial_thickness_n,&
+         fl_youngs, fl_strength,  save_all_traj_year, save_nonfl_traj_by_class,&
          save_traj_by_class_start_mass_thres_n, save_traj_by_class_start_mass_thres_s,traj_area_thres_sntbc,&
          traj_area_thres_fl,tau_is_velocity, ocean_drag_scale, A68_test, &
          A68_xdisp,A68_ydisp,use_broken_bonds_for_substep_contact,print_fracture,&
@@ -1305,7 +1289,7 @@ else
 endif
 if (save_short_traj) buffer_width_traj=6 ! This is the length of the short buffer used for abrevated traj
 if (save_fl_traj) then
-  if (fl_r>0) then
+  if (footloose) then
     buffer_width_traj=buffer_width_traj+8+2
   else
     buffer_width_traj=buffer_width_traj+4+2
@@ -1510,37 +1494,26 @@ endif
   endif
   bergs%ocean_drag_scale=ocean_drag_scale
   ! Footloose calving parameters
-  bergs%fl_use_poisson_distribution=fl_use_poisson_distribution
-  bergs%fl_use_perimeter=fl_use_perimeter
+  bergs%footloose=footloose
+  bergs%fl_init_child_xy_by_pe=fl_init_child_xy_by_pe
   bergs%fl_youngs=fl_youngs
   bergs%fl_strength=fl_strength
-  bergs%fl_use_l_scale=fl_use_l_scale
-  bergs%fl_l_scale=fl_l_scale
-  bergs%fl_l_scale_erosion_only=fl_l_scale_erosion_only
   bergs%new_berg_from_fl_bits_mass_thres=new_berg_from_fl_bits_mass_thres
-  bergs%fl_r=fl_r
-  bergs%fl_r_s=fl_r_s
   bergs%displace_fl_bergs=displace_fl_bergs
   bergs%fl_style=fl_style
   bergs%fl_bits_erosion_to_bergy_bits=fl_bits_erosion_to_bergy_bits
-  bergs%fl_k_scale_by_perimeter=fl_k_scale_by_perimeter
-  bergs%fl_bits_scale_l=fl_bits_scale_l
-  bergs%fl_bits_scale_w=fl_bits_scale_w
-  bergs%fl_bits_scale_t=fl_bits_scale_t
-  if (bergs%fl_use_l_scale) then
-    bergs%fl_use_perimeter=.true.
-    bergs%fl_k_scale_by_perimeter=1
-    if (.not. bergs%use_operator_splitting) then
-      call error_mesg('KID, ice_bergs_framework_init', &
-        'use_operator_splitting must be true when fl_use_l_scale=.true.', FATAL)
-    endif
+
+  if (bergs%footloose .and. .not. bergs%use_operator_splitting) then
+    call error_mesg('KID, ice_bergs_framework_init', &
+      'use_operator_splitting must be true to use footloose!', FATAL)
   endif
 
+
   !backwards compatibility
-  if (.not. (bergs%mts .or. bergs%dem .or. bergs%fl_r>0.)) bergs%old_interp_flds_order=.true.
+  if (.not. (bergs%mts .or. bergs%dem .or. bergs%footloose)) bergs%old_interp_flds_order=.true.
 
   if (bergs%Runge_not_Verlet) then
-    if (bergs%mts .or. bergs%dem .or. bergs%fl_r>0.) then
+    if (bergs%mts .or. bergs%dem .or. bergs%footloose) then
       call error_mesg('KID, ice_bergs_framework_init', &
         'Runge_not_Verlet must be false to use MTS, DEM, or footloose!', FATAL)
     endif
@@ -3848,14 +3821,13 @@ integer :: new_size, old_size
 end subroutine increase_ibuffer
 
 !> Packs a trajectory entry into a buffer
-subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj, save_fl_traj, fl_r)
+subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj, save_fl_traj)
   ! Arguments
   type(xyt), pointer :: traj !< Trajectory entry to pack
   type(buffer), pointer :: buff !< Buffer to pack entry into
   integer, intent(in) :: n !< Position in buffer to place entry
   logical, intent(in) :: save_short_traj !< If true, only use a subset of trajectory data
   logical, intent(in) :: save_fl_traj !< If true, save masses and footloose parameters
-  real, intent(in) :: fl_r !< If >0 and save_fl_traj, save footloose parameters
   ! Local variables
   integer :: counter ! Position in stack
   integer :: cnt, ij
@@ -3878,7 +3850,7 @@ subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj, save_fl_traj, 
     call push_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
     call push_buffer_value(buff%data(:,n),counter,traj%uvel)
     call push_buffer_value(buff%data(:,n),counter,traj%vvel)
-    if (fl_r>0) then
+    if (footloose) then
       call push_buffer_value(buff%data(:,n),counter,traj%mass_scaling)
       call push_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bits)
       call push_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bergy_bits)
@@ -3937,14 +3909,13 @@ subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj, save_fl_traj, 
 end subroutine pack_traj_into_buffer2
 
 !> Unpacks a trajectory entry from a buffer
-subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj, save_fl_traj, fl_r)
+subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj, save_fl_traj)
   ! Arguments
   type(xyt), pointer :: first !< Trajectory list
   type(buffer), pointer :: buff !< Buffer from which to unpack
   integer, intent(in) :: n !< Position in buffer to unpack
   logical, intent(in) :: save_short_traj !< If true, only use a subset of trajectory data
   logical, intent(in) :: save_fl_traj !< If true, save masses and footloose parameters
-  real, intent(in) :: fl_r !< If >0 and save_fl_traj, save footloose parameters
   ! Local variables
   type(xyt) :: traj
   integer :: counter ! Position in stack
@@ -3979,7 +3950,7 @@ subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj, save_fl_tra
     call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
     call pull_buffer_value(buff%data(:,n),counter,traj%uvel)
     call pull_buffer_value(buff%data(:,n),counter,traj%vvel)
-    if (fl_r>0) then
+    if (footloose) then
       call pull_buffer_value(buff%data(:,n),counter,traj%mass_scaling)
       call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bits)
       call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bergy_bits)
@@ -5817,7 +5788,7 @@ endif
           posn%mass_of_bits=this%mass_of_bits
           posn%uvel=this%uvel
           posn%vvel=this%vvel
-          if (bergs%fl_r>0) then
+          if (bergs%footloose) then
             posn%mass_scaling=this%mass_scaling
             posn%mass_of_fl_bits=this%mass_of_fl_bits
             posn%mass_of_fl_bergy_bits=this%mass_of_fl_bergy_bits
