@@ -276,7 +276,7 @@ def Create_iceberg_restart_file(Number_of_bergs, lon,lat,thickness,ang_vel_in,uv
 
 
         # To copy the dimension of the netCDF file
-        for dimname,dim in f.dimensions.iteritems():
+        for dimname,dim in f.dimensions.items():
                 # if you want to make changes in the dimensions of the new file
                 # you should add your own conditions here before the creation of the dimension.
                 #g.createDimension(dimname,len(dim))
@@ -284,7 +284,7 @@ def Create_iceberg_restart_file(Number_of_bergs, lon,lat,thickness,ang_vel_in,uv
 
         # To copy the variables of the netCDF file
 
-        for varname,ncvar in f.variables.iteritems():
+        for varname,ncvar in f.variables.items():
                 # if you want to make changes in the variables of the new file
                 # you should add your own conditions here before the creation of the variable.
                 var = g.createVariable(varname,ncvar.dtype,ncvar.dimensions)
@@ -373,7 +373,7 @@ def Create_bond_restart_file(Number_of_bonds,first_berg_num,first_berg_ine,first
 
 
         # To copy the dimension of the netCDF file
-        for dimname,dim in h.dimensions.iteritems():
+        for dimname,dim in h.dimensions.items():
                 # if you want to make changes in the dimensions of the new file
                 # you should add your own conditions here before the creation of the dimension.
                 #g.createDimension(dimname,len(dim))
@@ -381,7 +381,7 @@ def Create_bond_restart_file(Number_of_bonds,first_berg_num,first_berg_ine,first
 
         # To copy the variables of the netCDF file
 
-        for varname,ncvar in h.variables.iteritems():
+        for varname,ncvar in h.variables.items():
                 # if you want to make changes in the variables of the new file
                 # you should add your own conditions here before the creation of the variable.
                 var = q.createVariable(varname,ncvar.dtype,ncvar.dimensions)

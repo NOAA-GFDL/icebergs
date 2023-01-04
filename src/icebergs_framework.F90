@@ -262,7 +262,7 @@ type :: xyt
   real :: halo_berg
   real :: static_berg
   real :: mass_of_bits !< Mass of bergy bits (kg)
-  real :: mass_of_fl_bits !< Mass of footloose bits (kg)
+  real :: mass_of_fl_bits !< Mass (kg) of footloose bits (i.e. binned footloose child bergs)
   real :: mass_of_fl_bergy_bits !< Mass of bergy bits associated with the footloose bits (kg)
   real :: heat_density !< Heat density of berg (J/kg)
   real :: od !< Ocean depth
@@ -318,7 +318,7 @@ type :: iceberg
   real :: start_mass !< Mass berg had when created (kg)
   real :: mass_scaling !< Multiplier to scale mass when interpreting berg as a cloud of bergs (nondim)
   real :: mass_of_bits !< Mass of bergy bits following berg (kg)
-  real :: mass_of_fl_bits !< Mass of footloose bergy bits following berg (kg)
+  real :: mass_of_fl_bits !< Mass of footloose bits (binned child bergs) following berg (kg)
   real :: mass_of_fl_bergy_bits !< Mass of bergy bits associated with the footloose bits (kg)
   real :: fl_k !< Cumulative number of footloose bergs to calve
   real :: heat_density !< Heat density of berg (J/kg)
@@ -619,13 +619,13 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   real :: ocean_drag_scale=1. !< Scaling factor for the ocean drag coefficients
   ! Footloose calving parameters
   logical :: footloose=.false. !< Turn footloose calving on/off
-  logical :: fl_init_child_xy_by_pe=.true. !< True: position of a new footloose child berg along the parent perimeter is random, yet constant for each PE (old bug). False: fully-random.
-  real :: fl_youngs=1.e8 !< Young's modulus for footloose calculations (Pa)
-  real :: fl_strength=500. !< yield stress for footloose calculations (kPa)
+  logical :: fl_init_child_xy_by_pe=.false. !< True: position of a new footloose child berg along the parent perimeter is random, yet constant for each PE (old bug). False: fully-random.
+  real :: fl_youngs=1.e7 !< Young's modulus for footloose calculations (Pa)
+  real :: fl_strength=250. !< yield stress for footloose calculations (kPa)
   logical :: displace_fl_bergs=.true. !< footloose berg positions are randomly assigned along edges of parent berg
   character(len=11) :: fl_style='new_bergs' !< Evolve footloose bergs individually as 'new_bergs', or as a group with size 'fl_bits'
   logical :: fl_bits_erosion_to_bergy_bits=.true. !< Erosion from footloose bits becomes bergy bits
-  real :: new_berg_from_fl_bits_mass_thres=huge(0.) ! Create a new berg from FL bits when mass_of_fl_bits exceeds this value
+  real :: new_berg_from_fl_bits_mass_thres=1.e12 ! Create a new berg from FL bits when mass_of_fl_bits exceeds this value
 
   !backwards compatibility
   logical :: old_interp_flds_order=.false. !< Use old order of when to interpolate grid variables to bergs. Will be false if MTS, DEM, or footloose
@@ -635,7 +635,7 @@ end type icebergs
 !! \todo Remove when backward compatibility no longer needed
 logical :: orig_read=.false.
 
-!> Version of file provided by CPP macro (usually set to git hash)
+! Version of file provided by CPP macro (usually set to git hash)
 #ifdef _FILE_VERSION
 character(len=128) :: version = _FILE_VERSION !< Version of file
 #else
@@ -829,13 +829,13 @@ real :: constant_width=0. ! If constant_interaction_LW, the constant width used.
 real :: ocean_drag_scale=1. !< Scaling factor for the ocean drag coefficients
 ! Footloose calving parameters
 !logical :: footloose=.false. !< Turn footloose calving on/off
-logical :: fl_init_child_xy_by_pe=.true. !< True: position of a new footloose child berg along the parent perimeter is random, yet constant for each PE (old bug). False: fully-random.
-real :: fl_youngs=1.e8 !< Young's modulus for footloose calculations (Pa)
-real :: fl_strength=500. !< yield stress for footloose calculations (kPa)
+logical :: fl_init_child_xy_by_pe=.false. !< True: position of a new footloose child berg along the parent perimeter is random, yet constant for each PE (old bug). False: fully-random.
+real :: fl_youngs=1.e7 !< Young's modulus for footloose calculations (Pa)
+real :: fl_strength=250. !< yield stress for footloose calculations (kPa)
 logical :: displace_fl_bergs=.true. ! footloose berg positions are randomly assigned along edges of parent berg
 character(len=11) :: fl_style='new_bergs' ! Evolve footloose bergs individually as 'fl_bits', or as a group with size 'bergy_bits' or 'mean_size'
 logical :: fl_bits_erosion_to_bergy_bits=.true. ! Erosion from footloose bits becomes bergy bits
-real :: new_berg_from_fl_bits_mass_thres=huge(0.) ! Create a new berg from FL bits when mass_of_fl_bits exceeds this value
+real :: new_berg_from_fl_bits_mass_thres=1.e12 ! Create a new berg from FL bits when mass_of_fl_bits exceeds this value
 
 
 namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,traj_name,bond_traj_name,&

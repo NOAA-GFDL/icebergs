@@ -6510,7 +6510,6 @@ subroutine calve_fl_icebergs(bergs,pberg,k,l_b,fl_disp_x,fl_disp_y,berg_from_bit
   endif
 
   if (present(berg_from_bits)) then
-    !use scaling for fl_bits to calculate new berg T,L,W, and M. Also affects mass scaling.
     call fl_bits_dimensions(bergs,pberg,Lfl,Wfl,Tfl)
     cberg%length = Lfl; cberg%width = Wfl; cberg%thickness = Tfl
     cberg%mass = Tfl * Lfl * Wfl * bergs%rho_bergs

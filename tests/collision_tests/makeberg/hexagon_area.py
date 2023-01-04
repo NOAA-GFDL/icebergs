@@ -825,7 +825,7 @@ def divding_triangle_across_axes(Ax,Ay,Bx,By,Cx,Cy,axes1):
 				Area_positive= 0.;
 				Area_negative= A_triangle;
 			else:
-				print 'You should not get here1'
+				print ('You should not get here1')
 				halt
 		else:
 			print ('You should not get here2')
