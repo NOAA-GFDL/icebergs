@@ -6309,7 +6309,8 @@ subroutine calve_icebergs(bergs)
           newberg%uvel=0.
           newberg%vvel=0.
           !--added by Alex:
-          if (bergs%interactive_icebergs_on) then
+          if (bergs%interactive_icebergs_on .or. footloose) then
+            !not needed? But provided for backwards compatibility:
             newberg%uvel_prev=0.
             newberg%vvel_prev=0.
             newberg%uvel_old=0.
