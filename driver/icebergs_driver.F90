@@ -58,15 +58,9 @@ integer :: nj=0 !< Global number of grid cells in j-direction (mandatory input)
 logical :: debug=.true. !< If true, do some debugging
 logical :: saverestart=.false. !< If true, save a berg restart file at the end
 logical :: collision_test=.false.
-logical :: chaotic_test=.false.
-logical :: grounding_test=.false.
 logical :: big_grounding_test=.false.
-logical :: dem_test_contact=.false.
 logical :: a68_test=.false.
-logical :: vert_int_ocean_vel=.false.
 logical :: tau_is_velocity=.true.
-logical :: reverse_a68_forcings=.false.
-logical :: sin_test=.false.
 logical :: fl_test=.false.
 character(len=1000) :: data_dir = 'data/'
 integer :: transient_a68_data_start_ind=0 !<set to .gt. 0 to use the hourly JRA-55 wind data for the A68
@@ -82,18 +76,15 @@ real :: ibuy=0.0
 real :: gridres=1.e3
 real :: bump_depth=0
 real :: sst=-2
-logical :: Old_wrong_Rearth_and_SSH=.false. !< use Rearth=6.36e6 and SSH on B grid
 real :: REarth=6.378e6
-!logical :: mom_Rearth=.false. !< Use Rearth=6.378e6
-logical :: no_wind=.false.
 integer :: ibhrs=2
 integer :: nmax = 2000000000 !<max number of iteration
 integer :: write_time_inc=1
 namelist /icebergs_driver_nml/ debug, ni, nj, halo, ibhrs, ibdt, ibuo, ibvo, nmax, &
-  saverestart,ibui,ibvi,collision_test,chaotic_test,grounding_test,&
-  gridres,write_time_inc,bump_depth, sst, a68_test, data_dir, vert_int_ocean_vel,&
-  reverse_a68_forcings,sin_test,fl_test,tau_is_velocity,transient_a68_data_start_ind,ibua,ibuy,&
-  Old_wrong_Rearth_and_SSH,no_wind,REarth,big_grounding_test,dem_test_contact !mom_Rearth
+  saverestart,ibui,ibvi,collision_test,&
+  gridres,write_time_inc,bump_depth, sst, a68_test, data_dir,&
+  fl_test,tau_is_velocity,transient_a68_data_start_ind,ibua,ibuy,&
+  REarth,big_grounding_test
 ! For loops
 integer :: isc !< Start of i-index for computational domain (used for loops)
 integer :: iec !< End of i-index for computational domain (used for loops)
@@ -119,7 +110,7 @@ real, allocatable :: cos_rot(:,:) !< Cosine of angle of grid orientation
 real, allocatable :: sin_rot(:,:) !< Sine of angle of grid orientation
 real, allocatable :: depth(:,:) !< Depth of ocean (m)
 ! Work variables
-integer :: i,j, dit
+integer :: i,j
 real, allocatable :: coord(:) !< One dimensional coordinate for initializing diagnostics
 
 ! For icebergs_run
@@ -140,7 +131,6 @@ real, dimension(:,:), allocatable :: sss !< Sea-surface salinity (1e-3)
 real, dimension(:,:), pointer :: mass_berg !< Mass of bergs (kg)
 real, dimension(:,:), pointer  :: ustar_berg !< Friction velocity on base of bergs (m/s)
 real, dimension(:,:), pointer :: area_berg !< Area of bergs (m2)
-!grounding_test
 real :: a,bx,by,c,xc,yc !gaussian params
 !grounding/collision tests
 real :: mid
@@ -254,24 +244,14 @@ calving_hflx = 0.0 !calving heat flux (W/m2)
 ! area_berg = !Area of bergs (m2)
 
 if (a68_test) then
-  if (Old_wrong_Rearth_and_SSH) REarth=6360000.
   call mpp_sync()
-  call a68_prep(data_dir,mpp_domain,lon,lat,dx,dy,area,depth,uo,vo,tauxa,tauya,ssh,vert_int_ocean_vel,tau_is_velocity,Old_wrong_Rearth_and_SSH,REarth)
-  !mom_Rearth)
+  !note some of these fields will be replaced if transient_a68_data_start_ind>0 (transient instead of static fields)
+  call a68_prep(data_dir,mpp_domain,lon,lat,dx,dy,area,depth,uo,vo,tauxa,tauya,ssh,tau_is_velocity,REarth,&
+    transient_a68_data_start_ind)
   call mpp_sync()
-  if (no_wind) then
-    tauxa=0.0; tauya=0.0
-  endif
-  !where (lon<(-37.6+360.))
-  !  depth=depth+1000.
-  !end where
   wet=1.0
   cos_rot=1.0
   sin_rot=0.0
-  if (reverse_a68_forcings) then
-    uo=-uo; vo=-vo
-    tauxa=-tauxa; tauya=-tauya
-  endif
 
   if (transient_a68_data_start_ind>0) then
     if (.not. (ibdt==3600.0 .or. ibdt==1800.0)) then
@@ -286,19 +266,11 @@ if (a68_test) then
     allocate( vo_hr(isd:ied,jsd:jed,744) )
     allocate( ssh_hr(isd:ied,jsd:jed,744) )
     call a68_prep_3d(data_dir,mpp_domain,tauxa_hr,tauya_hr,uo_hr,vo_hr,ssh_hr)
-    if (reverse_a68_forcings) then
-      tauxa_hr=-tauxa_hr; tauya_hr=-tauya_hr
-      uo_hr=-uo_hr; vo_hr=-vo_hr
-      ssh_hr=-ssh_hr
-      dit=-1
-    else
-      dit=1
-    endif
-    if (no_wind) then
-      tauxa_hr=0.0; tauya_hr=0.0
-    endif
   endif
 else
+  !non-A68 tests
+  transient_a68_data_start_ind=0
+
   do j = jsd, jed
     do i = isd, ied
       lon(i,j) = gridres*real(i)
@@ -312,14 +284,6 @@ else
       depth(i,j) = 1000.
     enddo
   enddo
-
-  if (chaotic_test) then
-    !assign land cells at the N and S portions of the domain.
-    !input.nml: set coastal drift parameter to prevent grounding
-    do j=jsd,jed; do i=isd,ied
-      if (lat(i,j)<=0.0+2*gridres .or. lat(i,j)>=1000.e3-2*gridres) wet(i,j)=0.0
-    enddo;enddo
-  endif
 
   if (big_grounding_test) then
     lat(:,:)=lat(:,:)-0.45 !-25000.1
@@ -342,19 +306,15 @@ else
     depth = 1000.0-depth
   endif
 
-   if (dem_test_contact) then
-    lat(:,:)=lat(:,:)-0.45 !-25000.1
-    lon(:,:)=lon(:,:)-0.45
-    !assign land cells at the N and S portions of the domain.
-    !input.nml: set coastal drift parameter to prevent grounding
-    do j=jsd,jed; do i=isd,ied
-      if (lat(i,j)<=(-5.e3) .or. lat(i,j)>=(220.e3)) wet(i,j)=0.0
-    enddo;enddo
+  if (fl_test) then
+    where(lon>10000) vo=-vo
+  endif
 
-    mid=50.e3
+  if (collision_test) then
+    mid=10.e3
 
     do j=jsd,jed; do i=isd,ied
-      if (lon(i,j)>65 .or. lat(i,j)==mid) then
+      if (lon(i,j)>mid .or. lon(i,j)<=0.0 .or. lat(i,j)==mid) then
         vo(i,j)=0.0
       else
         if (lat(i,j)>mid) then
@@ -363,36 +323,8 @@ else
           vo(i,j)=ibvo
         endif
       endif
-  enddo;enddo
-
-
-  endif
-
-  if (grounding_test) then
-    lat(:,:)=lat(:,:)-15000.0
-    !assign land cells at the N and S portions of the domain.
-    !input.nml: set coastal drift parameter to prevent grounding
-    do j=jsd,jed; do i=isd,ied
-      if (lat(i,j)<=0.0+2*gridres .or. lat(i,j)>=30.e3-2*gridres) wet(i,j)=0.0
     enddo;enddo
-
-    !introduce gaussian bump to bathymetry
-    a = 1000.0-bump_depth !max height(m)
-    c = 2.5e3; !controls width
-    bx = 15.e3; by = 15.e3
-    do j=jsd,jed; do i=isd,ied
-      xc=lon(i,j)-(gridres/2.); yc=lat(i,j)-(gridres/2.) !define at cell centers
-      depth(i,j)=a*exp(-((xc-bx)*(xc-bx)/(2.*c*c)+(yc-by)*(yc-by)/(2.*c*c)))
-    enddo; enddo
-    print *,'min, max depth',minval(depth(:,:)),maxval(depth(:,:))
-    depth = 1000.0-depth
   endif
-endif
-
-if (sin_test) vo = vo * sin(lat*2*pi/(20.0*gridres) + gridres)
-
-if (fl_test) then
-  where(lon>10000) vo=-vo
 endif
 
 call set_calendar_type(THIRTY_DAY_MONTHS)
@@ -410,54 +342,6 @@ call icebergs_init(bergs, &
                    dx(isc-1:iec+1,jsc-1:jec+1), dy(isc-1:iec+1,jsc-1:jec+1), area(isc:iec,jsc:jec), &
                    cos_rot(isc-1:iec+1,jsc-1:jec+1), sin_rot(isc-1:iec+1,jsc-1:jec+1), &
                    depth(isc:iec,jsc:jec), fractional_area=.false.)
-
-if (collision_test .or. grounding_test) then
-  if (grounding_test) then
-    mid=15.e3
-  else
-    mid=10.e3
-  endif
-
-  do j=jsd,jed; do i=isd,ied
-    if (lon(i,j)>mid .or. lon(i,j)<=0.0 .or. lat(i,j)==mid) then
-      vo(i,j)=0.0
-      ! if (grounding_test .and. lon(i,j)>mid+5.e3) then
-      !   if (lat(i,j)>mid) then
-      !     vo(i,j)=+ibvo
-      !   else
-      !     vo(i,j)=-ibvo
-      !   endif
-      ! endif
-
-    else
-      if (lat(i,j)>mid) then
-        vo(i,j)=-ibvo
-      else
-        vo(i,j)=ibvo
-      endif
-    endif
-  enddo;enddo
-endif
-
-if (chaotic_test) then
-  do j=jsd,jed; do i=isd,ied
-    if (lat(i,j)==500.e3 .or. lon(i,j)==500.e3) then
-      vo(i,j)=0.0
-    elseif (lon(i,j)>500.e3) then
-      if (lat(i,j)>500.e3) then
-        vo(i,j)=0.5*ibvo
-      else
-        vo(i,j)=-0.5*ibvo
-      endif
-    else
-      if (lat(i,j)>500.e3) then
-        vo(i,j)=-ibvo
-      else
-        vo(i,j)=ibvo
-      endif
-    endif
-  enddo;enddo
-endif
 
 ns = 1 !timestep counter
 if (transient_a68_data_start_ind>0) ns2 = 1
@@ -484,17 +368,17 @@ do while ((ns <= nmax) .and. (Time < Time_end))
   if (transient_a68_data_start_ind>0) then
 
     if ((ibdt==3600.0) .or. (mod(ns2,1.)==0)) then
-      tauxa=tauxa_hr(:,:,transient_a68_data_start_ind+dit*(int(ns2)-1))
-      tauya=tauya_hr(:,:,transient_a68_data_start_ind+dit*(int(ns2)-1))
-      uo=uo_hr(:,:,transient_a68_data_start_ind+dit*(int(ns2)-1))
-      vo=vo_hr(:,:,transient_a68_data_start_ind+dit*(int(ns2)-1))
-      ssh=ssh_hr(:,:,transient_a68_data_start_ind+dit*(int(ns2)-1))
+      tauxa=tauxa_hr(:,:,transient_a68_data_start_ind+(int(ns2)-1))
+      tauya=tauya_hr(:,:,transient_a68_data_start_ind+(int(ns2)-1))
+      uo=uo_hr(:,:,transient_a68_data_start_ind+(int(ns2)-1))
+      vo=vo_hr(:,:,transient_a68_data_start_ind+(int(ns2)-1))
+      ssh=ssh_hr(:,:,transient_a68_data_start_ind+(int(ns2)-1))
     else
-      tauxa=0.5*(tauxa+tauxa_hr(:,:,transient_a68_data_start_ind+dit*(int(ceiling(ns2))-1)))
-      tauya=0.5*(tauya+tauya_hr(:,:,transient_a68_data_start_ind+dit*(int(ceiling(ns2))-1)))
-      uo=0.5*(uo+uo_hr(:,:,transient_a68_data_start_ind+dit*(int(ceiling(ns2))-1)))
-      vo=0.5*(vo+vo_hr(:,:,transient_a68_data_start_ind+dit*(int(ceiling(ns2))-1)))
-      ssh=ssh_hr(:,:,transient_a68_data_start_ind+dit*(int(ns2)-1))
+      tauxa=0.5*(tauxa+tauxa_hr(:,:,transient_a68_data_start_ind+(int(ceiling(ns2))-1)))
+      tauya=0.5*(tauya+tauya_hr(:,:,transient_a68_data_start_ind+(int(ceiling(ns2))-1)))
+      uo=0.5*(uo+uo_hr(:,:,transient_a68_data_start_ind+(int(ceiling(ns2))-1)))
+      vo=0.5*(vo+vo_hr(:,:,transient_a68_data_start_ind+(int(ceiling(ns2))-1)))
+      ssh=ssh_hr(:,:,transient_a68_data_start_ind+(int(ns2)-1))
     endif
   endif
 
@@ -532,11 +416,11 @@ if (a68_test) then
   write(*,'(a,i5)')' Saving after timestep   ',ns-1
   print *,' ns2   ',ns2
   if (mod(ns2,1.)==0) then
-    print *,'transient_a68_data_start_ind+dit*(int(ns2)-1)',&
-      transient_a68_data_start_ind+dit*(int(ns2)-1)
+    print *,'transient_a68_data_start_ind+(int(ns2)-1)',&
+      transient_a68_data_start_ind+(int(ns2)-1)
   else
-    print *,'transient_a68_data_start_ind+dit*(int(ceiling(ns2))-1))',&
-      transient_a68_data_start_ind+dit*(int(ceiling(ns2))-1)
+    print *,'transient_a68_data_start_ind+(int(ceiling(ns2))-1))',&
+      transient_a68_data_start_ind+(int(ceiling(ns2))-1)
   endif
   write(*,'(a)')' Restart time is:'
   write(*,'(a,i5,a,i5,a,i5)')' year',iyr,'  month ',imon,'  day   ',iday

@@ -1,5 +1,4 @@
-!!KID, bergs_chksum: write_restart berg chksum=1560193269 chksum2=-1064844053 chksum3=-1070230468 chksum4=-1070230468 chksum5=0 #=16
-
+!!KID, bergs_chksum: write_restart berg chksum=-1441819690 chksum2=-1441819690 chksum3=1124700946 chksum4=1124700946 chksum5=0 #=16
 
 &icebergs_driver_nml
   ni=20 !number of elements, x direction
@@ -19,20 +18,10 @@
 
 &icebergs_nml
 
-    traj_name=iKID.nc
-    bond_traj_name=iKID_bonds.nc
+    traj_name=MTS_KID.nc
+    bond_traj_name=MTS_KID_bonds.nc
 
     !defaults given in parentheses:
-    dem=.true.
-    poisson=0.3
-    dem_damping_coef=1.0
-    !a dem_spring_coef equivalent to the spring_coef (k) used for non-DEM would be:
-    !E=k*rho_bergs*2*sqrt(3)*(radius**2). If rho_bergs=850, radius=389.71 m, k=1.e-5, then E=4471.94
-    !if square packing, use A=4*(radius**2) instead of A=2*sqrt(3)*(radius**2)
-    !E=34000 for square packing with 1000 m radius, rho_bergs=850, and k=1.e-5. A=L*W always works?
-    dem_spring_coef=4471.94
-    spring_coef=1.e-5 !if dem_spring_coef=5e6, r=1500, and hex pack?
-
     explicit_inner_mts=.true.
     mts=.true. !(F) for using the Multiple Time Stepping Velocity Verlet scheme
     mts_sub_steps=60 !1 !30 !(-1) # of mts sub-steps (-1=automatically determine # from spring const)

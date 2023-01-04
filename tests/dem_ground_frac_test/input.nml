@@ -24,7 +24,6 @@
   saverestart=.true.
   halo=3
   debug=.true.
-  collision_test=.false.
   big_grounding_test=.true.
   bump_depth=50.!(m) depth of top of gaussian bump below sea level
 /
@@ -66,7 +65,7 @@
     cdrag_grounding=1.e4
     h_to_init_grounding=0 !0 !200.0
     ewsame=.false. !(F) set T if periodic and 2 PEs along the x (zonal) direction
-    remove_unused_bergs=.true.!.false. !(T) remove unneeded bergs after PEs transfers
+    remove_unused_bergs=.true. !(T) remove unneeded bergs after PEs transfers
 
     fracture_criterion='stress' !('none')
     frac_thres_scaling = 1

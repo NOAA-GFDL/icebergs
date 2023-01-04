@@ -24,9 +24,6 @@
   saverestart=.true.
   halo=3
   debug=.true.
-  collision_test=.false.
-  grounding_test=.false.
-  bump_depth=9999.0 !(m) depth of top of gaussian bump below sea level
   gridres=15000
 /
 
@@ -56,7 +53,7 @@
     remove_unused_bergs=.false. !(T) remove unneeded bergs after PEs transfers
 
 
-    fracture_criterion='none' !('none') 'strain_rate','strain','stress',or 'none'
+    fracture_criterion='none' !('none') or 'stress'
     !here, try setting scaling 1.0 if force_convergence=.false., 0.5 if force_convergence=.true.
     frac_thres_scaling = 1.0 !(1) scales frac_thres_n and frac_thres_t
     frac_thres_n = 0. !1.e7  !normal fracture strain threshold
