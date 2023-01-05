@@ -60,7 +60,6 @@ logical :: saverestart=.false. !< If true, save a berg restart file at the end
 logical :: collision_test=.false.
 logical :: big_grounding_test=.false.
 logical :: a68_test=.false.
-logical :: tau_is_velocity=.true.
 logical :: fl_test=.false.
 character(len=1000) :: data_dir = 'data/'
 integer :: transient_a68_data_start_ind=0 !<set to .gt. 0 to use the hourly JRA-55 wind data for the A68
@@ -83,7 +82,7 @@ integer :: write_time_inc=1
 namelist /icebergs_driver_nml/ debug, ni, nj, halo, ibhrs, ibdt, ibuo, ibvo, nmax, &
   saverestart,ibui,ibvi,collision_test,&
   gridres,write_time_inc,bump_depth, sst, a68_test, data_dir,&
-  fl_test,tau_is_velocity,transient_a68_data_start_ind,ibua,ibuy,&
+  fl_test,transient_a68_data_start_ind,ibua,ibuy,&
   REarth,big_grounding_test
 ! For loops
 integer :: isc !< Start of i-index for computational domain (used for loops)
@@ -223,8 +222,8 @@ uo = ibuo !zonal ocean velocities (m/s)
 vo = ibvo !meridonal ocean velocities (m/s)
 ui = ibui !zonal ice velocities (m/s)
 vi = ibvi !meridonal ice velocities (m/s)
-tauxa = ibua !zonal wind velocity (m/s) or stress (Pa) if tau_is_velocity=.false,
-tauya = ibuy !meridonal wind velocity (m/s) or stress (Pa) if tau_is_velocity=.false,
+tauxa = ibua !zonal wind velocity (m/s)
+tauya = ibuy !meridonal wind velocity (m/s)
 ssh = 0.0 !eff sea-surf height
 sstemp = sst !sea surface temperature (C or K; if K, will automatically adjust to C)
 cn = 0.0 !sea-ice concentration (nondim)
@@ -245,9 +244,8 @@ calving_hflx = 0.0 !calving heat flux (W/m2)
 
 if (a68_test) then
   call mpp_sync()
-  !note some of these fields will be replaced if transient_a68_data_start_ind>0 (transient instead of static fields)
-  call a68_prep(data_dir,mpp_domain,lon,lat,dx,dy,area,depth,uo,vo,tauxa,tauya,ssh,tau_is_velocity,REarth,&
-    transient_a68_data_start_ind)
+  !grid setup
+  call a68_prep(data_dir,mpp_domain,lon,lat,dx,dy,area,REarth)
   call mpp_sync()
   wet=1.0
   cos_rot=1.0
@@ -258,14 +256,16 @@ if (a68_test) then
       call error_mesg('icebergs_driver:', &
       'in order to use transient_a68_data_start_ind>0, timestep must be 30 min or 1 hr', FATAL)
     endif
-    if (.not. tau_is_velocity) call error_mesg('icebergs_driver:', &
-      'tau_is_velocity must be true if transient_a68_data_start_ind>-1', FATAL)
     allocate( tauxa_hr(isd:ied,jsd:jed,739) )
     allocate( tauya_hr(isd:ied,jsd:jed,739) )
     allocate( uo_hr(isd:ied,jsd:jed,744) )
     allocate( vo_hr(isd:ied,jsd:jed,744) )
     allocate( ssh_hr(isd:ied,jsd:jed,744) )
+    !read in time-varying wind velocity, ocean velocity, and ssh
     call a68_prep_3d(data_dir,mpp_domain,tauxa_hr,tauya_hr,uo_hr,vo_hr,ssh_hr)
+  else
+    call error_mesg('icebergs_driver:', &
+      'must set transient_a68_data_start_ind (i.e. start date index) to greater than zero!', FATAL)
   endif
 else
   !non-A68 tests
@@ -286,7 +286,7 @@ else
   enddo
 
   if (big_grounding_test) then
-    lat(:,:)=lat(:,:)-0.45 !-25000.1
+    lat(:,:)=lat(:,:)-0.45
     lon(:,:)=lon(:,:)-0.45
     !assign land cells at the N and S portions of the domain.
     !input.nml: set coastal drift parameter to prevent grounding
@@ -297,7 +297,7 @@ else
     !introduce gaussian bump to bathymetry
     a = 1000.0-bump_depth !max height(m)
     c = 5e3; !controls width
-    bx = 63.e3; by = 60.e3 !50.e3
+    bx = 63.e3; by = 60.e3
     do j=jsd,jed; do i=isd,ied
       xc=lon(i,j)-(gridres/2.); yc=lat(i,j)-(gridres/2.) !define at cell centers
       depth(i,j)=a*exp(-((xc-bx)*(xc-bx)/(2.*c*c)+(yc-by)*(yc-by)/(2.*c*c)))

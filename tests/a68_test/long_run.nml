@@ -3,15 +3,9 @@
 
 &icebergs_driver_nml
   a68_test=.true.
-  vert_int_ocean_vel=.false.!.true.
   !specify your data dir (ocean currents, winds, etc)
   data_dir='/lustre/f2/dev/gfdl/Alexander.Huth/MOM6-examples/src/icebergs/tests/a68_test/data/'
-  Old_wrong_Rearth_and_SSH=.false.
-  !mom_Rearth=.true.
   Rearth=<re>
-  !6363827 !6.378e6
-  no_wind=.false.
-  tau_is_velocity=.true.!.false.
   ibdt=1800.0 !seconds
   ibuo=0.0 !ocean x velocity
   ibvo=0.0 !ocean y velocity
@@ -23,8 +17,9 @@
   saverestart=.true.!.false.
   halo=3
   debug=.true.
-  reverse_a68_forcings=.false.
-  transient_a68_data_start_ind=206 !330 !static=0, dec09_1PM=206, dec13_5PM=305, dec14_1PM=326, dec14_5PM=330
+
+  !if non-zero, use time-varying ocean currents, winds, and sea-surface height:
+  transient_a68_data_start_ind=206 !206=dec09_1PM=206
 /
 
 &icebergs_nml
