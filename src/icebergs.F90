@@ -49,8 +49,7 @@ use ice_bergs_framework, only: update_latlon,set_conglom_ids,transfer_mts_bergs
 use ice_bergs_framework, only: quad_interp_from_agrid
 use ice_bergs_framework, only: save_bond_traj
 use ice_bergs_framework, only: orig_bond_length
-use ice_bergs_framework, only: update_and_break_bonds,break_bonds_dem,assign_n_bonds,reset_bond_rotation
-use ice_bergs_framework, only: update_bond_angles
+use ice_bergs_framework, only: break_bonds_dem,assign_n_bonds
 use ice_bergs_framework, only: mts
 use ice_bergs_framework, only: dem_tests_init
 use ice_bergs_framework, only: dem, save_bond_forces
@@ -1878,15 +1877,6 @@ subroutine accel_explicit_inner_mts(bergs, berg, i, j, xi, yj, lat, uvel, vvel, 
         !add vertical load to end of the cantilever beam
         if (berg%start_lon==bergs%dem_tests_end_lon) then
           F_y = F_y - 1.5e10/3.
-        endif
-      elseif (bergs%dem_beam_test==3) then
-        !Angular velocity test (starting element has constant rot=-pi/2)
-        if (berg%start_lon==bergs%dem_tests_start_lon) then
-          T=0.0; T_d=0.0
-        endif
-      elseif (bergs%dem_beam_test==4) then
-        if (berg%start_lon==bergs%dem_tests_start_lon) then
-          F_y=0.0; Fd_y=0.0
         endif
       endif
     endif
@@ -5441,7 +5431,6 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
   call mpp_clock_begin(bergs%clock_mom)
 
   if (.not.bergs%Static_icebergs) then
-    if (bergs%iceberg_bonds_on .and. (.not. bergs%dem)) call reset_bond_rotation(bergs)
 
     if (bergs%mts) then
       call evolve_icebergs_mts(bergs)
@@ -6315,8 +6304,6 @@ subroutine calve_icebergs(bergs)
             newberg%vvel_prev=0.
             newberg%uvel_old=0.
             newberg%vvel_old=0.
-            newberg%lon_prev=newberg%lon
-            newberg%lat_prev=newberg%lat
             newberg%lon_old=newberg%lon
             newberg%lat_old=newberg%lat
           endif
@@ -6370,13 +6357,6 @@ subroutine calve_icebergs(bergs)
               if (.not. allocated(newberg%rot)) allocate(newberg%rot)
             endif
             newberg%ang_vel=0.; newberg%ang_accel=0.; newberg%rot=0.
-          endif
-
-          if (bergs%fracture_criterion .ne. 'none' .and. (.not. bergs%dem)) then
-            if (.not. allocations_done) then
-              if (.not. allocated(newberg%accum_bond_rotation)) allocate(newberg%accum_bond_rotation)
-            endif
-            newberg%accum_bond_rotation=0.
           endif
 
           if (.not. bergs%old_interp_flds_order) then
@@ -6530,8 +6510,6 @@ subroutine calve_fl_icebergs(bergs,pberg,k,l_b,fl_disp_x,fl_disp_y,berg_from_bit
 
   cberg%start_lon    = cberg%lon
   cberg%start_lat    = cberg%lat
-  cberg%lon_prev     = pberg%lon_prev + fl_disp_x
-  cberg%lat_prev     = pberg%lat_prev + fl_disp_y
   cberg%lon_old      = pberg%lon_old  + fl_disp_x
   cberg%lat_old      = pberg%lat_old  + fl_disp_y
   cberg%start_day    = bergs%current_yearday
@@ -6589,11 +6567,6 @@ subroutine calve_fl_icebergs(bergs,pberg,k,l_b,fl_disp_x,fl_disp_y,berg_from_bit
   if (bergs%dem) then
     allocate(cberg%ang_vel,cberg%ang_accel,cberg%rot)
     cberg%ang_vel=0.; cberg%ang_accel=0.; cberg%rot=0.
-  endif
-
-  if (bergs%fracture_criterion .ne. 'none' .and. (.not. bergs%dem)) then
-    allocate(cberg%accum_bond_rotation)
-    cberg%accum_bond_rotation=0.
   endif
 
   call add_new_berg_to_list(bergs%list(cberg%ine,cberg%jne)%first, cberg)
@@ -6773,16 +6746,7 @@ subroutine evolve_icebergs_mts(bergs)
 
     enddo
 
-    !  print *,'iters',ii
-
-    if (.not. bergs%dem) then
-      call update_bond_angles(bergs)
-      call update_and_break_bonds(bergs)
-    else
-      if (.not. break_bonds_on_sub_steps) then
-        call break_bonds_dem(bergs)
-      endif
-    endif
+    if (bergs%dem .and. (.not. break_bonds_on_sub_steps)) call break_bonds_dem(bergs)
 
     !PART 2: X_0 and V_0, before fast sub-steps
     !X_0=X_n (no change)
@@ -6792,7 +6756,6 @@ subroutine evolve_icebergs_mts(bergs)
       berg=>bergs%list(grdi,grdj)%first
       do while (associated(berg)) ! loop over all bergs
         if (berg%static_berg .lt. 0.5 .and. berg%conglom_id.ne.0) then
-          berg%lat_prev = berg%lat; berg%lon_prev = berg%lon
           berg%uvel=berg%uvel_prev; berg%vvel=berg%vvel_prev
 
           berg%uvel = berg%uvel + dt_2*(berg%axn+berg%bxn)
@@ -7085,7 +7048,7 @@ subroutine evolve_icebergs_mts(bergs)
       enddo ! loop over all bergs
     enddo; enddo ! update 'old' velocities
 
-    if (.not. bergs%use_broken_bonds_for_substep_contact) then
+    if (bergs%dem .and. .not. bergs%use_broken_bonds_for_substep_contact) then
       if (break_bonds_on_sub_steps .and. bergs%bond_break_detected) call break_bonds_dem(bergs)
     endif
   enddo ! loop over sub-steps

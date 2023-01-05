@@ -18,7 +18,7 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 
 implicit none ; private
 
-integer :: buffer_width=36 ! This should be a parameter
+integer :: buffer_width=34 ! This should be a parameter
 integer :: buffer_width_traj=32 ! This should be a parameter
 integer :: buffer_width_bond_traj=11 !This should be a parameter
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
@@ -57,7 +57,6 @@ logical :: A68_test=.false. !< If True, enforces grounding zone in the A68 test 
 real :: A68_xdisp=0. !< longitude of the SW corner of the grounding zone in the A68 test case
 real :: A68_ydisp=0. !< latitude of the SW corner of the grounding zone in the A68 test case
 logical :: rev_mind=.false. !< Alterate option for staggering the 3x3 cells used for quadratic mapping of ocean depth to particles
-character(len=11) :: fracture_criterion='none' !<'stress' or 'none'. In non-dem-mode, 'strain_rate' and 'strain' are also options.
 logical :: orig_dem_moment_of_inertia=.false. !< Use Potyondy & Cundall,2004 torque from relative particle rotation (rather than Wang, 2020)
 logical :: break_bonds_on_sub_steps=.false.
 logical :: skip_first_outer_mts_step=.false.
@@ -70,7 +69,7 @@ public verbose, really_debug, debug, restart_input_dir,make_calving_reproduce,ol
 public ignore_ij_restart, use_slow_find,generate_test_icebergs,old_bug_rotated_weights,budget
 public orig_read, force_all_pes_traj
 public mts,save_bond_traj,ewsame,iceberg_bonds_on
-public dem, save_bond_forces, fracture_criterion, orig_dem_moment_of_inertia
+public dem, save_bond_forces, orig_dem_moment_of_inertia
 public short_step_mts_grounding, radius_based_drag
 public A68_test, A68_xdisp, A68_ydisp
 public footloose
@@ -103,7 +102,7 @@ public check_for_duplicates_in_parallel
 public split_id, id_from_2_ints, generate_id, cij_from_old_id, convert_old_id
 public update_latlon,set_conglom_ids,transfer_mts_bergs,quad_interp_from_agrid
 public pack_bond_traj_into_buffer2, unpack_bond_traj_from_buffer2, push_bond_posn, append_bond_posn
-public update_and_break_bonds,break_bonds_dem,assign_n_bonds,reset_bond_rotation,update_bond_angles
+public break_bonds_dem,assign_n_bonds
 public orig_bond_length
 public dem_tests_init
 public set_constant_interaction_length_and_width
@@ -294,8 +293,6 @@ type :: iceberg
   ! State variables (specific to the iceberg, needed for restarts)
   real :: lon !< Longitude of berg (degree N or unit of grid coordinate)
   real :: lat !< Latitude of berg (degree E or unit of grid coordinate)
-  real :: lon_prev !< Previous timestep longitude of berg
-  real :: lat_prev !< Previous timestep latitude of berg
   real :: uvel !< Zonal velocity of berg (m/s)
   real :: vvel !< Meridional velocity of berg (m/s)
   real :: mass !< Mass of berg (kg)
@@ -355,8 +352,6 @@ type :: iceberg
   integer, allocatable :: conglom_id !<ID for a conglomerate
   ! If iceberg_bonds_on
   integer, allocatable :: n_bonds
-  ! If frac
-  real, allocatable :: accum_bond_rotation
   ! For DEM-mode
   real, allocatable :: ang_vel !< Angular velocity
   real, allocatable :: ang_accel !< Angular acceleration
@@ -373,15 +368,8 @@ type :: bond
   integer :: other_berg_jne
   real :: length
   type(bond_xyt), pointer :: bond_trajectory=>null()
-  ! Fracture parameters:
-  !The following are accumulated over all timesteps, unless fracture_criterion=='strain_rate',
-  !in which case the following correspond to only the most recent timestep and units are s^(-1)
-  real, allocatable :: rotation !radians (non-dem only)
-  real, allocatable :: rel_rotation !<non-dem: relative to the mean of all bonds for a berg. dem: relative to other particle
-  ! non-dem-mode fracture:
-  real, allocatable :: n_frac_var !<normal stress or strain
-  real, allocatable :: n_strain_rate !<for fracture_criterion=='strain_rate' only
   ! For DEM-mode
+  real, allocatable :: rel_rotation !<rotation relative to other particle
   real, allocatable :: tangd1 !< Accumulated tangential displacement, x-component (m)
   real, allocatable :: tangd2 !< Accumulated tangential displacement, y-component (m)
   real, allocatable :: nstress !< Normal stress (Pa)
@@ -409,12 +397,8 @@ type :: bond_xyt
   integer(kind=8) :: id1 !<ID of first berg
   integer(kind=8) :: id2 !<ID of second berg
   type(bond_xyt), pointer :: next=>null() !< Next link in list
-  real, allocatable :: rotation !radians (non-dem only)
-  real, allocatable :: rel_rotation !<non-dem: relative to the mean of all bonds for a berg. dem: relative to other particle
-  ! non-dem-mode fracture:
-  real, allocatable :: n_frac_var !<normal stress or strain
-  real, allocatable :: n_strain_rate !<for fracture_criterion=='strain_rate' only
   ! For DEM-mode
+  real, allocatable :: rel_rotation !<Rotation relative to other particle
   real, allocatable :: tangd1 !< Accumulated tangential displacement, x-component (m)
   real, allocatable :: tangd2 !< Accumulated tangential displacement, y-component (m)
   real, allocatable :: nstress
@@ -462,9 +446,9 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   real :: contact_spring_coef !<Spring coefficient for berg collisions -Alex
   real :: cdrag_grounding=0.0 !< Drag coefficient against ocean bottom
   real :: h_to_init_grounding
-  character(len=11) :: fracture_criterion='none' !<'stress' or 'none'. In non-dem-mode, 'strain_rate' and 'strain' are also options.
-  real :: frac_thres_n=0.0 !normal fracture strain threshold
-  real :: frac_thres_t=0.0 !tangential fracture strain threshold
+  character(len=11) :: fracture_criterion='none' !< For DEM-mode. Options are 'stress' or 'none'.
+  real :: frac_thres_n=0.0 !normal fracture stress threshold
+  real :: frac_thres_t=0.0 !tangential fracture stress threshold
   logical :: debug_write=.false. !< Sets traj_sample_hours=traj_write_hours & includes halo bergs in write
   real :: bond_coef !< Spring constant for iceberg bonds
   real :: radial_damping_coef !< Coefficient for relative iceberg motion damping (radial component) -Alon
@@ -713,8 +697,8 @@ real :: spring_coef=1.e-8 ! Spring constant for iceberg interactions (this seems
 real :: contact_spring_coef=0. !Spring coef for berg collisions (is set to spring_coef if not specified)
 real :: cdrag_grounding=0.0 ! Drag coefficient against ocean bottom
 real :: h_to_init_grounding=100.0
-real :: frac_thres_n=0.0 !normal fracture strain threshold
-real :: frac_thres_t=0.0 !tangential fracture strain threshold
+real :: frac_thres_n=0.0 !normal fracture stress threshold
+real :: frac_thres_t=0.0 !tangential fracture stress threshold
 real :: frac_thres_scaling=1.0 !scaling factor for frac_thres_n and frac_thres_t, useful for tuning
 logical :: debug_write=.false. !Sets traj_sample_hours=traj_write_hours & includes halo bergs in write
 real :: bond_coef=1.e-8 ! Spring constant for iceberg bonds - not being used right now
@@ -814,6 +798,7 @@ real, dimension(nclasses) :: initial_thickness_n=(/80.4, 159.5, 240., 320., 360.
 integer(kind=8) :: debug_iceberg_with_id = -1 ! If positive, monitors a berg with this id
 ! DEM-mode parameters
 !logical :: dem=.false. !if T, run in DEM-mode with angular terms, variable stiffness, etc
+character(len=11) :: fracture_criterion='none' !< For DEM-mode. Options are 'stress' or 'none'.
 logical :: use_grounding_torque=.false.
 logical :: ignore_tangential_force=.false.
 real :: poisson=0.3 ! Poisson's ratio
@@ -1301,14 +1286,6 @@ if (dem) then
   buffer_width=buffer_width+3+(max_bonds*6)
   buffer_width_traj=buffer_width_traj+3
   buffer_width_bond_traj=buffer_width_bond_traj+6
-elseif (fracture_criterion .ne. 'none') then
-  buffer_width=buffer_width+1+(max_bonds*3)
-  buffer_width_traj=buffer_width_traj+1
-  buffer_width_bond_traj=buffer_width_bond_traj+3
-  if (fracture_criterion .eq. 'strain_rate') then
-    buffer_width=buffer_width+(max_bonds*1)
-    buffer_width_bond_traj=buffer_width_bond_traj+1
-  endif
 endif
 
 if (iceberg_bonds_on) then
@@ -2396,16 +2373,12 @@ subroutine mts_pack_in_dir(bergs, nbergs_to_send, dir)
               berg%conglom_id=current_conglom_id+2
             case ("w")
               berg%lon=berg%lon-pfix; berg%conglom_id=4
-              berg%lon_prev=berg%lon_prev-pfix
               call pack_berg_into_buffer2(berg, bergs%obuffer_w, nbergs_to_send, bergs%max_bonds)
               berg%lon=berg%lon+pfix; berg%conglom_id=current_conglom_id+8
-              berg%lon_prev=berg%lon_prev+pfix
             case ("e")
               berg%lon=berg%lon-pfix; berg%conglom_id=8
-              berg%lon_prev=berg%lon_prev-pfix
               call pack_berg_into_buffer2(berg, bergs%obuffer_e, nbergs_to_send, bergs%max_bonds)
               berg%lon=berg%lon+pfix; berg%conglom_id=current_conglom_id+4
-              berg%lon_prev=berg%lon_prev+pfix
             end select
             berg%halo_berg=current_halo_id
           endif
@@ -2445,13 +2418,13 @@ recursive subroutine mts_mark_and_pack_halo_and_congloms(bergs, berg, dir, nberg
 
     select case (dir)
     case ("e")
-      berg%conglom_id=8;                    berg%lon=berg%lon-pfix; berg%lon_prev=berg%lon_prev-pfix
+      berg%conglom_id=8;                    berg%lon=berg%lon-pfix;
       call pack_berg_into_buffer2(berg,bergs%obuffer_e, nbergs_to_send, bergs%max_bonds)
-      berg%conglom_id=current_conglom_id+4; berg%lon=berg%lon+pfix; berg%lon_prev=berg%lon_prev+pfix
+      berg%conglom_id=current_conglom_id+4; berg%lon=berg%lon+pfix;
     case ("w")
-      berg%conglom_id=4;                    berg%lon=berg%lon-pfix; berg%lon_prev=berg%lon_prev-pfix
+      berg%conglom_id=4;                    berg%lon=berg%lon-pfix;
       call pack_berg_into_buffer2(berg,bergs%obuffer_w, nbergs_to_send, bergs%max_bonds)
-      berg%conglom_id=current_conglom_id+8; berg%lon=berg%lon+pfix; berg%lon_prev=berg%lon_prev+pfix
+      berg%conglom_id=current_conglom_id+8; berg%lon=berg%lon+pfix;
     case ("n")
       berg%conglom_id=1
       call pack_berg_into_buffer2(berg,bergs%obuffer_n, nbergs_to_send, bergs%max_bonds)
@@ -2577,16 +2550,12 @@ recursive subroutine mts_pack_contact_bergs(bergs, berg, dir, pfix, nbergs_to_se
                 other_berg%conglom_id=current_conglom_id+2
               case ("w")
                 other_berg%lon=other_berg%lon-pfix; other_berg%conglom_id=4
-                other_berg%lon_prev=other_berg%lon_prev-pfix
                 call pack_berg_into_buffer2(other_berg,bergs%obuffer_w, nbergs_to_send, bergs%max_bonds)
                 other_berg%lon=other_berg%lon+pfix; other_berg%conglom_id=current_conglom_id+8
-                other_berg%lon_prev=other_berg%lon_prev+pfix
               case ("e")
                 other_berg%lon=other_berg%lon-pfix; other_berg%conglom_id=8
-                other_berg%lon_prev=other_berg%lon_prev-pfix
                 call pack_berg_into_buffer2(other_berg,bergs%obuffer_e, nbergs_to_send, bergs%max_bonds)
                 other_berg%lon=other_berg%lon+pfix; other_berg%conglom_id=current_conglom_id+4
-                other_berg%lon_prev=other_berg%lon_prev+pfix
               end select
               other_berg%halo_berg=current_halo_id
             endif
@@ -3305,8 +3274,6 @@ type(bond), pointer :: current_bond
   counter = 0
   call push_buffer_value(buff%data(:,n), counter, berg%lon)
   call push_buffer_value(buff%data(:,n), counter, berg%lat)
-  call push_buffer_value(buff%data(:,n), counter, berg%lon_prev)
-  call push_buffer_value(buff%data(:,n), counter, berg%lat_prev)
   call push_buffer_value(buff%data(:,n), counter, berg%uvel)
   call push_buffer_value(buff%data(:,n), counter, berg%vvel)
   call push_buffer_value(buff%data(:,n), counter, berg%uvel_prev)
@@ -3369,8 +3336,6 @@ type(bond), pointer :: current_bond
     call push_buffer_value(buff%data(:,n), counter, berg%ang_vel)
     call push_buffer_value(buff%data(:,n), counter, berg%ang_accel)
     call push_buffer_value(buff%data(:,n), counter, berg%rot)
-  elseif (fracture_criterion .ne. 'none') then
-    call push_buffer_value(buff%data(:,n), counter, berg%accum_bond_rotation)
   endif
 
   if (max_bonds .gt. 0) then
@@ -3391,13 +3356,6 @@ type(bond), pointer :: current_bond
           call push_buffer_value(buff%data(:,n), counter, current_bond%sstress)
           call push_buffer_value(buff%data(:,n), counter, current_bond%rel_rotation)
           call push_buffer_value(buff%data(:,n), counter, current_bond%broken)
-        elseif (fracture_criterion .ne. 'none') then
-          call push_buffer_value(buff%data(:,n), counter, current_bond%rotation)
-          call push_buffer_value(buff%data(:,n), counter, current_bond%rel_rotation)
-          call push_buffer_value(buff%data(:,n), counter, current_bond%n_frac_var)
-          if (fracture_criterion .eq. 'strain_rate') then
-            call push_buffer_value(buff%data(:,n), counter, current_bond%n_strain_rate)
-          endif
         endif
 
         current_bond=>current_bond%next_bond
@@ -3415,15 +3373,7 @@ type(bond), pointer :: current_bond
           call push_buffer_value(buff%data(:,n), counter, 0)
           call push_buffer_value(buff%data(:,n), counter, 0)
           call push_buffer_value(buff%data(:,n), counter, 0)
-        elseif (fracture_criterion .ne. 'none') then
-          call push_buffer_value(buff%data(:,n), counter, 0)
-          call push_buffer_value(buff%data(:,n), counter, 0)
-          call push_buffer_value(buff%data(:,n), counter, 0)
-          if (fracture_criterion .eq. 'strain_rate') then
-            call push_buffer_value(buff%data(:,n), counter, 0)
-          endif
         endif
-
       endif
     enddo
   endif
@@ -3554,25 +3504,15 @@ real :: temp_lon,temp_lat,length
   force_app = .false.
   if(present(force_append)) force_app = force_append
 
-  if (mts) then
-    allocate(localberg%axn_fast,localberg%ayn_fast,localberg%bxn_fast,localberg%byn_fast,localberg%conglom_id)
-  endif
+  if (mts) allocate(localberg%axn_fast,localberg%ayn_fast,localberg%bxn_fast,localberg%byn_fast,localberg%conglom_id)
 
-  if (iceberg_bonds_on) then
-    allocate(localberg%n_bonds)
-  endif
+  if (iceberg_bonds_on) allocate(localberg%n_bonds)
 
-  if (dem) then
-    allocate(localberg%ang_vel,localberg%ang_accel,localberg%rot)
-  elseif (fracture_criterion .ne. 'none') then
-    allocate(localberg%accum_bond_rotation)
-  endif
+  if (dem) allocate(localberg%ang_vel,localberg%ang_accel,localberg%rot)
 
   counter = 0
   call pull_buffer_value(buff%data(:,n), counter, localberg%lon)
   call pull_buffer_value(buff%data(:,n), counter, localberg%lat)
-  call pull_buffer_value(buff%data(:,n), counter, localberg%lon_prev)
-  call pull_buffer_value(buff%data(:,n), counter, localberg%lat_prev)
   call pull_buffer_value(buff%data(:,n), counter, localberg%uvel)
   call pull_buffer_value(buff%data(:,n), counter, localberg%vvel)
   call pull_buffer_value(buff%data(:,n), counter, localberg%uvel_prev)
@@ -3635,8 +3575,6 @@ real :: temp_lon,temp_lat,length
     call pull_buffer_value(buff%data(:,n), counter, localberg%ang_vel)
     call pull_buffer_value(buff%data(:,n), counter, localberg%ang_accel)
     call pull_buffer_value(buff%data(:,n), counter, localberg%rot)
-  elseif (fracture_criterion .ne. 'none') then
-    call pull_buffer_value(buff%data(:,n), counter, localberg%accum_bond_rotation)
   endif
 
   !These quantities no longer need to be passed between processors
@@ -3763,13 +3701,6 @@ real :: temp_lon,temp_lat,length
           call pull_buffer_value(buff%data(:,n), counter, current_bond%sstress)
           call pull_buffer_value(buff%data(:,n), counter, current_bond%rel_rotation)
           call pull_buffer_value(buff%data(:,n), counter, current_bond%broken)
-        elseif (fracture_criterion .ne. 'none') then
-          call pull_buffer_value(buff%data(:,n), counter, current_bond%rotation)
-          call pull_buffer_value(buff%data(:,n), counter, current_bond%rel_rotation)
-          call pull_buffer_value(buff%data(:,n), counter, current_bond%n_frac_var)
-          if (fracture_criterion .eq. 'strain_rate') then
-            call pull_buffer_value(buff%data(:,n), counter, current_bond%n_strain_rate)
-          endif
         endif
       endif
     enddo
@@ -3900,10 +3831,7 @@ subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj, save_fl_traj)
       call push_buffer_value(buff%data(:,n), counter, traj%ang_vel)
       call push_buffer_value(buff%data(:,n), counter, traj%ang_accel)
       call push_buffer_value(buff%data(:,n), counter, traj%rot)
-    elseif (fracture_criterion .ne. 'none') then
-      call push_buffer_value(buff%data(:,n), counter, traj%accum_bond_rotation)
     endif
-
   endif
 
 end subroutine pack_traj_into_buffer2
@@ -3929,11 +3857,7 @@ subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj, save_fl_tra
     allocate(traj%n_bonds)
   endif
 
-  if (dem) then
-    allocate(traj%ang_vel,traj%ang_accel,traj%rot)
-  elseif (fracture_criterion .ne. 'none') then
-    allocate(traj%accum_bond_rotation)
-  endif
+  if (dem) allocate(traj%ang_vel,traj%ang_accel,traj%rot)
 
   counter = 0
   call pull_buffer_value(buff%data(:,n),counter,traj%lon)
@@ -4000,8 +3924,6 @@ subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj, save_fl_tra
       call pull_buffer_value(buff%data(:,n), counter, traj%ang_vel)
       call pull_buffer_value(buff%data(:,n), counter, traj%ang_accel)
       call pull_buffer_value(buff%data(:,n), counter, traj%rot)
-    elseif (fracture_criterion .ne. 'none') then
-      call pull_buffer_value(buff%data(:,n), counter, traj%accum_bond_rotation)
     endif
   endif
   call append_posn(first, traj)
@@ -4044,13 +3966,6 @@ subroutine pack_bond_traj_into_buffer2(bond_traj, buff, n)
     call push_buffer_value(buff%data(:,n),counter,bond_traj%sstress)
     call push_buffer_value(buff%data(:,n),counter,bond_traj%rel_rotation)
     call push_buffer_value(buff%data(:,n),counter,bond_traj%broken)
-  elseif (fracture_criterion.ne.'none') then
-    call push_buffer_value(buff%data(:,n),counter,bond_traj%rotation)
-    call push_buffer_value(buff%data(:,n),counter,bond_traj%rel_rotation)
-    call push_buffer_value(buff%data(:,n),counter,bond_traj%n_frac_var)
-    if (fracture_criterion.eq.'strain_rate') then
-      call push_buffer_value(buff%data(:,n),counter,bond_traj%n_strain_rate)
-    endif
   endif
 
 end subroutine pack_bond_traj_into_buffer2
@@ -4066,14 +3981,7 @@ subroutine unpack_bond_traj_from_buffer2(first, buff, n)
   integer :: counter ! Position in stack
   integer :: cnt1, ij1, cnt2, ij2
 
-  if (dem) then
-    allocate(bond_traj%tangd1,bond_traj%tangd2,bond_traj%nstress,bond_traj%sstress,bond_traj%rel_rotation)
-  elseif (fracture_criterion.ne.'none') then
-    allocate(bond_traj%rotation,bond_traj%rel_rotation,bond_traj%n_frac_var)
-    if (fracture_criterion.eq.'strain_rate') then
-      allocate(bond_traj%n_strain_rate)
-    endif
-  endif
+  if (dem) allocate(bond_traj%tangd1,bond_traj%tangd2,bond_traj%nstress,bond_traj%sstress,bond_traj%rel_rotation)
 
   counter = 0
   call pull_buffer_value(buff%data(:,n),counter,bond_traj%lon)
@@ -4097,13 +4005,6 @@ subroutine unpack_bond_traj_from_buffer2(first, buff, n)
     call pull_buffer_value(buff%data(:,n),counter,bond_traj%sstress)
     call pull_buffer_value(buff%data(:,n),counter,bond_traj%rel_rotation)
     call pull_buffer_value(buff%data(:,n),counter,bond_traj%broken)
-  elseif (fracture_criterion.ne.'none') then
-    call pull_buffer_value(buff%data(:,n),counter,bond_traj%rotation)
-    call pull_buffer_value(buff%data(:,n),counter,bond_traj%rel_rotation)
-    call pull_buffer_value(buff%data(:,n),counter,bond_traj%n_frac_var)
-    if (fracture_criterion.eq.'strain_rate') then
-      call pull_buffer_value(buff%data(:,n),counter,bond_traj%n_strain_rate)
-    endif
   endif
 
   call append_bond_posn(first, bond_traj)
@@ -4571,11 +4472,8 @@ integer :: stderrunit
     berg%n_bonds=0
   endif
 
-  if (dem) then
-    allocate(berg%ang_vel,berg%ang_accel,berg%rot)
-  elseif (fracture_criterion .ne. 'none') then
-    allocate(berg%accum_bond_rotation)
-  endif
+  if (dem) allocate(berg%ang_vel,berg%ang_accel,berg%rot)
+
   berg=bergvals
   berg%prev=>null()
   berg%next=>null()
@@ -4815,268 +4713,7 @@ real :: minlon,maxlon
   bergs%dem_tests_start_lon=minlon; bergs%dem_tests_end_lon=maxlon
 
   print *,'pe,dem tests start lon,dem tests end lon',mpp_pe(),minlon,maxlon
-
-  if (bergs%dem_beam_test>=3) then
-    do grdj=grd%jsd,grd%jed ; do grdi=grd%isd,grd%ied !loop over all cells
-      this=>bergs%list(grdi,grdj)%first
-      do while (associated(this)) ! loop over all bergs in cell
-        if (bergs%dem_beam_test==3) then
-          if (this%start_lon==minlon) this%rot=-pi/2.
-        elseif (bergs%dem_beam_test==4) then
-          if (this%start_lon==maxlon) then
-            this%vvel=-40.0
-            this%vvel_old=-40.0
-            this%vvel_prev=-40.0
-          endif
-        endif
-        this=>this%next
-      enddo
-    enddo;enddo
-  endif
-
 end subroutine dem_tests_init
-
-!> Set the accumulated bond rotation to zero for all bergs
-subroutine reset_bond_rotation(bergs)
-type(icebergs), pointer :: bergs !< Container for all types and memory
-type(iceberg), pointer :: this, other_berg
-type(bond) , pointer :: current_bond
-type(icebergs_gridded), pointer :: grd
-integer :: grdi, grdj
-
-if (.not. bergs%fracture_criterion=='strain_rate') return
-
-  grd=>bergs%grd
-  do grdj=grd%jsd,grd%jed ; do grdi=grd%isd,grd%ied !loop over all cells
-    this=>bergs%list(grdi,grdj)%first
-    do while (associated(this)) ! loop over all bergs in cell
-      this%accum_bond_rotation=0.0
-      current_bond=>this%first_bond
-      do while (associated(current_bond)) ! loop over all bonds
-        current_bond%rotation=0.0
-        current_bond=>current_bond%next_bond
-      enddo
-      this=>this%next
-    enddo
-  enddo;enddo
-end subroutine reset_bond_rotation
-
-!>Saves rotation of bond on each bond, and accumulates the rotation of all bonds connected to a particle
-!!onto the particle.
-subroutine update_bond_angles(bergs)
-type(icebergs), pointer :: bergs !< Container for all types and memory
-type(iceberg), pointer :: this, other_berg
-type(icebergs_gridded), pointer :: grd
-integer :: grdi, grdj
-type(bond) , pointer :: current_bond
-real :: dx_dlon1,dx_dlon2,dx_dlon,dy_dlat,lat_ref,b1_u,b1_v,b2_u,b2_v
-real :: dxa,dya,dxb,dyb,vr1,vr2
-real :: angular_momentum,moment_of_inertia,tangent_velocity
-real :: cross_b1b2,dot_b1b2,angle
-
-  if (bergs%fracture_criterion=='none') return
-
-  grd=>bergs%grd
-
-  if (.not. bergs%grd%grid_is_latlon) then
-    dx_dlon=1.0; dy_dlat=1.0
-  else
-    dy_dlat=pi_180*Rearth
-  endif
-
-  do grdj=grd%jsd,grd%jed ; do grdi=grd%isd,grd%ied !loop over all cells
-    this=>bergs%list(grdi,grdj)%first
-    do while (associated(this)) ! loop over all bergs in cell
-      if (this%conglom_id>0) then
-        current_bond=>this%first_bond
-        if (associated(current_bond)) then
-
-          do while (associated(current_bond)) ! loop over all bonds
-            other_berg=>current_bond%other_berg
-            if (associated(other_berg)) then
-
-              !relative coords from previous cycle
-              if (bergs%grd%grid_is_latlon) then
-                lat_ref=0.5*(this%lat_prev+other_berg%lat_prev); dx_dlon=pi_180*Rearth*cos(lat_ref*pi_180)
-              endif
-              dxa=(other_berg%lon_prev-this%lon_prev)*dx_dlon;   dya=(other_berg%lat_prev-this%lat_prev)*dy_dlat
-
-              !relative coords from current cycle
-              if (bergs%grd%grid_is_latlon) then
-                lat_ref=0.5*(this%lat+other_berg%lat);         dx_dlon=pi_180*Rearth*cos(lat_ref*pi_180)
-              endif
-              dxb=(other_berg%lon-this%lon)*dx_dlon;           dyb=(other_berg%lat-this%lat)*dy_dlat
-
-              current_bond%length=sqrt(dxb*dxb+dyb*dyb) !update bond length
-
-              cross_b1b2=dxa*dyb-dya*dxb !([dxa dya 0] x [dxb dyb 0]) . [0 0 1]
-              dot_b1b2 = dxa*dxb+dya*dyb ![dxa dya] . [dxa dxb]
-              angle = atan2(cross_b1b2,dot_b1b2)
-
-              current_bond%rotation=current_bond%rotation+angle
-            endif
-            current_bond=>current_bond%next_bond
-          enddo !loop over all bonds
-        endif
-      endif
-      this=>this%next
-    enddo ! loop over all bergs in cell
-  enddo; enddo !loop over all cells
-end subroutine update_bond_angles
-
-
-!> For each berg element, calculates the average rotation rate of all bonds connected to a particle. Bonds are
-!! then broken based on their individual rotation rate compared to the average rotation rates accumulated on
-!! the berg elements that the bonds connect, and based on the rate of bond stretching (normal strain-rate).
-!! Alternatively, bonds can be broken based on the total accumulated relative rotation and normal strain (not rates).
-subroutine update_and_break_bonds(bergs)
-  type(icebergs), pointer :: bergs !< Container for all types and memory
-  type(iceberg), pointer :: other_berg, this
-  type(icebergs_gridded), pointer :: grd
-  integer :: grdi, grdj
-  type(bond) , pointer :: current_bond,other_bond,kick_the_bucket
-  real :: frac_thres_n,frac_thres_t,spring_coef
-  real :: inv_dt, rdenom, mean_denom, R1, R2, n_frac_var, BondEetot
-
-  frac_thres_n=bergs%frac_thres_n; frac_thres_t=bergs%frac_thres_t
-  if (frac_thres_n<=0.0 .and. frac_thres_t<=0.0) return !all fracture ignored
-  if (frac_thres_n<=0.0) frac_thres_n=huge(1.0) !no fracture from normal strain
-  if (frac_thres_t<=0.0) frac_thres_t=huge(1.0) !no fracture from bond rotation
-
-  if (bergs%fracture_criterion=='strain_rate') then
-    inv_dt=1.0/bergs%dt
-  elseif (bergs%fracture_criterion=='strain' .or. bergs%fracture_criterion=='stress') then
-    inv_dt=1.0
-  else
-    return
-  endif
-
-  if (bergs%hexagonal_icebergs) then
-    rdenom=1./(2.*sqrt(3.))
-  else
-    if (bergs%iceberg_bonds_on) then
-      rdenom=1./4.
-    else
-      rdenom=1./pi
-    endif
-  endif
-
-  grd=>bergs%grd
-
-  !1. accumulate bond rotation/rotation-rate to the berg element
-  do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
-    this=>bergs%list(grdi,grdj)%first
-    do while (associated(this)) ! loop over all bergs
-      this%accum_bond_rotation=0.0
-      current_bond=>this%first_bond
-      do while (associated(current_bond)) ! loop over all bonds
-        current_bond%rotation=current_bond%rotation*inv_dt
-        this%accum_bond_rotation=this%accum_bond_rotation+current_bond%rotation
-        current_bond=>current_bond%next_bond
-      enddo
-      this=>this%next
-    enddo
-  enddo;enddo
-
-  !2. Compare rotation/rotation-rate of each bond to the berg-based mean w/o the bond it in
-  do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied !loop over cells
-    this=>bergs%list(grdi,grdj)%first
-    do while (associated(this)) ! loop over all bergs
-      if (this%conglom_id>0 .and. this%n_bonds>1) then
-        R1=sqrt(this%length*this%width*rdenom)
-        if (this%n_bonds>1) mean_denom=1.0/(this%n_bonds-1)
-
-        !2. Bond updates: normal strain/strain-rate, and relative rotation/rotation-rate
-        current_bond=>this%first_bond
-        do while (associated(current_bond)) ! loop over all bonds
-          other_berg=>current_bond%other_berg
-          if (.not. associated(other_berg)) &
-            call error_mesg('KID,update_and_break_bonds','other_berg not associated!' ,FATAL)
-          R2=sqrt(other_berg%length*other_berg%width*rdenom)
-
-          !the relative rotation (or rotation-rate) of the current bond relative to the mean
-          !rotation (or rotation-rate) of bonds on the parent berg, where the current bond is
-          !excluded from the mean.
-          if (this%n_bonds>1) then
-            current_bond%rel_rotation = current_bond%rotation-&
-              (this%accum_bond_rotation-current_bond%rotation)*mean_denom
-          else
-            current_bond%rel_rotation = 0.0
-          endif
-
-          !normal strain or strain-rate: note original length is taken as the sum of the
-          !radii (calculated according to area) of the two bergs the bond connects.
-          if (bergs%fracture_criterion=='strain_rate') then
-            n_frac_var=current_bond%length/(R1+R2) - 1.0
-            current_bond%n_strain_rate=(n_frac_var-current_bond%n_frac_var)*inv_dt
-            current_bond%n_frac_var=n_frac_var
-            n_frac_var=current_bond%n_strain_rate
-          elseif (bergs%fracture_criterion=='strain') then
-            n_frac_var=current_bond%length/(R1+R2) - 1.0
-            current_bond%n_frac_var=n_frac_var
-          elseif (bergs%fracture_criterion=='stress') then
-            n_frac_var=(current_bond%length-(R1+R2))*min(this%mass,other_berg%mass)*&
-              (bergs%spring_coef)/(min(this%thickness,other_berg%thickness)*(R1+R2))
-            current_bond%rel_rotation = current_bond%rel_rotation*R1*min(this%mass,other_berg%mass)*&
-              bergs%spring_coef/(min(this%thickness,other_berg%thickness)*(R1+R2))
-            current_bond%n_frac_var=n_frac_var
-          endif
-
-        !mark bond and matching bond on other_berg as fractured
-        if (abs(current_bond%rel_rotation)>frac_thres_t.or.n_frac_var>frac_thres_n) then
-          current_bond%other_id=-1
-
-          !mark matching bond on other_berg
-          other_bond=>other_berg%first_bond
-          do while (associated(other_bond)) ! loop over all bonds
-            if (other_bond%other_id.eq.this%id) other_bond%other_id=-1
-            other_bond=>other_bond%next_bond
-          enddo
-        endif
-        current_bond=>current_bond%next_bond
-      enddo
-    endif
-    this=>this%next
-  enddo
-enddo; enddo
-
-  !4. final cleanup
-  do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
-    this=>bergs%list(grdi,grdj)%first
-    do while (associated(this)) ! loop over all bergs
-      current_bond=>this%first_bond
-      do while (associated(current_bond)) ! loop over all bonds
-        if (current_bond%other_id==-1) then
-          if (grdj>=grd%jsc .and. grdj<=grd%jec .and. grdi>=grd%isc .and. grdi<=grd%iec) then
-            if (bergs%fracture_criterion=='strain_rate') then
-              n_frac_var=current_bond%n_strain_rate
-            else
-              n_frac_var=current_bond%n_frac_var
-            endif
-            if (abs(current_bond%rel_rotation)>frac_thres_t.and.n_frac_var>frac_thres_n) then
-              print *,'angle and n_frac_var break',current_bond%rel_rotation,n_frac_var,this%id
-            elseif (abs(current_bond%rel_rotation)>frac_thres_t) then
-              print *,'angle break',current_bond%rel_rotation,n_frac_var,this%id
-            elseif (n_frac_var>frac_thres_n) then
-              print *,'n_frac_var break',current_bond%rel_rotation,n_frac_var,this%id
-            else
-              print *,'break due to bond match',current_bond%rel_rotation,n_frac_var,this%id
-            endif
-          endif
-          this%accum_bond_rotation=this%accum_bond_rotation-current_bond%rotation
-          this%n_bonds=this%n_bonds-1
-          kick_the_bucket=>current_bond
-          current_bond=>current_bond%next_bond
-          call delete_bond_from_list(this,kick_the_bucket)
-        else
-          current_bond=>current_bond%next_bond
-        endif
-      enddo
-      this=>this%next
-    enddo
-  enddo;enddo
-
-end subroutine update_and_break_bonds
 
 !> DEM-style fracture
 subroutine break_bonds_dem(bergs)
@@ -5096,8 +4733,8 @@ subroutine break_bonds_dem(bergs)
   frac_thres_n=bergs%frac_thres_n; frac_thres_t=bergs%frac_thres_t
 
   if (frac_thres_n<=0.0 .and. frac_thres_t<=0.0) return !all fracture ignored
-  if (frac_thres_n<=0.0) frac_thres_n=huge(1.0) !no fracture from normal strain
-  if (frac_thres_t<=0.0) frac_thres_t=huge(1.0) !no fracture from bond rotation
+  if (frac_thres_n<=0.0) frac_thres_n=huge(1.0) !no fracture from normal stress
+  if (frac_thres_t<=0.0) frac_thres_t=huge(1.0) !no fracture from tangential stress
   grd=>bergs%grd
   do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
     this=>bergs%list(grdi,grdj)%first
@@ -5216,13 +4853,6 @@ if (berg%id .ne. other_id) then
     if (save_bond_forces) then
       allocate(new_bond%F_x, new_bond%F_y, new_bond%Fd_x, new_bond%Fd_y, new_bond%T, new_bond%T_d)
       new_bond%F_x=0.; new_bond%F_y=0.; new_bond%Fd_x=0.; new_bond%Fd_y=0.; new_bond%T=0.; new_bond%T_d=0.
-    endif
-  elseif (fracture_criterion.ne.'none') then
-    allocate(new_bond%rotation,new_bond%rel_rotation,new_bond%n_frac_var)
-    new_bond%rotation=0.; new_bond%rel_rotation=0.; new_bond%n_frac_var=0.
-    if (fracture_criterion.eq.'strain_rate') then
-      allocate(new_bond%n_strain_rate)
-      new_bond%n_strain_rate=0.
     endif
   endif
 
@@ -5507,7 +5137,7 @@ subroutine update_latlon(bergs)
   ! Local variables
   type(icebergs_gridded), pointer :: grd
   type(iceberg), pointer :: berg
-  real :: dlon, dlat,dlon2,dlat2,xi,yj,Lx
+  real :: dlon, dlat,xi,yj,Lx
   integer :: grdi,grdj
   logical :: lret
 
@@ -5526,16 +5156,12 @@ subroutine update_latlon(bergs)
             !already been corrected (if needed), as the scheme below would fail.
             dlon = berg%lon - berg%lon_old
             dlat = berg%lat - berg%lat_old
-            dlon2 = berg%lon - berg%lon_prev
-            dlat2 = berg%lat - berg%lat_prev
 
             berg%lon=bilin(grd, grd%lon, berg%ine, berg%jne, berg%xi, berg%yj)
             berg%lat=bilin(grd, grd%lat, berg%ine, berg%jne, berg%xi, berg%yj)
 
             berg%lon_old = berg%lon-dlon
             berg%lat_old = berg%lat-dlat
-            berg%lon_prev = berg%lon-dlon2
-            berg%lat_prev = berg%lat-dlat2
 
             !need to update local positon in cell from updated global coords, due to roundoff
             lret=pos_within_cell(grd, berg%lon, berg%lat, berg%ine, berg%jne, berg%xi, berg%yj)
@@ -5734,20 +5360,9 @@ endif
     allocate(posn%n_bonds)
   endif
 
-  if (dem) then
-    allocate(posn%ang_vel,posn%ang_accel,posn%rot)
-  elseif (fracture_criterion .ne. 'none') then
-    allocate(posn%accum_bond_rotation)
-  endif
+  if (dem) allocate(posn%ang_vel,posn%ang_accel,posn%rot)
 
-  if (save_bond_traj) then
-    if (dem) then
-      allocate(bond_posn%tangd1,bond_posn%tangd2,bond_posn%nstress,bond_posn%sstress,bond_posn%rel_rotation)
-    elseif (fracture_criterion.ne.'none') then
-      allocate(bond_posn%rotation,bond_posn%rel_rotation,bond_posn%n_frac_var)
-      if (fracture_criterion.eq.'strain_rate') allocate(bond_posn%n_strain_rate)
-    endif
-  endif
+  if (save_bond_traj .and. dem) allocate(bond_posn%tangd1,bond_posn%tangd2,bond_posn%nstress,bond_posn%sstress,bond_posn%rel_rotation)
 
   area_thres=bergs%traj_area_thres*1.e6 ! convert from km^2 to m^2
   area_thres2=bergs%traj_area_thres_sntbc*1.e6
@@ -5838,8 +5453,6 @@ endif
             posn%ang_vel=this%ang_vel
             posn%ang_accel=this%ang_accel
             posn%rot=this%rot
-          elseif (fracture_criterion .ne. 'none') then
-            posn%accum_bond_rotation=this%accum_bond_rotation
           endif
         endif
 
@@ -5873,11 +5486,6 @@ endif
                 bond_posn%nstress=current_bond%nstress
                 bond_posn%sstress=current_bond%sstress
                 bond_posn%rel_rotation=current_bond%rel_rotation
-              elseif (fracture_criterion.ne.'none') then
-                bond_posn%rotation=current_bond%rotation
-                bond_posn%rel_rotation=current_bond%rel_rotation
-                bond_posn%n_frac_var=current_bond%n_frac_var
-                if (fracture_criterion.eq.'strain_rate') bond_posn%n_strain_rate=current_bond%n_strain_rate
               endif
 
               call push_bond_posn(current_bond%bond_trajectory, bond_posn)
@@ -5911,11 +5519,7 @@ type(xyt), pointer :: new_posn
     allocate(new_posn%n_bonds)
   endif
 
-  if (dem) then
-    allocate(new_posn%ang_vel,new_posn%ang_accel,new_posn%rot)
-  elseif (fracture_criterion .ne. 'none') then
-    allocate(new_posn%accum_bond_rotation)
-  endif
+  if (dem) allocate(new_posn%ang_vel,new_posn%ang_accel,new_posn%rot)
 
   new_posn=posn_vals
   new_posn%next=>trajectory
@@ -5933,12 +5537,7 @@ type(bond_xyt), pointer :: new_bond_posn
 
   allocate(new_bond_posn)
 
-  if (dem) then
-    allocate(new_bond_posn%tangd1,new_bond_posn%tangd2,new_bond_posn%nstress,new_bond_posn%sstress,new_bond_posn%rel_rotation)
-  elseif (fracture_criterion.ne.'none') then
-    allocate(new_bond_posn%rotation,new_bond_posn%rel_rotation,new_bond_posn%n_frac_var)
-    if (fracture_criterion.eq.'strain_rate') allocate(new_bond_posn%n_strain_rate)
-  endif
+  if (dem) allocate(new_bond_posn%tangd1,new_bond_posn%tangd2,new_bond_posn%nstress,new_bond_posn%sstress,new_bond_posn%rel_rotation)
 
   new_bond_posn=bond_posn_vals
   new_bond_posn%next=>bond_trajectory
@@ -5965,11 +5564,7 @@ type(xyt), pointer :: new_posn,next,last
     allocate(new_posn%n_bonds)
   endif
 
-  if (dem) then
-    allocate(new_posn%ang_vel,new_posn%ang_accel,new_posn%rot)
-  elseif (fracture_criterion .ne. 'none' .and. (.not. dem)) then
-    allocate(new_posn%accum_bond_rotation)
-  endif
+  if (dem) allocate(new_posn%ang_vel,new_posn%ang_accel,new_posn%rot)
 
   new_posn=posn_vals
   new_posn%next=>null()
@@ -5997,12 +5592,7 @@ type(bond_xyt), pointer :: new_bond_posn,next,last
 
   allocate(new_bond_posn)
 
-  if (dem) then
-    allocate(new_bond_posn%tangd1,new_bond_posn%tangd2,new_bond_posn%nstress,new_bond_posn%sstress,new_bond_posn%rel_rotation)
-  elseif (fracture_criterion.ne.'none') then
-    allocate(new_bond_posn%rotation,new_bond_posn%rel_rotation,new_bond_posn%n_frac_var)
-    if (fracture_criterion.eq.'strain_rate') allocate(new_bond_posn%n_strain_rate)
-  endif
+  if (dem) allocate(new_bond_posn%tangd1,new_bond_posn%tangd2,new_bond_posn%nstress,new_bond_posn%sstress,new_bond_posn%rel_rotation)
 
   new_bond_posn=bond_posn_vals
   new_bond_posn%next=>null()
