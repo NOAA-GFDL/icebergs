@@ -85,11 +85,11 @@ real, parameter :: Cd_wh=0.0012 !< (Horizontal) Drag coefficient between bergs a
 real, parameter :: Cd_iv=0.9 !< (Vertical) Drag coefficient between bergs and sea-ice
 !TOM> no horizontal drag for sea ice! real, parameter :: Cd_ih=0.0012 !< (Horizontal) Drag coefficient between bergs and sea-ice
 
-#ifdef _FILE_VERSION
-character(len=128) :: version = _FILE_VERSION !< Version of file
-#else
-character(len=128) :: version = 'unknown' !< Version of file
+#ifndef _FILE_VERSION
+! Version of file provided can be set to git hash via a CPP macro but if not set we use 'unknown'
+#define _FILE_VERSION 'unknown'
 #endif
+character(len=128) :: version = _FILE_VERSION !< Version of file
 
 contains
 
