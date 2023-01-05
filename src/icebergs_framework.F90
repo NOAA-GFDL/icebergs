@@ -619,7 +619,6 @@ end type icebergs
 !! \todo Remove when backward compatibility no longer needed
 logical :: orig_read=.false.
 
-!> Version of file provided by CPP macro (usually set to git hash)
 #ifdef _FILE_VERSION
 character(len=128) :: version = _FILE_VERSION !< Version of file
 #else
