@@ -69,11 +69,11 @@ logical :: is_io_tile_root_pe = .true.
 integer :: clock_trw,clock_trp
 integer :: clock_btrw,clock_btrp !bond trajectories
 
-#ifdef _FILE_VERSION
-  character(len=128) :: version = _FILE_VERSION
-#else
-  character(len=128) :: version = 'unknown'
+#ifndef _FILE_VERSION
+! Version of file provided can be set to git hash via a CPP macro but if not set we use 'unknown'
+#define _FILE_VERSION 'unknown'
 #endif
+character(len=128) :: version = _FILE_VERSION !< Version of file
 
 contains
 

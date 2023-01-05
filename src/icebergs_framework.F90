@@ -619,12 +619,11 @@ end type icebergs
 !! \todo Remove when backward compatibility no longer needed
 logical :: orig_read=.false.
 
-!> Version of file provided by CPP macro (usually set to git hash)
-#ifdef _FILE_VERSION
-character(len=128) :: version = _FILE_VERSION !< Version of file
-#else
-character(len=128) :: version = 'unknown' !< Version of file
+#ifndef _FILE_VERSION
+! Version of file provided can be set to git hash via a CPP macro but if not set we use 'unknown'
+#define _FILE_VERSION 'unknown'
 #endif
+character(len=128) :: version = _FILE_VERSION !< Version of file
 
 !> Set a value in the buffer at position (counter,n) after incrementing counter
 interface push_buffer_value
