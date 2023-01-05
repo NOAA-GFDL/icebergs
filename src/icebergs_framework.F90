@@ -501,8 +501,8 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   logical :: only_interactive_forces=.False. !< Icebergs only feel interactive forces, and not ocean, wind...
   logical :: halo_debugging=.False. !< Use for debugging halos (remove when its working)
   logical :: save_short_traj=.True. !< True saves only lon,lat,time,id in iceberg_trajectory.nc
-  character(len=70) :: traj_name='iceberg_trajectories.nc'
-  character(len=70) :: bond_traj_name='bond_trajectories.nc'
+  character(len=70) :: traj_name='iceberg_trajectories.nc' !< Name of output particle trajectory file
+  character(len=70) :: bond_traj_name='bond_trajectories.nc' !< Name of output bond trajectory file
   logical :: save_fl_traj=.True. ! True saves short traj, plus masses and footloose parameters in iceberg_trajectory.nc
   real :: save_all_traj_year=huge(0.0) ! Year at which all trajectories (for all berg areas) are saved
   logical :: save_nonfl_traj_by_class=.false. ! Save non-footloose trajectories based on initial mass class
@@ -619,6 +619,7 @@ end type icebergs
 !! \todo Remove when backward compatibility no longer needed
 logical :: orig_read=.false.
 
+!> Version of file provided by CPP macro (usually set to git hash)
 #ifdef _FILE_VERSION
 character(len=128) :: version = _FILE_VERSION !< Version of file
 #else
@@ -757,8 +758,8 @@ logical :: Static_icebergs=.False. ! True= icebergs do no move
 logical :: only_interactive_forces=.False. ! Icebergs only feel interactive forces, and not ocean, wind...
 logical :: halo_debugging=.False. ! Use for debugging halos (remove when its working)
 logical :: save_short_traj=.True. ! True saves only lon,lat,time,id in iceberg_trajectory.nc
-character(len=70) :: traj_name='iceberg_trajectories.nc'
-character(len=70) :: bond_traj_name='bond_trajectories.nc'
+character(len=70) :: traj_name='iceberg_trajectories.nc' !< Name of output particle trajectory file
+character(len=70) :: bond_traj_name='bond_trajectories.nc' !< Name of output bond trajectory file
 logical :: save_fl_traj=.True. ! True saves short traj, plus masses and footloose parameters in iceberg_trajectory.nc
 real :: save_all_traj_year=huge(0.0) ! Year at which all trajectories (for all berg areas) are saved
 logical :: save_nonfl_traj_by_class=.false. ! Save non-footloose trajectories based on initial mass class
