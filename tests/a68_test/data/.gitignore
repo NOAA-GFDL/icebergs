@@ -1,6 +1,0 @@
-!*.nc
-a68_experiment_ocean_surf_vel_oscar_dec2020_HOURLY_ll_p125.nc
-a68_experiment_ssh_duacs_dec2020_HOURLY_ll_p125.nc
-a68_experiment_wind_vel_ncep_10m_dec2020_HOURLY_ll_p125.nc
-split_script.sh
-old/
