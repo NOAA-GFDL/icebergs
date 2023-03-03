@@ -1,3 +1,6 @@
+mkdir output_files
+mkdir ./../INPUT
+mkdir ./../RESTART
 rm ./output_files/Generic*
 
 # THIS IS THE BERG USED IN HUTH ET AL, 2022 OCEAN CURRENTS BREAK UP A TABULAR ICEBERG. SCIENCE ADVANCES:

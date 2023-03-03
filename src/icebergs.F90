@@ -6410,10 +6410,10 @@ subroutine calve_fl_icebergs(bergs,pberg,k,l_b,fl_disp_x,fl_disp_y,berg_from_bit
   ! Arguments
   type(icebergs), pointer :: bergs !< Container for all types and memory
   type(iceberg), pointer :: pberg !< Parent berg
-  type(real),intent(in) :: k !< Number of child bergs to calve
-  type(real),intent(in) :: l_b !< The width, and 1/3 the length, of a child berg
-  type(real) :: fl_disp_x !< Child berg x-displacement from parent berg
-  type(real) :: fl_disp_y !< Child berg x-displacement from parent berg
+  real,intent(in) :: k !< Number of child bergs to calve
+  real,intent(in) :: l_b !< The width, and 1/3 the length, of a child berg
+  real :: fl_disp_x !< Child berg x-displacement from parent berg
+  real :: fl_disp_y !< Child berg x-displacement from parent berg
   logical, optional, intent(in) :: berg_from_bits !< True to create new berg from footloose bits
   ! Local variables
   type(iceberg) :: cberg ! The new child berg

@@ -1,3 +1,7 @@
+mkdir output_files
+mkdir ./../INPUT
+mkdir ./../RESTART
+
 ./makeberg.py
 
 rm ./output_files/Generic*
