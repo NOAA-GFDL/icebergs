@@ -1,0 +1,14 @@
+TO RUN THE EXPERIMENT IN THE PAPER:
+Huth, A., A. Adcroft, O. Sergienko, and N. Khan, 2022: Ocean currents break up a tabular iceberg. Science Advances, 8(42), eabq6974. doi:10.1126/sciadv.abq6974.
+
+I. Download the data
+   ./get_data.sh
+
+II. Make the iceberg input files:
+   cd makeberg; ./RUN; cd ..
+
+III. The full run from the paper:
+   ./long_run_for_paper.sh
+
+IV. Animate the results:
+./animate_trajectories.py -fname=longrun_od_17.8_tn_ng_ydn.1_ss90_ns18_rx-37.51_ry-55.2166.nc

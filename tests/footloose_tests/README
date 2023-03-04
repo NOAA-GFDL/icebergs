@@ -1,0 +1,11 @@
+Testing for footloose mechanism parameterization in (non-bonded mode only).
+
+Tests the Huth et al 2022 scheme, where beam theory is used to determine when to calve footloose child bergs according to the size of the underwater foot on the parent berg, which is determined by tracking side melt and erosion over time.
+
+This test uses the Huth et al 2022 footloose child berg binning scheme.
+
+1. Make the iceberg input files: cd makeberg; ./RUN; cd ..
+2. run the model: ./RUN
+3. animate the results:
+
+./animate_trajectories.py -fname="FL_physical.nc"

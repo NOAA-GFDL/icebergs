@@ -18,8 +18,9 @@ use time_manager_mod, only: time_type, get_date, get_time, set_date, operator(-)
 
 implicit none ; private
 
-integer :: buffer_width=28 ! This should be a parameter
+integer :: buffer_width=34 ! This should be a parameter
 integer :: buffer_width_traj=32 ! This should be a parameter
+integer :: buffer_width_bond_traj=11 !This should be a parameter
 integer, parameter :: nclasses=10 ! Number of ice bergs classes
 
 !Local Vars
@@ -37,21 +38,44 @@ logical :: use_roundoff_fix=.true. !< Use a "fix" for the round-off discrepancy 
 logical :: old_bug_rotated_weights=.false. !< Skip the rotation of off-center weights for rotated halo updates
 logical :: make_calving_reproduce=.false. !< Make the calving.res.nc file reproduce across pe count changes.
 logical :: old_bug_bilin=.true. !< If true, uses the inverted bilinear function (use False to get correct answer)
-character(len=10) :: restart_input_dir = 'INPUT/' !< Directory to look for restart files
+character(len=20) :: restart_input_dir = 'INPUT/' !< Directory to look for restart files
 integer, parameter :: delta_buf=25 !< Size by which to increment buffers
 real, parameter :: pi_180=pi/180. !< Converts degrees to radians
+real :: Rearth=6360000. !< Radius of earth (m)
 logical :: fix_restart_dates=.true. !< After a restart, check that bergs were created before the current model date
 logical :: do_unit_tests=.false. !< Conduct some unit tests
 logical :: force_all_pes_traj=.false. !< Force all pes write trajectory files regardless of io_layout
+logical :: mts=.false. !< Use multiple time stepping scheme
+logical :: save_bond_traj=.false. !<Save trajectory files for bonds
+logical :: ewsame=.false. !<(F) set T if periodic and 2 PEs along the x direction (zonal) (i.e. E/W PEs are the same)
+logical :: iceberg_bonds_on=.False. ! True=Allow icebergs to have bonds, False=don't allow.
+logical :: dem=.false. !< If T, run in DEM-mode with angular terms, variable stiffness, etc
+logical :: save_bond_forces=.true. !< Saves forces on bonds so only 1 of 2 bonds in a pair need processing during DEM-MTS explicit sub-steps
+logical :: short_step_mts_grounding=.false.
+logical :: radius_based_drag=.false. !if T, hex bergs, and dem, 2r is used as the area of the vert face for drag/wave forces
+logical :: A68_test=.false. !< If True, enforces grounding zone in the A68 test case (Huth et al., 2022)
+real :: A68_xdisp=0. !< longitude of the SW corner of the grounding zone in the A68 test case
+real :: A68_ydisp=0. !< latitude of the SW corner of the grounding zone in the A68 test case
+logical :: rev_mind=.false. !< Alterate option for staggering the 3x3 cells used for quadratic mapping of ocean depth to particles
+logical :: orig_dem_moment_of_inertia=.false. !< Use Potyondy & Cundall,2004 torque from relative particle rotation (rather than Wang, 2020)
+logical :: break_bonds_on_sub_steps=.false.
+logical :: skip_first_outer_mts_step=.false.
+logical :: no_frac_first_ts=.false.
+logical :: footloose=.false. !< Turn footloose calving on/off
 
 !Public params !Niki: write a subroutine to expose these
-public nclasses,buffer_width,buffer_width_traj
+public nclasses,buffer_width,buffer_width_traj,buffer_width_bond_traj
 public verbose, really_debug, debug, restart_input_dir,make_calving_reproduce,old_bug_bilin,use_roundoff_fix
 public ignore_ij_restart, use_slow_find,generate_test_icebergs,old_bug_rotated_weights,budget
 public orig_read, force_all_pes_traj
+public mts,save_bond_traj,ewsame,iceberg_bonds_on
+public dem, save_bond_forces, orig_dem_moment_of_inertia
+public short_step_mts_grounding, radius_based_drag
+public A68_test, A68_xdisp, A68_ydisp
+public footloose
 
 !Public types
-public icebergs_gridded, xyt, iceberg, icebergs, buffer, bond
+public icebergs_gridded, xyt, iceberg, icebergs, buffer, bond, bond_xyt
 
 !Public subs
 public ice_bergs_framework_init
@@ -64,11 +88,11 @@ public insert_berg_into_list, create_iceberg, delete_iceberg_from_list, destroy_
 public print_fld,print_berg, print_bergs,record_posn, push_posn, append_posn, check_position
 public move_trajectory, move_all_trajectories
 public form_a_bond, connect_all_bonds, show_all_bonds, bond_address_update
-public find_cell, find_cell_by_search, count_bergs, is_point_in_cell, pos_within_cell, count_bonds
+public find_cell, find_cell_by_search, find_cell_wide, count_bergs, is_point_in_cell, pos_within_cell, count_bonds
 public sum_mass, sum_heat, bilin, yearday, bergs_chksum, list_chksum, count_bergs_in_list
 public checksum_gridded
 public grd_chksum2,grd_chksum3
-public fix_restart_dates, offset_berg_dates
+public Rearth, fix_restart_dates, offset_berg_dates
 public move_berg_between_cells
 public find_individual_iceberg
 public monitor_a_berg
@@ -76,6 +100,13 @@ public is_point_within_xi_yj_bounds
 public test_check_for_duplicate_ids_in_list
 public check_for_duplicates_in_parallel
 public split_id, id_from_2_ints, generate_id, cij_from_old_id, convert_old_id
+public update_latlon,set_conglom_ids,transfer_mts_bergs,quad_interp_from_agrid
+public pack_bond_traj_into_buffer2, unpack_bond_traj_from_buffer2, push_bond_posn, append_bond_posn
+public break_bonds_dem,assign_n_bonds
+public orig_bond_length
+public dem_tests_init
+public set_constant_interaction_length_and_width
+public break_bonds_on_sub_steps, skip_first_outer_mts_step, no_frac_first_ts
 
 !> Container for gridded fields
 type :: icebergs_gridded
@@ -101,6 +132,8 @@ type :: icebergs_gridded
   logical :: grid_is_latlon !< Flag to say whether the coordinate is in lat-lon degrees, or meters
   logical :: grid_is_regular !< Flag to say whether point in cell can be found assuming regular Cartesian grid
   real :: Lx !< Length of the domain in x direction
+  real :: maxlon_c !< maximum x coord of computational domain
+  real :: minlon_c !< minimum x coord of computational domain
   real, dimension(:,:), pointer :: lon=>null() !< Longitude of cell corners (degree E)
   real, dimension(:,:), pointer :: lat=>null() !< Latitude of cell corners (degree N)
   real, dimension(:,:), pointer :: lonc=>null() !< Longitude of cell centers (degree E)
@@ -123,16 +156,26 @@ type :: icebergs_gridded
   real, dimension(:,:), pointer :: sss=>null() !< Sea surface salinity (psu)
   real, dimension(:,:), pointer :: cn=>null() !< Sea-ice concentration (0 to 1)
   real, dimension(:,:), pointer :: hi=>null() !< Sea-ice thickness (m)
+  real, dimension(:,:,:), pointer :: melt_by_class=>null() !< Total icebergs melt rate by mass class (kg/s/m^2)
+  real, dimension(:,:), pointer :: melt_buoy_fl=>null() !< Footloose bergs buoyancy component of melting rate (kg/s/m^2)
+  real, dimension(:,:), pointer :: melt_eros_fl=>null() !< Footloose bergs erosion component of melting rate (kg/s/m^2)
+  real, dimension(:,:), pointer :: melt_conv_fl=>null() !< Footloose bergs convective component of melting rate (kg/s/m^2)
+  real, dimension(:,:), pointer :: fl_parent_melt=>null() !< Footloose parent bergs melting rate (kg/s/m^2)
+  real, dimension(:,:), pointer :: fl_child_melt=>null() !< Footloose child bergs melting rate (kg/s/m^2)
   real, dimension(:,:), pointer :: calving=>null() !< Calving mass rate [frozen runoff] (kg/s) (into stored ice)
   real, dimension(:,:), pointer :: calving_hflx=>null() !< Calving heat flux [heat content of calving] (W/m2) (into stored ice)
   real, dimension(:,:), pointer :: floating_melt=>null() !< Net melting rate to icebergs + bits (kg/s/m^2)
-  real, dimension(:,:), pointer :: berg_melt=>null() !< Melting+erosion rate of icebergs (kg/s/m^2)
+  real, dimension(:,:), pointer :: berg_melt=>null() !< Melting+erosion rate of parent icebergs (kg/s/m^2)
   real, dimension(:,:), pointer :: melt_buoy=>null() !< Buoyancy component of melting rate (kg/s/m^2)
   real, dimension(:,:), pointer :: melt_eros=>null() !< Erosion component of melting rate (kg/s/m^2)
   real, dimension(:,:), pointer :: melt_conv=>null() !< Convective component of melting rate (kg/s/m^2)
   real, dimension(:,:), pointer :: bergy_src=>null() !< Mass flux from berg erosion into bergy bits (kg/s/m^2)
   real, dimension(:,:), pointer :: bergy_melt=>null() !< Melting rate of bergy bits (kg/s/m^2)
   real, dimension(:,:), pointer :: bergy_mass=>null() !< Mass distribution of bergy bits (kg/s/m^2)
+  real, dimension(:,:), pointer :: fl_bits_src=>null() !< Mass flux from berg into footloose bits (kg/s/m^2)
+  real, dimension(:,:), pointer :: fl_bits_melt=>null() !< Melting rate of footloose bits (kg/s/m^2)
+  real, dimension(:,:), pointer :: fl_bits_mass=>null() !< Mass distribution of footloose bits (kg/s/m^2)
+  real, dimension(:,:), pointer :: fl_bergy_bits_mass=>null() !< Mass distribution of footloose bergy bits (kg/s/m^2)
   real, dimension(:,:), pointer :: spread_mass=>null() !< Mass of icebergs after spreading (kg/m^2)
   real, dimension(:,:), pointer :: spread_mass_old=>null() !< Mass of icebergs after spreading old (kg/m^2)
   real, dimension(:,:), pointer :: spread_area=>null() !< Area of icebergs after spreading (m^2/m^2)
@@ -169,6 +212,7 @@ type :: icebergs_gridded
   integer :: id_calving_hflx_in=-1, id_stored_heat=-1, id_melt_hflx=-1, id_heat_content=-1
   integer :: id_mass=-1, id_ui=-1, id_vi=-1, id_ua=-1, id_va=-1, id_sst=-1, id_cn=-1, id_hi=-1
   integer :: id_bergy_src=-1, id_bergy_melt=-1, id_bergy_mass=-1, id_berg_melt=-1
+  integer :: id_fl_bits_src=-1, id_fl_bits_melt=-1, id_fl_bits_mass=-1, id_fl_bergy_bits_mass=-1
   integer :: id_rmean_calving=-1, id_rmean_calving_hflx=-1
   integer :: id_spread_mass=-1, id_spread_area=-1
   integer :: id_ssh=-1, id_fax=-1, id_fay=-1
@@ -176,6 +220,8 @@ type :: icebergs_gridded
   integer :: id_spread_uvel=-1, id_spread_vvel=-1
   integer :: id_melt_m_per_year=-1
   integer :: id_ocean_depth=-1
+  integer :: id_melt_by_class=-1, id_melt_buoy_fl=-1, id_melt_eros_fl=-1, id_melt_conv_fl=-1
+  integer :: id_fl_parent_melt=-1, id_fl_child_melt=-1
   !>@}
 
   real :: clipping_depth=0. !< The effective depth at which to clip the weight felt by the ocean [m].
@@ -197,10 +243,9 @@ type :: xyt
   real :: ayn
   real :: bxn
   real :: byn
-  real :: uvel_old
-  real :: vvel_old
-  real :: lat_old
-  real :: lon_old
+  real :: uvel_prev
+  real :: vvel_prev
+  real :: fl_k
   real :: uo !< Zonal velocity of ocean (m/s)
   real :: vo !< Meridional velocity of ocean (m/s)
   real :: ui !< Zonal velocity of ice (m/s)
@@ -216,10 +261,29 @@ type :: xyt
   real :: halo_berg
   real :: static_berg
   real :: mass_of_bits !< Mass of bergy bits (kg)
-  real :: heat_density !< Heat density of berg (???)
+  real :: mass_of_fl_bits !< Mass (kg) of footloose bits (i.e. binned footloose child bergs)
+  real :: mass_of_fl_bergy_bits !< Mass of bergy bits associated with the footloose bits (kg)
+  real :: heat_density !< Heat density of berg (J/kg)
+  real :: od !< Ocean depth
+  real :: start_mass
+  real :: mass_scaling
   integer :: year !< Year of this record (years)
   integer(kind=8) :: id = -1 !< Iceberg identifier
   type(xyt), pointer :: next=>null() !< Next link in list
+
+    ! For MTS
+  real, allocatable :: axn_fast
+  real, allocatable :: ayn_fast
+  real, allocatable :: bxn_fast
+  real, allocatable :: byn_fast
+  ! If iceberg_bonds_on
+  integer, allocatable :: n_bonds
+  ! If frac
+  real, allocatable :: accum_bond_rotation
+  ! For DEM-mode
+  real, allocatable :: ang_vel !< Angular velocity
+  real, allocatable :: ang_accel !< Angular acceleration
+  real, allocatable :: rot !< Accumulated rotation
 end type xyt
 
 !> An iceberg object, used as a link in a linked list
@@ -239,6 +303,8 @@ type :: iceberg
   real :: ayn
   real :: bxn
   real :: byn
+  real :: uvel_prev
+  real :: vvel_prev
   real :: uvel_old
   real :: vvel_old
   real :: lon_old
@@ -249,7 +315,10 @@ type :: iceberg
   real :: start_mass !< Mass berg had when created (kg)
   real :: mass_scaling !< Multiplier to scale mass when interpreting berg as a cloud of bergs (nondim)
   real :: mass_of_bits !< Mass of bergy bits following berg (kg)
-  real :: heat_density !< Heat density of berg (???)
+  real :: mass_of_fl_bits !< Mass of footloose bits (binned child bergs) following berg (kg)
+  real :: mass_of_fl_bergy_bits !< Mass of bergy bits associated with the footloose bits (kg)
+  real :: fl_k !< Cumulative number of footloose bergs to calve
+  real :: heat_density !< Heat density of berg (J/kg)
   real :: halo_berg  ! Equal to zero for bergs on computational domain, and =1 for bergs on the halo
   real :: static_berg  ! Equal to 1 for icebergs which are static (not allowed to move). Might be extended to grounding later.
   integer :: start_year !< Year that berg was created (years)
@@ -271,8 +340,22 @@ type :: iceberg
   real :: sss !< Sea-surface salinity (1e-3)
   real :: cn !< Sea-ice concentration (nondim)
   real :: hi !< Sea-ice thickness (m)
+  real :: od !< Ocean depth
   type(xyt), pointer :: trajectory=>null() !< Trajectory for this berg
   type(bond), pointer :: first_bond=>null() !< First element of bond list.
+
+  ! For MTS
+  real, allocatable :: axn_fast
+  real, allocatable :: ayn_fast
+  real, allocatable :: bxn_fast
+  real, allocatable :: byn_fast
+  integer, allocatable :: conglom_id !<ID for a conglomerate
+  ! If iceberg_bonds_on
+  integer, allocatable :: n_bonds
+  ! For DEM-mode
+  real, allocatable :: ang_vel !< Angular velocity
+  real, allocatable :: ang_accel !< Angular acceleration
+  real, allocatable :: rot !< Accumulated rotation
 end type iceberg
 
 !> A bond object connecting two bergs, used as a link in a linked list
@@ -283,7 +366,45 @@ type :: bond
   integer(kind=8) :: other_id !< ID of other berg
   integer :: other_berg_ine
   integer :: other_berg_jne
+  real :: length
+  type(bond_xyt), pointer :: bond_trajectory=>null()
+  ! For DEM-mode
+  real, allocatable :: rel_rotation !<rotation relative to other particle
+  real, allocatable :: tangd1 !< Accumulated tangential displacement, x-component (m)
+  real, allocatable :: tangd2 !< Accumulated tangential displacement, y-component (m)
+  real, allocatable :: nstress !< Normal stress (Pa)
+  real, allocatable :: sstress !< Shear stress (Pa)
+  integer, allocatable :: broken !< Is a bond broken (1) or not (0)?
+  type(bond), pointer :: other_bond=>null() !< Matching bond
+  ! If save_bond_forces
+  real, allocatable :: F_x !< Zonal force
+  real, allocatable :: F_y !< Meridional force
+  real, allocatable :: Fd_x !< Zonal damping force
+  real, allocatable :: Fd_y !< Meridional damping force
+  real, allocatable :: T !< Torque
+  real, allocatable :: T_d !< Torque (damping)
 end type bond
+
+!> A link in the bond trajectory record (diagnostic)
+type :: bond_xyt
+  real :: lon !< Longitude of bond (degree E or unit of grid coordinate)
+  real :: lat !< Latitude of bond (degree N or unit of grid coordinate)
+  integer :: year !< Year of this record (years)
+  real :: day !< Day of this record (days)
+  real :: length !<Length of bond
+  real :: n1 !<Unit vector, x-component
+  real :: n2 !<Unit vector, y-component
+  integer(kind=8) :: id1 !<ID of first berg
+  integer(kind=8) :: id2 !<ID of second berg
+  type(bond_xyt), pointer :: next=>null() !< Next link in list
+  ! For DEM-mode
+  real, allocatable :: rel_rotation !<Rotation relative to other particle
+  real, allocatable :: tangd1 !< Accumulated tangential displacement, x-component (m)
+  real, allocatable :: tangd2 !< Accumulated tangential displacement, y-component (m)
+  real, allocatable :: nstress
+  real, allocatable :: sstress
+  integer, allocatable :: broken !< Is bond broken (1) or not(0)?
+end type bond_xyt
 
 ! A dynamic buffer, used for communication, that packs types into rectangular memory
 type :: buffer
@@ -301,21 +422,34 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   type(icebergs_gridded), pointer :: grd !< Container with all gridded data
   type(linked_list), dimension(:,:), allocatable :: list !< Linked list of icebergs
   type(xyt), pointer :: trajectories=>null() !< A linked list for detached segments of trajectories
+  type(bond_xyt), pointer :: bond_trajectories=>null() !< A linked list for detached segments of bond trajectories
   real :: dt !< Time-step between iceberg calls
              !! \todo Should make dt adaptive?
   integer :: current_year !< Current year (years)
   real :: current_yearday !< Current year-day, 1.00-365.99, (days)
-  integer :: traj_sample_hrs !< Period between sampling for trajectories (hours)
-  integer :: traj_write_hrs !< Period between writing of trajectories (hours)
-  integer :: verbose_hrs !< Period between terminal status reports (hours)
+  real :: traj_area_thres !< Threshold for berg area (km^2) that must be exceeded to save a non-bonded berg trajectory
+  real :: traj_area_thres_sntbc !< Threshold for berg area (km^2) for saving trajectory when using save_nonfl_traj_by_class
+  real :: traj_area_thres_fl !< Threshold for berg area (km^2) that must be exceeded to save a non-bonded FL berg trajectory
+  real :: traj_sample_hrs !< Period between sampling for trajectories (hours)
+  real :: traj_write_hrs !< Period between writing of trajectories (hours)
+  real :: verbose_hrs !< Period between terminal status reports (hours)
   integer :: max_bonds
   !>@{
   !! Handles for clocks
-  integer :: clock, clock_mom, clock_the, clock_int, clock_cal, clock_com, clock_ini, clock_ior, clock_iow, clock_dia
+  integer :: clock, clock_mom, clock_the, clock_int, clock_cal, clock_com1, clock_fl1, clock_com2, clock_fl2
+  integer :: clock_ini, clock_ior, clock_iow, clock_dia
   integer :: clock_trw, clock_trp
+  integer :: clock_btrw, clock_btrp
   !>@}
   real :: rho_bergs !< Density of icebergs [kg/m^3]
-  real :: spring_coef !< Spring constant for iceberg interactions
+  real :: spring_coef !< Spring constant for bonded iceberg interactions
+  real :: contact_spring_coef !<Spring coefficient for berg collisions -Alex
+  real :: cdrag_grounding=0.0 !< Drag coefficient against ocean bottom
+  real :: h_to_init_grounding
+  character(len=11) :: fracture_criterion='none' !< For DEM-mode. Options are 'stress' or 'none'.
+  real :: frac_thres_n=0.0 !normal fracture stress threshold
+  real :: frac_thres_t=0.0 !tangential fracture stress threshold
+  logical :: debug_write=.false. !< Sets traj_sample_hours=traj_write_hours & includes halo bergs in write
   real :: bond_coef !< Spring constant for iceberg bonds
   real :: radial_damping_coef !< Coefficient for relative iceberg motion damping (radial component) -Alon
   real :: tangental_damping_coef !< Coefficient for relative iceberg motion damping (tangential component) -Alon
@@ -332,8 +466,11 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   real :: Gamma_T_3EQ=0.022 !< Non-dimensional heat-transfer coefficient
   real :: melt_cutoff=-1.0 !< Minimum ocean thickness for melting to occur (is not applied for values < 0)
   logical :: const_gamma=.True. !< If true uses a constant heat transfer coefficient, from which the salt transfer is calculated
-  real, dimension(:), pointer :: initial_mass, distribution, mass_scaling
-  real, dimension(:), pointer :: initial_thickness, initial_width, initial_length
+  real, dimension(:), pointer :: initial_mass_s, distribution_s, mass_scaling_s !< Southern hemisphere
+  real, dimension(:), pointer :: initial_thickness_s, initial_width_s, initial_length_s !< Southern hemisphere
+  logical :: separate_distrib_for_n_hemisphere=.False. ! Flag to use a separate berg distribution/mass/mass scaling/init thickness for N hemisphere
+  real, dimension(:), pointer :: initial_mass_n, distribution_n, mass_scaling_n !< Northern hemisphere
+  real, dimension(:), pointer :: initial_thickness_n, initial_width_n, initial_length_n !< Northern hemisphere
   logical :: restarted=.false. !< Indicate whether we read state from a restart or not
   logical :: use_operator_splitting=.true. !< Use first order operator splitting for thermodynamics
   logical :: add_weight_to_ocean=.true. !< Add weight of bergs to ocean
@@ -341,6 +478,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   logical :: time_average_weight=.false. !< Time average the weight on the ocean
   logical :: Runge_not_Verlet=.True. !< True=Runge-Kutta, False=Verlet.
   logical :: use_mixed_melting=.False. !< If true, then the melt is determined partly using 3 eq model partly using iceberg parameterizations (according to iceberg bond number)
+  logical :: internal_bergs_for_drag=.False. !< True=reduces side drag for bonded elements in momentum equation.
   logical :: apply_thickness_cutoff_to_gridded_melt=.False. !< Prevents melt for ocean thickness below melt_cuttoff (applied to gridded melt fields)
   logical :: apply_thickness_cutoff_to_bergs_melt=.False. !< Prevents melt for ocean thickness below melt_cuttoff (applied to bergs)
   logical :: use_updated_rolling_scheme=.false. !< True to use the aspect ratio based rolling scheme rather than incorrect version of WM scheme (set tip_parameter=1000. for correct WM scheme)
@@ -358,23 +496,36 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   logical :: hexagonal_icebergs=.False. !< True treats icebergs as rectangles, False as hexagonal elements (for the purpose of mass spreading)
   logical :: allow_bergs_to_roll=.True. !< Allows icebergs to roll over when rolling conditions are met
   logical :: ignore_missing_restart_bergs=.False. !< True Allows the model to ignore icebergs missing in the restart.
+  logical :: require_restart=.false. !< If true, requires a restart file to be present when starting the model.
   logical :: Static_icebergs=.False. !< True= icebergs do no move
   logical :: only_interactive_forces=.False. !< Icebergs only feel interactive forces, and not ocean, wind...
   logical :: halo_debugging=.False. !< Use for debugging halos (remove when its working)
   logical :: save_short_traj=.True. !< True saves only lon,lat,time,id in iceberg_trajectory.nc
+  character(len=70) :: traj_name='iceberg_trajectories.nc' !< Name of output particle trajectory file
+  character(len=70) :: bond_traj_name='bond_trajectories.nc' !< Name of output bond trajectory file
+  logical :: save_fl_traj=.True. ! True saves short traj, plus masses and footloose parameters in iceberg_trajectory.nc
+  real :: save_all_traj_year=huge(0.0) ! Year at which all trajectories (for all berg areas) are saved
+  logical :: save_nonfl_traj_by_class=.false. ! Save non-footloose trajectories based on initial mass class
+  real :: save_traj_by_class_start_mass_thres_n=0.0 ! The northern hemisphere mass thres for save_nonfl_traj_by_class
+  real :: save_traj_by_class_start_mass_thres_s=0.0 ! The southern hemisphere mass thres for save_nonfl_traj_by_class
   logical :: ignore_traj=.False. !< If true, then model does not write trajectory data at all
   logical :: iceberg_bonds_on=.False. !< True=Allow icebergs to have bonds, False=don't allow.
   logical :: manually_initialize_bonds=.False. !< True= Bonds are initialize manually.
   logical :: use_new_predictive_corrective =.False. !< Flag to use Bob's predictive corrective iceberg scheme- Added by Alon
   logical :: interactive_icebergs_on=.false. !< Turn on/off interactions between icebergs  - Added by Alon
+  logical :: scale_damping_by_pmag=.true. !< Scales damping by magnitude of (projection matrix dot relative velocity)
   logical :: critical_interaction_damping_on=.true. !< Sets the damping on relative iceberg velocity to critical value - Added by Alon
+  logical :: tang_crit_int_damp_on=.true. !<crit interaction damping for tangential component?
   logical :: use_old_spreading=.true. !< If true, spreads iceberg mass as if the berg is one grid cell wide
   logical :: read_ocean_depth_from_file=.false. !< If true, ocean depth is read from a file.
   integer(kind=8) :: debug_iceberg_with_id = -1 !< If positive, monitors a berg with this id
 
+  real :: length_for_manually_initialize_bonds=1000.0 !< If manually initialing bonds, only  bond if dist between particles is < this length -Added by Alex
+  logical :: manually_initialize_bonds_from_radii=.false. !< If manually initialing bonds, form bonds if dist between particles is < 1.25x the smaller radii-Alex
   real :: speed_limit=0. !< CFL speed limit for a berg [m/s]
+  logical :: tau_is_velocity=.false. !< If True, then wind stress input is actually velocity (m/s)
   real :: tau_calving=0. !< Time scale for smoothing out calving field (years)
-  real :: tip_parameter=0. !< parameter to override iceberg rolling critical ratio (use zero to get parameter directly from ice and seawater densities)
+  real :: tip_parameter=0. !< If non-zero, overrides iceberg rolling critical ratio (use zero to get parameter directly from ice and seawater densities)
   real :: grounding_fraction=0. !< Fraction of water column depth at which grounding occurs
   type(buffer), pointer :: obuffer_n=>null() !< Buffer for outgoing bergs to the north
   type(buffer), pointer :: ibuffer_n=>null() !< Buffer for incoming bergs from the north
@@ -400,6 +551,7 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   real :: floating_heat_start=0., floating_heat_end=0.
   real :: icebergs_mass_start=0., icebergs_mass_end=0.
   real :: bergy_mass_start=0., bergy_mass_end=0.
+  real :: fl_bits_mass_start=0., fl_bits_mass_end=0.
   real :: spread_mass_start=0., spread_mass_end=0.
   real :: spread_area_start=0., spread_area_end=0.
   real :: u_iceberg_start=0., u_iceberg_end=0.
@@ -410,22 +562,68 @@ type :: icebergs !; private !Niki: Ask Alistair why this is private. ice_bergs_i
   real :: returned_mass_on_ocean=0.
   real :: returned_area_on_ocean=0.
   real :: net_melt=0., berg_melt=0., bergy_src=0., bergy_melt=0.
-  integer :: nbergs_calved=0, nbergs_melted=0, nbergs_start=0, nbergs_end=0
+  real :: fl_bits_src=0., fl_bits_melt=0.
+  integer :: nbergs_calved=0, nbergs_calved_fl=0, nbergs_melted=0, nbergs_start=0, nbergs_end=0
   integer :: nspeeding_tickets=0
   integer :: nbonds=0
-  integer, dimension(:), pointer :: nbergs_calved_by_class=>null()
+  integer, dimension(:), pointer :: nbergs_calved_by_class_s=>null()
+  integer, dimension(:), pointer :: nbergs_calved_by_class_n=>null()
+  ! mts parameters - added by Alex
+  logical :: mts=.false. !< Use multiple timestepping scheme (substep size is automatically determined)
+  integer :: mts_sub_steps
+  real :: mts_fast_dt
+  integer :: mts_part !for turning on/off berg interactions/collisions during different mts scheme
+  logical :: remove_unused_bergs=.true. !remove unneeded bergs after PEs transfers
+  real :: contact_distance
+  integer :: contact_cells_lon=1,contact_cells_lat=1 !how many cells to search to find contact pairs
+  logical :: writeandstop=.false. !for debugging
+  logical :: force_convergence !experimental MTS convergence scheme to better conserve momentum during collisions
+  logical :: explicit_inner_mts=.false. !If T, inner MTS iterations are treated explicitly
+  real :: convergence_tolerance=1.e-8 !tolerance for the MTS convergence scheme
+  ! DEM-mode parameters
+  logical :: dem=.false. !if T, run in DEM-mode with angular terms, variable stiffness, etc
+  logical :: use_grounding_torque=.false.
+  logical :: ignore_tangential_force=.false.
+  real :: dem_K_damp !damping parameter
+  real :: poisson=0.3 ! Poisson's ratio
+  real :: dem_spring_coef=0.
+  real :: dem_damping_coef=0.1
+  logical :: use_broken_bonds_for_substep_contact=.false. !only evaluate sub-step contact between particles with a broken bond
+  logical :: print_fracture=.true. !when a bond breaks, print fracture type, lat, lon, and stresses
+  logical :: bond_break_detected=.false.
+  integer :: dem_beam_test=0 !1=Simply supported beam,2=cantilever beam,3=angular vel tes
+  real :: dem_tests_start_lon !starting lon of west-most berg element for dem tests
+  real :: dem_tests_end_lon !starting lon of east-most berg element for dem tests
+  ! Element interactions
+  logical :: constant_interaction_LW=.false. !< Use a constant element length & width during berg interactions
+  real :: constant_length=0.!< If constant_interaction_LW, the constant length. If 0, will be set to max initial length
+  real :: constant_width=0. !< If constant_interaction_LW, the constant width.  If 0, will be set to max initial width
+  real :: constant_area
+  real :: constant_radius
+  real :: ocean_drag_scale=1. !< Scaling factor for the ocean drag coefficients
+  ! Footloose calving parameters
+  logical :: footloose=.false. !< Turn footloose calving on/off
+  logical :: fl_init_child_xy_by_pe=.false. !< True: position of a new footloose child berg along the parent perimeter is random, yet constant for each PE (old bug). False: fully-random.
+  real :: fl_youngs=1.e7 !< Young's modulus for footloose calculations (Pa)
+  real :: fl_strength=250. !< yield stress for footloose calculations (kPa)
+  logical :: displace_fl_bergs=.true. !< footloose berg positions are randomly assigned along edges of parent berg
+  character(len=11) :: fl_style='new_bergs' !< Evolve footloose bergs individually as 'new_bergs', or as a group with size 'fl_bits'
+  logical :: fl_bits_erosion_to_bergy_bits=.true. !< Erosion from footloose bits becomes bergy bits
+  real :: new_berg_from_fl_bits_mass_thres=1.e12 ! Create a new berg from FL bits when mass_of_fl_bits exceeds this value
+
+  !backwards compatibility
+  logical :: old_interp_flds_order=.false. !< Use old order of when to interpolate grid variables to bergs. Will be false if MTS, DEM, or footloose
 end type icebergs
 
 !> Read original restarts. Needs to be module global so can be public to icebergs_mod.
 !! \todo Remove when backward compatibility no longer needed
 logical :: orig_read=.false.
 
-!> Version of file provided by CPP macro (usually set to git hash)
-#ifdef _FILE_VERSION
-character(len=128) :: version = _FILE_VERSION !< Version of file
-#else
-character(len=128) :: version = 'unknown' !< Version of file
+#ifndef _FILE_VERSION
+! Version of file provided can be set to git hash via a CPP macro but if not set we use 'unknown'
+#define _FILE_VERSION 'unknown'
 #endif
+character(len=128) :: version = _FILE_VERSION !< Version of file
 
 !> Set a value in the buffer at position (counter,n) after incrementing counter
 interface push_buffer_value
@@ -473,7 +671,7 @@ integer, intent(in) :: dom_y_flags !< Domain flags in j-direction
 real, intent(in) :: dt !< Time-step (s)
 type (time_type), intent(in) :: Time !< Current model time
 real, dimension(:,:), intent(in) :: ice_lon !< Longitude of cell corners using NE convention (degree E)
-real, dimension(:,:), intent(in) :: ice_lat !< Latitude of cell corners using NE conventino (degree N)
+real, dimension(:,:), intent(in) :: ice_lat !< Latitude of cell corners using NE convention (degree N)
 real, dimension(:,:), intent(in) :: ice_wet !< Wet/dry mask (1 is wet, 0 is dry) of cell centers
 real, dimension(:,:), intent(in) :: ice_dx !< Zonal length of cell on northern side (m)
 real, dimension(:,:), intent(in) :: ice_dy !< Meridional length of cell on eastern side (m)
@@ -486,12 +684,22 @@ logical, intent(in), optional :: fractional_area !< If true, ice_area contains c
 
 ! Namelist parameters (and defaults)
 integer :: halo=4 ! Width of halo region
-integer :: traj_sample_hrs=24 ! Period between sampling of position for trajectory storage
-integer :: traj_write_hrs=480 ! Period between writing sampled trajectories to disk
-integer :: verbose_hrs=24 ! Period between verbose messages
+real :: traj_area_thres=0. ! Threshold for berg area (km^2) that must be exceeded to save a non-bonded berg trajectory
+real :: traj_area_thres_sntbc=0. !< Threshold for berg area (km^2) for saving trajectory when using save_nonfl_traj_by_class
+real :: traj_area_thres_fl=1.e9 ! Threshold for berg area (km^2) that must be exceeded to save a non-bonded FL berg trajectory
+real :: traj_sample_hrs=24. ! Period between sampling of position for trajectory storage
+real :: traj_write_hrs=480. ! Period between writing sampled trajectories to disk
+real :: verbose_hrs=24. ! Period between verbose messages
 integer :: max_bonds=6 ! Maximum number of iceberg bond passed between processors
 real :: rho_bergs=850. ! Density of icebergs
 real :: spring_coef=1.e-8 ! Spring constant for iceberg interactions (this seems to be the highest stable value)
+real :: contact_spring_coef=0. !Spring coef for berg collisions (is set to spring_coef if not specified)
+real :: cdrag_grounding=0.0 ! Drag coefficient against ocean bottom
+real :: h_to_init_grounding=100.0
+real :: frac_thres_n=0.0 !normal fracture stress threshold
+real :: frac_thres_t=0.0 !tangential fracture stress threshold
+real :: frac_thres_scaling=1.0 !scaling factor for frac_thres_n and frac_thres_t, useful for tuning
+logical :: debug_write=.false. !Sets traj_sample_hours=traj_write_hours & includes halo bergs in write
 real :: bond_coef=1.e-8 ! Spring constant for iceberg bonds - not being used right now
 real :: radial_damping_coef=1.e-4 ! Coefficient for relative iceberg motion damping (radial component) -Alon
 real :: tangental_damping_coef=2.e-5 ! Coefficient for relative iceberg motion damping (tangential component) -Alon
@@ -513,7 +721,10 @@ logical :: use_operator_splitting=.true. ! Use first order operator splitting fo
 logical :: add_weight_to_ocean=.true. ! Add weight of icebergs + bits to ocean
 logical :: passive_mode=.false. ! Add weight of icebergs + bits to ocean
 logical :: time_average_weight=.false. ! Time average the weight on the ocean
+real :: length_for_manually_initialize_bonds=1000.0 ! if manually init bonds, only  bond if dist between particles is .lt. this length - Alex
+logical :: manually_initialize_bonds_from_radii=.false. ! if manually init bonds, form bonds if dist between particles is < 1.25x the smaller radii - Alex
 real :: speed_limit=0. ! CFL speed limit for a berg
+logical :: tau_is_velocity=.false. !< If True, then wind stress input is actually velocity (m/s)
 real :: tau_calving=0. ! Time scale for smoothing out calving field (years)
 real :: tip_parameter=0. ! Parameter to override iceberg rolling critical ratio (use zero to get parameter directly from ice and seawater densities
 real :: grounding_fraction=0. ! Fraction of water column depth at which grounding occurs
@@ -521,6 +732,7 @@ real :: coastal_drift=0. ! A velocity added to ocean currents to cause bergs to 
 real :: tidal_drift=0. ! Amplitude of a stochastic tidal velocity added to ocean currents to cause bergs to drift randomly
 logical :: Runge_not_Verlet=.True. ! True=Runge Kutta, False=Verlet.
 logical :: use_mixed_melting=.False. ! If true, then the melt is determined partly using 3 eq model partly using iceberg parameterizations (according to iceberg bond number)
+logical :: internal_bergs_for_drag=.False. ! True=reduces side drag for bonded elements in momentum equation.
 logical :: apply_thickness_cutoff_to_gridded_melt=.False. ! Prevents melt for ocean thickness below melt_cuttoff (applied to gridded melt fields)
 logical :: apply_thickness_cutoff_to_bergs_melt=.False. ! Prevents melt for ocean thickness below melt_cuttoff (applied to bergs)
 logical :: use_updated_rolling_scheme=.false. ! Use the corrected Rolling Scheme rather than the erroneous one
@@ -540,38 +752,108 @@ logical :: set_melt_rates_to_zero=.False. ! Sets all melt rates to zero, for tes
 logical :: allow_bergs_to_roll=.True. ! Allows icebergs to roll over when rolling conditions are met
 logical :: hexagonal_icebergs=.False. ! True treats icebergs as rectangles, False as hexagonal elements (for the purpose of mass spreading)
 logical :: ignore_missing_restart_bergs=.False. ! True Allows the model to ignore icebergs missing in the restart.
+logical :: require_restart=.false. ! If true, requires a restart file to be present when starting the model.
 logical :: Static_icebergs=.False. ! True= icebergs do no move
 logical :: only_interactive_forces=.False. ! Icebergs only feel interactive forces, and not ocean, wind...
 logical :: halo_debugging=.False. ! Use for debugging halos (remove when its working)
 logical :: save_short_traj=.True. ! True saves only lon,lat,time,id in iceberg_trajectory.nc
+character(len=70) :: traj_name='iceberg_trajectories.nc' !< Name of output particle trajectory file
+character(len=70) :: bond_traj_name='bond_trajectories.nc' !< Name of output bond trajectory file
+logical :: save_fl_traj=.True. ! True saves short traj, plus masses and footloose parameters in iceberg_trajectory.nc
+real :: save_all_traj_year=huge(0.0) ! Year at which all trajectories (for all berg areas) are saved
+logical :: save_nonfl_traj_by_class=.false. ! Save non-footloose trajectories based on initial mass class
+real :: save_traj_by_class_start_mass_thres_n=0.0 ! The northern hemisphere mass thres for save_nonfl_traj_by_class
+real :: save_traj_by_class_start_mass_thres_s=0.0 ! The southern hemisphere mass thres for save_nonfl_traj_by_class
 logical :: ignore_traj=.False. ! If true, then model does not traj trajectory data at all
-logical :: iceberg_bonds_on=.False. ! True=Allow icebergs to have bonds, False=don't allow.
+!logical :: iceberg_bonds_on=.False. ! True=Allow icebergs to have bonds, False=don't allow.
 logical :: manually_initialize_bonds=.False. ! True= Bonds are initialize manually.
 logical :: use_new_predictive_corrective =.False. ! Flag to use Bob's predictive corrective iceberg scheme- Added by Alon
 logical :: interactive_icebergs_on=.false. ! Turn on/off interactions between icebergs  - Added by Alon
+logical :: scale_damping_by_pmag=.true. ! Scales damping by magnitude of (projection matrix dot relative velocity)
 logical :: critical_interaction_damping_on=.true. ! Sets the damping on relative iceberg velocity to critical value - Added by Alon
+logical :: tang_crit_int_damp_on=.true. ! Critical interaction damping for tangential component?
 logical :: do_unit_tests=.false. ! Conduct some unit tests
 logical :: input_freq_distribution=.false. ! Flag to show if input distribution is freq or mass dist (=1 if input is a freq dist, =0 to use an input mass dist)
 logical :: read_old_restarts=.false. ! Legacy option that does nothing
 logical :: use_old_spreading=.true. ! If true, spreads iceberg mass as if the berg is one grid cell wide
 logical :: read_ocean_depth_from_file=.false. ! If true, ocean depth is read from a file.
+integer :: mts_sub_steps=-1 ! If -1, the number of mts sub-steps will be automatically determined
+logical :: remove_unused_bergs=.true. ! Remove unneeded bergs after PEs transfers
+real :: contact_distance=0.0 ! For unbonded berg interactions, collision is assumed at max(contact_distance,sum of the 2 bergs radii)
+logical :: force_convergence=.false. ! Experimental MTS convergence scheme that better preserves momentum during collisions
+logical :: explicit_inner_mts=.false. !If T, inner MTS iterations are treated explicitly
+real :: convergence_tolerance=1.e-8 ! Tolerance for the MTS force_convergence scheme
+! Initial mass, distribution, scaling, thickness at calving. Default is gladstone et al 2001 for Southern hemisphere:
 real, dimension(nclasses) :: initial_mass=(/8.8e7, 4.1e8, 3.3e9, 1.8e10, 3.8e10, 7.5e10, 1.2e11, 2.2e11, 3.9e11, 7.4e11/) ! Mass thresholds between iceberg classes (kg)
 real, dimension(nclasses) :: distribution=(/0.24, 0.12, 0.15, 0.18, 0.12, 0.07, 0.03, 0.03, 0.03, 0.02/) ! Fraction of calving to apply to this class (non-dim) ,
 real, dimension(nclasses) :: mass_scaling=(/2000, 200, 50, 20, 10, 5, 2, 1, 1, 1/) ! Ratio between effective and real iceberg mass (non-dim)
 real, dimension(nclasses) :: initial_thickness=(/40., 67., 133., 175., 250., 250., 250., 250., 250., 250./) ! Total thickness of newly calved bergs (m)
+!Default is Bigg et al 1997 for Northern hemisphere:
+logical :: separate_distrib_for_n_hemisphere=.False. ! Flag to use a separate berg distribution/mass/mass scaling/init thickness for N hemisphere
+real, dimension(nclasses) :: initial_mass_n=(/4.58e8, 3.61e9, 1.22e10, 2.91e10, 5.09e10, 7.34e10, 1.15e11, 1.65e11, 2.94e11, 5.59e11/) !for N hemisphere
+real, dimension(nclasses) :: distribution_n=(/0.14, 0.15, 0.20, 0.15, 0.08, 0.07, 0.05, 0.05, 0.05, 0.05/) ! for N hemisphere
+real, dimension(nclasses) :: mass_scaling_n=(/200, 50, 25, 13, 8, 5, 2, 1, 1, 1/) ! for N hemisphere
+real, dimension(nclasses) :: initial_thickness_n=(/80.4, 159.5, 240., 320., 360., 360., 360., 360., 360., 360./) ! for N hemisphere
 integer(kind=8) :: debug_iceberg_with_id = -1 ! If positive, monitors a berg with this id
+! DEM-mode parameters
+!logical :: dem=.false. !if T, run in DEM-mode with angular terms, variable stiffness, etc
+character(len=11) :: fracture_criterion='none' !< For DEM-mode. Options are 'stress' or 'none'.
+logical :: use_grounding_torque=.false.
+logical :: ignore_tangential_force=.false.
+real :: poisson=0.3 ! Poisson's ratio
+real :: dem_spring_coef=0.
+real :: dem_damping_coef=0.1
+logical :: use_broken_bonds_for_substep_contact=.false. ! only evaluate sub-step contact between particles with a broken bond
+logical :: print_fracture=.true. !when a bond breaks, print fracture type, lat, lon, and stresses
+integer :: dem_beam_test=0 !1=Simply supported beam,2=cantilever beam,3=angular vel test
+! Element Interactions
+logical :: constant_interaction_LW=.false. ! Always use the initial, globally constant, element length & width during berg interactions
+real :: constant_length=0. ! If constant_interaction_LW, the constant length used. If zero in the nml, will be set to max initial L
+real :: constant_width=0. ! If constant_interaction_LW, the constant width used. If zero in the nml, will be set to max initial W
+real :: ocean_drag_scale=1. !< Scaling factor for the ocean drag coefficients
+! Footloose calving parameters
+!logical :: footloose=.false. !< Turn footloose calving on/off
+logical :: fl_init_child_xy_by_pe=.false. !< True: position of a new footloose child berg along the parent perimeter is random, yet constant for each PE (old bug). False: fully-random.
+real :: fl_youngs=1.e7 !< Young's modulus for footloose calculations (Pa)
+real :: fl_strength=250. !< yield stress for footloose calculations (kPa)
+logical :: displace_fl_bergs=.true. ! footloose berg positions are randomly assigned along edges of parent berg
+character(len=11) :: fl_style='new_bergs' ! Evolve footloose bergs individually as 'fl_bits', or as a group with size 'bergy_bits' or 'mean_size'
+logical :: fl_bits_erosion_to_bergy_bits=.true. ! Erosion from footloose bits becomes bergy bits
+real :: new_berg_from_fl_bits_mass_thres=1.e12 ! Create a new berg from FL bits when mass_of_fl_bits exceeds this value
 
-namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,Static_icebergs,  &
-         distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef, radial_damping_coef, tangental_damping_coef, only_interactive_forces, &
-         rho_bergs, LoW_ratio, debug, really_debug, use_operator_splitting, bergy_bit_erosion_fraction, iceberg_bonds_on, manually_initialize_bonds, ignore_missing_restart_bergs, &
-         parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode, ignore_ij_restart, use_new_predictive_corrective, halo_debugging, hexagonal_icebergs, &
-         time_average_weight, generate_test_icebergs, speed_limit, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_icebergs_on, critical_interaction_damping_on, &
-         old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,grounding_fraction, input_freq_distribution, force_all_pes_traj, &
-         allow_bergs_to_roll,set_melt_rates_to_zero,lat_ref,initial_orientation,rotate_icebergs_for_mass_spreading,grid_is_latlon,Lx,use_f_plane,use_old_spreading, &
-         grid_is_regular,override_iceberg_velocities,u_override,v_override,add_iceberg_thickness_to_SSH,Iceberg_melt_without_decay,melt_icebergs_as_ice_shelf, &
-         Use_three_equation_model,find_melt_using_spread_mass,use_mixed_layer_salinity_for_thermo,utide_icebergs,ustar_icebergs_bg,cdrag_icebergs, pass_fields_to_ocean_model, &
-         const_gamma, Gamma_T_3EQ, ignore_traj, debug_iceberg_with_id,use_updated_rolling_scheme, tip_parameter, read_old_restarts, tau_calving, read_ocean_depth_from_file, melt_cutoff,&
-         apply_thickness_cutoff_to_gridded_melt, apply_thickness_cutoff_to_bergs_melt, use_mixed_melting, coastal_drift, tidal_drift
+
+namelist /icebergs_nml/ verbose, budget, halo,  traj_sample_hrs, initial_mass, traj_write_hrs, max_bonds, save_short_traj,traj_name,bond_traj_name,&
+         traj_area_thres, Static_icebergs,distribution, mass_scaling, initial_thickness, verbose_hrs, spring_coef,bond_coef,&
+         radial_damping_coef, tangental_damping_coef, only_interactive_forces, rho_bergs, LoW_ratio, debug, really_debug,&
+         use_operator_splitting, bergy_bit_erosion_fraction, iceberg_bonds_on, manually_initialize_bonds,&
+         ignore_missing_restart_bergs,  parallel_reprod, use_slow_find, sicn_shift, add_weight_to_ocean, passive_mode,&
+         ignore_ij_restart, use_new_predictive_corrective, halo_debugging, hexagonal_icebergs, time_average_weight,&
+         generate_test_icebergs, speed_limit, Rearth, fix_restart_dates, use_roundoff_fix, Runge_not_Verlet, interactive_icebergs_on,&
+         scale_damping_by_pmag, critical_interaction_damping_on, tang_crit_int_damp_on, require_restart,&
+         old_bug_rotated_weights, make_calving_reproduce,restart_input_dir, orig_read, old_bug_bilin,do_unit_tests,&
+         grounding_fraction, input_freq_distribution, force_all_pes_traj,allow_bergs_to_roll,set_melt_rates_to_zero,lat_ref,&
+         initial_orientation,rotate_icebergs_for_mass_spreading,grid_is_latlon,Lx,use_f_plane,use_old_spreading,&
+         grid_is_regular,override_iceberg_velocities,u_override,v_override,add_iceberg_thickness_to_SSH,&
+         Iceberg_melt_without_decay,melt_icebergs_as_ice_shelf, Use_three_equation_model,find_melt_using_spread_mass,&
+         use_mixed_layer_salinity_for_thermo,utide_icebergs,ustar_icebergs_bg,cdrag_icebergs, pass_fields_to_ocean_model,&
+         const_gamma, Gamma_T_3EQ, ignore_traj, debug_iceberg_with_id,use_updated_rolling_scheme, tip_parameter, &
+         read_old_restarts, tau_calving, read_ocean_depth_from_file, melt_cutoff,apply_thickness_cutoff_to_gridded_melt,&
+         apply_thickness_cutoff_to_bergs_melt, use_mixed_melting, internal_bergs_for_drag, coastal_drift, tidal_drift,&
+         mts,ewsame,mts_sub_steps,contact_distance,length_for_manually_initialize_bonds,&
+         manually_initialize_bonds_from_radii,contact_spring_coef,fracture_criterion, &
+         debug_write,cdrag_grounding,h_to_init_grounding,frac_thres_scaling,frac_thres_n,frac_thres_t,save_bond_traj,&
+         remove_unused_bergs,force_convergence,explicit_inner_mts,convergence_tolerance,dem,ignore_tangential_force,poisson,&
+         dem_spring_coef,dem_damping_coef,dem_beam_test,constant_interaction_LW,constant_length,constant_width,&
+         fl_init_child_xy_by_pe, footloose,displace_fl_bergs,&
+         fl_style,fl_bits_erosion_to_bergy_bits, save_fl_traj,&
+         new_berg_from_fl_bits_mass_thres,separate_distrib_for_n_hemisphere,&
+         initial_mass_n, distribution_n, mass_scaling_n, initial_thickness_n,&
+         fl_youngs, fl_strength,  save_all_traj_year, save_nonfl_traj_by_class,&
+         save_traj_by_class_start_mass_thres_n, save_traj_by_class_start_mass_thres_s,traj_area_thres_sntbc,&
+         traj_area_thres_fl,tau_is_velocity, ocean_drag_scale, A68_test, &
+         A68_xdisp,A68_ydisp,use_broken_bonds_for_substep_contact,print_fracture,&
+         orig_dem_moment_of_inertia, break_bonds_on_sub_steps, skip_first_outer_mts_step, rev_mind, &
+         no_frac_first_ts, use_grounding_torque, short_step_mts_grounding, radius_based_drag, save_bond_forces
 
 ! Local variables
 integer :: ierr, iunit, i, j, id_class, axes3d(3), is,ie,js,je,np
@@ -579,7 +861,13 @@ type(icebergs_gridded), pointer :: grd
 real :: lon_mod, big_number
 logical :: lerr
 integer :: stdlogunit, stderrunit
-real :: Total_mass  !Added by Alon
+real :: Total_mass_s, Total_mass_n
+real :: remaining_dist_s,remaining_dist_n
+integer :: last_dist_j, last_dist_j_n
+real :: mts_fast_dt=0.0 !Added by Alex
+real :: maxlon_c,minlon_c !Added by Alex, for mts verlet periodicity
+integer :: k,maxk
+real :: dx,dy,dx_dlon,dy_dlat,lat_ref2,lon_ref
 
   ! Get the stderr and stdlog unit numbers
   stderrunit=stderr()
@@ -587,7 +875,7 @@ real :: Total_mass  !Added by Alon
   write(stdlogunit,*) "ice_bergs_framework: "//trim(version)
 
 ! Read namelist parameters
- !write(stderrunit,*) 'diamonds: reading namelist'
+ !write(stderrunit,*) 'KID: reading namelist'
 #ifdef INTERNAL_FILE_NML
   read (input_nml_file, nml=icebergs_nml, iostat=ierr)
 #else
@@ -603,11 +891,11 @@ real :: Total_mass  !Added by Alon
 
 
 ! Allocate overall structure
- !write(stderrunit,*) 'diamonds: allocating bergs'
+ !write(stderrunit,*) 'KID: allocating bergs'
   allocate(bergs)
   allocate(bergs%grd)
   grd=>bergs%grd ! For convenience to avoid bergs%grd%X
- !write(stderrunit,*) 'diamonds: allocating domain'
+ !write(stderrunit,*) 'KID: allocating domain'
   allocate(grd%domain)
 
 ! Clocks
@@ -616,7 +904,10 @@ real :: Total_mass  !Added by Alon
   bergs%clock_the=mpp_clock_id( 'Icebergs-thermodyn', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
   bergs%clock_int=mpp_clock_id( 'Icebergs-interface', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
   bergs%clock_cal=mpp_clock_id( 'Icebergs-calving', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
-  bergs%clock_com=mpp_clock_id( 'Icebergs-communication', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+  bergs%clock_com1=mpp_clock_id( 'Icebergs-communication1', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+  bergs%clock_fl1=mpp_clock_id( 'Icebergs-footloose1', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+  bergs%clock_com2=mpp_clock_id( 'Icebergs-communication2', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
+  bergs%clock_fl2=mpp_clock_id( 'Icebergs-footloose2', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
   bergs%clock_ini=mpp_clock_id( 'Icebergs-initialization', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
   bergs%clock_ior=mpp_clock_id( 'Icebergs-I/O read', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
   bergs%clock_iow=mpp_clock_id( 'Icebergs-I/O write', flags=clock_flag_default, grain=CLOCK_SUBCOMPONENT )
@@ -626,15 +917,15 @@ real :: Total_mass  !Added by Alon
   call mpp_clock_begin(bergs%clock_ini)
 
 ! Set up iceberg domain
- !write(stderrunit,*) 'diamonds: defining domain'
+ !write(stderrunit,*) 'KID: defining domain'
   call mpp_define_domains( (/1,gni,1,gnj/), layout, grd%domain, &
                            maskmap=maskmap, &
                            xflags=dom_x_flags, xhalo=halo,  &
-                           yflags=dom_y_flags, yhalo=halo, name='diamond')
+                           yflags=dom_y_flags, yhalo=halo, name='KID')
 
   call mpp_define_io_domain(grd%domain, io_layout)
 
- !write(stderrunit,*) 'diamond: get compute domain'
+ !write(stderrunit,*) 'KID: get compute domain'
   call mpp_get_compute_domain( grd%domain, grd%isc, grd%iec, grd%jsc, grd%jec )
   call mpp_get_data_domain( grd%domain, grd%isd, grd%ied, grd%jsd, grd%jed )
   call mpp_get_global_domain( grd%domain, grd%isg, grd%ieg, grd%jsg, grd%jeg )
@@ -646,13 +937,13 @@ real :: Total_mass  !Added by Alon
 
 
   folded_north_on_pe = ((dom_y_flags == FOLD_NORTH_EDGE) .and. (grd%jec == gnj))
- !write(stderrunit,'(a,6i4)') 'diamonds, icebergs_init: pe,n,s,e,w =',mpp_pe(),grd%pe_N,grd%pe_S,grd%pe_E,grd%pe_W, NULL_PE
+ !write(stderrunit,'(a,6i4)') 'KID, icebergs_init: pe,n,s,e,w =',mpp_pe(),grd%pe_N,grd%pe_S,grd%pe_E,grd%pe_W, NULL_PE
 
  !if (verbose) &
- !write(stderrunit,'(a,i3,a,4i4,a,4f8.2)') 'diamonds, icebergs_init: (',mpp_pe(),') [ij][se]c=', &
+ !write(stderrunit,'(a,i3,a,4i4,a,4f8.2)') 'KID, icebergs_init: (',mpp_pe(),') [ij][se]c=', &
  !     grd%isc,grd%iec,grd%jsc,grd%jec, &
  !     ' [lon|lat][min|max]=', minval(ice_lon),maxval(ice_lon),minval(ice_lat),maxval(ice_lat)
- !write(stderrunit,*) 'diamonds, int args = ', mpp_pe(),gni, gnj, layout, axes
+ !write(stderrunit,*) 'KID, int args = ', mpp_pe(),gni, gnj, layout, axes
 
  ! Allocate grid of pointers
   allocate( bergs%list(grd%isd:grd%ied, grd%jsd:grd%jed) )
@@ -661,7 +952,7 @@ real :: Total_mass  !Added by Alon
   enddo ; enddo
 
   big_number=1.0E15
- !write(stderrunit,*) 'diamonds: allocating grid'
+ !write(stderrunit,*) 'KID: allocating grid'
   allocate( grd%lon(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%lon(:,:)=big_number
   allocate( grd%lat(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%lat(:,:)=big_number
   allocate( grd%lonc(grd%isd:grd%ied, grd%jsd:grd%jed) );grd%lon(:,:)=big_number
@@ -684,6 +975,10 @@ real :: Total_mass  !Added by Alon
   allocate( grd%bergy_src(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_src(:,:)=0.
   allocate( grd%bergy_melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_melt(:,:)=0.
   allocate( grd%bergy_mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%bergy_mass(:,:)=0.
+  allocate( grd%fl_bits_src(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%fl_bits_src(:,:)=0.
+  allocate( grd%fl_bits_melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%fl_bits_melt(:,:)=0.
+  allocate( grd%fl_bits_mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%fl_bits_mass(:,:)=0.
+  allocate( grd%fl_bergy_bits_mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%fl_bergy_bits_mass(:,:)=0.
   allocate( grd%spread_mass(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_mass(:,:)=0.
   allocate( grd%spread_mass_old(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_mass_old(:,:)=0.
   allocate( grd%spread_area(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%spread_area(:,:)=0.
@@ -713,14 +1008,21 @@ real :: Total_mass  !Added by Alon
   allocate( grd%sss(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%sss(:,:)=0.
   allocate( grd%cn(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%cn(:,:)=0.
   allocate( grd%hi(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%hi(:,:)=0.
+  allocate( grd%melt_by_class(grd%isd:grd%ied, grd%jsd:grd%jed, nclasses) ); grd%melt_by_class(:,:,:)=0.
+  allocate( grd%melt_buoy_fl(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%melt_buoy_fl(:,:)=0.
+  allocate( grd%melt_eros_fl(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%melt_eros_fl(:,:)=0.
+  allocate( grd%melt_conv_fl(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%melt_conv_fl(:,:)=0.
+  allocate( grd%fl_parent_melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%fl_parent_melt(:,:)=0.
+  allocate( grd%fl_child_melt(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%fl_child_melt(:,:)=0.
   allocate( grd%tmp(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%tmp(:,:)=0.
   allocate( grd%tmpc(grd%isc:grd%iec, grd%jsc:grd%jec) ); grd%tmpc(:,:)=0.
-  allocate( bergs%nbergs_calved_by_class(nclasses) ); bergs%nbergs_calved_by_class(:)=0
+  allocate( bergs%nbergs_calved_by_class_s(nclasses) ); bergs%nbergs_calved_by_class_s(:)=0
+  allocate( bergs%nbergs_calved_by_class_n(nclasses) ); bergs%nbergs_calved_by_class_n(:)=0
   allocate( grd%parity_x(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_x(:,:)=1.
   allocate( grd%parity_y(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%parity_y(:,:)=1.
   allocate( grd%iceberg_counter_grd(grd%isd:grd%ied, grd%jsd:grd%jed) ); grd%iceberg_counter_grd(:,:)=0
 
- !write(stderrunit,*) 'diamonds: copying grid'
+ !write(stderrunit,*) 'KID: copying grid'
   ! Copy data declared on ice model computational domain
   is=grd%isc; ie=grd%iec; js=grd%jsc; je=grd%jec
   grd%lon(is:ie,js:je)=ice_lon(:,:)
@@ -749,6 +1051,7 @@ real :: Total_mass  !Added by Alon
     if(fractional_area) grd%area(is:ie,js:je)=ice_area(:,:) *(4.*pi*radius*radius)
   endif
   if(present(ocean_depth)) grd%ocean_depth(is:ie,js:je)=ocean_depth(:,:)
+  !if(present(ocean_depth)) grd%ocean_depth(grd%isd:grd%ied,grd%jsd:grd%jed)=ocean_depth(:,:)
 
   ! Copy data declared on ice model data domain
   is=grd%isc-1; ie=grd%iec+1; js=grd%jsc-1; je=grd%jec+1
@@ -796,6 +1099,13 @@ real :: Total_mass  !Added by Alon
       if (grd%lat(i,j).ge.big_number) grd%lat(i,j)=2.*grd%lat(i-1,j)-grd%lat(i-2,j)
   enddo; enddo
 
+
+  if ( (mpp_pe() == 0) .and. (Lx .ne. 360.) .and. .not. (grid_is_latlon) ) then
+    write(*,'(/,a)') 'pe0 x-domain before periodicity fix'
+    write(*,'(f12.2)') (grd%lon(i,grd%jsd), i=grd%isd,grd%ied)
+  endif
+
+
   if (.not. present(maskmap)) then ! Using a maskmap causes tickles this sanity check
     do j=grd%jsd,grd%jed; do i=grd%isd,grd%ied
       !if (grd%lon(i,j).ge.big_number) write(stderrunit,*) 'bad lon: ',mpp_pe(),i-grd%isc+1,j-grd%jsc+1,grd%lon(i,j)
@@ -804,11 +1114,11 @@ real :: Total_mass  !Added by Alon
   endif
 
   if ((Lx.gt.1E15 ) .and. (mpp_pe().eq.mpp_root_pe())) then
-          call error_mesg('diamonds, framework', 'Model does not enjoy the domain being larger than 1E15. Not sure why. Probably to do with floating point precision.', WARNING)
+          call error_mesg('KID, framework', 'Model does not enjoy the domain being larger than 1E15. Not sure why. Probably to do with floating point precision.', WARNING)
   endif
   if ((.not. grid_is_latlon) .and. (Lx.eq.360.)) then
     if (mpp_pe().eq.mpp_root_pe())  then
-            call error_mesg('diamonds, framework', 'Since the lat/lon grid is off, the x-direction is being set as non-periodic. Set Lx not equal to 360 override.', WARNING)
+            call error_mesg('KID, framework', 'Since the lat/lon grid is off, the x-direction is being set as non-periodic. Set Lx not equal to 360 override.', WARNING)
     endif
     Lx=-1.
   endif
@@ -849,9 +1159,15 @@ real :: Total_mass  !Added by Alon
   enddo; enddo
 
   if (debug) then
-    write(stderrunit,'(a,i3,a,4i4,a,4f8.2)') 'diamonds, icebergs_init: (',mpp_pe(),') [ij][se]c=', &
-         grd%isc,grd%iec,grd%jsc,grd%jec, &
-         ' [lon|lat][min|max]=', minval(grd%lon),maxval(grd%lon),minval(grd%lat),maxval(grd%lat)
+   ! write(stderrunit,'(a,i3,a,4i4,a,4f8.2)') 'KID, icebergs_init: (',mpp_pe(),') [ij][se]c=', &
+   !      grd%isc,grd%iec,grd%jsc,grd%jec, &
+   !      ' [lon|lat][min|max]=', minval(grd%lon),maxval(grd%lon),minval(grd%lat),maxval(grd%lat)
+
+    write(stderrunit,'(a,i3,a,4i4)') 'KID, icebergs_init: (',mpp_pe(),') [ij][se]c=', &
+          grd%isc,grd%iec,grd%jsc,grd%jec
+
+    write(stderrunit,'(a,4f10.2)') '[Lon|lat][min|max]=', &
+          minval(grd%lon),maxval(grd%lon),minval(grd%lat),maxval(grd%lat)
   endif
 
  !if (mpp_pe().eq.5) then
@@ -873,60 +1189,162 @@ real :: Total_mass  !Added by Alon
   do j=grd%jsd+1,grd%jed; do i=grd%isd+1,grd%ied
     if (grd%lat(i,j) .ne. grd%lat(i,j)) then
       write(stderrunit,*) 'Lat not defined properly', mpp_pe(),i,j,grd%lat(i,j)
-      call error_mesg('diamonds,grid defining', 'Latitude contains NaNs', FATAL)
+      call error_mesg('KID,grid defining', 'Latitude contains NaNs', FATAL)
     endif
     if (grd%lon(i,j) .ne. grd%lon(i,j)) then
       write(stderrunit,*) 'Lon not defined properly', mpp_pe(),i,j,grd%lon(i,j)
-      call error_mesg('diamonds, grid defining', 'Longatudes contains NaNs', FATAL)
+      call error_mesg('KID, grid defining', 'Longatudes contains NaNs', FATAL)
     endif
   enddo; enddo
 
 
+  ! If a separate calving distribution for the northern hemisphere is not used, the following northern
+  ! hemisphere parameters inherit the values of their respective southern hemisphere parameters
+  if (.not. separate_distrib_for_n_hemisphere) then
+    initial_mass_n=initial_mass; distribution_n=distribution
+    mass_scaling_n=mass_scaling; initial_thickness_n=initial_thickness
+  endif
+
+
 !Added by Alon  - If a freq distribution is input, we have to convert the freq distribution to a mass flux distribution)
 if (input_freq_distribution) then
-     Total_mass=0.
+     Total_mass_s=0.; Total_mass_n=0.
      do j=1,nclasses
-          Total_mass=Total_mass+(distribution(j)*initial_mass(j))
+          Total_mass_s=Total_mass_s+(distribution(j)*initial_mass(j))
+          Total_mass_n=Total_mass_n+(distribution_n(j)*initial_mass_n(j))
      enddo
      do j=1,nclasses
-           distribution(j)=(distribution(j)*initial_mass(j))/Total_mass
+           distribution(j)=(distribution(j)*initial_mass(j))/Total_mass_s
+           distribution_n(j)=(distribution_n(j)*initial_mass_n(j))/Total_mass_n
      enddo
+
+     if (mpp_pe()==0) then
+       print *,'uncorrected distribution_s',distribution
+       print *,'uncorrected distribution_n',distribution_n
+     endif
+     !floating point fix: correct the distributions so that
+     !remaining_dist_s and remaining_dist_n in icebergs.F90/accumulate_calving are >= 0
+     do j=1,nclasses
+       if (distribution(j)>0.) last_dist_j=j
+       if (distribution_n(j)>0.) last_dist_j_n=j
+     enddo
+     remaining_dist_s=1.; remaining_dist_n=1.
+     do j=1,last_dist_j-1
+       remaining_dist_s=remaining_dist_s-distribution(j)
+     enddo
+     distribution(last_dist_j)=remaining_dist_s
+     do j=1,last_dist_j_n-1
+       remaining_dist_n=remaining_dist_n-distribution_n(j)
+     enddo
+     distribution_n(last_dist_j_n)=remaining_dist_n
+     if (mpp_pe()==0) then
+       print *,'remaining_dist_s, last_dist_j_s, remaining_dist_n','last_dist_j_n',&
+         remaining_dist_s-distribution(last_dist_j),last_dist_j,&
+         remaining_dist_n-distribution_n(last_dist_j_n),last_dist_j_n
+       print *,'corrected distribution_s',distribution
+       print *,'corrected distribution_n',distribution_n
+     endif
 endif
 
 if ((halo .lt. 3) .and. (rotate_icebergs_for_mass_spreading .and. iceberg_bonds_on) )   then
     halo=3
-    call error_mesg('diamonds, framework', 'Setting iceberg halos =3, since halos must be >= 3 for rotating icebergs for mass spreading', WARNING)
+    call error_mesg('KID, framework', 'Setting iceberg halos =3, since halos must be >= 3 for rotating icebergs for mass spreading', WARNING)
 elseif  ((halo .lt. 2) .and. (interactive_icebergs_on .or. iceberg_bonds_on) )   then
     halo=2
-    call error_mesg('diamonds, framework', 'Setting iceberg halos =2, since halos must be >= 2 for interactions', WARNING)
+    call error_mesg('KID, framework', 'Setting iceberg halos =2, since halos must be >= 2 for interactions', WARNING)
 endif
 
 if (interactive_icebergs_on) then
   if (Runge_not_Verlet) then
     !Runge_not_Verlet=.false.  ! Iceberg interactions only with Verlet
-    call error_mesg('diamonds, framework', 'It is unlcear whther interactive icebergs work with Runge Kutta stepping.', WARNING)
+    call error_mesg('KID, framework', 'It is unlcear whther interactive icebergs work with Runge Kutta stepping.', WARNING)
   endif
 endif
 if (.not.interactive_icebergs_on) then
   if (iceberg_bonds_on) then
     !iceberg_bonds_on=.false.
-    call error_mesg('diamonds, framework', 'Interactive icebergs off requires iceberg bonds off (turning bonds off).', WARNING)
+    call error_mesg('KID, framework', 'Interactive icebergs off requires iceberg bonds off (turning bonds off).', WARNING)
   endif
 endif
 if (.not. iceberg_bonds_on) then
-   max_bonds=0
+  max_bonds=0
 else
-  buffer_width=buffer_width+(max_bonds*4) ! Increase buffer width to include bonds being passed between processors
+  buffer_width=buffer_width+(max_bonds*5) ! Increase buffer width to include bonds being passed between processors
 endif
 if (save_short_traj) buffer_width_traj=6 ! This is the length of the short buffer used for abrevated traj
+if (save_fl_traj) then
+  if (footloose) then
+    buffer_width_traj=buffer_width_traj+8+2
+  else
+    buffer_width_traj=buffer_width_traj+4+2
+  endif
+endif
 if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files should be ignored
+
+if (dem) then
+  buffer_width=buffer_width+3+(max_bonds*6)
+  buffer_width_traj=buffer_width_traj+3
+  buffer_width_bond_traj=buffer_width_bond_traj+6
+endif
+
+if (iceberg_bonds_on) then
+  buffer_width=buffer_width+1
+  buffer_width_traj=buffer_width_traj+1
+endif
+
+!must use verlet with mts - Alex
+if (mts) then
+  buffer_width_traj=buffer_width_traj+4 !to accomodate n_bonds,fast-step accel terms, overall accel terms
+  buffer_width=buffer_width+17 !to accomodate external forcing (conglom_id,uo,vo,ua,va,ui,vi,ssh_x,ssh_y,sst,sss,cn,hi,accel)
+
+  !if mts_sub_steps is not given in the nml already,
+  !then detemine according to the max dt according to the spring coef
+  if (mts_sub_steps .eq. -1) then
+    mts_fast_dt = 0.3/sqrt(spring_coef)        !critical dt for mts scheme w/ safety multiplier of 0.75
+    mts_sub_steps = ceiling(dt/mts_fast_dt)    !the number of substeps
+  end if
+
+  mts_fast_dt = dt/mts_sub_steps !adjust mts_fast_dt so that dt is an integer multiple of mts_fast_dt
+
+  if (Runge_not_Verlet) then
+    call error_mesg('KID, framework', &
+      'Multiple time stepping does not work with Runge Kutta stepping, switching to Verlet.', WARNING)
+    Runge_not_Verlet=.false.
+  end if
+end if
+
+!by default, set contact_spring_coef equal to the spring_coef for bonded interactions, unless
+!contact_spring_coef is specified as > 0.
+if (contact_spring_coef.le.0.) contact_spring_coef=spring_coef
+if (debug_write) then
+  if (traj_sample_hrs.ne.traj_write_hrs) then
+    call error_mesg('KID, framework', &
+      'Debug_write activated: setting traj_sample_hrs=traj_write_hrs', WARNING)
+    traj_sample_hrs=traj_write_hrs
+  endif
+  if (.not. force_all_pes_traj) then
+    call error_mesg('KID, framework', &
+      'Debug_write activated: setting force_all_pes_traj=.true.', WARNING)
+    force_all_pes_traj=.true.
+  endif
+endif
 
 
  ! Parameters
   bergs%dt=dt
+  bergs%traj_area_thres=traj_area_thres
+  bergs%traj_area_thres_sntbc=traj_area_thres_sntbc
+  bergs%traj_area_thres_fl=traj_area_thres_fl
   bergs%traj_sample_hrs=traj_sample_hrs
   bergs%traj_write_hrs=traj_write_hrs
   bergs%save_short_traj=save_short_traj
+  bergs%traj_name=traj_name
+  bergs%bond_traj_name=bond_traj_name
+  bergs%save_fl_traj=save_fl_traj
+  bergs%save_all_traj_year=save_all_traj_year
+  bergs%save_nonfl_traj_by_class=save_nonfl_traj_by_class
+  bergs%save_traj_by_class_start_mass_thres_n=save_traj_by_class_start_mass_thres_n
+  bergs%save_traj_by_class_start_mass_thres_s=save_traj_by_class_start_mass_thres_s
   bergs%ignore_traj=ignore_traj
   bergs%verbose_hrs=verbose_hrs
   bergs%grd%halo=halo
@@ -936,20 +1354,30 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
   bergs%max_bonds=max_bonds
   bergs%rho_bergs=rho_bergs
   bergs%spring_coef=spring_coef
+  bergs%contact_spring_coef=contact_spring_coef !Alex
+  bergs%fracture_criterion=fracture_criterion
+  bergs%cdrag_grounding=cdrag_grounding
+  bergs%h_to_init_grounding=h_to_init_grounding
+  bergs%frac_thres_n=frac_thres_n*frac_thres_scaling
+  bergs%frac_thres_t=frac_thres_t*frac_thres_scaling
+  bergs%debug_write=debug_write
   bergs%bond_coef=bond_coef
   bergs%radial_damping_coef=radial_damping_coef
   bergs%tangental_damping_coef=tangental_damping_coef
   bergs%LoW_ratio=LoW_ratio
+  bergs%separate_distrib_for_n_hemisphere=separate_distrib_for_n_hemisphere
   bergs%use_operator_splitting=use_operator_splitting
   bergs%bergy_bit_erosion_fraction=bergy_bit_erosion_fraction
   bergs%sicn_shift=sicn_shift
   bergs%passive_mode=passive_mode
   bergs%time_average_weight=time_average_weight
   bergs%speed_limit=speed_limit
+  bergs%tau_is_velocity=tau_is_velocity
   bergs%tau_calving=tau_calving
   bergs%tip_parameter=tip_parameter
   bergs%use_updated_rolling_scheme=use_updated_rolling_scheme  !Alon
   bergs%Runge_not_Verlet=Runge_not_Verlet
+  bergs%internal_bergs_for_drag=internal_bergs_for_drag
   bergs%use_mixed_melting=use_mixed_melting
   bergs%apply_thickness_cutoff_to_bergs_melt=apply_thickness_cutoff_to_bergs_melt
   bergs%apply_thickness_cutoff_to_gridded_melt=apply_thickness_cutoff_to_gridded_melt
@@ -978,30 +1406,165 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
   bergs%allow_bergs_to_roll=allow_bergs_to_roll
   bergs%hexagonal_icebergs=hexagonal_icebergs
   bergs%ignore_missing_restart_bergs=ignore_missing_restart_bergs
+  bergs%require_restart=require_restart
   bergs%Static_icebergs=Static_icebergs
   bergs%only_interactive_forces=only_interactive_forces
   bergs%halo_debugging=halo_debugging
   bergs%iceberg_bonds_on=iceberg_bonds_on   !Alon
   bergs%manually_initialize_bonds=manually_initialize_bonds   !Alon
+  bergs%length_for_manually_initialize_bonds=length_for_manually_initialize_bonds !Alex
+  bergs%manually_initialize_bonds_from_radii=manually_initialize_bonds_from_radii !Alex
+  bergs%scale_damping_by_pmag=scale_damping_by_pmag
   bergs%critical_interaction_damping_on=critical_interaction_damping_on   !Alon
+  bergs%tang_crit_int_damp_on=tang_crit_int_damp_on
   bergs%interactive_icebergs_on=interactive_icebergs_on   !Alon
   bergs%use_new_predictive_corrective=use_new_predictive_corrective  !Alon
   bergs%grounding_fraction=grounding_fraction
   bergs%add_weight_to_ocean=add_weight_to_ocean
   bergs%use_old_spreading=use_old_spreading
   bergs%debug_iceberg_with_id=debug_iceberg_with_id
-  allocate( bergs%initial_mass(nclasses) ); bergs%initial_mass(:)=initial_mass(:)
-  allocate( bergs%distribution(nclasses) ); bergs%distribution(:)=distribution(:)
-  allocate( bergs%mass_scaling(nclasses) ); bergs%mass_scaling(:)=mass_scaling(:)
-  allocate( bergs%initial_thickness(nclasses) ); bergs%initial_thickness(:)=initial_thickness(:)
-  allocate( bergs%initial_width(nclasses) )
-  allocate( bergs%initial_length(nclasses) )
-  bergs%initial_width(:)=sqrt(initial_mass(:)/(LoW_ratio*rho_bergs*initial_thickness(:)))
-  bergs%initial_length(:)=LoW_ratio*bergs%initial_width(:)
+  bergs%mts=mts
+  bergs%mts_fast_dt = mts_fast_dt
+  bergs%mts_sub_steps = mts_sub_steps
+  bergs%mts_part = 1
+  bergs%remove_unused_bergs = remove_unused_bergs
+  bergs%contact_distance=contact_distance
+  bergs%force_convergence=force_convergence
+  bergs%explicit_inner_mts=explicit_inner_mts
+  bergs%convergence_tolerance=convergence_tolerance
+  ! DEM-mode parameters
+  bergs%dem=dem
+  bergs%use_grounding_torque=use_grounding_torque
+  bergs%ignore_tangential_force=ignore_tangential_force
+  if (bergs%dem) bergs%explicit_inner_mts=.true.
+  bergs%poisson=poisson
+  bergs%dem_spring_coef=dem_spring_coef
+  bergs%dem_K_damp=2.*bergs%dem_spring_coef/(3.*(1.-bergs%poisson**2)) !damping factor
+  bergs%dem_damping_coef=dem_damping_coef
+  if (break_bonds_on_sub_steps) then
+    if (use_broken_bonds_for_substep_contact .and. .not. (bergs%dem .and. bergs%iceberg_bonds_on)) then
+      call error_mesg('KID, framework', &
+        'use_broken_bonds_for_substep_contact requires dem and iceberg_bonds_on', FATAL)
+    else
+      bergs%use_broken_bonds_for_substep_contact=use_broken_bonds_for_substep_contact
+    endif
+  else
+    bergs%use_broken_bonds_for_substep_contact=.false.
+  end if
+  bergs%print_fracture=print_fracture
+  bergs%dem_beam_test=dem_beam_test
+  bergs%constant_interaction_LW=constant_interaction_LW
+  bergs%constant_length=constant_length
+  bergs%constant_width=constant_width
+  if (bergs%constant_interaction_LW) then
+    bergs%constant_area=bergs%constant_length*bergs%constant_width
+    if (bergs%hexagonal_icebergs) then
+      bergs%constant_radius=sqrt(bergs%constant_area/(2.*sqrt(3.)))
+    else
+      if (bergs%iceberg_bonds_on) then
+        bergs%constant_radius=0.5*sqrt(bergs%constant_area)
+      else
+        bergs%constant_radius=sqrt(bergs%constant_area/pi) ! Interaction radius of the iceberg (assuming circular icebergs)
+      endif
+    endif
+  endif
+  bergs%ocean_drag_scale=ocean_drag_scale
+  ! Footloose calving parameters
+  bergs%footloose=footloose
+  bergs%fl_init_child_xy_by_pe=fl_init_child_xy_by_pe
+  bergs%fl_youngs=fl_youngs
+  bergs%fl_strength=fl_strength
+  bergs%new_berg_from_fl_bits_mass_thres=new_berg_from_fl_bits_mass_thres
+  bergs%displace_fl_bergs=displace_fl_bergs
+  bergs%fl_style=fl_style
+  bergs%fl_bits_erosion_to_bergy_bits=fl_bits_erosion_to_bergy_bits
+
+  if (bergs%footloose .and. .not. bergs%use_operator_splitting) then
+    call error_mesg('KID, ice_bergs_framework_init', &
+      'use_operator_splitting must be true to use footloose!', FATAL)
+  endif
+
+
+  !backwards compatibility
+  if (.not. (bergs%mts .or. bergs%dem .or. bergs%footloose)) bergs%old_interp_flds_order=.true.
+
+  if (bergs%Runge_not_Verlet) then
+    if (bergs%mts .or. bergs%dem .or. bergs%footloose) then
+      call error_mesg('KID, ice_bergs_framework_init', &
+        'Runge_not_Verlet must be false to use MTS, DEM, or footloose!', FATAL)
+    endif
+  endif
+
+  if (bergs%contact_distance>0) then
+    dx_dlon=1; dy_dlat=1
+    if (grd%grid_is_latlon) dy_dlat=pi_180*Rearth
+    maxk=0
+    do j=grd%jsd,grd%jed; do i=grd%isd,grd%ied
+      if (grd%grid_is_latlon) then
+        lat_ref2=grd%lat(i,j)
+        dx_dlon=pi_180*Rearth*cos(lat_ref2*pi_180)
+      endif
+      lon_ref=grd%lon(i,j)
+      k=0
+      do while((k+i)<grd%ied)
+        k=k+1
+        dx=(grd%lon(k+i,j)-lon_ref)*dx_dlon
+        if (k>maxk) maxk=k
+        if (dx>=contact_distance) exit
+      enddo
+    enddo;enddo
+
+    if (grd%grid_is_latlon) dy_dlat=pi_180*Rearth
+    dy=(grd%lat(grd%isc,grd%jsc+1)-grd%lat(grd%isc,grd%jsc))*dy_dlat
+
+    bergs%contact_cells_lon = max(maxk,1)
+    bergs%contact_cells_lat = max(int(ceiling(contact_distance/dy)),1)
+  else
+    bergs%contact_cells_lon = 1
+    bergs%contact_cells_lat = 1
+  endif
+
+  !necessary?
+  if (.not. mts) then
+    if ((halo-1)<bergs%contact_cells_lon .or. (halo-1)<bergs%contact_cells_lat) then
+      if (mpp_pe()==0) then
+        write(stderrunit,'(a,i3)') 'KID, icebergs_init: halo width minus 1 ',halo - 1
+        write(stderrunit,'(a,f8.2,a,2i3)') 'KID, icebergs_init:  contact distance ',bergs%contact_distance,&
+          ' num contact cells lon and lat',bergs%contact_cells_lon,bergs%contact_cells_lat
+
+        call error_mesg('KID, ice_bergs_framework_init', &
+          'halo width must be increased to accomodate specified contact distance!!!', FATAL)
+      endif
+    endif
+  endif
+  allocate( bergs%initial_mass_s(nclasses) ); bergs%initial_mass_s(:)=initial_mass(:)
+  allocate( bergs%distribution_s(nclasses) ); bergs%distribution_s(:)=distribution(:)
+  allocate( bergs%mass_scaling_s(nclasses) ); bergs%mass_scaling_s(:)=mass_scaling(:)
+  allocate( bergs%initial_thickness_s(nclasses) ); bergs%initial_thickness_s(:)=initial_thickness(:)
+  allocate( bergs%initial_width_s(nclasses) )
+  allocate( bergs%initial_length_s(nclasses) )
+  bergs%initial_width_s(:)=sqrt(initial_mass(:)/(LoW_ratio*rho_bergs*initial_thickness(:)))
+  bergs%initial_length_s(:)=LoW_ratio*bergs%initial_width_s(:)
+
+  allocate( bergs%initial_mass_n(nclasses) ); bergs%initial_mass_n(:)=initial_mass_n(:)
+  allocate( bergs%distribution_n(nclasses) ); bergs%distribution_n(:)=distribution_n(:)
+  allocate( bergs%mass_scaling_n(nclasses) ); bergs%mass_scaling_n(:)=mass_scaling_n(:)
+  allocate( bergs%initial_thickness_n(nclasses) ); bergs%initial_thickness_n(:)=initial_thickness_n(:)
+  allocate( bergs%initial_width_n(nclasses) )
+  allocate( bergs%initial_length_n(nclasses) )
+  bergs%initial_width_n(:)=sqrt(initial_mass_n(:)/(LoW_ratio*rho_bergs*initial_thickness_n(:)))
+  bergs%initial_length_n(:)=LoW_ratio*bergs%initial_width_n(:)
+
+  bergs%writeandstop=.false.
   grd%coastal_drift = coastal_drift
   grd%tidal_drift = tidal_drift
 
-  if (read_old_restarts) call error_mesg('diamonds, ice_bergs_framework_init', 'Setting "read_old_restarts=.true." is obsolete and does nothing!', WARNING)
+  !needed for periodicity
+  maxlon_c = grd%lon(grd%iec,grd%jec); minlon_c = grd%lon(grd%isc-1,grd%jsc-1)
+  call mpp_max(maxlon_c); call mpp_min(minlon_c)
+  grd%maxlon_c=maxlon_c; grd%minlon_c=minlon_c
+
+  if (read_old_restarts) call error_mesg('KID, ice_bergs_framework_init', 'Setting "read_old_restarts=.true." is obsolete and does nothing!', WARNING)
 
   ! Diagnostics
   id_class = diag_axis_init('mass_class', initial_mass, 'kg','Z', 'iceberg mass')
@@ -1032,7 +1595,15 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
   grd%id_bergy_melt=register_diag_field('icebergs', 'bergy_melt', axes, Time, &
      'Melt rate of bergy bits', 'kg/(m^2*s)')
   grd%id_bergy_mass=register_diag_field('icebergs', 'bergy_mass', axes, Time, &
-     'Bergy bit density field', 'kg/(m^2)')
+    'Bergy bit density field', 'kg/(m^2)')
+  grd%id_fl_bits_src=register_diag_field('icebergs', 'fl_bits_src', axes, Time, &
+     'Mass source of footloose bits', 'kg/(m^2*s)')
+  grd%id_fl_bits_melt=register_diag_field('icebergs', 'fl_bits_melt', axes, Time, &
+     'Melt rate of footloose bits', 'kg/(m^2*s)')
+  grd%id_fl_bits_mass=register_diag_field('icebergs', 'fl_bits_mass', axes, Time, &
+    'Footloose bits density field', 'kg/(m^2)')
+  grd%id_fl_bergy_bits_mass=register_diag_field('icebergs', 'fl_bergy_bits_mass', axes, Time, &
+    'Footloose bergy bits density field', 'kg/(m^2)')
   grd%id_spread_mass=register_diag_field('icebergs', 'spread_mass', axes, Time, &
      'Iceberg mass after spreading', 'kg/(m^2)')
   grd%id_spread_area=register_diag_field('icebergs', 'spread_area', axes, Time, &
@@ -1052,9 +1623,11 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
   grd%id_mass=register_diag_field('icebergs', 'mass', axes, Time, &
      'Iceberg density field', 'kg/(m^2)')
   grd%id_stored_ice=register_diag_field('icebergs', 'stored_ice', axes3d, Time, &
-     'Accumulated ice mass by class', 'kg')
+     'Accumulated ice mass by class (z-axis labels correspond to Southern hemisphere classes)', &
+     'kg')
   grd%id_real_calving=register_diag_field('icebergs', 'real_calving', axes3d, Time, &
-     'Calving into iceberg class', 'kg/s')
+     'Calving into iceberg class (z-axis labels correspond to Southern hemisphere classes)', &
+     'kg/s')
   grd%id_rmean_calving=register_diag_field('icebergs', 'running_mean_calving', axes, Time, &
      'Running mean of calving', 'kg/s')
   grd%id_rmean_calving_hflx=register_diag_field('icebergs', 'running_mean_calving_hflx', axes, Time, &
@@ -1091,6 +1664,19 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
      'Y-stress on ice from atmosphere', 'N m^-2')
   grd%id_ocean_depth=register_diag_field('icebergs', 'Depth', axes, Time, &
      'Ocean Depth', 'm')
+  grd%id_melt_by_class=register_diag_field('icebergs', 'melt_by_class', axes3d, Time, &
+     'Total ice melt (bergs+bits+FL_bits) by class (z-axis labels correspond to Southern hemisphere classes)', &
+     'kg/(m^2*s)')
+  grd%id_melt_buoy_fl=register_diag_field('icebergs', 'melt_buoy_fl', axes, Time, &
+     'Buoyancy component of footloose iceberg melt rate', 'kg/(m^2*s)')
+  grd%id_melt_eros_fl=register_diag_field('icebergs', 'melt_eros_fl', axes, Time, &
+     'Erosion component of footloose iceberg melt rate', 'kg/(m^2*s)')
+  grd%id_melt_conv_fl=register_diag_field('icebergs', 'melt_conv_fl', axes, Time, &
+     'Convective component of footloose iceberg melt rate', 'kg/(m^2*s)')
+  grd%id_fl_parent_melt=register_diag_field('icebergs', 'fl_parent_melt', axes, Time, &
+     'Melt rate of footloose parent bergs', 'kg/(m^2*s)')
+  grd%id_fl_child_melt=register_diag_field('icebergs', 'fl_child_melt', axes, Time, &
+     'Melt rate of footloose child bergs', 'kg/(m^2*s)')
 
   ! Static fields
   id_class=register_static_field('icebergs', 'lon', axes, &
@@ -1122,10 +1708,10 @@ if (ignore_traj) buffer_width_traj=0 ! If this is true, then all traj files shou
   endif
 
   if (do_unit_tests) then
-   if (unit_tests(bergs)) call error_mesg('diamonds, icebergs_init', 'Unit tests failed!', FATAL)
+   if (unit_tests(bergs)) call error_mesg('KID, icebergs_init', 'Unit tests failed!', FATAL)
   endif
 
- !write(stderrunit,*) 'diamonds: done'
+ !write(stderrunit,*) 'KID: done'
   call mpp_clock_end(bergs%clock_ini)
   call mpp_clock_end(bergs%clock)
 
@@ -1161,7 +1747,7 @@ integer :: grdi, grdj
 
   yr_offset=int(latest_start_year+1.)-iyr
   if (mpp_pe().eq.mpp_root_pe()) write(*,'(a,i8,a)') &
-    'diamonds: Bergs found with creation dates after model date! Adjusting berg dates by ',yr_offset,' years'
+    'KID: Bergs found with creation dates after model date! Adjusting berg dates by ',yr_offset,' years'
   call bergs_chksum(bergs, 'before adjusting start dates')
   do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
     this=>bergs%list(grdi,grdj)%first
@@ -1182,7 +1768,7 @@ type(icebergs), pointer :: bergs !< Container for all types and memory
 type(icebergs_gridded), pointer :: grd => null()
 type(iceberg), pointer :: moving_berg => null(), this => null()
 integer :: grdi, grdj
-logical :: quick
+
 ! For convenience
 grd=>bergs%grd
 
@@ -1249,7 +1835,7 @@ logical :: halo_debugging
     do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
       this=>bergs%list(grdi,grdj)%first
       do while (associated(this))
-          write(stderrunit,*) 'A', this%id, mpp_pe(), this%halo_berg, grdi, grdj
+        write(stderrunit,'(a,5i8)') 'A', this%id, mpp_pe(), int(this%halo_berg), grdi, grdj
         this=>this%next
       enddo
     enddo; enddo
@@ -1275,20 +1861,34 @@ logical :: halo_debugging
     call delete_all_bergs_in_list(bergs,grdj,grdi)
   enddo ; enddo
 
+  ! if (bergs%mts) then
+  !   !remove conglomerate bergs outside halo
+  !   do grdj = grd%jsc,grd%jec ;    do grdi = grd%isc,grd%iec
+  !     this=>bergs%list(grdi,grdj)%first
+  !     do while (associated(this))
+  !       kick_the_bucket=>this
+  !       this=>this%next
+  !       if (kick_the_bucket%halo_berg .ne. 0) then
+  !         call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
+  !       end if
+  !     enddo
+  !   enddo;enddo
+  ! endif
+
   call mpp_sync_self()
 
   ! For debugging
   if (halo_debugging) then
     do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
       this=>bergs%list(grdi,grdj)%first
-        do while (associated(this))
-        write(stderrunit,*) 'B', this%id, mpp_pe(), this%halo_berg, grdi, grdj
-      this=>this%next
+      do while (associated(this))
+        write(stderrunit,'(a,5i8)') 'B', this%id, mpp_pe(), int(this%halo_berg), grdi, grdj
+        this=>this%next
       enddo
     enddo; enddo
   endif
   if (debug) then
-    nbergs_start=count_bergs(bergs)
+    nbergs_start=count_bergs(bergs, with_halos=.true.)
   endif
 
   call mpp_sync_self()
@@ -1485,7 +2085,7 @@ logical :: halo_debugging
     do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
       this=>bergs%list(grdi,grdj)%first
       do while (associated(this))
-        write(stderrunit,*)  'C', this%id, mpp_pe(), this%halo_berg,  grdi, grdj
+        write(stderrunit,'(a,5i8)') 'C', this%id, mpp_pe(), int(this%halo_berg),  grdi, grdj
         this=>this%next
       enddo
     enddo; enddo
@@ -1494,23 +2094,23 @@ logical :: halo_debugging
 
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!Debugging!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
   if (debug) then
-    nbergs_end=count_bergs(bergs)
+    nbergs_end=count_bergs(bergs, with_halos=.true.)
     i=nbergs_rcvd_from_n+nbergs_rcvd_from_s+nbergs_rcvd_from_e+nbergs_rcvd_from_w &
      -nbergs_to_send_n-nbergs_to_send_s-nbergs_to_send_e-nbergs_to_send_w
     if (nbergs_end-(nbergs_start+i).ne.0) then
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_end=',nbergs_end,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_start=',nbergs_start,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: delta=',i,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: error=',nbergs_end-(nbergs_start+i),' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_to_send_n=',nbergs_to_send_n,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_to_send_s=',nbergs_to_send_s,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_to_send_e=',nbergs_to_send_e,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_to_send_w=',nbergs_to_send_w,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_rcvd_from_n=',nbergs_rcvd_from_n,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_rcvd_from_s=',nbergs_rcvd_from_s,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_rcvd_from_e=',nbergs_rcvd_from_e,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, update_halos: nbergs_rcvd_from_w=',nbergs_rcvd_from_w,' on PE',mpp_pe()
-      !call error_mesg('diamonds, update_halos:', 'We lost some bergs!', FATAL)
+      write(stderrunit,'(a,i4,a,i4)') 'KID, update_halos: nbergs_end=',nbergs_end,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, update_halos: nbergs_start=',nbergs_start,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, update_halos: delta=',i,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, update_halos: error=',nbergs_end-(nbergs_start+i),' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, update_halos: nbergs_to_send_n=',nbergs_to_send_n,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, update_halos: nbergs_to_send_s=',nbergs_to_send_s,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, update_halos: nbergs_to_send_e=',nbergs_to_send_e,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, update_halos: nbergs_to_send_w=',nbergs_to_send_w,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, update_halos: nbergs_rcvd_from_n=',nbergs_rcvd_from_n,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, update_halos: nbergs_rcvd_from_s=',nbergs_rcvd_from_s,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, update_halos: nbergs_rcvd_from_e=',nbergs_rcvd_from_e,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, update_halos: nbergs_rcvd_from_w=',nbergs_rcvd_from_w,' on PE',mpp_pe()
+      !call error_mesg('KID, update_halos:', 'We lost some bergs!', FATAL)
     endif
   endif
   if (debug) then
@@ -1528,13 +2128,858 @@ logical :: halo_debugging
     enddo ; enddo
     call mpp_sum(i)
     if (i>0 .and. mpp_pe()==mpp_root_pe()) then
-      write(stderrunit,'(a,i4)') 'diamonds, update_halos: # of bergs outside computational domain = ',i
-      call error_mesg('diamonds, update_halos:', 'there are bergs still in halos!', FATAL)
+      write(stderrunit,'(a,i4)') 'KID, update_halos: # of bergs outside computational domain = ',i
+      call error_mesg('KID, update_halos:', 'there are bergs still in halos!', FATAL)
     endif ! root_pe
   endif ! debug
   !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!Debugging!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!111
 
 end subroutine update_halo_icebergs
+
+!> For the multiple-timestepping velocity verlet scheme, populates the current PE with the following
+!! bergs from neighboring PEs: halo bergs, bergs that comprise any conglomerate that overlaps both
+!! PEs, and bergs within the contact distance of these halo and conglomerate bergs.
+Subroutine transfer_mts_bergs(bergs)
+! Arguments
+type(icebergs), pointer :: bergs !< Container for all types and memory
+! Local variables
+type(icebergs_gridded), pointer :: grd
+integer :: stderrunit
+integer :: grdi, grdj,i
+type(iceberg), pointer :: this,kick_the_bucket
+integer :: nbergs_to_send_e, nbergs_to_send_w
+integer :: nbergs_to_send_n, nbergs_to_send_s
+
+  grd=>bergs%grd ! for convenience
+  stderrunit = stderr() ! Get the stderr unit number
+
+  ! Step 1: Clear the current halos
+  do grdj = grd%jsd,grd%jsc-1 ;  do grdi = grd%isd,grd%ied
+    call delete_all_bergs_in_list(bergs, grdj, grdi)
+  enddo ; enddo
+
+  do grdj = grd%jec+1,grd%jed ;  do grdi = grd%isd,grd%ied
+    call delete_all_bergs_in_list(bergs,grdj,grdi)
+  enddo ; enddo
+
+  do grdj = grd%jsd,grd%jed ;    do grdi = grd%isd,grd%isc-1
+    call delete_all_bergs_in_list(bergs,grdj,grdi)
+  enddo ; enddo
+
+  do grdj = grd%jsd,grd%jed ;    do grdi = grd%iec+1,grd%ied
+    call delete_all_bergs_in_list(bergs,grdj,grdi)
+  enddo ; enddo
+
+  !Remove contact-only/conglom bergs outside halo. Reset conglom IDs to zero for all other bergs
+  do grdj = grd%jsc,grd%jec ;    do grdi = grd%isc,grd%iec
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+      if (this%halo_berg .ne. 0) then
+        kick_the_bucket=>this
+        this=>this%next
+        call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
+      else
+        this%conglom_id=0
+        this=>this%next
+      end if
+    enddo
+  enddo;enddo
+
+  !Copy bergs between PEs
+  do i = 1,2 !run twice to account for diagonal transfers and guarantee robust transfers of conglomerates
+    call connect_all_bonds(bergs,ignore_unmatched=.true.)
+    nbergs_to_send_e=0; nbergs_to_send_w=0; nbergs_to_send_n=0; nbergs_to_send_s=0
+
+    call mts_pack_in_dir(bergs,nbergs_to_send_e,"e")
+    call mts_pack_in_dir(bergs,nbergs_to_send_w,"w")
+    call mts_pack_in_dir(bergs,nbergs_to_send_n,"n")
+    call mts_pack_in_dir(bergs,nbergs_to_send_s,"s")
+
+    call mts_send_and_receive(bergs,nbergs_to_send_e,nbergs_to_send_w,nbergs_to_send_n,nbergs_to_send_s)
+  enddo
+
+  if (debug) then
+    call connect_all_bonds(bergs,ignore_unmatched=.false.,match_bond_pairs=.true.)
+  else
+    call connect_all_bonds(bergs,ignore_unmatched=.true.,match_bond_pairs=.true.)
+  endif
+
+  call set_conglom_ids(bergs)
+  if (bergs%remove_unused_bergs) call mts_remove_unused_bergs(bergs)
+
+  ! For debugging
+  if (bergs%halo_debugging) then
+    do grdj = grd%jsd,grd%jed ;  do grdi = grd%isd,grd%ied
+      this=>bergs%list(grdi,grdj)%first
+      do while (associated(this))
+        write(stderrunit,'(a,5i8)') 'transfer_mts_bergs', this%id, mpp_pe(), int(this%halo_berg),  grdi, grdj
+        this=>this%next
+      enddo
+    enddo; enddo
+    call show_all_bonds(bergs)
+  endif
+
+end subroutine transfer_mts_bergs
+
+!> For the MTS scheme, packs bergs for transfers between PEs to the N,S,E, and W
+subroutine mts_pack_in_dir(bergs, nbergs_to_send, dir)
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  integer :: nbergs_to_send !< Counter for number of bergs to send
+  character(len=1) :: dir !< Indicates PE to the north,south,east,or west
+  ! Local variables
+  type(icebergs_gridded), pointer :: grd
+  type(iceberg), pointer :: berg
+  integer :: halo_width,nc_x,nc_y
+  real :: cds !<contact distance squared
+  logical :: edgecontact
+  integer :: is,ie,js,je,grdi,grdj
+  integer :: ics,ice,jcs,jce
+  integer :: inhs,inhe,jnhs,jnhe
+  real :: pfix !<used to adjust for periodicity
+  real :: rhc(4)
+  real :: clat,clon,dlat,dlon,r_dist
+  integer :: current_conglom_id
+  real :: current_halo_id
+
+  !---INITIALIZATION---!
+  grd=>bergs%grd
+  halo_width=bergs%grd%halo
+  nc_x=bergs%contact_cells_lon; nc_y=bergs%contact_cells_lat
+  cds=bergs%contact_distance**2
+  edgecontact=.false.
+  pfix=0.0
+
+  select case (dir)
+  case ("e")
+    !congloms overlapping this range of cells are always sent:
+    is=grd%iec-halo_width+2; ie=grd%ied; js=grd%jsd; je=grd%jed
+    if (grd%Lx>0.0 .and. grd%lon(grd%iec,grd%jec).eq.grd%maxlon_c) pfix=grd%Lx
+    !lat/lon range of halo cells
+    rhc(1)=grd%lon(is-1,js);    rhc(2)=grd%lat(is-1,js)    !min corner
+    rhc(3)=grd%lon(grd%iec,je); rhc(4)=grd%lat(grd%iec,je) !max corner
+    !range for non-halo cells (for contact with conglom)
+    inhs=grd%isd; inhe=is-1; jnhs=js; jnhe=je
+    !range for cells w/in contact dist of edge of comp domain:
+    ics=max(grd%iec-nc_x,grd%isd+1)
+    if (ics<is) then
+      edgecontact=.true.; ice=grd%iec; jcs=js; jce=je
+      clon=grd%lon(grd%iec,grd%jec) !closest lon from the east PE computational domain
+    endif
+  case ("w")
+    is=grd%isd; ie=grd%isc+halo_width-1; js=grd%jsd; je=grd%jed
+    if (grd%Lx>0.0 .and. grd%lon(grd%isc-1,grd%jsc-1).eq.grd%minlon_c) pfix=-grd%Lx
+    rhc(1)=grd%lon(grd%isc-1,js); rhc(2)=grd%lat(grd%isc-1,js)
+    rhc(3)=grd%lon(ie,je);        rhc(4)=grd%lat(ie,je)
+    inhs=ie+1; inhe=grd%ied; jnhs=js; jnhe=je
+    ice=min(grd%isc+nc_x,grd%ied)
+    if (ice>ie) then
+      edgecontact=.true.; ics=grd%isc; jcs=js; jce=je
+      clon=grd%lon(grd%isc-1,grd%jsc-1)
+    endif
+  case ("n")
+    is=grd%isd; ie=grd%ied; js=grd%jec-halo_width+2; je=grd%jed
+    rhc(1)=grd%lon(is,js-1);    rhc(2)=grd%lat(is,js-1)
+    rhc(3)=grd%lon(ie,grd%jec); rhc(4)=grd%lat(ie,grd%jec)
+    inhs=is; inhe=ie; jnhs=grd%jsd; jnhe=js-1
+    jcs=max(grd%jec-nc_y,grd%jsd+1)
+    if (jcs<js) then
+      edgecontact=.true.; ics=is; ice=ie; jce=grd%jec
+      clat=grd%lat(grd%iec,grd%jec)
+    endif
+  case ("s")
+    is=grd%isd; ie=grd%ied; js=grd%jsd; je=grd%jsc+halo_width-1
+    rhc(1)=grd%lon(is,grd%jsc-1); rhc(2)=grd%lat(is,grd%jsc-1)
+    rhc(3)=grd%lon(ie,je);        rhc(4)=grd%lat(ie,je)
+    inhs=is; inhe=ie; jnhs=je+1; jnhe=grd%jed
+    jce=min(grd%jsc+nc_y,grd%jed)
+    if (jce>je) then
+      edgecontact=.true.; ics=is; ice=ie; jcs=grd%jsc
+      clat=grd%lat(grd%isc-1,grd%jsc-1)
+    endif
+  case default
+    call error_mesg('mts_pack_in_dir', 'dir not specified correctly!', FATAL)
+  end select
+
+  !---MAIN ALGORITHM---:
+  !
+  !The packing procedure is split into the three routines below. A note on bookkeeping:
+  !
+  !-In routines 1 & 2, the sign of berg%id is used to mark if a berg has already been processed
+  !
+  !-The packing routines rely on knowing which neighboring PEs already contain (or will contain,
+  ! after sending) copies of a berg. The locations of copies are tracked using bergs%conglom_id, which
+  ! initially equals zero at the start of subroutine transfer_mts_bergs. Whenever a copy of a berg is
+  ! packed to send to a neighboring PE, the original berg’s conglom_id=conglom_id+a, where a is an integer
+  ! associated with the direction of the PE that the copy will reside (East=4, West=8, North=2, South=1).
+  ! The copy’s conglom_id=conglom_id+b, where b is the integer for the direction of the original
+  ! berg’s PE relative to the PE to which the copy will be sent. From a berg’s growing conglom_id, it is
+  ! possible to backtrack which neighboring PEs contain (or will contain after sending) a copy of the
+  ! berg by using the function mts_berg_sent, which is called in all routines below. Note: during the MTS
+  ! scheme, conglom_id is reset and repurposed for marking bergs that belong to the same conglomerate.
+
+  !1. Pack bergs to send to the neighboring PE in the given dir if they are in the
+  !   corresponding halo cells, or connected to bergs in the halo cells as a conglomerate.
+  do grdj=js,je; do grdi=is,ie
+    berg=>bergs%list(grdi,grdj)%first
+    do while (associated(berg))
+      if (berg%id>0) then !bergs that have already been processed are marked with negative berg%id
+        call mts_mark_and_pack_halo_and_congloms(bergs,berg,dir,nbergs_to_send,pfix,rhc)
+      endif
+      berg=>berg%next
+    enddo
+  enddo;enddo
+
+  !2. Find and pack bergs within contact distance of the bergs on the edge of the conglom
+  do grdj=js,je; do grdi=is,ie
+    berg=>bergs%list(grdi,grdj)%first
+    do while (associated(berg))
+      if (berg%id<0) then !berg was processed in 1. Will be reset to positive berg%id here.
+        call mts_pack_contact_bergs(bergs,berg,dir,pfix,nbergs_to_send,inhs,inhe,jnhs,jnhe)
+      endif
+      berg=>berg%next
+    enddo
+  enddo;enddo
+
+  !3. Find and pack bergs within contact distance to the closest possible coords on the neighbor
+  !   PE, to account for the possibility of a berg being located there.
+  if (edgecontact) then
+    do grdj=jcs,jce; do grdi=ics,ice
+      berg=>bergs%list(grdi,grdj)%first
+      do while (associated(berg))
+        !has the berg already been sent/packed in this dir?
+        if (.not. mts_berg_sent(berg%conglom_id,dir)) then
+          if (dir.eq."e" .or. dir.eq."w") then
+            dlon=berg%lon-clon; dlat=0.0 !lat_ref=berg%lat
+            if (grd%grid_is_latlon) dlon=dlon*pi_180*Rearth*cos(berg%lat*pi_180)
+          else
+            dlat=berg%lat-clat; dlon=0.0
+            if (grd%grid_is_latlon) dlat=dlat*pi_180*Rearth
+          endif
+          r_dist=dlat**2+dlon**2
+          if (r_dist<cds) then
+            current_conglom_id=berg%conglom_id; current_halo_id=berg%halo_berg
+            berg%halo_berg=10
+            nbergs_to_send=nbergs_to_send+1
+            select case (dir)
+            case ("s")
+              berg%conglom_id=2
+              call pack_berg_into_buffer2(berg, bergs%obuffer_s, nbergs_to_send, bergs%max_bonds)
+              berg%conglom_id=current_conglom_id+1
+            case ("n")
+              berg%conglom_id=1
+              call pack_berg_into_buffer2(berg, bergs%obuffer_n, nbergs_to_send, bergs%max_bonds)
+              berg%conglom_id=current_conglom_id+2
+            case ("w")
+              berg%lon=berg%lon-pfix; berg%conglom_id=4
+              call pack_berg_into_buffer2(berg, bergs%obuffer_w, nbergs_to_send, bergs%max_bonds)
+              berg%lon=berg%lon+pfix; berg%conglom_id=current_conglom_id+8
+            case ("e")
+              berg%lon=berg%lon-pfix; berg%conglom_id=8
+              call pack_berg_into_buffer2(berg, bergs%obuffer_e, nbergs_to_send, bergs%max_bonds)
+              berg%lon=berg%lon+pfix; berg%conglom_id=current_conglom_id+4
+            end select
+            berg%halo_berg=current_halo_id
+          endif
+        endif
+        berg=>berg%next
+      enddo
+    enddo;enddo
+  endif
+end subroutine mts_pack_in_dir
+
+!> Find, mark, and pack the halo and conglomerate bergs
+recursive subroutine mts_mark_and_pack_halo_and_congloms(bergs, berg, dir, nbergs_to_send,pfix, rhc)
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  type(iceberg), pointer :: berg !< Berg to pack
+  character(len=1) :: dir !< north,south,east,or west
+  integer :: nbergs_to_send !< Number of bergs to send
+  real :: pfix !<for periodicity
+  real :: rhc(4) !<lat/lon bounds of halo region for receiving cell
+  ! Local variables
+  type(iceberg), pointer :: other_berg
+  type(bond) , pointer :: current_bond
+  integer :: k !<bond counter
+  integer :: current_conglom_id
+  real :: current_halo_id
+
+  !pack the berg for transfer if it has not been packed already
+  if (.not. mts_berg_sent(berg%conglom_id,dir)) then
+    current_halo_id=berg%halo_berg; current_conglom_id=berg%conglom_id
+    nbergs_to_send=nbergs_to_send+1
+
+    if (berg%lon<rhc(1).or.berg%lat<rhc(2).or.berg%lon>rhc(3).or.berg%lat>rhc(4)) then
+      berg%halo_berg=max(2.,current_halo_id) !outside neighboring PE halo
+    else
+      berg%halo_berg=1 !inside neighboring PE halo
+    endif
+
+    select case (dir)
+    case ("e")
+      berg%conglom_id=8;                    berg%lon=berg%lon-pfix;
+      call pack_berg_into_buffer2(berg,bergs%obuffer_e, nbergs_to_send, bergs%max_bonds)
+      berg%conglom_id=current_conglom_id+4; berg%lon=berg%lon+pfix;
+    case ("w")
+      berg%conglom_id=4;                    berg%lon=berg%lon-pfix;
+      call pack_berg_into_buffer2(berg,bergs%obuffer_w, nbergs_to_send, bergs%max_bonds)
+      berg%conglom_id=current_conglom_id+8; berg%lon=berg%lon+pfix;
+    case ("n")
+      berg%conglom_id=1
+      call pack_berg_into_buffer2(berg,bergs%obuffer_n, nbergs_to_send, bergs%max_bonds)
+      berg%conglom_id=current_conglom_id+2
+    case ("s")
+      berg%conglom_id=2
+      call pack_berg_into_buffer2(berg,bergs%obuffer_s, nbergs_to_send, bergs%max_bonds)
+      berg%conglom_id=current_conglom_id+1
+    end select
+
+    berg%halo_berg=current_halo_id
+  endif
+
+  berg%id=-berg%id !marks that the berg has been processed
+
+  !process connected bergs:
+  k=0 !bond counter
+  current_bond=>berg%first_bond
+  do while (associated(current_bond))
+    k=k+1
+    if  (associated(current_bond%other_berg)) then
+      other_berg=>current_bond%other_berg
+      if (other_berg%id>0) then
+        call mts_mark_and_pack_halo_and_congloms(bergs,other_berg,dir,nbergs_to_send,pfix,rhc)
+      endif
+    endif
+    current_bond=>current_bond%next_bond
+  enddo
+
+  if (k.ne.bergs%max_bonds) then !mark the berg element as belonging to the outer layer of a conglomerate
+    berg%conglom_id=-berg%conglom_id
+  endif
+
+end subroutine mts_mark_and_pack_halo_and_congloms
+
+!> Pack the bergs within contact distance of conglom/halo bergs
+recursive subroutine mts_pack_contact_bergs(bergs, berg, dir, pfix, nbergs_to_send, inhs, inhe, jnhs, jnhe)
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  type(iceberg), pointer :: berg !< Berg to find contact with
+  character(len=1) :: dir !< north,south,east,or west
+  real :: pfix !< for periodicity
+  integer :: nbergs_to_send !< Number of bergs to send
+  integer :: inhs !< Start i bounds of non-halo domain, i.e. where contact bergs may exist
+  integer :: inhe !< End i bounds of non-halo domain, i.e. where contact bergs may exist
+  integer :: jnhs !< Start j bounds of non-halo domain, i.e. where contact bergs may exist
+  integer :: jnhe !< End j bounds of non-halo domain, i.e. where contact bergs may exist
+  ! Local variables
+  type(bond) , pointer :: current_bond
+  type(icebergs_gridded), pointer :: grd
+  type(iceberg), pointer :: other_berg
+  integer :: nc_x,nc_y,grdj,grdi,js,je,is,ie
+  integer :: current_conglom_id
+  logical :: radial_contact
+  real :: R1,R2,dlon,dlat,lat_ref,dx_dlon,dy_dlat,r_dist,crit_dist,current_halo_id
+  real :: rdenom
+  logical :: pack_contacts
+
+  pack_contacts=.false.
+  radial_contact=.false.
+  berg%id=-berg%id !unmark
+
+  if (berg%conglom_id<0) then
+    berg%conglom_id=-berg%conglom_id !unmark
+    grd=>bergs%grd
+    nc_x=bergs%contact_cells_lon; nc_y=bergs%contact_cells_lat
+    grdj=berg%jne; grdi=berg%ine
+    js=max(grdj-nc_y,jnhs); je=min(grdj+nc_y,jnhe)
+    is=max(grdi-nc_x,inhs); ie=min(grdi+nc_x,inhe)
+    !only pack contacs on computational domain (bergs on data domain already sent)
+    if (.not. (je<js .or. ie<is)) pack_contacts=.true.
+  endif
+
+  if (pack_contacts) then
+    if (bergs%hexagonal_icebergs) then
+      rdenom=1./(2.*sqrt(3.))
+    else
+      if (bergs%iceberg_bonds_on) then
+        rdenom=1./4.
+      else
+        rdenom=1./pi
+      endif
+    endif
+    if (nc_x.eq.1 .and. nc_y.eq.1) then
+      radial_contact=.true. !contact based on berg radii can occur
+      R1=sqrt(berg%length*berg%width*rdenom) !radius of current berg
+    else
+      crit_dist=bergs%contact_distance**2
+    endif
+
+    do grdj=js,je; do grdi=is,ie
+      other_berg=>bergs%list(grdi,grdj)%first
+      do while (associated(other_berg)) ! inner berg loop
+        if (other_berg%id>0) then
+          !has the berg already been sent/packed in this dir?
+          if (.not. mts_berg_sent(other_berg%conglom_id,dir)) then
+            if (radial_contact) then
+              R2=sqrt(other_berg%length*other_berg%width*rdenom)
+              crit_dist=max(R1+R2,bergs%contact_distance)**2
+            endif
+
+            if (grd%grid_is_latlon) then
+              lat_ref=0.5*(berg%lat+other_berg%lat)
+              dx_dlon=pi_180*Rearth*cos(lat_ref*pi_180); dy_dlat=pi_180*Rearth
+              dlon=berg%lon-other_berg%lon; dlat=berg%lat-other_berg%lat
+              r_dist=(dlon*dx_dlon)**2 + (dlat*dy_dlat)**2
+            else
+              r_dist=(berg%lon-other_berg%lon)**2 + (berg%lat-other_berg%lat)**2
+            endif
+
+            if (r_dist<crit_dist) then       !other_berg is within the contact distance
+              current_halo_id=other_berg%halo_berg; current_conglom_id=other_berg%conglom_id
+              other_berg%halo_berg=10
+              nbergs_to_send=nbergs_to_send+1
+              select case (dir)
+              case ("s")
+                other_berg%conglom_id=2
+                call pack_berg_into_buffer2(other_berg,bergs%obuffer_s, nbergs_to_send, bergs%max_bonds)
+                other_berg%conglom_id=current_conglom_id+1
+              case ("n")
+                other_berg%conglom_id=1
+                call pack_berg_into_buffer2(other_berg,bergs%obuffer_n, nbergs_to_send, bergs%max_bonds)
+                other_berg%conglom_id=current_conglom_id+2
+              case ("w")
+                other_berg%lon=other_berg%lon-pfix; other_berg%conglom_id=4
+                call pack_berg_into_buffer2(other_berg,bergs%obuffer_w, nbergs_to_send, bergs%max_bonds)
+                other_berg%lon=other_berg%lon+pfix; other_berg%conglom_id=current_conglom_id+8
+              case ("e")
+                other_berg%lon=other_berg%lon-pfix; other_berg%conglom_id=8
+                call pack_berg_into_buffer2(other_berg,bergs%obuffer_e, nbergs_to_send, bergs%max_bonds)
+                other_berg%lon=other_berg%lon+pfix; other_berg%conglom_id=current_conglom_id+4
+              end select
+              other_berg%halo_berg=current_halo_id
+            endif
+          endif
+        endif
+        other_berg=>other_berg%next
+      enddo !inner berg loop
+    enddo;enddo
+  endif
+
+  !process connected bergs:
+  current_bond=>berg%first_bond
+  do while (associated(current_bond))
+    if  (associated(current_bond%other_berg)) then
+      other_berg=>current_bond%other_berg
+      if (other_berg%id<0) then
+        call mts_pack_contact_bergs(bergs,other_berg,dir,pfix,nbergs_to_send,inhs,inhe,jnhs,jnhe)
+      endif
+    endif
+    current_bond=>current_bond%next_bond
+  enddo
+end subroutine mts_pack_contact_bergs
+
+!> For MTS scheme, determines if a berg has been packed to send to the neighboring PE in a given direction
+!! based on its evolving conglom_id from subroutines transfer_mts_bergs and mts_pack_in_dir
+logical function mts_berg_sent(conglom_id, dir)
+  integer :: conglom_id !< Id of conglomerate
+  character(len=1) :: dir !< Direction for sending
+
+  mts_berg_sent=.false.
+  select case (dir)
+  case ("e")
+    if (mod(conglom_id,8)>3) mts_berg_sent=.true.
+    if (ewsame) then
+      if (conglom_id>7) mts_berg_sent=.true.
+    endif
+  case ("w")
+    if (conglom_id>7) mts_berg_sent=.true.
+    if (ewsame) then
+      if (mod(conglom_id,8)>3) mts_berg_sent=.true.
+    endif
+  case ("n")
+    if (mod(conglom_id,4)>1) mts_berg_sent=.true.
+  case ("s")
+    if (mod(conglom_id,2).eq.1) mts_berg_sent=.true.
+  end select
+end function mts_berg_sent
+
+!> Clear and reassign conglom ids
+subroutine set_conglom_ids(bergs)
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  ! Local variables
+  type(icebergs_gridded), pointer :: grd
+  type(iceberg), pointer :: this
+  integer :: grdi,grdj,new_conglom_id
+
+  grd=>bergs%grd
+
+  !Reset all conglom ids to zero
+  do grdj = grd%jsd,grd%jed; do grdi = grd%isd,grd%ied
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+      this%conglom_id=0
+      this=>this%next
+    enddo
+  enddo;enddo
+
+  !Set the conglom_id for conglomerate bergs that overlap the computational domain
+  new_conglom_id=0
+  do grdj = grd%jsc,grd%jec; do grdi=grd%isc,grd%iec
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+      if (this%conglom_id.eq.0) then
+        new_conglom_id=new_conglom_id+1
+        this%conglom_id=new_conglom_id
+        call label_conglomerates(this,new_conglom_id)
+      endif
+      this=>this%next
+    enddo
+  enddo;enddo
+
+  if (bergs%use_broken_bonds_for_substep_contact) then
+    do grdj = grd%jsd,grd%jed; do grdi = grd%isd,grd%ied
+      this=>bergs%list(grdi,grdj)%first
+      do while (associated(this))
+        if (this%n_bonds<bergs%max_bonds) then
+          call remove_broken_bonds_between_congloms(this)
+        endif
+        this=>this%next
+      enddo
+    enddo;enddo
+  endif
+
+end subroutine set_conglom_ids
+
+!> Identify all bergs in the same conglomerate as the given berg, and assign them the given conglom_id
+recursive subroutine label_conglomerates(berg, new_conglom_id)
+  type(iceberg), pointer :: berg !< Berg to start search from
+  integer :: new_conglom_id !< Conglomerate id to assign
+  ! Local variables
+  type(iceberg), pointer :: other_berg
+  type(bond) , pointer :: current_bond
+
+  current_bond=>berg%first_bond
+
+  if (dem) then
+    do while (associated(current_bond))
+      if (current_bond%broken.ne.1) then
+        if  (associated(current_bond%other_berg)) then
+          other_berg=>current_bond%other_berg
+          if (other_berg%conglom_id.ne.new_conglom_id) then
+            other_berg%conglom_id=new_conglom_id
+            if (other_berg%halo_berg==10) other_berg%halo_berg=2
+            call label_conglomerates(other_berg,new_conglom_id)
+          endif
+        endif
+      endif
+      current_bond=>current_bond%next_bond
+    enddo
+  else
+    !same as above with no broken bond check
+    do while (associated(current_bond))
+      if  (associated(current_bond%other_berg)) then
+        other_berg=>current_bond%other_berg
+        if (other_berg%conglom_id.ne.new_conglom_id) then
+          other_berg%conglom_id=new_conglom_id
+          if (other_berg%halo_berg==10) other_berg%halo_berg=2
+          call label_conglomerates(other_berg,new_conglom_id)
+        endif
+      endif
+      current_bond=>current_bond%next_bond
+    enddo
+  endif
+end subroutine label_conglomerates
+
+!> Remove broken bonds between two different conglomerates
+subroutine remove_broken_bonds_between_congloms(berg)
+  type(iceberg), pointer :: berg !< Berg to start search from
+  ! Local variables
+  type(iceberg), pointer :: other_berg
+  type(bond) , pointer :: current_bond, other_bond, kick_the_bucket
+
+  current_bond=>berg%first_bond
+  do while (associated(current_bond))
+
+    if (current_bond%broken.eq.1) then
+      if  (associated(current_bond%other_berg)) then
+        other_berg=>current_bond%other_berg
+        if (other_berg%conglom_id.ne.berg%conglom_id) then
+          !broken bond exists between two different conglomerates
+          !remove matching bond from other berg
+          if (save_bond_forces .and. associated(current_bond%other_bond)) then
+            other_bond=>current_bond%other_bond
+            call delete_bond_from_list(other_berg,other_bond)
+          else
+            other_bond=>other_berg%first_bond
+            do while (associated(other_bond)) ! loop over all bonds
+              if (other_bond%other_id.eq.berg%id) then
+                kick_the_bucket=>other_bond
+                other_bond=>null()
+                call delete_bond_from_list(other_berg,kick_the_bucket)
+              else
+                other_bond=>other_bond%next_bond
+              endif
+            enddo
+          endif
+          !remove bond from current berg
+          kick_the_bucket=>current_bond
+          current_bond=>current_bond%next_bond
+          call delete_bond_from_list(berg,kick_the_bucket)
+        else
+          current_bond=>current_bond%next_bond
+        endif
+      else
+        current_bond=>current_bond%next_bond
+      endif
+    else
+      current_bond=>current_bond%next_bond
+    endif
+  enddo
+end subroutine remove_broken_bonds_between_congloms
+
+!> Keep only the bergs which are part of, or within contact distance of, a conglomerate that overlaps
+!! the computational domain, or which are halo_berg=1
+subroutine mts_remove_unused_bergs(bergs)
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  ! Local variables
+  type(icebergs_gridded), pointer :: grd
+  type(iceberg), pointer :: this,other_berg,kick_the_bucket
+  integer :: i,nc_x,nc_y,is,ie,js,je
+  integer :: grdi, grdj, grdi2, grdj2
+  logical :: contact,radial_contact
+  real :: lat1,lat2,lon1,lon2,dlon,dlat,dx_dlon,dy_dlat,lat_ref
+  real :: r_dist,crit_dist,R1,R2,rdenom
+
+  grd=>bergs%grd
+  nc_x=bergs%contact_cells_lon; nc_y=bergs%contact_cells_lat
+  if (nc_x.eq.1 .and. nc_y.eq.1) then
+    radial_contact=.true. !contact based on berg radii can occur
+    if (bergs%hexagonal_icebergs) then
+      rdenom=1./(2.*sqrt(3.))
+    else
+      if (bergs%iceberg_bonds_on) then
+        rdenom=1./4.
+      else
+        rdenom=1./pi
+      endif
+    endif
+  else
+    radial_contact=.false.
+    crit_dist=bergs%contact_distance**2
+  endif
+
+  do i =1,4
+    select case (i) !halo cells on each side of the current PE
+    case (1)
+      is=grd%isd+1; ie=grd%isc-1; js=grd%jsd+1; je=grd%jed
+    case (2)
+      is=grd%iec+1; ie=grd%ied;   js=grd%jsd+1; je=grd%jed
+    case (3)
+      is=grd%isc;   ie=grd%iec;   js=grd%jsd+1; je=grd%jsc-1
+    case (4)
+      is=grd%isc;   ie=grd%iec;   js=grd%jec+1; je=grd%jed
+    end select
+
+    ! Loop over the current PE's halo cells
+    do grdj = js,je ;  do grdi = is,ie
+      this=>bergs%list(grdi,grdj)%first
+      do while (associated(this))
+        if (this%halo_berg<2 .or. this%conglom_id>0) then !keep true halo and congloms bergs
+          this=>this%next
+        else !if not a halo/conglom berg, then test if w/in contact dist to a conglom/halo berg
+          contact=.false.
+          lat1=this%lat; lon1=this%lon
+          if (radial_contact) R1=sqrt(this%length*this%width*rdenom) !radius of current berg
+          do grdj2=max(grdj-nc_y,grd%jsd+1),min(grdj+nc_y,grd%jed)
+            do grdi2=max(grdi-nc_x,grd%isd+1),min(grdi+nc_x,grd%ied)
+              other_berg=>bergs%list(grdi2,grdj2)%first
+              do while (associated(other_berg))
+                if (other_berg%conglom_id>0) then !test contact w/ conglom berg
+                  lat2=other_berg%lat; lon2=other_berg%lon
+                  dlon=lon2-lon1; dlat=lat2-lat1
+                  if (radial_contact) then
+                    R2=sqrt(other_berg%length*other_berg%width*rdenom)
+                    crit_dist=max(R1+R2,bergs%contact_distance)**2
+                  endif
+                  if (bergs%grd%grid_is_latlon) then
+                    lat_ref=0.5*(lat1+lat2)
+                    dx_dlon=pi_180*Rearth*cos(lat_ref*pi_180); dy_dlat=pi_180*Rearth
+                    r_dist=(dlon*dx_dlon)**2 + (dlat*dy_dlat)**2
+                  else
+                    r_dist=dlon**2 + dlat**2
+                  endif
+                  if (r_dist<crit_dist) then
+                    contact=.true.
+                    exit
+                  endif
+                endif
+                other_berg=>other_berg%next
+              enddo
+              if (contact) exit
+            enddo
+            if (contact) exit
+          enddo
+
+          if (.not. contact) then  !remove if not w/in contact dist to a true halo/conglom berg
+            kick_the_bucket=>this
+            this=>this%next
+            call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
+          else
+            this%halo_berg=10 !contact berg
+            this=>this%next
+          endif
+        endif
+      enddo
+    enddo; enddo
+  enddo
+end subroutine mts_remove_unused_bergs
+
+!> For MTS velocity verlet, the send and receive call for for transfer_mts_bergs
+subroutine mts_send_and_receive(bergs, nbergs_to_send_e, nbergs_to_send_w, nbergs_to_send_n, nbergs_to_send_s)
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  integer :: nbergs_to_send_e !< Number of bergs to send to the east
+  integer :: nbergs_to_send_w !< Number of bergs to send to the west
+  integer :: nbergs_to_send_n !< Number of bergs to send to the north
+  integer :: nbergs_to_send_s !< Number of bergs to send to the south
+  ! Local vars
+  type(icebergs_gridded), pointer :: grd
+  integer :: nbergs_rcvd_from_e, nbergs_rcvd_from_w, nbergs_rcvd_from_n, nbergs_rcvd_from_s
+  integer :: i,stderrunit
+
+  ! Get the stderr unit number
+  stderrunit = stderr()
+
+  ! For convenience
+  grd=>bergs%grd
+
+  ! Send bergs east
+  if (grd%pe_E.ne.NULL_PE) then
+    call mpp_send(nbergs_to_send_e, plen=1, to_pe=grd%pe_E, tag=COMM_TAG_1)
+    if (nbergs_to_send_e.gt.0) then
+      call mpp_send(bergs%obuffer_e%data, nbergs_to_send_e*buffer_width, grd%pe_E, tag=COMM_TAG_2)
+    endif
+  endif
+
+  ! Send bergs west
+  if (grd%pe_W.ne.NULL_PE) then
+    call mpp_send(nbergs_to_send_w, plen=1, to_pe=grd%pe_W, tag=COMM_TAG_3)
+    if (nbergs_to_send_w.gt.0) then
+      call mpp_send(bergs%obuffer_w%data, nbergs_to_send_w*buffer_width, grd%pe_W, tag=COMM_TAG_4)
+    endif
+  endif
+
+  ! Receive bergs from west
+  if (grd%pe_W.ne.NULL_PE) then
+    nbergs_rcvd_from_w=-999
+    call mpp_recv(nbergs_rcvd_from_w, glen=1, from_pe=grd%pe_W, tag=COMM_TAG_1)
+    if (nbergs_rcvd_from_w.lt.0) then
+      write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_w,' from',grd%pe_W,' (W) !!!!!'
+    endif
+    if (nbergs_rcvd_from_w.gt.0) then
+      call increase_ibuffer(bergs%ibuffer_w, nbergs_rcvd_from_w,buffer_width)
+      call mpp_recv(bergs%ibuffer_w%data, nbergs_rcvd_from_w*buffer_width, grd%pe_W, tag=COMM_TAG_2)
+      do i=1, nbergs_rcvd_from_w
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_w, i, grd, max_bonds_in=bergs%max_bonds )
+      enddo
+    endif
+  else
+    nbergs_rcvd_from_w=0
+  endif
+
+  ! Receive bergs from east
+  if (grd%pe_E.ne.NULL_PE) then
+    nbergs_rcvd_from_e=-999
+    call mpp_recv(nbergs_rcvd_from_e, glen=1, from_pe=grd%pe_E, tag=COMM_TAG_3)
+    if (nbergs_rcvd_from_e.lt.0) then
+      write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_e,' from',grd%pe_E,' (E) !!!!!'
+    endif
+    if (nbergs_rcvd_from_e.gt.0) then
+      call increase_ibuffer(bergs%ibuffer_e, nbergs_rcvd_from_e,buffer_width)
+      call mpp_recv(bergs%ibuffer_e%data, nbergs_rcvd_from_e*buffer_width, grd%pe_E, tag=COMM_TAG_4)
+      do i=1, nbergs_rcvd_from_e
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_e, i, grd, max_bonds_in=bergs%max_bonds )
+      enddo
+    endif
+  else
+    nbergs_rcvd_from_e=0
+  endif
+
+  call mpp_sync_self()
+
+  ! Send bergs north
+  if (grd%pe_N.ne.NULL_PE) then
+    if(folded_north_on_pe) then
+      call mpp_send(nbergs_to_send_n, plen=1, to_pe=grd%pe_N, tag=COMM_TAG_9)
+    else
+      call mpp_send(nbergs_to_send_n, plen=1, to_pe=grd%pe_N, tag=COMM_TAG_5)
+    endif
+    if (nbergs_to_send_n.gt.0) then
+      if(folded_north_on_pe) then
+        call mpp_send(bergs%obuffer_n%data, nbergs_to_send_n*buffer_width, grd%pe_N, tag=COMM_TAG_10)
+      else
+        call mpp_send(bergs%obuffer_n%data, nbergs_to_send_n*buffer_width, grd%pe_N, tag=COMM_TAG_6)
+      endif
+    endif
+  endif
+
+  ! Send bergs south
+  if (grd%pe_S.ne.NULL_PE) then
+    call mpp_send(nbergs_to_send_s, plen=1, to_pe=grd%pe_S, tag=COMM_TAG_7)
+    if (nbergs_to_send_s.gt.0) then
+      call mpp_send(bergs%obuffer_s%data, nbergs_to_send_s*buffer_width, grd%pe_S, tag=COMM_TAG_8)
+    endif
+  endif
+
+  ! Receive bergs from south
+  if (grd%pe_S.ne.NULL_PE) then
+    nbergs_rcvd_from_s=-999
+    call mpp_recv(nbergs_rcvd_from_s, glen=1, from_pe=grd%pe_S, tag=COMM_TAG_5)
+    if (nbergs_rcvd_from_s.lt.0) then
+      write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_s,' from',grd%pe_S,' (S) !!!!!'
+    endif
+    if (nbergs_rcvd_from_s.gt.0) then
+      call increase_ibuffer(bergs%ibuffer_s, nbergs_rcvd_from_s,buffer_width)
+      call mpp_recv(bergs%ibuffer_s%data, nbergs_rcvd_from_s*buffer_width, grd%pe_S, tag=COMM_TAG_6)
+      do i=1, nbergs_rcvd_from_s
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_s, i, grd, max_bonds_in=bergs%max_bonds  )
+      enddo
+    endif
+  else
+    nbergs_rcvd_from_s=0
+  endif
+
+  ! Receive bergs from north
+  if (grd%pe_N.ne.NULL_PE) then
+    nbergs_rcvd_from_n=-999
+    if(folded_north_on_pe) then
+      call mpp_recv(nbergs_rcvd_from_n, glen=1, from_pe=grd%pe_N, tag=COMM_TAG_9)
+    else
+      call mpp_recv(nbergs_rcvd_from_n, glen=1, from_pe=grd%pe_N, tag=COMM_TAG_7)
+    endif
+    if (nbergs_rcvd_from_n.lt.0) then
+      write(stderrunit,*) 'pe=',mpp_pe(),' received a bad number',nbergs_rcvd_from_n,' from',grd%pe_N,' (N) !!!!!'
+    endif
+    if (nbergs_rcvd_from_n.gt.0) then
+      call increase_ibuffer(bergs%ibuffer_n, nbergs_rcvd_from_n,buffer_width)
+      if(folded_north_on_pe) then
+        call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_10)
+      else
+        call mpp_recv(bergs%ibuffer_n%data, nbergs_rcvd_from_n*buffer_width, grd%pe_N, tag=COMM_TAG_8)
+      endif
+      do i=1, nbergs_rcvd_from_n
+        call unpack_berg_from_buffer2(bergs, bergs%ibuffer_n, i, grd, max_bonds_in=bergs%max_bonds )
+      enddo
+    endif
+  else
+    nbergs_rcvd_from_n=0
+  endif
+
+  call mpp_sync_self()
+end subroutine mts_send_and_receive
+
 
 !> Destroys all bergs in a list
 subroutine delete_all_bergs_in_list(bergs, grdj, grdi)
@@ -1591,14 +3036,14 @@ integer :: grdi, grdj
           this=>this%next
           nbergs_to_send_e=nbergs_to_send_e+1
           call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_e, nbergs_to_send_e, bergs%max_bonds  )
-          call move_trajectory(bergs, kick_the_bucket)
+          if (.not. bergs%debug_write) call move_trajectory(bergs, kick_the_bucket)
           call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
         elseif (this%ine.lt.bergs%grd%isc) then
           kick_the_bucket=>this
           this=>this%next
           nbergs_to_send_w=nbergs_to_send_w+1
           call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_w, nbergs_to_send_w, bergs%max_bonds  )
-          call move_trajectory(bergs, kick_the_bucket)
+          if (.not. bergs%debug_write) call move_trajectory(bergs, kick_the_bucket)
           call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
         else
           this=>this%next
@@ -1676,14 +3121,14 @@ integer :: grdi, grdj
           this=>this%next
           nbergs_to_send_n=nbergs_to_send_n+1
           call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_n, nbergs_to_send_n,bergs%max_bonds)
-          call move_trajectory(bergs, kick_the_bucket)
+          if (.not. bergs%debug_write) call move_trajectory(bergs, kick_the_bucket)
           call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
         elseif (this%jne.lt.bergs%grd%jsc) then
           kick_the_bucket=>this
           this=>this%next
           nbergs_to_send_s=nbergs_to_send_s+1
           call pack_berg_into_buffer2(kick_the_bucket, bergs%obuffer_s, nbergs_to_send_s,bergs%max_bonds)
-          call move_trajectory(bergs, kick_the_bucket)
+          if (.not. bergs%debug_write) call move_trajectory(bergs, kick_the_bucket)
           call delete_iceberg_from_list(bergs%list(grdi,grdj)%first,kick_the_bucket)
         else
           this=>this%next
@@ -1767,19 +3212,19 @@ integer :: grdi, grdj
     i=nbergs_rcvd_from_n+nbergs_rcvd_from_s+nbergs_rcvd_from_e+nbergs_rcvd_from_w &
      -nbergs_to_send_n-nbergs_to_send_s-nbergs_to_send_e-nbergs_to_send_w
     if (nbergs_end-(nbergs_start+i).ne.0) then
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_end=',nbergs_end,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_start=',nbergs_start,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_bergs_to_other_pes: delta=',i,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_bergs_to_other_pes: error=',nbergs_end-(nbergs_start+i),' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_to_send_n=',nbergs_to_send_n,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_to_send_s=',nbergs_to_send_s,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_to_send_e=',nbergs_to_send_e,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_to_send_w=',nbergs_to_send_w,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_rcvd_from_n=',nbergs_rcvd_from_n,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_rcvd_from_s=',nbergs_rcvd_from_s,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_rcvd_from_e=',nbergs_rcvd_from_e,' on PE',mpp_pe()
-      write(stderrunit,'(a,i4,a,i4)') 'diamonds, send_bergs_to_other_pes: nbergs_rcvd_from_w=',nbergs_rcvd_from_w,' on PE',mpp_pe()
-      call error_mesg('diamonds, send_bergs_to_other_pes:', 'We lost some bergs!', FATAL)
+      write(stderrunit,'(a,i4,a,i4)') 'KID, send_bergs_to_other_pes: nbergs_end=',nbergs_end,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, send_bergs_to_other_pes: nbergs_start=',nbergs_start,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, send_bergs_to_other_pes: delta=',i,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, send_bergs_to_other_pes: error=',nbergs_end-(nbergs_start+i),' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, send_bergs_to_other_pes: nbergs_to_send_n=',nbergs_to_send_n,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, send_bergs_to_other_pes: nbergs_to_send_s=',nbergs_to_send_s,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, send_bergs_to_other_pes: nbergs_to_send_e=',nbergs_to_send_e,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, send_bergs_to_other_pes: nbergs_to_send_w=',nbergs_to_send_w,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, send_bergs_to_other_pes: nbergs_rcvd_from_n=',nbergs_rcvd_from_n,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, send_bergs_to_other_pes: nbergs_rcvd_from_s=',nbergs_rcvd_from_s,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, send_bergs_to_other_pes: nbergs_rcvd_from_e=',nbergs_rcvd_from_e,' on PE',mpp_pe()
+      write(stderrunit,'(a,i4,a,i4)') 'KID, send_bergs_to_other_pes: nbergs_rcvd_from_w=',nbergs_rcvd_from_w,' on PE',mpp_pe()
+      call error_mesg('KID, send_bergs_to_other_pes:', 'We lost some bergs!', FATAL)
     endif
   endif
 
@@ -1798,8 +3243,8 @@ integer :: grdi, grdj
     enddo ; enddo
     call mpp_sum(i)
     if (i>0 .and. mpp_pe()==mpp_root_pe()) then
-      write(stderrunit,'(a,i4)') 'diamonds, send_bergs_to_other_pes: # of bergs outside computational domain = ',i
-      call error_mesg('diamonds, send_bergs_to_other_pes:', 'there are bergs still in halos!', FATAL)
+      write(stderrunit,'(a,i4)') 'KID, send_bergs_to_other_pes: # of bergs outside computational domain = ',i
+      call error_mesg('KID, send_bergs_to_other_pes:', 'there are bergs still in halos!', FATAL)
     endif ! root_pe
   endif ! debug
 
@@ -1813,7 +3258,7 @@ subroutine pack_berg_into_buffer2(berg, buff, n, max_bonds_in)
 type(iceberg), pointer :: berg !< Iceberg to pack into buffer
 type(buffer), pointer :: buff !< Buffer to pack berg into
 integer, intent(in) :: n !< Position in buffer to place berg
-integer, optional :: max_bonds_in !< <undocumented>
+integer, optional :: max_bonds_in !< undocumented
 !integer, intent(in) :: max_bonds  ! Change this later
 ! Local variables
 integer :: counter, k, max_bonds, id_cnt, id_ij
@@ -1830,6 +3275,8 @@ type(bond), pointer :: current_bond
   call push_buffer_value(buff%data(:,n), counter, berg%lat)
   call push_buffer_value(buff%data(:,n), counter, berg%uvel)
   call push_buffer_value(buff%data(:,n), counter, berg%vvel)
+  call push_buffer_value(buff%data(:,n), counter, berg%uvel_prev)
+  call push_buffer_value(buff%data(:,n), counter, berg%vvel_prev)
   call push_buffer_value(buff%data(:,n), counter, berg%xi)
   call push_buffer_value(buff%data(:,n), counter, berg%yj)
   call push_buffer_value(buff%data(:,n), counter, berg%start_lon)
@@ -1841,8 +3288,11 @@ type(bond), pointer :: current_bond
   call push_buffer_value(buff%data(:,n), counter, berg%thickness)
   call push_buffer_value(buff%data(:,n), counter, berg%width)
   call push_buffer_value(buff%data(:,n), counter, berg%length)
+  call push_buffer_value(buff%data(:,n), counter, berg%fl_k)
   call push_buffer_value(buff%data(:,n), counter, berg%mass_scaling)
   call push_buffer_value(buff%data(:,n), counter, berg%mass_of_bits)
+  call push_buffer_value(buff%data(:,n), counter, berg%mass_of_fl_bits)
+  call push_buffer_value(buff%data(:,n), counter, berg%mass_of_fl_bergy_bits)
   call push_buffer_value(buff%data(:,n), counter, berg%heat_density)
   call push_buffer_value(buff%data(:,n), counter, berg%ine)
   call push_buffer_value(buff%data(:,n), counter, berg%jne)
@@ -1855,6 +3305,37 @@ type(bond), pointer :: current_bond
   call split_id(berg%id, id_cnt, id_ij)
   call push_buffer_value(buff%data(:,n), counter, id_cnt)
   call push_buffer_value(buff%data(:,n), counter, id_ij)
+  call push_buffer_value(buff%data(:,n), counter, berg%od)
+
+  if (mts) then
+    call push_buffer_value(buff%data(:,n), counter, berg%conglom_id)
+    call push_buffer_value(buff%data(:,n), counter, berg%axn_fast)
+    call push_buffer_value(buff%data(:,n), counter, berg%ayn_fast)
+    call push_buffer_value(buff%data(:,n), counter, berg%bxn_fast)
+    call push_buffer_value(buff%data(:,n), counter, berg%byn_fast)
+    call push_buffer_value(buff%data(:,n), counter, berg%uo)
+    call push_buffer_value(buff%data(:,n), counter, berg%vo)
+    call push_buffer_value(buff%data(:,n), counter, berg%ua)
+    call push_buffer_value(buff%data(:,n), counter, berg%va)
+    call push_buffer_value(buff%data(:,n), counter, berg%ui)
+    call push_buffer_value(buff%data(:,n), counter, berg%vi)
+    call push_buffer_value(buff%data(:,n), counter, berg%ssh_x)
+    call push_buffer_value(buff%data(:,n), counter, berg%ssh_y)
+    call push_buffer_value(buff%data(:,n), counter, berg%sst)
+    call push_buffer_value(buff%data(:,n), counter, berg%sss)
+    call push_buffer_value(buff%data(:,n), counter, berg%cn)
+    call push_buffer_value(buff%data(:,n), counter, berg%hi)
+  endif
+
+  if (iceberg_bonds_on) then
+    call push_buffer_value(buff%data(:,n), counter, berg%n_bonds)
+  end if
+
+  if (dem) then
+    call push_buffer_value(buff%data(:,n), counter, berg%ang_vel)
+    call push_buffer_value(buff%data(:,n), counter, berg%ang_accel)
+    call push_buffer_value(buff%data(:,n), counter, berg%rot)
+  endif
 
   if (max_bonds .gt. 0) then
     current_bond=>berg%first_bond
@@ -1865,12 +3346,33 @@ type(bond), pointer :: current_bond
         call push_buffer_value(buff%data(:,n), counter, id_ij)
         call push_buffer_value(buff%data(:,n), counter, current_bond%other_berg_ine)
         call push_buffer_value(buff%data(:,n), counter, current_bond%other_berg_jne)
+        call push_buffer_value(buff%data(:,n), counter, current_bond%length)
+
+        if (dem) then
+          call push_buffer_value(buff%data(:,n), counter, current_bond%tangd1)
+          call push_buffer_value(buff%data(:,n), counter, current_bond%tangd2)
+          call push_buffer_value(buff%data(:,n), counter, current_bond%nstress)
+          call push_buffer_value(buff%data(:,n), counter, current_bond%sstress)
+          call push_buffer_value(buff%data(:,n), counter, current_bond%rel_rotation)
+          call push_buffer_value(buff%data(:,n), counter, current_bond%broken)
+        endif
+
         current_bond=>current_bond%next_bond
       else
         call push_buffer_value(buff%data(:,n), counter, 0)
         call push_buffer_value(buff%data(:,n), counter, 0)
         call push_buffer_value(buff%data(:,n), counter, 0)
         call push_buffer_value(buff%data(:,n), counter, 0)
+        call push_buffer_value(buff%data(:,n), counter, 0)
+
+        if (dem) then
+          call push_buffer_value(buff%data(:,n), counter, 0)
+          call push_buffer_value(buff%data(:,n), counter, 0)
+          call push_buffer_value(buff%data(:,n), counter, 0)
+          call push_buffer_value(buff%data(:,n), counter, 0)
+          call push_buffer_value(buff%data(:,n), counter, 0)
+          call push_buffer_value(buff%data(:,n), counter, 0)
+        endif
       endif
     enddo
   endif
@@ -1930,9 +3432,10 @@ subroutine pull_buffer_ivalue(vbuf, counter, val)
 
 end subroutine pull_buffer_ivalue
 
+!> Nullify the other_berg pointer for a bond pointing to the current berg
 subroutine clear_berg_from_partners_bonds(berg)
 ! Arguments
-type(iceberg), intent(in), pointer :: berg
+type(iceberg), intent(in), pointer :: berg !< Iceberg to clear from partner bonds
 ! Local variables
 type(iceberg), pointer :: other_berg
 type(bond), pointer :: current_bond, matching_bond
@@ -1951,13 +3454,16 @@ stderrunit = stderr()
           !write(stderrunit,*) , 'Clearing', berg%id, matching_bond%other_id,other_berg%id, mpp_pe()
           matching_bond%other_berg=>null()
           matching_bond=>null()
+          if (iceberg_bonds_on) then !should not find bonds unless they are on anyway, but just to be safe...
+            if (other_berg%n_bonds>0) other_berg%n_bonds=other_berg%n_bonds-1
+          endif
         else
           matching_bond=>matching_bond%next_bond
         endif
       enddo
     else
      ! Note: This is meant to be unmatched after you have cleared the first berg
-     ! call error_mesg('diamonds, clear berg from partners', 'The bond you are trying to clear is unmatched!', WARNING)
+     ! call error_mesg('KID, clear berg from partners', 'The bond you are trying to clear is unmatched!', WARNING)
     endif
     current_bond=>current_bond%next_bond
   enddo !End loop over bonds
@@ -1971,37 +3477,45 @@ type(icebergs), pointer :: bergs !< Container for all types and memory
 type(buffer), pointer :: buff !< Buffer from which to unpack berg
 integer, intent(in) :: n !< Position in buffer to unpack
 type(icebergs_gridded), pointer :: grd !< Container for gridded fields
-logical, optional :: force_append !< <undocumented>
-integer, optional :: max_bonds_in !< <undocumented>
+logical, optional :: force_append !< undocumented
+integer, optional :: max_bonds_in !< undocumented
 ! Local variables
 !real :: lon, lat, uvel, vvel, xi, yj
 !real :: start_lon, start_lat, start_day, start_mass
 !integer :: ine, jne, start_year
 logical :: lres
 type(iceberg) :: localberg
-type(iceberg), pointer :: this
+type(iceberg), pointer :: this,kick_the_bucket
+type(bond) , pointer :: current_bond
 integer :: other_berg_ine, other_berg_jne
 integer :: counter, k, max_bonds, id_cnt, id_ij
 integer(kind=8) :: id
 integer :: stderrunit
-logical :: force_app
-logical :: quick
+logical :: force_app,duplicate
+real :: temp_lon,temp_lat,length
 
   ! Get the stderr unit number
   stderrunit = stderr()
 
-  quick=.false.
   max_bonds=0
   if (present(max_bonds_in)) max_bonds=max_bonds_in
 
   force_app = .false.
   if(present(force_append)) force_app = force_append
 
+  if (mts) allocate(localberg%axn_fast,localberg%ayn_fast,localberg%bxn_fast,localberg%byn_fast,localberg%conglom_id)
+
+  if (iceberg_bonds_on) allocate(localberg%n_bonds)
+
+  if (dem) allocate(localberg%ang_vel,localberg%ang_accel,localberg%rot)
+
   counter = 0
   call pull_buffer_value(buff%data(:,n), counter, localberg%lon)
   call pull_buffer_value(buff%data(:,n), counter, localberg%lat)
   call pull_buffer_value(buff%data(:,n), counter, localberg%uvel)
   call pull_buffer_value(buff%data(:,n), counter, localberg%vvel)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%uvel_prev)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%vvel_prev)
   call pull_buffer_value(buff%data(:,n), counter, localberg%xi)
   call pull_buffer_value(buff%data(:,n), counter, localberg%yj)
   call pull_buffer_value(buff%data(:,n), counter, localberg%start_lon)
@@ -2013,8 +3527,11 @@ logical :: quick
   call pull_buffer_value(buff%data(:,n), counter, localberg%thickness)
   call pull_buffer_value(buff%data(:,n), counter, localberg%width)
   call pull_buffer_value(buff%data(:,n), counter, localberg%length)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%fl_k)
   call pull_buffer_value(buff%data(:,n), counter, localberg%mass_scaling)
   call pull_buffer_value(buff%data(:,n), counter, localberg%mass_of_bits)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%mass_of_fl_bits)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%mass_of_fl_bergy_bits)
   call pull_buffer_value(buff%data(:,n), counter, localberg%heat_density)
   call pull_buffer_value(buff%data(:,n), counter, localberg%ine)
   call pull_buffer_value(buff%data(:,n), counter, localberg%jne)
@@ -2027,6 +3544,37 @@ logical :: quick
   call pull_buffer_value(buff%data(:,n), counter, id_cnt)
   call pull_buffer_value(buff%data(:,n), counter, id_ij)
   localberg%id = id_from_2_ints(id_cnt, id_ij)
+  call pull_buffer_value(buff%data(:,n), counter, localberg%od)
+
+  if (bergs%mts) then
+    call pull_buffer_value(buff%data(:,n), counter, localberg%conglom_id)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%axn_fast)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%ayn_fast)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%bxn_fast)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%byn_fast)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%uo)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%vo)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%ua)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%va)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%ui)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%vi)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%ssh_x)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%ssh_y)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%sst)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%sss)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%cn)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%hi)
+  endif
+
+  if (iceberg_bonds_on) then
+    call pull_buffer_value(buff%data(:,n), counter, localberg%n_bonds)
+  endif
+
+  if (dem) then
+    call pull_buffer_value(buff%data(:,n), counter, localberg%ang_vel)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%ang_accel)
+    call pull_buffer_value(buff%data(:,n), counter, localberg%rot)
+  endif
 
   !These quantities no longer need to be passed between processors
   localberg%uvel_old=localberg%uvel
@@ -2034,36 +3582,97 @@ logical :: quick
   localberg%lon_old=localberg%lon
   localberg%lat_old=localberg%lat
 
-  ! force_app=.true.
-  if(force_app) then !force append with origin ine,jne (for I/O)
-    call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg, quick, this)
-  else
-    lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+  !when using MTS Verlet, iceberg elements that are part of a conglomerate may lie outside
+  !of the PE's grid. They are assigned to the berg list of the nearest halo cell.
+  !The global (lon/lat) and local (xi,yi) coords of these elements are not adjusted.
+  if (bergs%mts .and. abs(localberg%halo_berg)>1) then
+    temp_lon = localberg%lon; temp_lat = localberg%lat
+
+    if (temp_lon > grd%lon(grd%ied,grd%jed)) then
+      temp_lon = grd%lonc(grd%ied,grd%jed)
+    elseif (temp_lon < grd%lon(grd%isd,grd%jsd)) then
+      temp_lon = grd%lonc(grd%isd+1,grd%jsd+1)
+    endif
+    if (temp_lat > grd%lat(grd%ied,grd%jed)) then
+      temp_lat = grd%latc(grd%ied,grd%jed)
+    elseif (temp_lat < grd%lat(grd%isd,grd%jsd)) then
+      temp_lat = grd%latc(grd%isd+1,grd%jsd+1)
+    endif
+
+    lres=find_cell_wide(grd, temp_lon, temp_lat, localberg%ine, localberg%jne)
     if (lres) then
-      lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
-      call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg,quick,this)
+      call unpack_duplicate_check(bergs,localberg,duplicate)
+      if (duplicate) return
+      call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg,this)
     else
-      lres=find_cell_wide(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+      write(stderrunit,'("KID, unpack_berg_from_buffer pe=(",i3,a,2i4,a,2f8.2)')&
+        & mpp_pe(),') Failed to find i,j=',localberg%ine,localberg%jne,&
+        ' for mts conglom berg lon,lat=',temp_lon, temp_lat
+      write(stderrunit,*) temp_lon, temp_lat
+      write(stderrunit,*) localberg%uvel,localberg%vvel
+      write(stderrunit,*) localberg%axn,localberg%ayn !Alon
+      write(stderrunit,*) localberg%bxn,localberg%byn !Alon
+      if (bergs%mts) then
+        write(stderrunit,*) localberg%axn_fast,localberg%ayn_fast !Alex
+        write(stderrunit,*) localberg%bxn_fast,localberg%byn_fast !Alex
+      endif
+      write(stderrunit,*) localberg%uvel_old,localberg%vvel_old
+      write(stderrunit,*) localberg%lon_old,localberg%lat_old
+      write(stderrunit,*) grd%isc,grd%iec,grd%jsc,grd%jec
+      write(stderrunit,*) grd%isd,grd%ied,grd%jsd,grd%jed
+      write(stderrunit,*) grd%lon(grd%isc-1,grd%jsc-1),grd%lon(grd%iec,grd%jsc)
+      write(stderrunit,*) grd%lat(grd%isc-1,grd%jsc-1),grd%lat(grd%iec,grd%jec)
+      write(stderrunit,*) grd%lon(grd%isd,grd%jsd),grd%lon(grd%ied,grd%jsd)
+      write(stderrunit,*) grd%lat(grd%isd,grd%jsd),grd%lat(grd%ied,grd%jed)
+      write(stderrunit,*) temp_lat,temp_lon
+      write(stderrunit,*) lres
+      call error_mesg('KID, unpack_berg_from_buffer', 'can not find a cell to place berg in!', FATAL)
+    endif
+  else
+    ! force_app=.true.
+    if(force_app) then !force append with origin ine,jne (for I/O)
+      call unpack_duplicate_check(bergs,localberg,duplicate)
+      if (duplicate) return
+      call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg, this)
+    else
+      ! lres=find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+      !this version is faster, by checking if current ine and jne are appropriate before searching rest of cells.
+      lres=check_and_find_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
       if (lres) then
+        call unpack_duplicate_check(bergs,localberg,duplicate)
+        if (duplicate) return
         lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
-        call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg,quick,this)
+        call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg,this)
       else
-        write(stderrunit,'("diamonds, unpack_berg_from_buffer pe=(",i3,a,2i4,a,2f8.2)')&
-         & mpp_pe(),') Failed to find i,j=',localberg%ine,localberg%jne,' for lon,lat=',localberg%lon,localberg%lat
-        write(stderrunit,*) localberg%lon,localberg%lat
-        write(stderrunit,*) localberg%uvel,localberg%vvel
-        write(stderrunit,*) localberg%axn,localberg%ayn !Alon
-        write(stderrunit,*) localberg%bxn,localberg%byn !Alon
-        write(stderrunit,*) localberg%uvel_old,localberg%vvel_old
-        write(stderrunit,*) localberg%lon_old,localberg%lat_old
-        write(stderrunit,*) grd%isc,grd%iec,grd%jsc,grd%jec
-        write(stderrunit,*) grd%isd,grd%ied,grd%jsd,grd%jed
-        write(stderrunit,*) grd%lon(grd%isc-1,grd%jsc-1),grd%lon(grd%iec,grd%jsc)
-        write(stderrunit,*) grd%lat(grd%isc-1,grd%jsc-1),grd%lat(grd%iec,grd%jec)
-        write(stderrunit,*) grd%lon(grd%isd,grd%jsd),grd%lon(grd%ied,grd%jsd)
-        write(stderrunit,*) grd%lat(grd%isd,grd%jsd),grd%lat(grd%ied,grd%jed)
-        write(stderrunit,*) lres
-        call error_mesg('diamonds, unpack_berg_from_buffer', 'can not find a cell to place berg in!', FATAL)
+        lres=find_cell_wide(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne)
+        if (lres) then
+          call unpack_duplicate_check(bergs,localberg,duplicate)
+          if (duplicate) return
+          lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
+          call add_new_berg_to_list(bergs%list(localberg%ine,localberg%jne)%first, localberg,this)
+        else
+          write(stderrunit,'("KID, unpack_berg_from_buffer pe=(",i3,a,2i4,a,2f8.2)')&
+            & mpp_pe(),') Failed to find i,j=',localberg%ine,localberg%jne,' for lon,lat=',localberg%lon,localberg%lat
+          write(stderrunit,*) localberg%halo_berg
+          write(stderrunit,*) localberg%lon,localberg%lat
+          write(stderrunit,*) localberg%uvel,localberg%vvel
+          write(stderrunit,*) localberg%axn,localberg%ayn !Alon
+          write(stderrunit,*) localberg%bxn,localberg%byn !Alon
+          if (bergs%mts) then
+            write(stderrunit,*) localberg%axn_fast,localberg%ayn_fast !Alex
+            write(stderrunit,*) localberg%bxn_fast,localberg%byn_fast !Alex
+          endif
+          write(stderrunit,*) localberg%uvel_old,localberg%vvel_old
+          write(stderrunit,*) localberg%lon_old,localberg%lat_old
+          write(stderrunit,*) grd%isc,grd%iec,grd%jsc,grd%jec
+          write(stderrunit,*) grd%isd,grd%ied,grd%jsd,grd%jed
+          write(stderrunit,*) grd%lon(grd%isc-1,grd%jsc-1),grd%lon(grd%iec,grd%jsc)
+          write(stderrunit,*) grd%lat(grd%isc-1,grd%jsc-1),grd%lat(grd%iec,grd%jec)
+          write(stderrunit,*) grd%lon(grd%isd,grd%jsd),grd%lon(grd%ied,grd%jsd)
+          write(stderrunit,*) grd%lat(grd%isd,grd%jsd),grd%lat(grd%ied,grd%jed)
+          write(stderrunit,*) lres
+          call error_mesg('KID, unpack_berg_from_buffer', 'can not find a cell to place berg in!', FATAL)
+        endif
       endif
     endif
   endif
@@ -2077,8 +3686,21 @@ logical :: quick
       id = id_from_2_ints(id_cnt, id_ij)
       call pull_buffer_value(buff%data(:,n), counter, other_berg_ine)
       call pull_buffer_value(buff%data(:,n), counter, other_berg_jne)
+      call pull_buffer_value(buff%data(:,n), counter, length)
+
       if (id_ij > 0) then
         call form_a_bond(this, id, other_berg_ine, other_berg_jne)
+        current_bond=>this%first_bond
+        current_bond%length=length
+
+        if (dem) then
+          call pull_buffer_value(buff%data(:,n), counter, current_bond%tangd1)
+          call pull_buffer_value(buff%data(:,n), counter, current_bond%tangd2)
+          call pull_buffer_value(buff%data(:,n), counter, current_bond%nstress)
+          call pull_buffer_value(buff%data(:,n), counter, current_bond%sstress)
+          call pull_buffer_value(buff%data(:,n), counter, current_bond%rel_rotation)
+          call pull_buffer_value(buff%data(:,n), counter, current_bond%broken)
+        endif
       endif
     enddo
   endif
@@ -2123,18 +3745,19 @@ integer :: new_size, old_size
       deallocate(old)
     endif
     old=>new
-   !write(stderr(),*) 'diamonds, increase_ibuffer',mpp_pe(),' increased to',new_size
+   !write(stderr(),*) 'KID, increase_ibuffer',mpp_pe(),' increased to',new_size
   endif
 
 end subroutine increase_ibuffer
 
 !> Packs a trajectory entry into a buffer
-subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj)
+subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj, save_fl_traj)
   ! Arguments
   type(xyt), pointer :: traj !< Trajectory entry to pack
   type(buffer), pointer :: buff !< Buffer to pack entry into
   integer, intent(in) :: n !< Position in buffer to place entry
   logical, intent(in) :: save_short_traj !< If true, only use a subset of trajectory data
+  logical, intent(in) :: save_fl_traj !< If true, save masses and footloose parameters
   ! Local variables
   integer :: counter ! Position in stack
   integer :: cnt, ij
@@ -2150,13 +3773,26 @@ subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj)
   call split_id(traj%id, cnt, ij)
   call push_buffer_value(buff%data(:,n),counter,cnt)
   call push_buffer_value(buff%data(:,n),counter,ij)
-  if (.not. save_short_traj) then
+  if (save_fl_traj) then
+    call push_buffer_value(buff%data(:,n),counter,traj%mass)
+    call push_buffer_value(buff%data(:,n),counter,traj%start_mass)
+    call push_buffer_value(buff%data(:,n),counter,traj%thickness)
+    call push_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
     call push_buffer_value(buff%data(:,n),counter,traj%uvel)
     call push_buffer_value(buff%data(:,n),counter,traj%vvel)
-    call push_buffer_value(buff%data(:,n),counter,traj%mass)
-    call push_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
+    if (footloose) then
+      call push_buffer_value(buff%data(:,n),counter,traj%mass_scaling)
+      call push_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bits)
+      call push_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bergy_bits)
+      call push_buffer_value(buff%data(:,n),counter,traj%fl_k)
+    endif
+  endif
+  if (.not. save_short_traj) then
+    !call push_buffer_value(buff%data(:,n),counter,traj%uvel)
+    !call push_buffer_value(buff%data(:,n),counter,traj%vvel)
+    call push_buffer_value(buff%data(:,n),counter,traj%uvel_prev)
+    call push_buffer_value(buff%data(:,n),counter,traj%vvel_prev)
     call push_buffer_value(buff%data(:,n),counter,traj%heat_density)
-    call push_buffer_value(buff%data(:,n),counter,traj%thickness)
     call push_buffer_value(buff%data(:,n),counter,traj%width)
     call push_buffer_value(buff%data(:,n),counter,traj%length)
     call push_buffer_value(buff%data(:,n),counter,traj%uo)
@@ -2168,6 +3804,7 @@ subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj)
     call push_buffer_value(buff%data(:,n),counter,traj%ssh_x)
     call push_buffer_value(buff%data(:,n),counter,traj%ssh_y)
     call push_buffer_value(buff%data(:,n),counter,traj%sst)
+    call push_buffer_value(buff%data(:,n),counter,traj%sss)
     call push_buffer_value(buff%data(:,n),counter,traj%cn)
     call push_buffer_value(buff%data(:,n),counter,traj%hi)
     call push_buffer_value(buff%data(:,n),counter,traj%axn)
@@ -2176,22 +3813,50 @@ subroutine pack_traj_into_buffer2(traj, buff, n, save_short_traj)
     call push_buffer_value(buff%data(:,n),counter,traj%byn)
     call push_buffer_value(buff%data(:,n),counter,traj%halo_berg)
     call push_buffer_value(buff%data(:,n),counter,traj%static_berg)
-    call push_buffer_value(buff%data(:,n),counter,traj%sss)
+    call push_buffer_value(buff%data(:,n),counter,traj%od)
+
+    if (mts) then
+      call push_buffer_value(buff%data(:,n), counter, traj%axn_fast)
+      call push_buffer_value(buff%data(:,n), counter, traj%ayn_fast)
+      call push_buffer_value(buff%data(:,n), counter, traj%bxn_fast)
+      call push_buffer_value(buff%data(:,n), counter, traj%byn_fast)
+    endif
+
+    if (iceberg_bonds_on) then
+      call push_buffer_value(buff%data(:,n), counter, traj%n_bonds)
+    end if
+
+    if (dem) then
+      call push_buffer_value(buff%data(:,n), counter, traj%ang_vel)
+      call push_buffer_value(buff%data(:,n), counter, traj%ang_accel)
+      call push_buffer_value(buff%data(:,n), counter, traj%rot)
+    endif
   endif
 
 end subroutine pack_traj_into_buffer2
 
 !> Unpacks a trajectory entry from a buffer
-subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj)
+subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj, save_fl_traj)
   ! Arguments
   type(xyt), pointer :: first !< Trajectory list
   type(buffer), pointer :: buff !< Buffer from which to unpack
   integer, intent(in) :: n !< Position in buffer to unpack
   logical, intent(in) :: save_short_traj !< If true, only use a subset of trajectory data
+  logical, intent(in) :: save_fl_traj !< If true, save masses and footloose parameters
   ! Local variables
   type(xyt) :: traj
   integer :: counter ! Position in stack
   integer :: cnt, ij
+
+  if (mts) then
+    allocate(traj%axn_fast,traj%ayn_fast,traj%bxn_fast,traj%byn_fast)
+  endif
+
+  if (iceberg_bonds_on) then
+    allocate(traj%n_bonds)
+  endif
+
+  if (dem) allocate(traj%ang_vel,traj%ang_accel,traj%rot)
 
   counter = 0
   call pull_buffer_value(buff%data(:,n),counter,traj%lon)
@@ -2201,13 +3866,26 @@ subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj)
   call pull_buffer_value(buff%data(:,n),counter,cnt)
   call pull_buffer_value(buff%data(:,n),counter,ij)
   traj%id = id_from_2_ints(cnt, ij)
-  if (.not. save_short_traj) then
+  if (save_fl_traj) then
+    call pull_buffer_value(buff%data(:,n),counter,traj%mass)
+    call pull_buffer_value(buff%data(:,n),counter,traj%start_mass)
+    call pull_buffer_value(buff%data(:,n),counter,traj%thickness)
+    call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
     call pull_buffer_value(buff%data(:,n),counter,traj%uvel)
     call pull_buffer_value(buff%data(:,n),counter,traj%vvel)
-    call pull_buffer_value(buff%data(:,n),counter,traj%mass)
-    call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_bits)
+    if (footloose) then
+      call pull_buffer_value(buff%data(:,n),counter,traj%mass_scaling)
+      call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bits)
+      call pull_buffer_value(buff%data(:,n),counter,traj%mass_of_fl_bergy_bits)
+      call pull_buffer_value(buff%data(:,n),counter,traj%fl_k)
+    endif
+  endif
+  if (.not. save_short_traj) then
+    !call pull_buffer_value(buff%data(:,n),counter,traj%uvel)
+    !call pull_buffer_value(buff%data(:,n),counter,traj%vvel)
+    call pull_buffer_value(buff%data(:,n),counter,traj%uvel_prev)
+    call pull_buffer_value(buff%data(:,n),counter,traj%vvel_prev)
     call pull_buffer_value(buff%data(:,n),counter,traj%heat_density)
-    call pull_buffer_value(buff%data(:,n),counter,traj%thickness)
     call pull_buffer_value(buff%data(:,n),counter,traj%width)
     call pull_buffer_value(buff%data(:,n),counter,traj%length)
     call pull_buffer_value(buff%data(:,n),counter,traj%uo)
@@ -2219,6 +3897,7 @@ subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj)
     call pull_buffer_value(buff%data(:,n),counter,traj%ssh_x)
     call pull_buffer_value(buff%data(:,n),counter,traj%ssh_y)
     call pull_buffer_value(buff%data(:,n),counter,traj%sst)
+    call pull_buffer_value(buff%data(:,n),counter,traj%sss)
     call pull_buffer_value(buff%data(:,n),counter,traj%cn)
     call pull_buffer_value(buff%data(:,n),counter,traj%hi)
     call pull_buffer_value(buff%data(:,n),counter,traj%axn)
@@ -2227,11 +3906,109 @@ subroutine unpack_traj_from_buffer2(first, buff, n, save_short_traj)
     call pull_buffer_value(buff%data(:,n),counter,traj%byn)
     call pull_buffer_value(buff%data(:,n),counter,traj%halo_berg)
     call pull_buffer_value(buff%data(:,n),counter,traj%static_berg)
-    call pull_buffer_value(buff%data(:,n),counter,traj%sss)
+    call pull_buffer_value(buff%data(:,n),counter,traj%od)
+
+    if (mts) then
+      call pull_buffer_value(buff%data(:,n), counter, traj%axn_fast)
+      call pull_buffer_value(buff%data(:,n), counter, traj%ayn_fast)
+      call pull_buffer_value(buff%data(:,n), counter, traj%bxn_fast)
+      call pull_buffer_value(buff%data(:,n), counter, traj%byn_fast)
+    endif
+
+    if (iceberg_bonds_on) then
+      call pull_buffer_value(buff%data(:,n), counter, traj%n_bonds)
+    end if
+
+    if (dem) then
+      call pull_buffer_value(buff%data(:,n), counter, traj%ang_vel)
+      call pull_buffer_value(buff%data(:,n), counter, traj%ang_accel)
+      call pull_buffer_value(buff%data(:,n), counter, traj%rot)
+    endif
   endif
   call append_posn(first, traj)
 
 end subroutine unpack_traj_from_buffer2
+
+!> Packs a trajectory entry into a buffer
+subroutine pack_bond_traj_into_buffer2(bond_traj, buff, n)
+  ! Arguments
+  type(bond_xyt), pointer :: bond_traj !< Trajectory entry to pack
+  type(buffer), pointer :: buff !< Buffer to pack entry into
+  integer, intent(in) :: n !< Position in buffer to place entry
+  ! Local variables
+  integer :: counter ! Position in stack
+  integer :: cnt1, ij1, cnt2, ij2
+
+  if (.not.associated(buff)) call increase_ibuffer(buff,n,buffer_width_bond_traj)
+  if (n>buff%size) call increase_ibuffer(buff,n,buffer_width_bond_traj)
+
+  counter = 0
+  call push_buffer_value(buff%data(:,n),counter,bond_traj%lon)
+  call push_buffer_value(buff%data(:,n),counter,bond_traj%lat)
+  call push_buffer_value(buff%data(:,n),counter,bond_traj%year)
+  call push_buffer_value(buff%data(:,n),counter,bond_traj%day)
+  call push_buffer_value(buff%data(:,n),counter,bond_traj%length)
+  call push_buffer_value(buff%data(:,n),counter,bond_traj%n1)
+  call push_buffer_value(buff%data(:,n),counter,bond_traj%n2)
+
+  call split_id(bond_traj%id1, cnt1, ij1)
+  call push_buffer_value(buff%data(:,n),counter,cnt1)
+  call push_buffer_value(buff%data(:,n),counter,ij1)
+  call split_id(bond_traj%id2, cnt2, ij2)
+  call push_buffer_value(buff%data(:,n),counter,cnt2)
+  call push_buffer_value(buff%data(:,n),counter,ij2)
+
+  if (dem) then
+    call push_buffer_value(buff%data(:,n),counter,bond_traj%tangd1)
+    call push_buffer_value(buff%data(:,n),counter,bond_traj%tangd2)
+    call push_buffer_value(buff%data(:,n),counter,bond_traj%nstress)
+    call push_buffer_value(buff%data(:,n),counter,bond_traj%sstress)
+    call push_buffer_value(buff%data(:,n),counter,bond_traj%rel_rotation)
+    call push_buffer_value(buff%data(:,n),counter,bond_traj%broken)
+  endif
+
+end subroutine pack_bond_traj_into_buffer2
+
+!> Unpacks a trajectory entry from a buffer
+subroutine unpack_bond_traj_from_buffer2(first, buff, n)
+  ! Arguments
+  type(bond_xyt), pointer :: first !< Bond trajectory list
+  type(buffer), pointer :: buff !< Buffer from which to unpack
+  integer, intent(in) :: n !< Position in buffer to unpack
+  ! Local variables
+  type(bond_xyt) :: bond_traj
+  integer :: counter ! Position in stack
+  integer :: cnt1, ij1, cnt2, ij2
+
+  if (dem) allocate(bond_traj%tangd1,bond_traj%tangd2,bond_traj%nstress,bond_traj%sstress,bond_traj%rel_rotation)
+
+  counter = 0
+  call pull_buffer_value(buff%data(:,n),counter,bond_traj%lon)
+  call pull_buffer_value(buff%data(:,n),counter,bond_traj%lat)
+  call pull_buffer_value(buff%data(:,n),counter,bond_traj%year)
+  call pull_buffer_value(buff%data(:,n),counter,bond_traj%day)
+  call pull_buffer_value(buff%data(:,n),counter,bond_traj%length)
+  call pull_buffer_value(buff%data(:,n),counter,bond_traj%n1)
+  call pull_buffer_value(buff%data(:,n),counter,bond_traj%n2)
+  call pull_buffer_value(buff%data(:,n),counter,cnt1)
+  call pull_buffer_value(buff%data(:,n),counter,ij1)
+  bond_traj%id1 = id_from_2_ints(cnt1, ij1)
+  call pull_buffer_value(buff%data(:,n),counter,cnt2)
+  call pull_buffer_value(buff%data(:,n),counter,ij2)
+  bond_traj%id2 = id_from_2_ints(cnt2, ij2)
+
+  if (dem) then
+    call pull_buffer_value(buff%data(:,n),counter,bond_traj%tangd1)
+    call pull_buffer_value(buff%data(:,n),counter,bond_traj%tangd2)
+    call pull_buffer_value(buff%data(:,n),counter,bond_traj%nstress)
+    call pull_buffer_value(buff%data(:,n),counter,bond_traj%sstress)
+    call pull_buffer_value(buff%data(:,n),counter,bond_traj%rel_rotation)
+    call pull_buffer_value(buff%data(:,n),counter,bond_traj%broken)
+  endif
+
+  call append_bond_posn(first, bond_traj)
+
+end subroutine unpack_bond_traj_from_buffer2
 
 !> Add a new berg to a list by copying values
 !!
@@ -2239,12 +4016,11 @@ end subroutine unpack_traj_from_buffer2
 !! temporary. This routine allocates memory for a new berg and copies the
 !! the input values into it. The memory for the new berg is pointed to
 !! by newberg_return (if present).
-subroutine add_new_berg_to_list(first, bergvals, quick, newberg_return)
+subroutine add_new_berg_to_list(first, bergvals, newberg_return)
 ! Arguments
 type(iceberg), pointer :: first !< List of icebergs
 type(iceberg), intent(in) :: bergvals !< Berg values to copy
 type(iceberg), intent(out), pointer, optional :: newberg_return !< New berg
-logical, intent(in), optional :: quick !< If true, use the quick insertion algorithm
 ! Local variables
 type(iceberg), pointer :: new=>null()
 
@@ -2256,15 +4032,7 @@ type(iceberg), pointer :: new=>null()
     !newberg_return=>null()
   endif
 
-  if (present(quick)) then
-    if(quick) then
-      call insert_berg_into_list(first, new, quick=.true.)
-    else
-      call insert_berg_into_list(first, new)
-    endif
-  else
-    call insert_berg_into_list(first, new)
-  endif
+  call insert_berg_into_list(first, new)
 
   !Clear new
   new=>null()
@@ -2310,20 +4078,46 @@ integer :: grdi, grdj
           this%jne>bergs%grd%jec) icnt2=icnt2+1
       this=>this%next
       if (i>1.and..not.associated(this%prev)) then
-        call error_mesg('diamonds, count_out_of_order', 'Pointer %prev is unassociated. This should not happen!', FATAL)
+        call error_mesg('KID, count_out_of_order', 'Pointer %prev is unassociated. This should not happen!', FATAL)
       endif
     enddo
   enddo; enddo
   call mpp_sum(icnt2)
 
   if ((debug.or.icnt1.ne.0).and.mpp_pe().eq.mpp_root_pe()) then
-    write(*,'(a,3(x,a,i6),x,a)') 'diamonds, count_out_of_order:', &
+    write(*,'(a,3(x,a,i6),x,a)') 'KID, count_out_of_order:', &
       '# out of order=', icnt1,'# in halo=',icnt2,'# identicals=',icnt3,label
   endif
 
   call check_for_duplicates(bergs,label)
 
 end subroutine count_out_of_order
+
+!> Scans a single cell for duplicate bergs
+subroutine unpack_duplicate_check(bergs,localberg,duplicate)
+  ! Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  type(iceberg) :: localberg !< Input iceberg
+  logical :: duplicate !< True if a duplicate is detected
+  ! Local variables
+  type(iceberg), pointer :: this ! bergs for comparison
+
+  duplicate=.false.
+  if (.not. bergs%mts) return
+  this=>bergs%list(localberg%ine,localberg%jne)%first
+  do while (associated(this) .and. .not. duplicate)
+    if (this%id.eq.localberg%id) then
+      if (localberg%halo_berg==10) then
+        this%halo_berg=10
+      elseif (localberg%halo_berg<this%halo_berg) then
+        this%halo_berg=localberg%halo_berg
+      endif
+      duplicate=.true.
+    endif
+    this=>this%next
+  end do
+  this=>null()
+end subroutine unpack_duplicate_check
 
 !> Scans all lists and checks for duplicate identifiers between lists
 subroutine check_for_duplicates(bergs,label)
@@ -2362,7 +4156,7 @@ integer :: grdi_inner, grdj_inner
   call mpp_sum(icnt_same)
 
   if ((debug.or.icnt_id>0.or.icnt_same>0).and.mpp_pe().eq.mpp_root_pe()) then
-    write(*,'(a,2(x,a,i9),x,a)') 'diamonds, check_for_duplicates:', &
+    write(*,'(a,2(x,a,i9),x,a)') 'KID, check_for_duplicates:', &
       '# with same id=', icnt_id,'# identical bergs=',icnt_same,label
   endif
 
@@ -2441,7 +4235,7 @@ integer function ij_component_of_id(grd, i, j)
   integer :: iNg ! Zonal size of the global grid
 
   ! Using the current grid shape maximizes the numbers of IDs that can be represented
-  ! allowing up to 30-minute uniform global resolution, or potentially finer if non-uniform. 
+  ! allowing up to 30-minute uniform global resolution, or potentially finer if non-uniform.
   iNg = grd%ieg - grd%isg + 1
 
   ! ij_component_of_id is unique number for each grid cell (32-bit integers allow for ~1/100th degree global resolution)
@@ -2478,20 +4272,15 @@ integer :: stderrunit
 end subroutine monitor_a_berg
 
 !> Inserts a berg into a list
-subroutine insert_berg_into_list(first, newberg, quick)
+subroutine insert_berg_into_list(first, newberg)
 ! Arguments
 type(iceberg), pointer :: first !< List of bergs
 type(iceberg), pointer :: newberg !< New berg to insert
-logical, intent(in), optional :: quick !< If true, use the quick insertion algorithm
-                                       !! \todo Delete arguments since the code does not appear to use it.
 ! Local variables
 type(iceberg), pointer :: this, prev
-logical :: quickly
-
-  quickly = .false.
 
   if (associated(first)) then
-    if (.not. parallel_reprod .or. quickly) then
+    if (.not. parallel_reprod) then
       newberg%next=>first
       newberg%prev=>null()
       first%prev=>newberg
@@ -2579,7 +4368,7 @@ end function inorder
 !! \todo Should be able to remove this function if using identifiers properly
 real function time_hash(berg)!  Alon: Think about removing this.
 ! Arguments
-type(iceberg), pointer :: berg
+type(iceberg), pointer :: berg !< An iceberg
   time_hash=berg%start_day+366.*float(berg%start_year)
 end function time_hash
 
@@ -2633,6 +4422,13 @@ type(iceberg), pointer :: berg2 !< An iceberg
   if (berg1%vvel_old.ne.berg2%vvel_old) return  !Alon
   if (berg1%lon_old .ne.berg2%lon_old) return  !Alon
   if (berg1%lat_old.ne.berg2%lat_old) return  !Alon
+
+  if (mts) then
+    if (berg1%axn_fast.ne.berg2%axn_fast) return  !Alex
+    if (berg1%ayn_fast.ne.berg2%ayn_fast) return  !Alex
+    if (berg1%bxn_fast.ne.berg2%bxn_fast) return  !Alex
+    if (berg1%byn_fast.ne.berg2%byn_fast) return  !Alex
+  endif
   sameberg=.true. ! passing the above tests mean that bergs 1 and 2 are identical
 end function sameberg
 
@@ -2661,10 +4457,22 @@ integer :: stderrunit
   stderrunit=stderr()
 
   if (associated(berg)) then
-    write(stderrunit,*) 'diamonds, create_iceberg: berg already associated!!!!',mpp_pe()
-    call error_mesg('diamonds, create_iceberg', 'berg already associated. This should not happen!', FATAL)
+    write(stderrunit,*) 'KID, create_iceberg: berg already associated!!!!',mpp_pe()
+    call error_mesg('KID, create_iceberg', 'berg already associated. This should not happen!', FATAL)
   endif
   allocate(berg)
+
+  if (mts) then
+    allocate(berg%axn_fast,berg%ayn_fast,berg%bxn_fast,berg%byn_fast,berg%conglom_id)
+  endif
+
+  if (iceberg_bonds_on) then
+    allocate(berg%n_bonds)
+    berg%n_bonds=0
+  endif
+
+  if (dem) allocate(berg%ang_vel,berg%ang_accel,berg%rot)
+
   berg=bergvals
   berg%prev=>null()
   berg%next=>null()
@@ -2720,31 +4528,37 @@ integer, optional, intent(in) :: il !< i-index of cell berg should be in
 integer, optional, intent(in) :: jl !< j-index of cell berg should be in
 ! Local variables
 
-  write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,a,2f10.4,i5,f7.2,es12.4,f5.1)') &
+  write(iochan,'("KID, print_berg: ",2a,i5,a,i12,a,2f16.4,i5,f7.2,es12.4,f5.1)') &
     label, 'pe=(', mpp_pe(), ') #=', berg%id, ' start lon,lat,yr,day,mass,hb=', &
     berg%start_lon, berg%start_lat, berg%start_year, berg%start_day, berg%start_mass, berg%halo_berg
   if (present(il).and.present(jl)) then
-    write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,a,2i5)') &
+    write(iochan,'("KID, print_berg: ",2a,i5,a,i12,a,2i5)') &
       label, 'pe=(', mpp_pe(), ') #=', berg%id, ' List i,j=',il,jl
   endif
-  write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,a,2i5,a,2l2)') &
+  write(iochan,'("KID, print_berg: ",2a,i5,a,i12,a,2i5,a,2l2)') &
     label, 'pe=(', mpp_pe(), ') #=', berg%id, &
     ' i,j=', berg%ine, berg%jne, &
     ' p,n=', associated(berg%prev), associated(berg%next)
-  write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,3(a,2f14.8))') &
+  write(iochan,'("KID, print_berg: ",2a,i5,a,i12,3(a,2f16.8))') &
     label, 'pe=(', mpp_pe(), ') #=', berg%id, &
     ' xi,yj=', berg%xi, berg%yj, &
     ' lon,lat=', berg%lon, berg%lat, &
     ' lon_old,lat_old=', berg%lon_old, berg%lat_old
-  write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,2(a,2f14.8))') &
+  write(iochan,'("KID, print_berg: ",2a,i5,a,i12,2(a,2f14.8))') &
     label, 'pe=(', mpp_pe(), ') #=', berg%id, &
     ' u,v=', berg%uvel, berg%vvel, &
     ' uvel_old,vvel_old=', berg%uvel_old, berg%vvel_old
-  write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,2(a,2f14.8))') &
+  write(iochan,'("KID, print_berg: ",2a,i5,a,i12,2(a,2f14.8))') &
     label, 'pe=(', mpp_pe(), ') #=', berg%id, &
     ' axn,ayn=', berg%axn, berg%ayn, &
     ' bxn,byn=', berg%bxn, berg%byn
-  write(iochan,'("diamonds, print_berg: ",2a,i5,a,i12,3(a,2f14.8))') &
+  if (mts) then
+    write(iochan,'("KID, print_berg: ",2a,i5,a,i12,2(a,2f14.8))') &
+      label, 'pe=(', mpp_pe(), ') #=', berg%id, &
+      ' axn_fast,ayn_fast=', berg%axn_fast, berg%ayn_fast, &
+      ' bxn_fast,byn_fast=', berg%bxn_fast, berg%byn_fast
+  endif
+  write(iochan,'("KID, print_berg: ",2a,i5,a,i12,3(a,2f14.8))') &
     label, 'pe=(', mpp_pe(), ') #=', berg%id, &
     ' uo,vo=', berg%uo, berg%vo, &
     ' ua,va=', berg%ua, berg%va, &
@@ -2772,17 +4586,249 @@ integer :: grdi, grdj
   nbergs=count_bergs(bergs)
   nnbergs=nbergs
   call mpp_sum(nnbergs)
-  if (nbergs.gt.0) write(iochan,'("diamonds, ",a," there are",i5," bergs out of",i6," on PE ",i4)') label, nbergs, nnbergs, mpp_pe()
+  if (nbergs.gt.0) write(iochan,'("KID, ",a," there are",i5," bergs out of",i6," on PE ",i4)') label, nbergs, nnbergs, mpp_pe()
 
 end subroutine print_bergs
 
+!> Set initial length of the bond
+subroutine orig_bond_length(bergs)
+type(icebergs), pointer :: bergs !< Container for all types and memory
+type(iceberg), pointer :: other_berg, berg
+type(icebergs_gridded), pointer :: grd
+integer :: grdi, grdj
+type(bond) , pointer :: current_bond,prev,next
+real :: dist
+
+  grd=>bergs%grd
+
+  do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
+    berg=>bergs%list(grdi,grdj)%first
+    do while (associated(berg)) ! loop over all bergs
+      current_bond=>berg%first_bond
+      do while (associated(current_bond)) ! loop over all bonds
+        other_berg=>current_bond%other_berg
+        if (associated(current_bond%other_berg)) then
+          dist=(berg%lon-other_berg%lon)**2+(berg%lat-other_berg%lat)**2
+          current_bond%length=sqrt(dist)
+        endif
+        current_bond=>current_bond%next_bond
+      enddo
+      berg=>berg%next
+    enddo
+  enddo; enddo
+end subroutine orig_bond_length
+
+!> Save number of bonds on element
+subroutine assign_n_bonds(bergs)
+type(icebergs), pointer :: bergs !< Container for all types and memory
+type(iceberg), pointer :: this, other_berg
+type(bond) , pointer :: current_bond
+type(icebergs_gridded), pointer :: grd
+integer :: grdi, grdj
+
+  grd=>bergs%grd
+  do grdj=grd%jsd,grd%jed ; do grdi=grd%isd,grd%ied !loop over all cells
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this)) ! loop over all bergs in cell
+      this%n_bonds=0
+      current_bond=>this%first_bond
+      do while (associated(current_bond)) ! loop over all bonds
+        this%n_bonds=this%n_bonds+1
+        current_bond=>current_bond%next_bond
+      enddo
+      this=>this%next
+    enddo
+  enddo;enddo
+end subroutine assign_n_bonds
+
+!> For if using constant_LW_for_interactions: if constant_length and constant_width
+!! are not given in the nml or are both set to zero, determine their values here
+subroutine set_constant_interaction_length_and_width(bergs)
+type(icebergs), pointer :: bergs !< Container for all types and memory
+type(iceberg), pointer :: this
+type(icebergs_gridded), pointer :: grd
+integer :: grdi, grdj
+real :: elem_sum, l_sum, w_sum
+
+  ! constant_length/constant_width are set to the mean values of the lengths/widths
+  ! that are currently initialized on the domain. Note that using the mean should be
+  ! overkill because ideally, the initialized elements should all have the same
+  ! length and width anyway...
+
+  if (.not. bergs%constant_interaction_LW) return
+
+  elem_sum = 0. !counter for number of elements
+  l_sum = 0.    !sum of lengths
+  w_sum = 0.    !sum of widths
+  grd=>bergs%grd
+  do grdj=grd%jsc,grd%jec ; do grdi=grd%isc,grd%iec!loop over all cells
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this)) ! loop over all bergs in cell
+      elem_sum=elem_sum+1.
+      l_sum=l_sum+this%length
+      w_sum=w_sum+this%width
+      this=>this%next
+    enddo
+  enddo;enddo
+
+  call mpp_sum(elem_sum); call mpp_sum(l_sum); call mpp_sum(w_sum)
+  bergs%constant_length = l_sum/elem_sum
+  bergs%constant_width  = w_sum/elem_sum
+
+  bergs%constant_area=bergs%constant_length*bergs%constant_width
+  if (bergs%hexagonal_icebergs) then
+    bergs%constant_radius=sqrt(bergs%constant_area/(2.*sqrt(3.)))
+  else
+    if (bergs%iceberg_bonds_on) then
+      bergs%constant_radius=0.5*sqrt(bergs%constant_area)
+    else
+      bergs%constant_radius=sqrt(bergs%constant_area/pi) ! Interaction radius of the iceberg (assuming circular icebergs)
+    endif
+  endif
+
+end subroutine set_constant_interaction_length_and_width
+
+!> Initialization for the DEM beam tests
+subroutine dem_tests_init(bergs)
+type(icebergs), pointer :: bergs !< Container for all types and memory
+type(iceberg), pointer :: this
+type(icebergs_gridded), pointer :: grd
+integer :: grdi, grdj
+real :: minlon,maxlon
+
+  maxlon=-huge(1.0); minlon=huge(1.0)
+  grd=>bergs%grd
+  do grdj=grd%jsd,grd%jed ; do grdi=grd%isd,grd%ied !loop over all cells
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this)) ! loop over all bergs in cell
+      this%start_lon=this%lon; this%start_lat=this%lat
+      if (this%lon>maxlon) maxlon=this%lon
+      if (this%lon<minlon) minlon=this%lon
+      this=>this%next
+    enddo
+  enddo;enddo
+
+  call mpp_max(maxlon); call mpp_min(minlon)
+  bergs%dem_tests_start_lon=minlon; bergs%dem_tests_end_lon=maxlon
+
+  print *,'pe,dem tests start lon,dem tests end lon',mpp_pe(),minlon,maxlon
+end subroutine dem_tests_init
+
+!> DEM-style fracture
+subroutine break_bonds_dem(bergs)
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  type(iceberg), pointer :: other_berg, this
+  type(icebergs_gridded), pointer :: grd
+  integer :: grdi, grdj
+  type(bond) , pointer :: current_bond,other_bond,kick_the_bucket
+  real :: frac_thres_n,frac_thres_t
+  real :: Rsig,Rtau,frac
+  integer :: stderrunit
+
+  if (no_frac_first_ts) then
+    return
+  endif
+
+  frac_thres_n=bergs%frac_thres_n; frac_thres_t=bergs%frac_thres_t
+
+  if (frac_thres_n<=0.0 .and. frac_thres_t<=0.0) return !all fracture ignored
+  if (frac_thres_n<=0.0) frac_thres_n=huge(1.0) !no fracture from normal stress
+  if (frac_thres_t<=0.0) frac_thres_t=huge(1.0) !no fracture from tangential stress
+  grd=>bergs%grd
+  do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this)) ! loop over all bergs
+      current_bond=>this%first_bond
+      do while (associated(current_bond)) ! loop over all bonds
+
+        if (current_bond%other_id.ne.-1) then
+
+          if (bergs%fracture_criterion=='stress') then
+            if (current_bond%nstress>frac_thres_n .or. current_bond%sstress>frac_thres_t) then
+              current_bond%other_id=-1
+            endif
+          else
+            call error_mesg('KID, break_bonds_dem','fracture criterion not supported for DEM!',FATAL)
+          endif
+
+          if (save_bond_forces) then
+            if (current_bond%other_id.eq.-1) current_bond%other_bond%other_id=-1
+          else
+            if (current_bond%other_id.eq.-1) then
+              other_berg=>current_bond%other_berg
+              if (associated(other_berg)) then
+                !mark matching bond on other_berg
+                other_bond=>other_berg%first_bond
+                do while (associated(other_bond)) ! loop over all bonds
+                  if (other_bond%other_id.eq.this%id) then
+                    other_bond%other_id=-1
+                    if (debug) then
+                      if (other_bond%nstress<=frac_thres_n .and. other_bond%sstress<=frac_thres_t) then
+                        stderrunit=stderr()
+                        call error_mesg('KID, break_bonds_dem', 'Other bond did not fracture!', WARNING)
+                        write(stderrunit,*) 'current and other bond nstress',current_bond%nstress, other_bond%nstress
+                        write(stderrunit,*) 'current and other bond sstress',current_bond%sstress, other_bond%sstress
+                      endif
+                    endif
+                  endif
+                  other_bond=>other_bond%next_bond
+                enddo
+              endif
+            endif
+          endif
+        endif
+        current_bond=>current_bond%next_bond
+      enddo
+      this=>this%next
+    enddo
+  enddo;enddo
+
+
+  do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this)) ! loop over all bergs
+      current_bond=>this%first_bond
+      do while (associated(current_bond)) ! loop over all bonds
+        if (current_bond%other_id.eq.-1) then
+          this%n_bonds=this%n_bonds-1
+          kick_the_bucket=>current_bond
+          current_bond=>current_bond%next_bond
+          call delete_bond_from_list(this,kick_the_bucket)
+        else
+          current_bond=>current_bond%next_bond
+        endif
+      enddo
+      this=>this%next
+    enddo
+  enddo;enddo
+end subroutine break_bonds_dem
+
+!> Delete current_bond from the list of its parent berg
+subroutine delete_bond_from_list(berg,bond_to_delete)
+type(iceberg), intent(in), pointer :: berg !<parent berg to bond_to_delete
+type(bond), pointer :: bond_to_delete !<deleting this bond
+type(bond), pointer :: prev,next,current_bond
+  prev=>bond_to_delete%prev_bond
+  next=>bond_to_delete%next_bond
+  if (associated(prev)) then
+    prev%next_bond=>next
+  else
+    berg%first_bond=>next
+  endif
+  if (associated(next)) next%prev_bond=>prev
+  deallocate(bond_to_delete)
+end subroutine delete_bond_from_list
+
+!> Bond two bergs together
 subroutine form_a_bond(berg, other_id, other_berg_ine, other_berg_jne, other_berg)
 ! Arguments
-type(iceberg), pointer :: berg
-type(iceberg), optional,  pointer :: other_berg
+type(iceberg), pointer :: berg !< first berg
+integer(kind=8), intent(in) :: other_id !< ID of the other other berg
+integer, optional  :: other_berg_ine !< second berg zonal cell index
+integer, optional :: other_berg_jne !< second berg meridional cell index
+type(iceberg), optional,  pointer :: other_berg !< second berg
+! Local variables
 type(bond) , pointer :: new_bond, first_bond
-integer(kind=8), intent(in) :: other_id
-integer, optional  :: other_berg_ine, other_berg_jne
 integer :: stderrunit
 
  stderrunit = stderr()
@@ -2793,6 +4839,22 @@ if (berg%id .ne. other_id) then
 
   ! Step 1: Create a new bond
   allocate(new_bond)
+
+  if (dem) then
+    allocate(new_bond%tangd1,new_bond%tangd2)
+    new_bond%tangd1=0.; new_bond%tangd2=0.
+    allocate(new_bond%nstress,new_bond%sstress)
+    new_bond%nstress=0.; new_bond%sstress=0.
+    allocate(new_bond%rel_rotation)
+    new_bond%rel_rotation=0.
+    allocate(new_bond%broken)
+    new_bond%broken=0
+    if (save_bond_forces) then
+      allocate(new_bond%F_x, new_bond%F_y, new_bond%Fd_x, new_bond%Fd_y, new_bond%T, new_bond%T_d)
+      new_bond%F_x=0.; new_bond%F_y=0.; new_bond%Fd_x=0.; new_bond%Fd_y=0.; new_bond%T=0.; new_bond%T_d=0.
+    endif
+  endif
+
   new_bond%other_id=other_id
   if(present(other_berg)) then
     new_bond%other_berg=>other_berg
@@ -2820,7 +4882,7 @@ if (berg%id .ne. other_id) then
    endif
    new_bond=>null()
  else
-   call error_mesg('diamonds, bonds', 'An iceberg is trying to bond with itself!!!', FATAL)
+   call error_mesg('KID, bonds', 'An iceberg is trying to bond with itself!!!', FATAL)
  endif
 
 end subroutine form_a_bond
@@ -2849,7 +4911,7 @@ type(bond) , pointer :: current_bond
           current_bond%other_berg_jne=current_bond%other_berg%jne
         else
           if (berg%halo_berg .lt. 0.5) then
-            call error_mesg('diamonds, bond address update', 'other berg in bond not assosiated!', FATAL)
+            call error_mesg('KID, bond address update', 'other berg in bond not assosiated!', FATAL)
           endif
         endif
         current_bond=>current_bond%next_bond
@@ -2877,17 +4939,22 @@ type(bond) , pointer :: current_bond
     do while (associated(berg)) ! loop over all bergs
       current_bond=>berg%first_bond
       do while (associated(current_bond)) ! loop over all bonds
-        print *, 'Show Bond1 :', berg%id, current_bond%other_id, current_bond%other_berg_ine, current_bond%other_berg_jne,  mpp_pe()
+        !print *, 'Show Bond1 :', berg%id, current_bond%other_id, current_bond%other_berg_ine, current_bond%other_berg_jne,  mpp_pe()
+        !write(*,'(a,5i)')'Show Bond1 :',berg%id, current_bond%other_id, current_bond%other_berg_ine, current_bond%other_berg_jne, mpp_pe()
         !print *, 'Current:', berg%id, berg%ine, berg%jne,berg%halo_berg, mpp_pe()
         if  (associated(current_bond%other_berg)) then
           if (current_bond%other_berg%id .ne. current_bond%other_id) then
-            print *, 'Bond matching', berg%id,current_bond%other_berg%id, current_bond%other_id,&
-            berg%halo_berg,current_bond%other_berg%halo_berg ,mpp_pe()
-            call error_mesg('diamonds, show all bonds:', 'The bonds are not matching properly!', FATAL)
+            !print *, 'Bond matching', berg%id,current_bond%other_berg%id, current_bond%other_id,&
+            !  berg%halo_berg,current_bond%other_berg%halo_berg ,mpp_pe()
+            write(*,'(a,3i8,2i3,i4)')'Bond matching :',berg%id,current_bond%other_berg%id, current_bond%other_id,&
+              int(berg%halo_berg),current_bond%other_berg%halo_berg ,mpp_pe()
+            call error_mesg('KID, show all bonds:', 'The bonds are not matching properly!', FATAL)
           endif
         else
-            print *, 'This bond has an non-assosiated other berg :', berg%id, current_bond%other_id,&
-            current_bond%other_berg_ine, current_bond%other_berg_jne, berg%halo_berg,  mpp_pe()
+          ! print *, 'This bond has an non-assosiated other berg :', berg%id, current_bond%other_id,&
+          !   current_bond%other_berg_ine, current_bond%other_berg_jne, berg%halo_berg,  mpp_pe()
+          ! write(*,'(a,4i,i3,i4)')'This bond has an non-assosiated other berg :', berg%id, current_bond%other_id,&
+          !   current_bond%other_berg_ine, current_bond%other_berg_jne, int(berg%halo_berg),  mpp_pe()
         endif
         current_bond=>current_bond%next_bond
       enddo
@@ -2897,16 +4964,29 @@ type(bond) , pointer :: current_bond
 
 end subroutine show_all_bonds
 
-subroutine connect_all_bonds(bergs)
+!> Sweep across all bergs filling in bond data
+subroutine connect_all_bonds(bergs, ignore_unmatched, match_bond_pairs)
 type(icebergs), pointer :: bergs !< Container for all types and memory
+logical,optional :: ignore_unmatched !< If true, do not call error if the other berg in a bond is not found
+logical,optional :: match_bond_pairs !< If true, point identical bonds (bond pairs) to each other
+! Local variables
 type(iceberg), pointer :: other_berg, berg
 type(icebergs_gridded), pointer :: grd
 integer :: i, j
 integer :: grdi, grdj
 integer :: grdi_inner, grdj_inner
-type(bond) , pointer :: current_bond, other_berg_bond
-logical :: bond_matched, missing_bond, check_bond_quality
+type(bond) , pointer :: current_bond, other_bond
+logical :: bond_matched, missing_bond, check_bond_quality,check_match,link_bond_pairs
 integer nbonds
+
+  check_match = .true.
+  if (present(ignore_unmatched)) then
+    if (ignore_unmatched) check_match = .false.
+  end if
+  link_bond_pairs=.false.
+  if (present(match_bond_pairs)) then
+    if (match_bond_pairs) link_bond_pairs=.true.
+  endif
 
 missing_bond=.false.
 bond_matched=.false.
@@ -2914,7 +4994,10 @@ bond_matched=.false.
 ! For convenience
   grd=>bergs%grd
 
-  do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
+  !If interacting bergs & domain is periodic, then correct lat & lon for halo bergs - Alex
+  call update_latlon(bergs)
+
+  do grdj = grd%jsd+1,grd%jed ; do grdi = grd%isd+1,grd%ied
 ! do grdj = grd%jsc,grd%jec ; do grdi = grd%isc,grd%iec  ! Don't connect halo bergs
     berg=>bergs%list(grdi,grdj)%first
     do while (associated(berg)) ! loop over all bergs
@@ -2958,16 +5041,46 @@ bond_matched=.false.
             enddo;enddo
           endif
           if (.not.bond_matched) then
+            ! Finally, if still not matched, search adjacent cells to current berg -Alex (periodicity fix)
+            i = berg%ine; j = berg%jne
+            do grdj_inner = j-2,j+2 ; do grdi_inner = i-2,i+2 !probably wider search than necessary...
+              if (.not. bond_matched) then
+                if ((grdj_inner .gt. grd%jsd-1) .and. (grdj_inner .lt. grd%jed+1) &
+                    .and.  (grdi_inner .gt. grd%isd-1) .and. (grdi_inner .lt. grd%ied+1) ) then
+                  other_berg=>bergs%list(grdi_inner,grdj_inner)%first
+                  do while (associated(other_berg)) ! loop over all other bergs
+                    if (other_berg%id .eq. current_bond%other_id) then
+                      current_bond%other_berg=>other_berg
+                      current_bond%other_berg_ine = grdi_inner
+                      current_bond%other_berg_jne = grdj_inner
+                      other_berg=>null()
+                      bond_matched=.true.
+                    else
+                      other_berg=>other_berg%next
+                    endif
+                  enddo
+                endif
+              endif
+            enddo;enddo
+          endif
+
+          if (check_match .and. .not.bond_matched .and. berg%halo_berg.ne.10) then
             if (berg%halo_berg .lt. 0.5) then
               missing_bond=.true.
-              print * ,'non-halo berg unmatched: ', berg%id, mpp_pe(), current_bond%other_id, current_bond%other_berg_ine
-              call error_mesg('diamonds, connect_all_bonds', 'A non-halo bond is missing!!!', FATAL)
+              print * ,'non-halo berg unmatched: ', berg%id, berg%ine, berg%jne, mpp_pe(), &
+                current_bond%other_id, current_bond%other_berg_ine, current_bond%other_berg_jne
+              call error_mesg('KID, connect_all_bonds', 'A non-halo bond is missing!!!', FATAL)
             else  ! This is not a problem if the partner berg is not yet in the halo
-              !if (  (current_bond%other_berg_ine .gt.grd%isd-1) .and. (current_bond%other_berg_ine .lt.grd%ied+1) &
-                !.and.  (current_bond%other_berg_jne .gt.grd%jsd-1) .and. (current_bond%other_berg_jne .lt.grd%jed+1) ) then
-                !print * ,'halo berg unmatched: ',mpp_pe(),  berg%id, current_bond%other_id, current_bond%other_berg_ine,current_bond%other_berg_jne
-                !call error_mesg('diamonds, connect_all_bonds', 'A halo bond is missing!!!', WARNING)
-              !endif
+              if (bergs%mts) then
+                call error_mesg('KID, connect_all_bonds', 'A halo bond is missing!!!', WARNING)
+                print *,'mpp_pe(),berg,target,ine,jne,halo_stat,lon,lat',&
+                  mpp_pe(),berg%id,current_bond%other_id,i,j,berg%halo_berg,berg%lon,berg%lat
+                print *,'mpp_pe(),latbounds:',mpp_pe(),grd%lat(grd%isd,grd%jsd),grd%lat(grd%isc-1,grd%jsc-1),&
+                  grd%lat(grd%iec,grd%jec),grd%lat(grd%ied,grd%jed)
+                print *,'mpp_pe(),lonbounds:',mpp_pe(),grd%lon(grd%isd,grd%jsd),grd%lon(grd%isc-1,grd%jsc-1),&
+                  grd%lon(grd%iec,grd%jec),grd%lon(grd%ied,grd%jed)
+                !bergs%writeandstop=.true.
+              endif
             endif
           endif
         endif
@@ -2982,20 +5095,97 @@ bond_matched=.false.
     nbonds=0
     call count_bonds(bergs, nbonds,check_bond_quality)
   endif
+
+  if (save_bond_forces .and. link_bond_pairs .and. bergs%dem) then
+    do grdj = grd%jsd+1,grd%jed ; do grdi = grd%isd+1,grd%ied
+      berg=>bergs%list(grdi,grdj)%first
+      do while (associated(berg)) ! loop over all bergs
+        if (berg%halo_berg.ne.10) then
+          current_bond=>berg%first_bond
+          do while (associated(current_bond)) ! loop over all bonds
+            if (.not.associated(current_bond%other_bond)) then
+              other_berg=>current_bond%other_berg
+              if (associated(other_berg)) then
+                other_bond=>other_berg%first_bond
+                do while (associated(other_bond)) ! loop over all bonds
+                  if (other_bond%other_id.eq.berg%id) then
+                    other_bond%other_bond=>current_bond
+                    current_bond%other_bond=>other_bond
+                    other_bond=>null()
+                  else
+                    other_bond=>other_bond%next_bond
+                  endif
+                enddo
+              else
+                call error_mesg('KID, connect_all_bonds', 'A bond is missing its second berg !!!', WARNING)
+              endif
+            endif
+            current_bond=>current_bond%next_bond
+          enddo
+        endif
+        berg=>berg%next
+      enddo
+    enddo;enddo
+  endif
 end subroutine connect_all_bonds
 
-subroutine count_bonds(bergs, number_of_bonds, check_bond_quality)
+!> If periodic domain, update lat & lon for bergs located beyond Lx - Alex
+subroutine update_latlon(bergs)
+  !Arguments
+  type(icebergs), pointer :: bergs !< Container for all types and memory
+  ! Local variables
+  type(icebergs_gridded), pointer :: grd
+  type(iceberg), pointer :: berg
+  real :: dlon, dlat,xi,yj,Lx
+  integer :: grdi,grdj
+  logical :: lret
 
+  ! For convenience
+  grd=>bergs%grd
+  Lx=grd%Lx
+
+  if (Lx > 0.) then
+    if ((grd%lon(grd%isc-1,grd%jsc-1) == grd%minlon_c) .or.  (grd%lon(grd%iec,grd%jec) == grd%maxlon_c)) then
+      do grdj = grd%jsd,grd%jed ; do grdi = grd%isd,grd%ied
+        berg=>bergs%list(grdi,grdj)%first
+        do while (associated(berg))
+          if ((.not. bergs%mts) .or. (berg%halo_berg .le. 1)) then
+            !for bergs%mts skip halo elements that only exist due to their
+            !inclusion in a conglomerate (berg%halo_berg > 1). Their coords have
+            !already been corrected (if needed), as the scheme below would fail.
+            dlon = berg%lon - berg%lon_old
+            dlat = berg%lat - berg%lat_old
+
+            berg%lon=bilin(grd, grd%lon, berg%ine, berg%jne, berg%xi, berg%yj)
+            berg%lat=bilin(grd, grd%lat, berg%ine, berg%jne, berg%xi, berg%yj)
+
+            berg%lon_old = berg%lon-dlon
+            berg%lat_old = berg%lat-dlat
+
+            !need to update local positon in cell from updated global coords, due to roundoff
+            lret=pos_within_cell(grd, berg%lon, berg%lat, berg%ine, berg%jne, berg%xi, berg%yj)
+          endif
+          berg=>berg%next
+        enddo !loop over all bergs
+      enddo; enddo
+    endif
+  endif
+
+end subroutine update_latlon
+
+!> Counts (and error checks) bonds
+subroutine count_bonds(bergs, number_of_bonds, check_bond_quality)
 type(icebergs), pointer :: bergs !< Container for all types and memory
+integer, intent(out) :: number_of_bonds !< Number of bonds
+logical, intent(inout), optional :: check_bond_quality !< If true, check bond quality
+! Local variables
 type(iceberg), pointer :: berg
 type(iceberg), pointer :: other_berg
 type(icebergs_gridded), pointer :: grd
 type(bond) , pointer :: current_bond, other_berg_bond
-integer, intent(out) :: number_of_bonds
 integer :: number_of_bonds_all_pe
 integer :: grdi, grdj
 logical :: bond_is_good
-logical, intent(inout), optional :: check_bond_quality
 logical :: quality_check
 integer :: num_unmatched_bonds,num_unmatched_bonds_all_pe
 integer :: num_unassosiated_bond_pairs, num_unassosiated_bond_pairs_all_pe
@@ -3024,8 +5214,8 @@ integer :: stderrunit
         ! ##### Beginning Quality Check on Bonds ######
         !      print *, 'Quality check', mpp_pe(), berg%id
         if (quality_check) then
-          num_unmatched_bonds=0
-          num_unassosiated_bond_pairs=0
+          !num_unmatched_bonds=0
+          !num_unassosiated_bond_pairs=0
           bond_is_good=.False.
           other_berg=>current_bond%other_berg
           if (associated(other_berg)) then
@@ -3044,14 +5234,15 @@ integer :: stderrunit
             enddo  ! End of loop over the other berg's bonds.
 
             if (bond_is_good) then
-              if (debug) write(stderrunit,*) 'Perfect quality Bond:', berg%id, current_bond%other_id
+              !if (debug) write(stderrunit,*) 'Perfect quality Bond:', berg%id, current_bond%other_id
             else
               if (debug) write(stderrunit,*) 'Non-matching bond...:', berg%id, current_bond%other_id
               num_unmatched_bonds=num_unmatched_bonds+1
             endif
           else
-            if (debug) write(stderrunit,*) 'Opposite berg is not assosiated:', berg%id, current_bond%other_berg%id
-            num_unassosiated_bond_pairs=0
+            if (debug) write(stderrunit,*) 'Opposite berg is not assosiated:', berg%id, current_bond%other_id, mpp_pe()
+            !num_unassosiated_bond_pairs=0
+            num_unassosiated_bond_pairs=num_unassosiated_bond_pairs+1
           endif
         endif
         ! ##### Ending Quality Check on Bonds ######
@@ -3078,12 +5269,12 @@ integer :: stderrunit
       call mpp_sum(num_unassosiated_bond_pairs_all_pe)
 
       if (num_unmatched_bonds_all_pe .gt. 0) then
-        call error_mesg('diamonds, bonds', 'Bonds are not matching!', FATAL)
+        call error_mesg('KID, bonds', 'Bonds are not matching!', FATAL)
       endif
       if (num_unassosiated_bond_pairs_all_pe .ne. 0) then
-        call error_mesg('diamonds, bonds', 'Bonds partners not located!', Warning)
+        call error_mesg('KID, bonds', 'Bonds partners not located!', Warning)
         if (num_unassosiated_bond_pairs .ne. 0) then
-          write(*,'(2a)') 'diamonds, Bonds parnters not located!!!! PE=', mpp_pe()
+          write(*,'(2a)') 'KID, Bonds parnters not located!!!! PE=', mpp_pe()
         endif
       endif
       if ((num_unmatched_bonds_all_pe .eq. 0)  .and. (num_unassosiated_bond_pairs_all_pe .eq. 0)) then
@@ -3092,7 +5283,7 @@ integer :: stderrunit
         endif
         check_bond_quality=.true.
       else
-        if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') 'diamonds: Warning, Broken Bonds! '
+        if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') 'KID: Warning, Broken Bonds! '
       endif
     endif
 
@@ -3144,51 +5335,164 @@ subroutine record_posn(bergs)
 type(icebergs), pointer :: bergs !< Container for all types and memory
 ! Local variables
 type(xyt) :: posn
-type(iceberg), pointer :: this
+type(iceberg), pointer :: this, other_berg
 integer :: grdi, grdj
+integer :: js,je,is,ie
+type(bond) , pointer :: current_bond
+real :: area_thres,area_thres2,area_thres3
+! Local bond variables
+type(bond_xyt) :: bond_posn
+real :: dx_dlon,dy_dlat,lat_ref,dx,dy,n1,n2,id1,id2,berg_area
+logical :: loc_save_nonfl_traj_by_class,save_fl_berg
 
-  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+if (bergs%debug_write) then
+  js=bergs%grd%jsd+1; je=bergs%grd%jed; is=bergs%grd%isd+1; ie=bergs%grd%ied
+else
+  js=bergs%grd%jsc;   je=bergs%grd%jec; is=bergs%grd%isc;   ie=bergs%grd%iec
+endif
+
+  if (mts) then
+    allocate(posn%axn_fast,posn%ayn_fast,posn%bxn_fast,posn%byn_fast)
+  endif
+
+  if (iceberg_bonds_on) then
+    allocate(posn%n_bonds)
+  endif
+
+  if (dem) allocate(posn%ang_vel,posn%ang_accel,posn%rot)
+
+  if (save_bond_traj .and. dem) allocate(bond_posn%tangd1,bond_posn%tangd2,bond_posn%nstress,bond_posn%sstress,bond_posn%rel_rotation)
+
+  area_thres=bergs%traj_area_thres*1.e6 ! convert from km^2 to m^2
+  area_thres2=bergs%traj_area_thres_sntbc*1.e6
+  area_thres3=bergs%traj_area_thres_fl*1.e6
+  loc_save_nonfl_traj_by_class=.false.
+
+  do grdj = js,je ; do grdi = is,ie
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
-      posn%lon=this%lon
-      posn%lat=this%lat
-      posn%year=bergs%current_year
-      posn%day=bergs%current_yearday
-      posn%id=this%id
-      if (.not. bergs%save_short_traj) then !Not totally sure that this is correct
-        posn%uvel=this%uvel
-        posn%vvel=this%vvel
-        posn%mass=this%mass
-        posn%mass_of_bits=this%mass_of_bits
-        posn%heat_density=this%heat_density
-        posn%thickness=this%thickness
-        posn%width=this%width
-        posn%length=this%length
-        posn%uo=this%uo
-        posn%vo=this%vo
-        posn%ui=this%ui
-        posn%vi=this%vi
-        posn%ua=this%ua
-        posn%va=this%va
-        posn%ssh_x=this%ssh_x
-        posn%ssh_y=this%ssh_y
-        posn%sst=this%sst
-        posn%sss=this%sss
-        posn%cn=this%cn
-        posn%hi=this%hi
-        posn%axn=this%axn
-        posn%ayn=this%ayn
-        posn%bxn=this%bxn
-        posn%byn=this%byn
-        posn%uvel_old=this%uvel_old
-        posn%vvel_old=this%vvel_old
-        posn%lon_old=this%lon_old
-        posn%lat_old=this%lat_old
-        posn%halo_berg=this%halo_berg
-        posn%static_berg=this%static_berg
+      berg_area=this%mass/(bergs%rho_bergs*this%thickness)
+      if (bergs%save_nonfl_traj_by_class) then
+        loc_save_nonfl_traj_by_class=.false.
+        if (this%fl_k>=0. .and. berg_area>area_thres2) then
+          if (this%lat<0.) then
+            if (this%start_mass>=bergs%save_traj_by_class_start_mass_thres_s) loc_save_nonfl_traj_by_class=.true.
+          else
+            if (this%start_mass>=bergs%save_traj_by_class_start_mass_thres_n) loc_save_nonfl_traj_by_class=.true.
+          endif
+        endif
       endif
+      if (this%fl_k<0 .and. berg_area>area_thres3) then
+        save_fl_berg=.true.
+      else
+        save_fl_berg=.false.
+      endif
+      current_bond=>this%first_bond
+      if ( bergs%current_year>bergs%save_all_traj_year .or. loc_save_nonfl_traj_by_class .or. &
+        berg_area >= area_thres .or. associated(current_bond) .or. save_fl_berg) then
+        posn%lon=this%lon
+        posn%lat=this%lat
+        posn%year=bergs%current_year
+        posn%day=bergs%current_yearday
+        posn%id=this%id
+        if (bergs%save_fl_traj) then
+          posn%mass=this%mass
+          posn%start_mass=this%start_mass
+          posn%thickness=this%thickness
+          posn%mass_of_bits=this%mass_of_bits
+          posn%uvel=this%uvel
+          posn%vvel=this%vvel
+          if (bergs%footloose) then
+            posn%mass_scaling=this%mass_scaling
+            posn%mass_of_fl_bits=this%mass_of_fl_bits
+            posn%mass_of_fl_bergy_bits=this%mass_of_fl_bergy_bits
+            posn%fl_k=this%fl_k
+          endif
+        endif
+        if (.not. bergs%save_short_traj) then !Not totally sure that this is correct
+          !posn%uvel=this%uvel
+          !posn%vvel=this%vvel
+          posn%uvel_prev=this%uvel_prev
+          posn%vvel_prev=this%vvel_prev
+          posn%heat_density=this%heat_density
+          posn%width=this%width
+          posn%length=this%length
+          posn%uo=this%uo
+          posn%vo=this%vo
+          posn%ui=this%ui
+          posn%vi=this%vi
+          posn%ua=this%ua
+          posn%va=this%va
+          posn%ssh_x=this%ssh_x
+          posn%ssh_y=this%ssh_y
+          posn%sst=this%sst
+          posn%sss=this%sss
+          posn%cn=this%cn
+          posn%hi=this%hi
+          posn%axn=this%axn
+          posn%ayn=this%ayn
+          posn%bxn=this%bxn
+          posn%byn=this%byn
+          posn%halo_berg=this%halo_berg
+          posn%static_berg=this%static_berg
+          posn%od=this%od
 
-      call push_posn(this%trajectory, posn)
+          if (bergs%mts) then
+            posn%axn_fast=this%axn_fast
+            posn%ayn_fast=this%ayn_fast
+            posn%bxn_fast=this%bxn_fast
+            posn%byn_fast=this%byn_fast
+          endif
+
+          if (iceberg_bonds_on) then
+            posn%n_bonds=this%n_bonds
+          end if
+
+          if (dem) then
+            posn%ang_vel=this%ang_vel
+            posn%ang_accel=this%ang_accel
+            posn%rot=this%rot
+          endif
+        endif
+
+        call push_posn(this%trajectory, posn)
+
+        if (save_bond_traj) then
+          do while (associated(current_bond)) ! loop over all bonds
+            if  (associated(current_bond%other_berg)) then
+              other_berg=>current_bond%other_berg
+
+              ! From icebergs.F90 --> subroutine convert_from_grid_to_meters
+              if (bergs%grd%grid_is_latlon) then
+                lat_ref=0.5*(this%lat+other_berg%lat)
+                dx_dlon=pi_180*Rearth*cos(lat_ref*pi_180);  dy_dlat=pi_180*Rearth
+              else
+                dx_dlon=1.0;                                dy_dlat=1.0
+              endif
+
+              dx=(this%lon-other_berg%lon)*dx_dlon; dy=(this%lat-other_berg%lat)*dy_dlat
+              n1=dx/this%length; n2=dy/this%length !unit vector
+              bond_posn%lon=0.5*(this%lon+other_berg%lon)
+              bond_posn%lat=0.5*(this%lat+other_berg%lat)
+              bond_posn%year=bergs%current_year;    bond_posn%day=bergs%current_yearday
+              bond_posn%length=current_bond%length;
+              bond_posn%n1=n1;                      bond_posn%n2=n2
+              bond_posn%id1=this%id;                bond_posn%id2=other_berg%id
+
+              if (dem) then
+                bond_posn%tangd1=current_bond%tangd1
+                bond_posn%tangd2=current_bond%tangd2
+                bond_posn%nstress=current_bond%nstress
+                bond_posn%sstress=current_bond%sstress
+                bond_posn%rel_rotation=current_bond%rel_rotation
+              endif
+
+              call push_bond_posn(current_bond%bond_trajectory, bond_posn)
+            endif
+            current_bond=>current_bond%next_bond
+          enddo
+        endif
+      endif
 
       this=>this%next
     enddo
@@ -3205,11 +5509,40 @@ type(xyt) :: posn_vals !< Values to add
 type(xyt), pointer :: new_posn
 
   allocate(new_posn)
+
+  if (mts) then
+    allocate(new_posn%axn_fast,new_posn%ayn_fast,new_posn%bxn_fast,new_posn%byn_fast)
+  endif
+
+  if (iceberg_bonds_on) then
+    allocate(new_posn%n_bonds)
+  endif
+
+  if (dem) allocate(new_posn%ang_vel,new_posn%ang_accel,new_posn%rot)
+
   new_posn=posn_vals
   new_posn%next=>trajectory
   trajectory=>new_posn
 
 end subroutine push_posn
+
+!> Add bond trajectory values as a new record in a bond trajectory
+subroutine push_bond_posn(bond_trajectory, bond_posn_vals)
+! Arguments
+type(bond_xyt), pointer :: bond_trajectory !< Trajectory list
+type(bond_xyt) :: bond_posn_vals !< Values to add
+! Local variables
+type(bond_xyt), pointer :: new_bond_posn
+
+  allocate(new_bond_posn)
+
+  if (dem) allocate(new_bond_posn%tangd1,new_bond_posn%tangd2,new_bond_posn%nstress,new_bond_posn%sstress,new_bond_posn%rel_rotation)
+
+  new_bond_posn=bond_posn_vals
+  new_bond_posn%next=>bond_trajectory
+  bond_trajectory=>new_bond_posn
+
+end subroutine push_bond_posn
 
 !> Appends trajectory values to the end of the trajectory list (slow)
 !! \todo append_posn() is very slow and should be removed a.s.a.p.
@@ -3221,6 +5554,17 @@ type(xyt) :: posn_vals !< Values to add
 type(xyt), pointer :: new_posn,next,last
 
   allocate(new_posn)
+
+  if (mts) then
+    allocate(new_posn%axn_fast,new_posn%ayn_fast,new_posn%bxn_fast,new_posn%byn_fast)
+  endif
+
+  if (iceberg_bonds_on) then
+    allocate(new_posn%n_bonds)
+  endif
+
+  if (dem) allocate(new_posn%ang_vel,new_posn%ang_accel,new_posn%rot)
+
   new_posn=posn_vals
   new_posn%next=>null()
   if(.NOT. associated(trajectory)) then
@@ -3236,6 +5580,34 @@ type(xyt), pointer :: new_posn,next,last
   endif
 end subroutine append_posn
 
+!> Appends bond trajectory values to the end of the bond trajectory list (slow)
+!! \todo append_bond_posn() is very slow and should be removed a.s.a.p.
+subroutine append_bond_posn(bond_trajectory, bond_posn_vals)
+! Arguments
+type(bond_xyt), pointer :: bond_trajectory !< Trajectory list
+type(bond_xyt) :: bond_posn_vals !< Values to add
+! Local variables
+type(bond_xyt), pointer :: new_bond_posn,next,last
+
+  allocate(new_bond_posn)
+
+  if (dem) allocate(new_bond_posn%tangd1,new_bond_posn%tangd2,new_bond_posn%nstress,new_bond_posn%sstress,new_bond_posn%rel_rotation)
+
+  new_bond_posn=bond_posn_vals
+  new_bond_posn%next=>null()
+  if(.NOT. associated(bond_trajectory)) then
+     bond_trajectory=>new_bond_posn
+  else
+     ! Find end of the trajectory and point it to the  new leaf
+     next=>bond_trajectory
+     do while (associated(next))
+        last=>next
+        next=>next%next
+     enddo
+     last%next=>new_bond_posn
+  endif
+end subroutine append_bond_posn
+
 !> Disconnect a trajectory from a berg and add it to a list of trajectory segments
 subroutine move_trajectory(bergs, berg)
 ! Arguments
@@ -3244,6 +5616,7 @@ type(iceberg), pointer :: berg !< Berg containing trajectory
 ! Local variables
 type(xyt), pointer :: next, last
 type(xyt) :: vals
+type(bond) , pointer :: current_bond
 
   if (bergs%ignore_traj) return
 
@@ -3259,9 +5632,45 @@ type(xyt) :: vals
   last%next=>bergs%trajectories
 
   bergs%trajectories=>berg%trajectory
+
+  if (save_bond_traj) then
+    current_bond=>berg%first_bond
+    do while (associated(current_bond)) ! loop over all bonds
+      call move_bond_trajectory(bergs, current_bond)
+      current_bond=>current_bond%next_bond
+    enddo
+  endif
+
   berg%trajectory=>null()
 
 end subroutine move_trajectory
+
+!> Disconnect a trajectory from a bond and add it to a list of trajectory segments
+subroutine move_bond_trajectory(bergs, current_bond)
+! Arguments
+type(icebergs), pointer :: bergs !< Container for all types and memory
+type(bond) , pointer :: current_bond !< Bond containing trajectory
+! Local variables
+type(bond_xyt), pointer :: next, last
+type(bond_xyt) :: vals
+
+  if (bergs%ignore_traj) return
+
+  ! If the trajectory is empty, ignore it
+  if (.not.associated(current_bond%bond_trajectory)) return
+
+  ! Find end of berg trajectory and point it to start of existing trajectories
+  next=>current_bond%bond_trajectory
+  do while (associated(next))
+    last=>next
+    next=>next%next
+  enddo
+  last%next=>bergs%bond_trajectories
+
+  bergs%bond_trajectories=>current_bond%bond_trajectory
+  current_bond%bond_trajectory=>null()
+
+end subroutine move_bond_trajectory
 
 !> Scan all bergs in a list and disconnect trajectories and more to the list of trajectory segments
 !! \todo The argument delete_bergs should be removed.
@@ -3272,13 +5681,21 @@ logical, optional, intent(in) :: delete_bergs !< If true, delete bergs after dis
 ! Local variables
 type(iceberg), pointer :: this, next
 logical :: delete_bergs_after_moving_traj
-integer :: grdi, grdj
+integer :: grdi, grdj, is, ie, js, je
 
   if (bergs%ignore_traj) return
 
   delete_bergs_after_moving_traj = .false.
   if (present(delete_bergs)) delete_bergs_after_moving_traj = delete_bergs
-  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+
+  if (bergs%debug_write) then
+    js=bergs%grd%jsd+1; je=bergs%grd%jed; is=bergs%grd%isd+1; ie=bergs%grd%ied
+  else
+    js=bergs%grd%jsc;   je=bergs%grd%jec; is=bergs%grd%isc;   ie=bergs%grd%iec
+  endif
+
+  !do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+  do grdj = js,je ; do grdi = is,ie
     this=>bergs%list(grdi,grdj)%first
     do while (associated(this))
       next=>this%next
@@ -3321,7 +5738,7 @@ real :: Lx
   elseif (d3==dmin) then; i=ie-1; j=je-1
   elseif (d4==dmin) then; i=is+1; j=je-1
   else
-    call error_mesg('diamonds, find_cell_by_search:', 'This should never EVER happen! (1)', FATAL)
+    call error_mesg('KID, find_cell_by_search:', 'This should never EVER happen! (1)', FATAL)
   endif
 
   if (explain) then
@@ -3360,7 +5777,7 @@ real :: Lx
     elseif (d5==dmin) then; di=0; dj=-1
     elseif (d7==dmin) then; di=1; dj=0
     else
-      call error_mesg('diamonds, find_cell_by_search:', 'This should never EVER happen!', FATAL)
+      call error_mesg('KID, find_cell_by_search:', 'This should never EVER happen!', FATAL)
     endif
 
     i=min(ie, max(is, io+di))
@@ -3400,7 +5817,7 @@ real :: Lx
   !         call print_fld(grd, grd%tmp, 'Cost')
   !         stop 'Avoid recursing'
   !       endif
-  !       write(0,'(i3,a,2i5,a,2i3,a,2f8.3)') mpp_pe(),'diamonds, find_cell_by_search: false negative io,jo=',io,jo,' di,dj=',di,dj,' targ=',x,y
+  !       write(0,'(i3,a,2i5,a,2i3,a,2f8.3)') mpp_pe(),'KID, find_cell_by_search: false negative io,jo=',io,jo,' di,dj=',di,dj,' targ=',x,y
   !       explain=.true.; goto 911
   !     endif
       endif
@@ -3416,18 +5833,23 @@ real :: Lx
     write(0,'(i3,a,3f9.5)') mpp_pe(),'cost ',d4,d5,d6
     write(0,'(i3,a,2f9.5)') mpp_pe(),'x,y ',x,y
     write(0,'(i3,a,4i5)') mpp_pe(),'io,jo ',io,jo,di,dj
-    write(0,'(i3,a,2i5,a,2i3)') mpp_pe(),'diamonds, find_cell_by_search: false negative 2 i,j=',i-is,j-js,' di,dj=',di,dj
-    write(0,'(i3,a,2i5,a,2f8.3)') mpp_pe(),'diamonds, find_cell_by_search: false negative 2 io,jo=',io,jo
-    write(0,'(i3,a,2i5,a,2f8.3)') mpp_pe(),'diamonds, find_cell_by_search: false negative 2 i,j=',i,j,' targ=',x,y
+    write(0,'(i3,a,2i5,a,2i3)') mpp_pe(),'KID, find_cell_by_search: false negative 2 i,j=',i-is,j-js,' di,dj=',di,dj
+    write(0,'(i3,a,2i5,a,2f8.3)') mpp_pe(),'KID, find_cell_by_search: false negative 2 io,jo=',io,jo
+    write(0,'(i3,a,2i5,a,2f8.3)') mpp_pe(),'KID, find_cell_by_search: false negative 2 i,j=',i,j,' targ=',x,y
     return
   endif
   find_cell_by_search=.false.
 
 end function find_cell_by_search
 
-real function dcost(x1, y1, x2, y2,Lx)
+!< A cost function with minimum when x2==x1 and y2==y1
+real function dcost(x1, y1, x2, y2, Lx)
   ! Arguments
-  real, intent(in) :: x1, x2, y1, y2,Lx
+  real, intent(in) :: x1 !< x-coordinate or point 1
+  real, intent(in) :: x2 !< x-coordinate or point 2
+  real, intent(in) :: y1 !< y-coordinate or point 1
+  real, intent(in) :: y2 !< y-coordinate or point 2
+  real, intent(in) :: Lx !< Periodicity of x-coordinate
   ! Local variables
   real :: x1m
 
@@ -3436,12 +5858,16 @@ real function dcost(x1, y1, x2, y2,Lx)
     dcost=(x2-x1m)**2+(y2-y1)**2
 end function dcost
 
+!> A better way to find the indices (oi,oj) or the cell containing position (x,y).
+!! Returns True if a cell is found and updates oi,oj.
 logical function find_better_min(grd, x, y, w, oi, oj)
   ! Arguments
   type(icebergs_gridded), intent(in) :: grd !< Container for gridded fields
-  real, intent(in) :: x, y
-  integer, intent(in) :: w
-  integer, intent(inout) :: oi, oj
+  real, intent(in) :: x !< x-coordinate being searched for
+  real, intent(in) :: y !< y-coordinate being searched for
+  integer, intent(in) :: w !< Number of surrounding cells to the N,S,E, and W to search
+  integer, intent(inout) :: oi !< i-index of cell containing x,y
+  integer, intent(inout) :: oj !< j-index of cell containing x,y
   ! Local variables
   integer :: i,j,xs,xe,ys,ye
   real :: dmin, dcst
@@ -3467,27 +5893,34 @@ logical function find_better_min(grd, x, y, w, oi, oj)
 
 end function find_better_min
 
+! Returns true and updates oi and oj, if a cell containing x,y is found within w cells of the input oi, oj
 logical function find_cell_loc(grd, x, y, is, ie, js, je, w, oi, oj)
   ! Arguments
   type(icebergs_gridded), intent(in) :: grd !< Container for gridded fields
-  real, intent(in) :: x, y
-  integer, intent(in) :: is, ie, js, je, w
-  integer, intent(inout) :: oi, oj
+  real, intent(in) :: x !< Longitude
+  real, intent(in) :: y !< Latitude
+  integer, intent(in) :: is !< Start i-index of computational grid
+  integer, intent(in) :: ie !< End i-index of computational grid
+  integer, intent(in) :: js !< Start j-index of computational grid
+  integer, intent(in) :: je !< End j-index of computational grid
+  integer, intent(in) :: w !< Width to search around
+  integer, intent(inout) :: oi !< Starting and updated i-index
+  integer, intent(inout) :: oj !< Starting and updated j-index
   ! Local variables
   integer :: i,j,xs,xe,ys,ye
 
-    xs=max(is, oi-w)
-    xe=min(ie, oi+w)
-    ys=max(js, oj-w)
-    ye=min(je, oj+w)
+  xs=max(is, oi-w)
+  xe=min(ie, oi+w)
+  ys=max(js, oj-w)
+  ye=min(je, oj+w)
 
-    find_cell_loc=.false.
-    do j=ys,ye; do i=xs,xe
-        if (is_point_in_cell(grd, x, y, i, j)) then
-          oi=i; oj=j; find_cell_loc=.true.
-          return
-        endif
-    enddo; enddo
+  find_cell_loc=.false.
+  do j=ys,ye; do i=xs,xe
+      if (is_point_in_cell(grd, x, y, i, j)) then
+        oi=i; oj=j; find_cell_loc=.true.
+        return
+      endif
+  enddo; enddo
 
 end function find_cell_loc
 
@@ -3536,6 +5969,45 @@ jne=999
     enddo ; enddo
 end subroutine  find_individual_iceberg
 
+!> Scans each computational grid cell until is_point_in_cell() is true,
+!! checking the current cell first.
+logical function check_and_find_cell(grd, x, y, oi, oj)
+! Arguments
+type(icebergs_gridded), intent(in) :: grd !< Container for gridded fields
+real, intent(in) :: x !< Longitude of position
+real, intent(in) :: y !< Latitude of position
+integer, intent(out) :: oi !< i-index of cell containing position or -999
+integer, intent(out) :: oj !< j-index of cell containing position or -999
+! Local variables
+integer :: i,j
+
+check_and_find_cell=.false.
+
+if (.not. (oi-1.lt.grd%isd.or.oi.gt.grd%ied.or.oj-1.lt.grd%jsd.or.oj.gt.grd%jed)) then
+  if (is_point_in_cell(grd, x, y, oi, oj)) then
+    check_and_find_cell=.true.
+        return
+      endif
+endif
+
+!find cell for structured grid without looping:
+oi=floor((x-grd%lon(grd%isd,grd%jsd))/(grd%lon(grd%isd+1,grd%jsd+1)-grd%lon(grd%isd,grd%jsd)))+grd%isd+1
+oj=floor((y-grd%lat(grd%isd,grd%jsd))/(grd%lat(grd%isd+1,grd%jsd+1)-grd%lat(grd%isd,grd%jsd)))+grd%jsd+1
+if (.not. (oi-1.lt.grd%isd.or.oi.gt.grd%ied.or.oj-1.lt.grd%jsd.or.oj.gt.grd%jed)) then
+  if (is_point_in_cell(grd, x, y, oi, oj)) then
+    check_and_find_cell=.true.; return
+  endif
+endif
+
+  oi=-999; oj=-999
+  do j=grd%jsd+1,grd%jed; do i=grd%isd+1,grd%ied
+      if (is_point_in_cell(grd, x, y, i, j)) then
+        oi=i; oj=j; check_and_find_cell=.true.
+        return
+      endif
+    enddo; enddo
+end function check_and_find_cell
+
 !> Scans each computational grid cell until is_point_in_cell() is true
 logical function find_cell(grd, x, y, oi, oj)
 ! Arguments
@@ -3547,8 +6019,19 @@ integer, intent(out) :: oj !< j-index of cell containing position or -999
 ! Local variables
 integer :: i,j
 
-  find_cell=.false.; oi=-999; oj=-999
+find_cell=.false.
 
+
+!find cell for structured grid without looping:
+oi=floor((x-grd%lon(grd%isd,grd%jsd))/(grd%lon(grd%isd+1,grd%jsd+1)-grd%lon(grd%isd,grd%jsd)))+grd%isd+1
+oj=floor((y-grd%lat(grd%isd,grd%jsd))/(grd%lat(grd%isd+1,grd%jsd+1)-grd%lat(grd%isd,grd%jsd)))+grd%jsd+1
+if (oi>grd%isc-1 .and. oi<grd%iec+1 .and. oj>grd%jsc-1 .and. oj<grd%jec+1) then
+  if (is_point_in_cell(grd, x, y, oi, oj)) then
+    find_cell=.true.; return
+  endif
+endif
+
+  oi=-999; oj=-999
   do j=grd%jsc,grd%jec; do i=grd%isc,grd%iec
       if (is_point_in_cell(grd, x, y, i, j)) then
         oi=i; oj=j; find_cell=.true.
@@ -3569,7 +6052,17 @@ integer, intent(out) :: oj !< j-index of cell containing position or -999
 ! Local variables
 integer :: i,j
 
-  find_cell_wide=.false.; oi=-999; oj=-999
+find_cell_wide=.false.
+!find cell for structured grid without looping:
+oi=floor((x-grd%lon(grd%isd,grd%jsd))/(grd%lon(grd%isd+1,grd%jsd+1)-grd%lon(grd%isd,grd%jsd)))+grd%isd+1
+oj=floor((y-grd%lat(grd%isd,grd%jsd))/(grd%lat(grd%isd+1,grd%jsd+1)-grd%lat(grd%isd,grd%jsd)))+grd%jsd+1
+if (.not. (oi-1.lt.grd%isd.or.oi.gt.grd%ied.or.oj-1.lt.grd%jsd.or.oj.gt.grd%jed)) then
+  if (is_point_in_cell(grd, x, y, oi, oj)) then
+    find_cell_wide=.true.; return
+  endif
+endif
+
+oi=-999; oj=-999
 
   do j=grd%jsd+1,grd%jed; do i=grd%isd+1,grd%ied
       if (is_point_in_cell(grd, x, y, i, j)) then
@@ -3602,9 +6095,9 @@ real :: tol
   ! Safety check index bounds
   if (i-1.lt.grd%isd.or.i.gt.grd%ied.or.j-1.lt.grd%jsd.or.j.gt.grd%jed) then
     write(stderrunit,'(a,i3,(a,3i4))') &
-                     'diamonds, is_point_in_cell: pe=(',mpp_pe(),') i,s,e=', &
+                     'KID, is_point_in_cell: pe=(',mpp_pe(),') i,s,e=', &
                      i,grd%isd,grd%ied,' j,s,e=', j,grd%jsd,grd%jed
-    call error_mesg('diamonds, is_point_in_cell', 'test is off the PE!', FATAL)
+    call error_mesg('KID, is_point_in_cell', 'test is off the PE!', FATAL)
   endif
 
   is_point_in_cell=.false.
@@ -3900,14 +6393,14 @@ logical :: is_point_in_cell_using_xi_yj
         fac=2.1*max( abs(xi-0.5), abs(yj-0.5) ); fac=max(1., fac)
         xi=0.5+(xi-0.5)/fac
         yj=0.5+(yj-0.5)/fac
-        if (debug) call error_mesg('diamonds, pos_within_cell', 'in cell but scaling internal coordinates!', WARNING)
+        if (debug) call error_mesg('KID, pos_within_cell', 'in cell but scaling internal coordinates!', WARNING)
       endif
     else
       ! The point is not inside the spherical quad
       if (abs(xi-0.5)<0.5.and.abs(yj-0.5)<0.5) then
         ! The projection of the spherical quad onto the tangent plane should be larger than
         ! quad in the tangent plane so we should never be able to get here.
-        call error_mesg('diamonds, pos_within_cell', 'not in cell but coordinates <0.5!', FATAL)
+        call error_mesg('KID, pos_within_cell', 'not in cell but coordinates <0.5!', FATAL)
       endif
     endif
   endif
@@ -3926,7 +6419,7 @@ logical :: is_point_in_cell_using_xi_yj
       if (debug) then
         write(stderrunit,'(a,1p6e12.4)') 'values of xi, yj ',xi, yj
         pos_within_cell=is_point_in_cell(grd, x, y, i, j,explain=.True.)
-        call error_mesg('diamonds, pos_within_cell', 'pos_within_cell is False BUT is_point_in_cell disagrees!', FATAL)
+        call error_mesg('KID, pos_within_cell', 'pos_within_cell is False BUT is_point_in_cell disagrees!', FATAL)
       endif
     endif
   else
@@ -3936,7 +6429,7 @@ logical :: is_point_in_cell_using_xi_yj
       if (debug) then
         write(stderrunit,'(a,1p6e12.4)') 'values of xi, yj ',xi, yj
         pos_within_cell=is_point_in_cell(grd, x, y, i, j,explain=.True.)
-        call error_mesg('diamonds, pos_within_cell', 'pos_within_cell is True BUT is_point_in_cell disagrees!', FATAL)
+        call error_mesg('KID, pos_within_cell', 'pos_within_cell is True BUT is_point_in_cell disagrees!', FATAL)
       endif
     endif
   endif
@@ -4007,7 +6500,7 @@ if (abs(a)>1.e-12) then
     write(stderrunit,'(a,i3,1p6e12.4)') 'calc_xiyj: coeffs alpha..kappa',mpp_pe(),alpha,beta,gamma,delta,epsilon,kappa
     write(stderrunit,'(a,i3)') 'calc_xiyj: b<0 in quadratic root solver!!!!',mpp_pe()
     write(stderrunit,'(a,i3,1p6e12.4)') 'calc_xiyj: coeffs a,b,c,d,dx,dy',mpp_pe(),a,b,c,d,dx,dy
-    call error_mesg('diamonds, calc_xiyj', 'We have complex roots. The grid must be very distorted!', FATAL)
+    call error_mesg('KID, calc_xiyj', 'We have complex roots. The grid must be very distorted!', FATAL)
   endif
 else
   if (b.ne.0.) then
@@ -4034,7 +6527,7 @@ else
     write(stderrunit,'(a,i3,3f8.2)') 'calc_xiyj: y2..y4 - x1',mpp_pe(),y2-y1,y3-y1,y4-y1
     write(stderrunit,'(a,i3,1p6e12.4)') 'calc_xiyj: coeffs alpha..kappa',mpp_pe(),alpha,beta,gamma,delta,epsilon,kappa
     write(stderrunit,'(a,i3,1p2e12.4)') 'calc_xiyj: coeffs a,b',mpp_pe(),a,b
-    call error_mesg('diamonds, calc_xiyj', 'Can not invert either linear equaton for xi! This should not happen!', FATAL)
+    call error_mesg('KID, calc_xiyj', 'Can not invert either linear equaton for xi! This should not happen!', FATAL)
   endif
 endif
 if (expl) write(stderrunit,'(a,2e12.4)') 'calc_xiyj: xi,yj=',xi,yj
@@ -4098,23 +6591,24 @@ integer :: stderrunit
 
   lret=pos_within_cell(grd, berg%lon, berg%lat, berg%ine, berg%jne, xi, yj)
   if (xi.ne.berg%xi.or.yj.ne.berg%yj) then
-    write(stderrunit,'("diamonds: check_position (",i4,") b%x,x,-=",3(es12.4,x),a)') mpp_pe(),berg%xi,xi,berg%xi-xi,label
-    write(stderrunit,'("diamonds: check_position (",i4,") b%y,y,-=",3(es12.4,x),a)') mpp_pe(),berg%yj,yj,berg%yj-yj,label
+    write(stderrunit,'("KID: check_position (",i4,") b%x,x,-=",3(es12.4,x),a)') mpp_pe(),berg%xi,xi,berg%xi-xi,label
+    write(stderrunit,'("KID: check_position (",i4,") b%y,y,-=",3(es12.4,x),a)') mpp_pe(),berg%yj,yj,berg%yj-yj,label
     call print_berg(stderrunit, berg, 'check_position', il, jl)
-    call error_mesg('diamonds, check_position, '//trim(label),'berg has inconsistent xi,yj!',FATAL)
+    call error_mesg('KID, check_position, '//trim(label),'berg has inconsistent xi,yj!',FATAL)
   endif
   if (grd%msk(berg%ine, berg%jne)==0.) then
     call print_berg(stderrunit, berg, 'check_position, '//trim(label), il, jl)
-    call error_mesg('diamonds, check_position, '//trim(label),'berg is in a land cell!',FATAL)
+    call error_mesg('KID, check_position, '//trim(label),'berg is in a land cell!',FATAL)
   endif
 
 end subroutine check_position
 
 !> Add up the mass of bergs and/or bergy bits
-real function sum_mass(bergs, justbits, justbergs)
+real function sum_mass(bergs, justbits, justflbits, justbergs)
 ! Arguments
 type(icebergs), pointer :: bergs !< Container for all types and memory
 logical, intent(in), optional :: justbits !< If present, add up mass of just bergy bits
+logical, intent(in), optional :: justflbits !< If present, add up mass of just footloose bits
 logical, intent(in), optional :: justbergs !< If present, add up mass of just bergs
 ! Local variables
 type(iceberg), pointer :: this
@@ -4127,9 +6621,11 @@ integer :: grdi, grdj
       if (present(justbergs)) then
         sum_mass=sum_mass+this%mass*this%mass_scaling
       elseif (present(justbits)) then
-        sum_mass=sum_mass+this%mass_of_bits*this%mass_scaling
+        sum_mass=sum_mass+(this%mass_of_bits+this%mass_of_fl_bergy_bits)*this%mass_scaling
+      elseif (present(justflbits)) then
+        sum_mass=sum_mass+this%mass_of_fl_bits*this%mass_scaling
       else
-        sum_mass=sum_mass+(this%mass+this%mass_of_bits)*this%mass_scaling
+        sum_mass=sum_mass+(this%mass+this%mass_of_bits+this%mass_of_fl_bits+this%mass_of_fl_bergy_bits)*this%mass_scaling
       endif
       this=>this%next
     enddo
@@ -4138,10 +6634,11 @@ integer :: grdi, grdj
 end function sum_mass
 
 !> Add up the heat content of bergs and/or bergy bits
-real function sum_heat(bergs,justbits,justbergs)
+real function sum_heat(bergs,justbits,justflbits, justbergs)
 ! Arguments
 type(icebergs), pointer :: bergs !< Container for all types and memory
 logical, intent(in), optional :: justbits !< If present, add up heat content of just bergy bits
+logical, intent(in), optional :: justflbits !< If present, add up mass of just footloose bits
 logical, intent(in), optional :: justbergs !< If present, add up heat content of just bergs
 ! Local variables
 type(iceberg), pointer :: this
@@ -4156,9 +6653,11 @@ integer :: grdi, grdj
       if (present(justbergs)) then
         dm=this%mass*this%mass_scaling
       elseif (present(justbits)) then
-        dm=this%mass_of_bits*this%mass_scaling
+        dm=(this%mass_of_bits+this%mass_of_fl_bergy_bits)*this%mass_scaling
+      elseif (present(justflbits)) then
+        dm=this%mass_of_fl_bits*this%mass_scaling
       else
-        dm=(this%mass+this%mass_of_bits)*this%mass_scaling
+        dm=(this%mass+this%mass_of_bits+this%mass_of_fl_bits+this%mass_of_fl_bergy_bits)*this%mass_scaling
       endif
       sum_heat=sum_heat+dm*this%heat_density
       this=>this%next
@@ -4190,7 +6689,7 @@ type(icebergs_gridded), pointer :: grd !< Container for gridded fields
 character(len=*) :: label !< Label to use in messages
 ! Local variables
 
-  if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') 'diamonds: checksumming gridded data @ ',trim(label)
+  if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') 'KID: checksumming gridded data @ ',trim(label)
 
   ! external forcing
   call grd_chksum2(grd, grd%uo, 'uo')
@@ -4223,6 +6722,10 @@ character(len=*) :: label !< Label to use in messages
   call grd_chksum2(grd, grd%bergy_src, 'bergy_src')
   call grd_chksum2(grd, grd%bergy_melt, 'bergy_melt')
   call grd_chksum2(grd, grd%bergy_mass, 'bergy_mass')
+  call grd_chksum2(grd, grd%fl_bits_src, 'fl_bits_src')
+  call grd_chksum2(grd, grd%fl_bits_melt, 'fl_bits_melt')
+  call grd_chksum2(grd, grd%fl_bits_mass, 'fl_bits_mass')
+  call grd_chksum2(grd, grd%fl_bergy_bits_mass, 'fl_bergy_bits_mass')
   call grd_chksum2(grd, grd%spread_mass, 'spread_mass')
   call grd_chksum2(grd, grd%spread_area, 'spread_area')
   call grd_chksum2(grd, grd%u_iceberg, 'u_iceberg')
@@ -4233,6 +6736,12 @@ character(len=*) :: label !< Label to use in messages
   call grd_chksum2(grd, grd%virtual_area, 'varea')
   call grd_chksum2(grd, grd%floating_melt, 'floating_melt')
   call grd_chksum2(grd, grd%berg_melt, 'berg_melt')
+  call grd_chksum3(grd, grd%melt_by_class, 'melt_by_class')
+  call grd_chksum2(grd, grd%melt_buoy_fl, 'melt_b_fl')
+  call grd_chksum2(grd, grd%melt_eros_fl, 'melt_e_fl')
+  call grd_chksum2(grd, grd%melt_conv_fl, 'melt_v_fl')
+  call grd_chksum2(grd, grd%fl_parent_melt, 'fl_parent_melt')
+  call grd_chksum2(grd, grd%fl_child_melt, 'fl_child_melt')
 
   ! static
   call grd_chksum2(grd, grd%lon, 'lon')
@@ -4306,7 +6815,7 @@ real, dimension(lbound(fld,1):ubound(fld,1), lbound(fld,2):ubound(fld,2), lbound
   j=mpp_chksum( tmp(lbound(fld,1)+halo:ubound(fld,1)-halo, &
                     lbound(fld,2)+halo:ubound(fld,2)-halo,:) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(*,'("diamonds, grd_chksum3: ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9))') &
+    write(*,'("KID, grd_chksum3: ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9))') &
      txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd
 #ifdef CHECKSUM_HALOS
   i=mpp_chksum( fld(lbound(fld,1):ubound(fld,1), &
@@ -4314,7 +6823,7 @@ real, dimension(lbound(fld,1):ubound(fld,1), lbound(fld,2):ubound(fld,2), lbound
   j=mpp_chksum( tmp(lbound(fld,1):ubound(fld,1), &
                     lbound(fld,2):ubound(fld,2),:) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(*,'("diamonds, grd_chksum3* ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9))') &
+    write(*,'("KID, grd_chksum3* ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9))') &
      txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd
 #endif
 
@@ -4365,13 +6874,13 @@ real :: mean, rms, SD, minv, maxv
   i=mpp_chksum( fld(grd%isc:grd%iec,grd%jsc:grd%jec) )
   j=mpp_chksum( grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(*,'("diamonds, grd_chksum2: ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9),x,a,"=",i8)') &
+    write(*,'("KID, grd_chksum2: ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9),x,a,"=",i8)') &
      txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd!, '#', icount
 #ifdef CHECKSUM_HALOS
   i=mpp_chksum( fld(grd%isd:grd%ied,grd%jsd:grd%jed) )
   j=mpp_chksum( grd%tmp(grd%isd:grd%ied,grd%jsd:grd%jed) )
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(*,'("diamonds, grd_chksum2* ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9),x,a,"=",i)') &
+    write(*,'("KID, grd_chksum2* ",a18,2(x,a,"=",i22),5(x,a,"=",es16.9),x,a,"=",i)') &
      txt, 'chksum', i, 'chksum2', j, 'min', minv, 'max', maxv, 'mean',  mean, 'rms', rms, 'sd', sd!, '#', icount
 #endif
 
@@ -4382,7 +6891,7 @@ subroutine bergs_chksum(bergs, txt, ignore_halo_violation)
 ! Arguments
 type(icebergs), pointer :: bergs !< Container for all types and memory
 character(len=*), intent(in) :: txt !< Label to use in messages
-logical, optional :: ignore_halo_violation
+logical, optional :: ignore_halo_violation !< If true, skip error checking
 ! Local variables
 integer :: i, nbergs, ichk1, ichk2, ichk3, ichk4, ichk5, iberg
 real, allocatable :: fld(:,:), fld2(:,:)
@@ -4447,9 +6956,9 @@ integer :: grdi, grdj
   nbergs=count_bergs(bergs)
 
   if (nbergs.ne.sum(icnt(:,:))) then
-    write(*,'("diamonds, bergs_chksum: ",2(a,i8))') &
+    write(*,'("KID, bergs_chksum: ",2(a,i8))') &
       '# bergs =', nbergs, ' sum(icnt) =',sum(icnt(:,:))
-    call error_mesg('diamonds, bergs_chksum:', 'mismatch in berg count!', FATAL)
+    call error_mesg('KID, bergs_chksum:', 'mismatch in berg count!', FATAL)
   endif
 
   check_halo=.true.
@@ -4457,14 +6966,14 @@ integer :: grdi, grdj
     if (ignore_halo_violation) check_halo=.false.
   endif
   if (check_halo.and.nbergs.ne.sum(icnt(grd%isc:grd%iec, grd%jsc:grd%jec))) then
-    write(*,'("diamonds, bergs_chksum: ",2(a,i8))') &
+    write(*,'("KID, bergs_chksum: ",2(a,i8))') &
       '# bergs =', nbergs, ' sum(icnt(comp_dom)) =',sum(icnt(:,:))
-    call error_mesg('diamonds, bergs_chksum:', 'mismatch in berg count on computational domain!', FATAL)
+    call error_mesg('KID, bergs_chksum:', 'mismatch in berg count on computational domain!', FATAL)
   endif
 
   call mpp_sum(nbergs)
   if (mpp_pe().eq.mpp_root_pe()) &
-    write(*,'("diamonds, bergs_chksum: ",a18,6(x,a,"=",i22))') &
+    write(*,'("KID, bergs_chksum: ",a18,6(x,a,"=",i22))') &
       txt, 'chksum', ichk1, 'chksum2', ichk2, 'chksum3', ichk3, 'chksum4', ichk4, 'chksum5', ichk5, '#', nbergs
 
   grd%tmp(:,:)=real(icnt(:,:))
@@ -4578,6 +7087,171 @@ integer, intent(in) :: j !< j-index of cell
          +(fld(i,j-1)*xi+fld(i-1,j-1)*(1.-xi))*(1.-yj)
   endif
 end function bilin
+
+!> Bilinear interpolation of an A-grid field to a location within a cell (not tested!)
+real function bilin_interp_from_agrid(grd, fld, x, y, i, j, xi, yj)
+! Arguments
+type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+real, intent(in) :: fld(grd%isd:grd%ied,grd%jsd:grd%jed) !< Field to interpolate
+real, intent(in) :: x !<Longitude of position
+real, intent(in) :: y !<Latitude of position
+real, intent(in) :: xi !< Non-dimensional x-position within cell
+real, intent(in) :: yj !< Non-dimensional y-position within cell
+integer, intent(in) :: i !< i-index of cell
+integer, intent(in) :: j !< j-index of cell
+! Local variables
+integer :: is,ie,js,je
+real :: x1,x2,x3,x4,y1,y2,y3,y4
+real :: dx,dy,Delta_x,xx,yy
+real :: xloc,yloc !local coords
+real :: xb(2,2), yb(2,2) !basis functions
+
+!Uses bilinear lagrange basis functions (like in FEM), where the 4
+!nodes of an "element" are defined by a 2x2 array of neigboring cell-centers
+
+if (xi>=0.5) then
+  is=i; ie=i+1
+else
+  is=i-1; ie=i
+endif
+
+if (yj>=0.5) then
+  js=j; je=j+1
+else
+  js=j-1; je=j
+endif
+
+!four corners
+x1=grd%lonc(is,js); y1=grd%latc(is,js)
+x2=grd%lonc(ie,js); y2=grd%latc(ie,js)
+x3=grd%lonc(ie,je); y3=grd%latc(ie,je)
+x4=grd%lonc(is,je); y4=grd%latc(is,je)
+
+!get non-dimensional, local (natural) coords xloc and yloc:
+!largely copied from to pos_within_cell
+if ((.not. grd%grid_is_latlon) .and. (grd%grid_is_regular))  then
+  dx=abs(x3-x4); dy=abs(y3-y2)
+  x1=x3-(dx/2); y1=y3-(dy/2)
+  Delta_x= apply_modulo_around_point(x,x1,grd%Lx)-x1
+  xloc=((Delta_x)/dx)+0.5; yloc=((y-y1)/dy)+0.5
+elseif ((max(y1,y2,y3,y4)<89.999) .or.(.not. grd%grid_is_latlon)) then
+  ! This returns non-dimensional position xi,yj for quad cells (not at a pole)
+  call calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, x, y, xloc, yloc, grd%Lx)
+else
+  ! One of the cell corners is at the north pole so we switch to a tangent plane with
+  ! co-latitude as a radial coordinate.
+  xx=(90.-y)*cos(x*pi_180); yy=(90.-y)*sin(x*pi_180)
+  x1=(90.-y1)*cos(grd%lon(is,js)*pi_180); y1=(90.-y1)*sin(grd%lon(is,js)*pi_180)
+  x2=(90.-y2)*cos(grd%lon(ie,je)*pi_180); y2=(90.-y2)*sin(grd%lon(ie,je)*pi_180)
+  x3=(90.-y3)*cos(grd%lon(ie,je)*pi_180); y3=(90.-y3)*sin(grd%lon(ie,je)*pi_180)
+  x4=(90.-y4)*cos(grd%lon(is,je)*pi_180); y4=(90.-y4)*sin(grd%lon(is,je)*pi_180)
+  call calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, xx, yy, xloc, yloc, grd%Lx)
+endif
+
+!convert local coords to lie within the range [-1,1] rather than [0,1]
+xloc=xloc*2-1; yloc=yloc*2-1
+
+!basis functions:
+xb(1,:)=1-xloc; yb(:,1)=1-yloc
+xb(2,:)=1+xloc; yb(:,2)=1+yloc
+
+!interpolate:
+bilin_interp_from_agrid=sum(0.25*xb*yb*fld(is:ie,js:je))
+
+end function bilin_interp_from_agrid
+
+!> Quadratic interpolation of an A-grid field to a location within a cell
+real function quad_interp_from_agrid(grd, fld, x, y, i, j, xi, yj)
+! Arguments
+type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+real, intent(in) :: fld(grd%isd:grd%ied,grd%jsd:grd%jed) !< Field to interpolate
+real, intent(in) :: x !<Longitude of position
+real, intent(in) :: y !<Latitude of position
+real, intent(in) :: xi !< Non-dimensional x-position within cell
+real, intent(in) :: yj !< Non-dimensional y-position within cell
+integer, intent(in) :: i !< i-index of cell
+integer, intent(in) :: j !< j-index of cell
+! Local variables
+integer :: is,ie,js,je
+real :: x1,x2,x3,x4,y1,y2,y3,y4
+real :: dx,dy,Delta_x,xx,yy
+real :: xloc,yloc !local coords
+real :: xb(3,3), yb(3,3) !basis functions
+integer :: mind!=1
+
+!Uses bi-quadratic lagrange quadrilateral basis functions (like in FEM), where the 9
+!nodes of an "element" are defined by a 3x3 array of neigboring cell-centers. Note that a
+!perfect quadrilateral is assumed for simplicity (4 straight sides). This assumption
+!is imperfect when using a geographic grid (local coordinates may be slightly wrong),
+!but is probably good enough to approximate the bathymetry at a point, which is the
+!main purpose of this subroutine. Note that even the bilinear interpolations used elsewhere
+!are inaccurate, given the curved coordinate system...
+
+!bounds of "node" array (is:ie,js:je).
+ if (rev_mind) then
+   mind=0
+ else
+   mind=1
+ endif
+if (mod(i,2)==mind) then
+  if (xi>=0.5) then
+    is=i; ie=i+2
+  else
+    is=i-2; ie=i
+  endif
+else
+  is=i-1; ie=i+1
+endif
+if (mod(j,2)==mind) then
+  if (yj>=0.5) then
+    js=j; je=j+2
+  else
+    js=j-2; je=j
+  endif
+else
+  js=j-1; je=j+1
+endif
+
+!four corners
+x1=grd%lonc(is,js); y1=grd%latc(is,js)
+x2=grd%lonc(ie,js); y2=grd%latc(ie,js)
+x3=grd%lonc(ie,je); y3=grd%latc(ie,je)
+x4=grd%lonc(is,je); y4=grd%latc(is,je)
+
+!get non-dimensional, local (natural) coords xloc and yloc:
+!largely copied from to pos_within_cell
+if ((.not. grd%grid_is_latlon) .and. (grd%grid_is_regular))  then
+  dx=abs(x3-x4); dy=abs(y3-y2)
+  x1=x3-(dx/2); y1=y3-(dy/2)
+  Delta_x= apply_modulo_around_point(x,x1,grd%Lx)-x1
+  xloc=((Delta_x)/dx)+0.5; yloc=((y-y1)/dy)+0.5
+elseif ((max(y1,y2,y3,y4)<89.999) .or.(.not. grd%grid_is_latlon)) then
+  ! This returns non-dimensional position xi,yj for quad cells (not at a pole)
+  call calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, x, y, xloc, yloc, grd%Lx)
+else
+  ! One of the cell corners is at the north pole so we switch to a tangent plane with
+  ! co-latitude as a radial coordinate.
+  xx=(90.-y)*cos(x*pi_180); yy=(90.-y)*sin(x*pi_180)
+  x1=(90.-y1)*cos(grd%lon(is,js)*pi_180); y1=(90.-y1)*sin(grd%lon(is,js)*pi_180)
+  x2=(90.-y2)*cos(grd%lon(ie,je)*pi_180); y2=(90.-y2)*sin(grd%lon(ie,je)*pi_180)
+  x3=(90.-y3)*cos(grd%lon(ie,je)*pi_180); y3=(90.-y3)*sin(grd%lon(ie,je)*pi_180)
+  x4=(90.-y4)*cos(grd%lon(is,je)*pi_180); y4=(90.-y4)*sin(grd%lon(is,je)*pi_180)
+  call calc_xiyj(x1, x2, x3, x4, y1, y2, y3, y4, xx, yy, xloc, yloc, grd%Lx)
+endif
+
+!convert local coords to lie within the range [-1,1] rather than [0,1]
+xloc=xloc*2-1; yloc=yloc*2-1
+
+!basis functions:
+xb(1,:)=0.5*xloc*(xloc-1); yb(:,1)=0.5*yloc*(yloc-1)
+xb(2,:)=(1+xloc)*(1-xloc); yb(:,2)=(1+yloc)*(1-yloc)
+xb(3,:)=0.5*xloc*(xloc+1); yb(:,3)=0.5*yloc*(yloc+1)
+
+!interpolate:
+quad_interp_from_agrid=sum(xb*yb*fld(is:ie,js:je))
+
+end function quad_interp_from_agrid
+
 
 !> Prints a field
 subroutine print_fld(grd, fld, label)
@@ -4698,10 +7372,10 @@ subroutine check_for_duplicates_in_parallel(bergs)
   endif
   if (k /= nbergs) then
     write(stderrunit,*) 'counted bergs=',k,'count_bergs()=',nbergs
-    call error_mesg('diamonds, check_for_duplicates:', 'Mismatch between concatenation of lists and count_bergs()!', FATAL)
+    call error_mesg('KID, check_for_duplicates:', 'Mismatch between concatenation of lists and count_bergs()!', FATAL)
   endif
   k = check_for_duplicate_ids_in_list(nbergs, ids, verbose=.true.)
-  if (k /= 0) call error_mesg('diamonds, check_for_duplicates:', 'Duplicate berg detected across PEs!', FATAL)
+  if (k /= 0) call error_mesg('KID, check_for_duplicates:', 'Duplicate berg detected across PEs!', FATAL)
   if (nbergs>0) deallocate(ids)
 end subroutine check_for_duplicates_in_parallel
 
@@ -4793,21 +7467,21 @@ subroutine test_check_for_duplicate_ids_in_list()
   call mpp_sum(error_count)
   if (error_count /= 0) then
     error_count = check_for_duplicate_ids_in_list(5, ids, verbose=.true.)
-    call error_mesg('diamonds, test_check_for_duplicate_ids_in_list:', 'Unit test for clean list failed!', FATAL)
+    call error_mesg('KID, test_check_for_duplicate_ids_in_list:', 'Unit test for clean list failed!', FATAL)
   endif
   if (mpp_pe() == mpp_root_pe()) ids(5) = ids(4)
   error_count = check_for_duplicate_ids_in_list(5, ids, verbose=.false.)
   call mpp_sum(error_count)
   if (error_count == 0) then
     error_count = check_for_duplicate_ids_in_list(5, ids, verbose=.true.)
-    call error_mesg('diamonds, test_check_for_duplicate_ids_in_list:', 'Unit test for dirty list failed!', FATAL)
+    call error_mesg('KID, test_check_for_duplicate_ids_in_list:', 'Unit test for dirty list failed!', FATAL)
   endif
   if (mpp_pe() == mpp_root_pe()) ids(5) = 7 + 5*mpp_pe()
   error_count = check_for_duplicate_ids_in_list(5, ids, verbose=.false.)
   call mpp_sum(error_count)
-  if (error_count == 0) then
+  if (error_count == 0 .and. mpp_npes()>1) then
     error_count = check_for_duplicate_ids_in_list(5, ids, verbose=.true.)
-    call error_mesg('diamonds, test_check_for_duplicate_ids_in_list:', 'Unit test for a really dirty list failed!', FATAL)
+    call error_mesg('KID, test_check_for_duplicate_ids_in_list:', 'Unit test for a really dirty list failed!', FATAL)
   endif
   deallocate(ids)
 end subroutine test_check_for_duplicate_ids_in_list

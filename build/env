@@ -1,0 +1,16 @@
+#source /opt/modules/default/etc/modules.sh
+module use -a /ncrc/home2/fms/local/modulefiles
+setenv MODULEPATH /usw/eslogin/modulefiles-c4:/sw/eslogin-c4/modulefiles:/opt/cray/pe/ari/modulefiles:/opt/cray/ari/modulefiles:/opt/cray/pe/modulefiles:/opt/cray/modulefiles:/opt/modulefiles:/sw/common/modulefiles
+#module unload PrgEnv-pgi PrgEnv-intel PrgEnv-gnu darshan; module load PrgEnv-gnu; module unload netcdf gcc; module load gcc/7.3.0 cray-hdf5 cray-netcdf
+
+module unload PrgEnv-pgi
+module unload PrgEnv-pathscale
+module unload PrgEnv-intel
+module unload PrgEnv-gnu
+module unload PrgEnv-cray
+
+module load PrgEnv-intel
+module swap intel intel/18.0.6.288
+module unload netcdf
+module load cray-netcdf
+module load cray-hdf5

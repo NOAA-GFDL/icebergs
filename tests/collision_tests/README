@@ -1,0 +1,22 @@
+Model the contact between two bonded-particle iceberg conglomerates using the original "KID" scheme (Stern et al, 2017), the "MTS-KID" multiple-timestepping scheme (without angular momentum terms), or the "iKID" discrete-element-style scheme (Huth et al, 2022; MTS-KID with angular momentum terms).
+
+1. Make the iceberg input files: cd makeberg; ./RUN; cd ..
+2. run the model: ./RUN_KID or ./RUN_MTS_KID or ./RUN_iKID
+3. animate the results:
+./animate_trajectories.py -fname="KID.nc"
+or
+./animate_trajectories.py -fname="MTS_KID.nc"
+or
+./animate_trajectories.py -fname="iKID.nc"
+
+!!for regression testing:
+Note the "write_restart berg" chksums in each of the .nml files that are called by the model run commands, and also printed below:
+
+KID:
+chksum = -1211104969 chksum2= -1211104969 chksum3= 1964715299  chksum4= 1964715299  chksum5= 0#= 16
+
+MTS_KID:
+chksum=-1441819690 chksum2=-1441819690 chksum3=1124700946 chksum4=1124700946 chksum5=0 #=16
+
+iKID:
+chksum=1560193269 chksum2=-1064844053 chksum3=-1070230468 chksum4=-1070230468 chksum5=0 #=16

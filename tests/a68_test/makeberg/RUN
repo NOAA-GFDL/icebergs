@@ -1,0 +1,9 @@
+mkdir output_files
+mkdir ./../INPUT
+mkdir ./../RESTART
+rm ./output_files/Generic*
+
+# THIS IS THE BERG USED IN HUTH ET AL, 2022 OCEAN CURRENTS BREAK UP A TABULAR ICEBERG. SCIENCE ADVANCES:
+./makeberg.py -Convert_to_lat_lon=True -input_is_cartesian=False -element_type='square' -plot_circles=False -Create_icebergs_bonds=False -Generic_ice_geometry_filename='./../data/a68_experiment_berg_2020_12_09_gridded_ll_p0625_cropped.nc' -Ice_geometry_source='Generic' -set_all_thicknesses_to_one=True -Th_prescribed=200 -plot_ice_thickness=False -plot_circles=True -plot_h_ice_new=False -plot_ice_mask=True -plot_icebergs_positions=False -adjust_lat_ref=True -Interpolate_from_four_corners=False -Radius=1500 -lat_ref_grid_to_cartesian=-55.2 -uvel=0.22 -dx=500. -R_earth=6363827. -icethres=0.5 -displace_y=-0.1
+
+cp ./output_files/Generic_icebergs.res.nc ./../INPUT/icebergs.res.nc

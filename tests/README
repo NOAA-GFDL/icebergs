@@ -1,0 +1,25 @@
+These directories contain test cases for the updates to the iceberg module described in the following publications:
+
+[1] Huth, A., Adcroft, A., & Sergienko, O. (2022). Parameterizing Tabular-Iceberg Decay in an Ocean Model. Journal of Advances in Modeling Earth Systems, 14(3), e2021MS002869. doi:10.1029/2021MS002869
+
+[2] Huth, A., Adcroft, A., Sergienko, O., & Khan, N. (2022). Ocean currents break up a tabular iceberg. Science Advances, 8(42), eabq6974. doi:10.1126/sciadv.abq6974
+
+
+Test descriptions:
+
+footloose_tests/: Breakup of two icebergs via the footloose mechanism, as described in [1]
+
+collision_tests/: Two bonded-particle icebergs collide using either the original Kinematic Icebergs Dynamics (KID) bonded-particle model, KID with multiple-time-stepping (MTS), or the "improved" KID (iKID) that includes MTS with parallel-bond-style discrete element method (DEM) sub-steps (see [2]).
+
+dem_cbeam_test/ and dem_ssbeam_test/: check whether iKID can match analytical solutions for beam bending
+
+dem_ground_frac_test/: An iKID iceberg grounds and breaks into pieces
+
+a68_test/: iKID simulation of the two rift-calving breakups of iceberg A68a in December 2020, from [2]
+
+
+Each test contains python scripts to create the initial iceberg configuration (restart files) and to plot the results.
+To build an appropriate conda environment:
+
+conda env create --name icebergs --file=iceberg_env.yml
+conda activate icebergs
