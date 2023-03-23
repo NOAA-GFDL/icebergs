@@ -10,14 +10,17 @@ use mpp_domains_mod, only: mpp_get_tile_pelist,mpp_get_tile_npes,mpp_get_io_doma
 use mpp_mod, only: mpp_npes, mpp_pe, mpp_root_pe, mpp_sum, mpp_min, mpp_max, NULL_PE
 use mpp_mod, only: mpp_send, mpp_recv, mpp_gather, mpp_chksum, mpp_sync_self
 use mpp_mod, only: COMM_TAG_11, COMM_TAG_12, COMM_TAG_13, COMM_TAG_14
+use mpp_mod, only: mpp_get_current_pelist
 
-use fms_mod, only: stdlog, stderr, error_mesg, FATAL, WARNING, NOTE
-use fms_mod, only: field_exist, file_exist, read_data, write_data
+use fms_mod, only: stdlog, stderr, error_mesg, FATAL, WARNING, NOTE, lowercase
 
-use fms_io_mod, only: get_instance_filename
-use fms_io_mod, only : save_restart, restart_file_type, free_restart_type, set_meta_global
-use fms_io_mod, only : register_restart_axis, register_restart_field, set_domain, nullify_domain
-use fms_io_mod, only : read_unlimited_axis =>read_compressed, field_exist, get_field_size
+use fms2_io_mod, only: get_instance_filename
+use fms2_io_mod, only: FmsNetcdfDomainFile_t, open_file, close_file, read_restart, fms2_io_write_restart => write_restart
+use fms2_io_mod, only: variable_exists, get_dimension_size, get_num_dimensions, get_dimension_names
+use fms2_io_mod, only: get_variable_attribute, variable_att_exists, write_data, read_data
+use fms2_io_mod, only: register_unlimited_compressed_axis, register_axis, register_restart_field, register_variable_attribute
+use fms2_io_mod, only: register_global_attribute, register_field
+use fms2_io_mod, only: get_global_io_domain_indices, unlimited
 
 use mpp_mod,    only : mpp_clock_begin, mpp_clock_end, mpp_clock_id
 use mpp_mod,    only : CLOCK_COMPONENT, CLOCK_SUBCOMPONENT, CLOCK_LOOP
@@ -75,6 +78,12 @@ integer :: clock_btrw,clock_btrp !bond trajectories
 #endif
 character(len=128) :: version = _FILE_VERSION !< Version of file
 
+interface register_restart_field_wrap
+  module procedure :: register_restart_field_wrap_1d
+  module procedure :: register_restart_field_wrap_2d
+  module procedure :: register_restart_field_wrap_3d
+end interface
+
 contains
 
 !> Initialize parallel i/o
@@ -124,9 +133,6 @@ character(len=35) :: filename_bonds
 type(iceberg), pointer :: this=>NULL()
 integer :: stderrunit
 !I/O vars
-type(restart_file_type) :: bergs_restart
-type(restart_file_type) :: bergs_bond_restart
-type(restart_file_type) :: calving_restart
 integer :: nbergs, nbonds
 integer :: n_static_bergs
 logical :: check_bond_quality
@@ -184,6 +190,11 @@ integer, allocatable, dimension(:) :: ine,              &
 
 
 integer :: grdi, grdj
+type(FmsNetcdfDomainFile_t) :: fileobj         !< Fms2_io fileobj
+integer :: global_nbergs
+character(len=8), dimension(4) :: dim_names_4d
+character(len=8), dimension(3) :: dim_names_3d
+character(len=1), dimension(1) :: dim_names_1d
 
 ! Get the stderr unit number
  stderrunit=stderr()
@@ -247,97 +258,6 @@ integer :: grdi, grdj
      allocate(rot(nbergs))
    endif
 
-  filename = trim("icebergs.res.nc")
-  call set_domain(bergs%grd%domain)
-  call register_restart_axis(bergs_restart,filename,'i',nbergs)
-  call set_meta_global(bergs_restart,'file_format_major_version',ival=(/file_format_major_version/))
-  call set_meta_global(bergs_restart,'file_format_minor_version',ival=(/file_format_minor_version/))
-  call set_meta_global(bergs_restart,'time_axis',ival=(/0/))
-
-  !Now start writing in the io_tile_root_pe if there are any bergs in the I/O list
-
-  ! Define Variables
-  id = register_restart_field(bergs_restart,filename,'lon',lon,longname='longitude',units='degrees_E')
-  id = register_restart_field(bergs_restart,filename,'lat',lat,longname='latitude',units='degrees_N')
-  id = register_restart_field(bergs_restart,filename,'uvel',uvel,longname='zonal velocity',units='m/s')
-  id = register_restart_field(bergs_restart,filename,'vvel',vvel,longname='meridional velocity',units='m/s')
-  id = register_restart_field(bergs_restart,filename,'mass',mass,longname='mass',units='kg')
-  if (.not. bergs%Runge_not_Verlet) then
-    id = register_restart_field(bergs_restart,filename,'axn',axn,longname='explicit zonal acceleration',units='m/s^2')
-    id = register_restart_field(bergs_restart,filename,'ayn',ayn,longname='explicit meridional acceleration',units='m/s^2')
-    id = register_restart_field(bergs_restart,filename,'bxn',bxn,longname='implicit zonal acceleration',units='m/s^2')
-    id = register_restart_field(bergs_restart,filename,'byn',byn,longname='implicit meridional acceleration',units='m/s^2')
-  endif
-  id = register_restart_field(bergs_restart,filename,'ine',ine,longname='i index',units='none')
-  id = register_restart_field(bergs_restart,filename,'jne',jne,longname='j index',units='none')
-  id = register_restart_field(bergs_restart,filename,'thickness',thickness,longname='thickness',units='m')
-  id = register_restart_field(bergs_restart,filename,'width',width,longname='width',units='m')
-  id = register_restart_field(bergs_restart,filename,'length',length,longname='length',units='m')
-  id = register_restart_field(bergs_restart,filename,'start_lon',start_lon, &
-                                            longname='longitude of calving location',units='degrees_E')
-  id = register_restart_field(bergs_restart,filename,'start_lat',start_lat, &
-                                            longname='latitude of calving location',units='degrees_N')
-  id = register_restart_field(bergs_restart,filename,'start_year',start_year, &
-                                            longname='calendar year of calving event', units='years')
-  id = register_restart_field(bergs_restart,filename,'id_cnt',id_cnt, &
-                                            longname='counter component of iceberg id', units='dimensionless')
-  id = register_restart_field(bergs_restart,filename,'id_ij',id_ij, &
-                                            longname='position component of iceberg id', units='dimensionless')
-  id = register_restart_field(bergs_restart,filename,'start_day',start_day, &
-                                            longname='year day of calving event',units='days')
-  id = register_restart_field(bergs_restart,filename,'start_mass',start_mass, &
-                                            longname='initial mass of calving berg',units='kg')
-  id = register_restart_field(bergs_restart,filename,'mass_scaling',mass_scaling, &
-                                            longname='scaling factor for mass of calving berg',units='none')
-  id = register_restart_field(bergs_restart,filename,'mass_of_bits',mass_of_bits, &
-                                            longname='mass of bergy bits',units='kg')
-  id = register_restart_field(bergs_restart,filename,'heat_density',heat_density, &
-                                            longname='heat density',units='J/kg')
-
-  if (bergs%footloose) then
-    id = register_restart_field(bergs_restart,filename,'fl_k',fl_k,longname='footloose calving k',units='m')
-    id = register_restart_field(bergs_restart,filename,'mass_of_fl_bits',mass_of_fl_bits, &
-      longname='mass of footloose bits',units='kg')
-    id = register_restart_field(bergs_restart,filename,'mass_of_fl_bergy_bits',mass_of_fl_bergy_bits, &
-      longname='mass of bergy bits associated with footloose bits',units='kg')
-   end if
-
-  if (mts) then
-    id = register_restart_field(bergs_restart,filename,'axn_fast',axn_fast,&
-      longname='sub-step explicit zonal acceleration',units='m/s^2')
-    id = register_restart_field(bergs_restart,filename,'ayn_fast',ayn_fast,&
-      longname='sub-step explicit meridional acceleration',units='m/s^2')
-    id = register_restart_field(bergs_restart,filename,'bxn_fast',bxn_fast,&
-      longname='sub-step implicit zonal acceleration',units='m/s^2')
-    id = register_restart_field(bergs_restart,filename,'byn_fast',byn_fast,&
-      longname='sub-step implicit meridional acceleration',units='m/s^2')
-  endif
-
-  if (dem) then
-    id = register_restart_field(bergs_restart,filename,'ang_vel',ang_vel,&
-      longname='dem angular velocity',units='rad/s')
-    id = register_restart_field(bergs_restart,filename,'ang_accel',ang_accel,&
-      longname='dem angular acceleration',units='rad/s^2')
-    id = register_restart_field(bergs_restart,filename,'rot',rot,&
-      longname='dem accumulated rotation',units='rad')
-  endif
-
-  !Checking if any icebergs are static in order to decide whether to save static_berg
-  n_static_bergs = 0
-  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
-    this=>bergs%list(grdi,grdj)%first
-    do while (associated(this))
-      n_static_bergs=n_static_bergs+this%static_berg
-      this=>this%next
-    enddo
-  enddo ; enddo
-  call mpp_sum(n_static_bergs)
-  if (n_static_bergs .gt. 0) &
-    id = register_restart_field(bergs_restart,filename,'static_berg',static_berg, &
-                                              longname='static_berg',units='dimensionless')
-
-  ! Write variables
-
   i = 0
   do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
     this=>bergs%list(grdi,grdj)%first
@@ -379,9 +299,120 @@ integer :: grdi, grdj
     enddo
   enddo ; enddo
 
+  filename = "RESTART/"//trim("icebergs.res.nc")
+  dim_names_1d(1) = "i"
+  if (.not. open_file(fileobj, filename, "overwrite", bergs%grd%domain, is_restart=.true.)) &
+    call error_mesg('write_icebegrs_restart', "Error opening the icebergs restart file to write", FATAL)
 
-  call save_restart(bergs_restart, time_stamp)
-  call free_restart_type(bergs_restart)
+  call register_unlimited_compressed_axis(fileobj, dim_names_1d(1), nbergs)
+  call register_global_attribute(fileobj,"file_format_major_version", file_format_major_version)
+  call register_global_attribute(fileobj,"file_format_minor_version", file_format_minor_version)
+  call register_global_attribute(fileobj,"time_axis", 0)
+
+  !Now start writing in the io_tile_root_pe if there are any bergs in the I/O list
+
+  ! Define Variables
+  call register_restart_field_wrap(fileobj,'lon',lon, &
+                                   dim_names_1d,longname='longitude',units='degrees_E')
+  call register_restart_field_wrap(fileobj,'lat',lat, &
+                                   dim_names_1d,longname='latitude',units='degrees_N')
+  call register_restart_field_wrap(fileobj,'uvel',uvel, &
+                                   dim_names_1d,longname='zonal velocity',units='m/s')
+  call register_restart_field_wrap(fileobj,'vvel',vvel, &
+                                   dim_names_1d,longname='meridional velocity',units='m/s')
+  call register_restart_field_wrap(fileobj,'mass',mass, &
+                                   dim_names_1d,longname='mass',units='kg')
+  if (.not. bergs%Runge_not_Verlet) then
+    call register_restart_field_wrap(fileobj,'axn',axn, &
+                                    dim_names_1d,longname='explicit zonal acceleration',units='m/s^2')
+    call register_restart_field_wrap(fileobj,'ayn',ayn, &
+                                    dim_names_1d,longname='explicit meridional acceleration',units='m/s^2')
+    call register_restart_field_wrap(fileobj,'bxn',bxn, &
+                                    dim_names_1d,longname='implicit zonal acceleration',units='m/s^2')
+    call register_restart_field_wrap(fileobj,'byn',byn, &
+                                    dim_names_1d,longname='implicit meridional acceleration',units='m/s^2')
+  endif
+  call register_restart_field_wrap(fileobj,'ine',ine, &
+                                   dim_names_1d,longname='i index',units='none')
+  call register_restart_field_wrap(fileobj,'jne',jne, &
+                                   dim_names_1d,longname='j index',units='none')
+  call register_restart_field_wrap(fileobj,'thickness',thickness, &
+                                   dim_names_1d,longname='thickness',units='m')
+  call register_restart_field_wrap(fileobj,'width',width, &
+                                   dim_names_1d,longname='width',units='m')
+  call register_restart_field_wrap(fileobj,'length',length, &
+                                   dim_names_1d,longname='length',units='m')
+  call register_restart_field_wrap(fileobj,'start_lon',start_lon, &
+                                   dim_names_1d,longname='longitude of calving location',units='degrees_E')
+  call register_restart_field_wrap(fileobj,'start_lat',start_lat, &
+                                   dim_names_1d,longname='latitude of calving location',units='degrees_N')
+  call register_restart_field_wrap(fileobj,'start_year',start_year, &
+                                   dim_names_1d,longname='calendar year of calving event', units='years')
+  call register_restart_field_wrap(fileobj,'id_cnt',id_cnt, &
+                                   dim_names_1d,longname='counter component of iceberg id', units='dimensionless')
+  call register_restart_field_wrap(fileobj,'id_ij',id_ij, &
+                                   dim_names_1d,longname='position component of iceberg id', units='dimensionless')
+  call register_restart_field_wrap(fileobj,'start_day',start_day, &
+                                   dim_names_1d,longname='year day of calving event',units='days')
+  call register_restart_field_wrap(fileobj,'start_mass',start_mass, &
+                                   dim_names_1d,longname='initial mass of calving berg',units='kg')
+  call register_restart_field_wrap(fileobj,'mass_scaling',mass_scaling, &
+                                   dim_names_1d,longname='scaling factor for mass of calving berg',units='none')
+  call register_restart_field_wrap(fileobj,'mass_of_bits',mass_of_bits, &
+                                   dim_names_1d,longname='mass of bergy bits',units='kg')
+  call register_restart_field_wrap(fileobj,'heat_density',heat_density, &
+                                   dim_names_1d,longname='heat density',units='J/kg')
+
+  if (bergs%footloose) then
+    call register_restart_field_wrap(fileobj,'fl_k',fl_k, &
+                                    dim_names_1d,longname='footloose calving k',units='m')
+    call register_restart_field_wrap(fileobj,'mass_of_fl_bits',mass_of_fl_bits, &
+                                    dim_names_1d,longname='mass of footloose bits',units='kg')
+    call register_restart_field_wrap(fileobj,'mass_of_fl_bergy_bits',mass_of_fl_bergy_bits, &
+                                    dim_names_1d,longname='mass of bergy bits associated with footloose bits',units='kg')
+   end if
+
+  if (mts) then
+    call register_restart_field_wrap(fileobj,'axn_fast',axn_fast,&
+                                     dim_names_1d,longname='sub-step explicit zonal acceleration',units='m/s^2')
+    call register_restart_field_wrap(fileobj,'ayn_fast',ayn_fast,&
+                                     dim_names_1d,longname='sub-step explicit meridional acceleration',units='m/s^2')
+    call register_restart_field_wrap(fileobj,'bxn_fast',bxn_fast,&
+                                     dim_names_1d,longname='sub-step implicit zonal acceleration',units='m/s^2')
+    call register_restart_field_wrap(fileobj,'byn_fast',byn_fast,&
+                                     dim_names_1d,longname='sub-step implicit meridional acceleration',units='m/s^2')
+  endif
+
+  if (dem) then
+    call register_restart_field_wrap(fileobj,'ang_vel',ang_vel,&
+                                     dim_names_1d,longname='dem angular velocity',units='rad/s')
+    call register_restart_field_wrap(fileobj,'ang_accel',ang_accel,&
+                                     dim_names_1d,longname='dem angular acceleration',units='rad/s^2')
+    call register_restart_field_wrap(fileobj,'rot',rot,&
+                                     dim_names_1d,longname='dem accumulated rotation',units='rad')
+  endif
+
+  !Checking if any icebergs are static in order to decide whether to save static_berg
+  n_static_bergs = 0
+  do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
+    this=>bergs%list(grdi,grdj)%first
+    do while (associated(this))
+      n_static_bergs=n_static_bergs+this%static_berg
+      this=>this%next
+    enddo
+  enddo ; enddo
+  call mpp_sum(n_static_bergs)
+  if (n_static_bergs .gt. 0) &
+    call register_restart_field_wrap(fileobj,'static_berg',static_berg, &
+                                     dim_names_1d,longname='static_berg',units='dimensionless')
+
+  call register_field(fileobj, "i", "int")
+  call fms2_io_write_restart(fileobj)
+
+  call get_dimension_size(fileobj, "i", global_nbergs)
+  call write_data(fileobj, "i", global_nbergs)
+
+  call close_file(fileobj)
 
   deallocate(              &
              lon,          &
@@ -432,8 +463,6 @@ integer :: grdi, grdj
              id_ij,     &
              start_year )
 
-  call nullify_domain()
-
 !########## Creating bond restart file ######################
 
   !Allocating restart memory for bond related variables.
@@ -459,41 +488,6 @@ integer :: grdi, grdj
     allocate(rel_rotation(nbonds))
     allocate(broken(nbonds))
   endif
-
-  call get_instance_filename("bonds_iceberg.res.nc", filename_bonds)
-  call set_domain(bergs%grd%domain)
-  call register_restart_axis(bergs_bond_restart,filename,'i',nbonds)
-  call set_meta_global(bergs_bond_restart,'file_format_major_version',ival=(/file_format_major_version/))
-  call set_meta_global(bergs_bond_restart,'file_format_minor_version',ival=(/file_format_minor_version/))
-  call set_meta_global(bergs_bond_restart,'time_axis',ival=(/0/))
-
-  !Now start writing in the io_tile_root_pe if there are any bergs in the I/O list
-
-  id = register_restart_field(bergs_bond_restart,filename_bonds,'first_berg_ine',first_berg_ine,longname='iceberg ine of first berg in bond',units='dimensionless')
-  id = register_restart_field(bergs_bond_restart,filename_bonds,'first_berg_jne',first_berg_jne,longname='iceberg jne of first berg in bond',units='dimensionless')
-  id = register_restart_field(bergs_bond_restart,filename_bonds,'first_id_cnt',first_id_cnt,longname='counter component of iceberg id first berg in bond',units='dimensionless')
-  id = register_restart_field(bergs_bond_restart,filename_bonds,'first_id_ij',first_id_ij,longname='position component of iceberg id first berg in bond',units='dimensionless')
-  id = register_restart_field(bergs_bond_restart,filename_bonds,'other_berg_ine',other_berg_ine,longname='iceberg ine of second berg in bond',units='dimensionless')
-  id = register_restart_field(bergs_bond_restart,filename_bonds,'other_berg_jne',other_berg_jne,longname='iceberg jne of second berg in bond',units='dimensionless')
-  id = register_restart_field(bergs_bond_restart,filename_bonds,'other_id_cnt',other_id_cnt,longname='counter component of iceberg id second berg in bond',units='dimensionless')
-  id = register_restart_field(bergs_bond_restart,filename_bonds,'other_id_ij',other_id_ij,longname='position component of iceberg id second berg in bond',units='dimensionless')
-
-  if (dem) then
-    id = register_restart_field(bergs_bond_restart,filename_bonds,'tangd1',tangd1,&
-      longname='zonal tangential displacement',units='m')
-    id = register_restart_field(bergs_bond_restart,filename_bonds,'tangd2',tangd2,&
-      longname='meridional tangential displacement',units='m')
-    id = register_restart_field(bergs_bond_restart,filename_bonds,'nstress',nstress,&
-      longname='normal stress',units='Pa')
-    id = register_restart_field(bergs_bond_restart,filename_bonds,'sstress',sstress,&
-      longname='shear stress',units='Pa')
-    id = register_restart_field(bergs_bond_restart,filename_bonds,'rel_rotation',rel_rotation,&
-      longname='relative rotation',units='rad')
-     id = register_restart_field(bergs_bond_restart,filename_bonds,'broken',broken,&
-      longname='broken status',units='none')
-  endif
-
-  ! Write variables
 
   i = 0
   do grdj = bergs%grd%jsc,bergs%grd%jec ; do grdi = bergs%grd%isc,bergs%grd%iec
@@ -524,9 +518,51 @@ integer :: grdi, grdj
     enddo!End of loop over bergs
   enddo; enddo !End of loop over grid
 
-  call save_restart(bergs_bond_restart, time_stamp)
-  call free_restart_type(bergs_bond_restart)
+  filename = "RESTART/"//trim("bonds_iceberg.res.nc")
+  if (open_file(fileobj, filename, "overwrite", bergs%grd%domain, is_restart=.true.)) &
+    call error_mesg('write_icebegrs_restart', "Error opening the bonds icebergs restart file to write", FATAL)
 
+  call register_unlimited_compressed_axis(fileobj,'i',nbonds)
+  call register_global_attribute(fileobj,'file_format_major_version',file_format_major_version)
+  call register_global_attribute(fileobj,'file_format_minor_version',file_format_minor_version)
+  call register_global_attribute(fileobj,'time_axis',0)
+
+  !Now start writing in the io_tile_root_pe if there are any bergs in the I/O list
+
+  call register_restart_field_wrap(fileobj,'first_berg_ine',first_berg_ine, &
+                                   dim_names_1d,longname='iceberg ine of first berg in bond',units='dimensionless')
+  call register_restart_field_wrap(fileobj,'first_berg_jne',first_berg_jne, &
+                                   dim_names_1d,longname='iceberg jne of first berg in bond',units='dimensionless')
+  call register_restart_field_wrap(fileobj,'first_id_cnt',first_id_cnt, &
+                                   dim_names_1d,longname='counter component of iceberg id first berg in bond',units='dimensionless')
+  call register_restart_field_wrap(fileobj,'first_id_ij',first_id_ij, &
+                                   dim_names_1d,longname='position component of iceberg id first berg in bond',units='dimensionless')
+  call register_restart_field_wrap(fileobj,'other_berg_ine',other_berg_ine, &
+                                   dim_names_1d,longname='iceberg ine of second berg in bond',units='dimensionless')
+  call register_restart_field_wrap(fileobj,'other_berg_jne',other_berg_jne, &
+                                   dim_names_1d,longname='iceberg jne of second berg in bond',units='dimensionless')
+  call register_restart_field_wrap(fileobj,'other_id_cnt',other_id_cnt, &
+                                   dim_names_1d,longname='counter component of iceberg id second berg in bond',units='dimensionless')
+  call register_restart_field_wrap(fileobj,'other_id_ij',other_id_ij, &
+                                   dim_names_1d,longname='position component of iceberg id second berg in bond',units='dimensionless')
+
+  if (dem) then
+    call register_restart_field_wrap(fileobj,'tangd1',tangd1,&
+                                     dim_names_1d,longname='zonal tangential displacement',units='m')
+    call register_restart_field_wrap(fileobj,'tangd2',tangd2,&
+                                     dim_names_1d,longname='meridional tangential displacement',units='m')
+    call register_restart_field_wrap(fileobj,'nstress',nstress,&
+                                     dim_names_1d,longname='normal stress',units='Pa')
+    call register_restart_field_wrap(fileobj,'sstress',sstress,&
+                                     dim_names_1d,longname='shear stress',units='Pa')
+    call register_restart_field_wrap(fileobj,'rel_rotation',rel_rotation,&
+                                     dim_names_1d,longname='relative rotation',units='rad')
+    call register_restart_field_wrap(fileobj,'broken',broken,&
+                                     dim_names_1d,longname='broken status',units='none')
+  endif
+
+  call fms2_io_write_restart(fileobj)
+  call close_file(fileobj)
 
   deallocate(first_id_cnt,          &
              other_id_cnt,          &
@@ -545,12 +581,10 @@ integer :: grdi, grdj
              rel_rotation,          &
              broken)
   endif
-
-  call nullify_domain()
   endif
 
   ! Write stored ice
-  filename='calving.res.nc'
+  filename="RESTART/"//trim("calving.res.nc")
   if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stderrunit,'(2a)') 'KID, write_restart: writing ',filename
   call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'write stored_ice')
   call grd_chksum2(bergs%grd, bergs%grd%stored_heat, 'write stored_heat')
@@ -559,18 +593,41 @@ integer :: grdi, grdj
     call grd_chksum2(bergs%grd, bergs%grd%rmean_calving_hflx, 'write mean calving_hflx')
   endif
 
-  call set_domain(bergs%grd%domain)
-  id = register_restart_field(calving_restart,filename,'stored_ice',bergs%grd%stored_ice,longname='STORED_ICE',units='none')
-  id = register_restart_field(calving_restart,filename,'stored_heat',bergs%grd%stored_heat,longname='STORED_HEAT',units='none')
-  id = register_restart_field(calving_restart,filename,'iceberg_counter_grd',bergs%grd%iceberg_counter_grd,longname='ICEBERG_COUNTER_GRD',units='none')
+  dim_names_4d = (/"xaxis_1", "yaxis_1", "zaxis_1", "Time   "/)
+  dim_names_3d = (/"xaxis_1", "yaxis_1", "Time   "/)
+
+  if (.not. open_file(fileobj, filename, "overwrite", bergs%grd%domain, is_restart=.true.)) &
+    call error_mesg('write_icebegrs_restart', "Error opening the calving restart file to write", FATAL)
+
+  call register_axis(fileobj, "xaxis_1", "x")
+  call register_axis(fileobj, "yaxis_1", "y")
+  call register_axis(fileobj, "zaxis_1", size(bergs%grd%stored_ice, 3))
+  call register_axis(fileobj, "Time", unlimited)
+
+  call register_restart_field_wrap(fileobj,'stored_ice',bergs%grd%stored_ice, &
+                                   dim_names_4d,longname='STORED_ICE',units='none', &
+                                   is_domain_decomposed=.true.)
+  call register_restart_field_wrap(fileobj,'stored_heat',bergs%grd%stored_heat,&
+                                   dim_names_3d,longname='STORED_HEAT',units='none', &
+                                   is_domain_decomposed=.true.)
+
+  call register_restart_field_wrap(fileobj,'iceberg_counter_grd', bergs%grd%iceberg_counter_grd, &
+                                   dim_names_3d,longname='ICEBERG_COUNTER_GRD',units='none', &
+                                   is_domain_decomposed=.true.)
+
   if (bergs%tau_calving>0.) then
-    id = register_restart_field(calving_restart,filename,'rmean_calving',bergs%grd%rmean_calving,longname='RMEAN_CALVING',units='none')
-    id = register_restart_field(calving_restart,filename,'rmean_calving_hflx',bergs%grd%rmean_calving_hflx,longname='RMEAN_CALVING_HFLX',units='none')
+    call register_restart_field_wrap(fileobj,'rmean_calving',bergs%grd%rmean_calving, &
+                                     dim_names_3d,longname='RMEAN_CALVING',units='none', &
+                                     is_domain_decomposed=.true.)
+    call register_restart_field_wrap(fileobj,'rmean_calving_hflx',bergs%grd%rmean_calving_hflx, &
+                                     dim_names_3d,longname='RMEAN_CALVING_HFLX',units='none', &
+                                     is_domain_decomposed=.true.)
   endif
 
-  call save_restart(calving_restart, time_stamp)
-  call free_restart_type(calving_restart)
-
+  call write_axis_metadata(fileobj)
+  call fms2_io_write_restart(fileobj)
+  call write_axis_data(fileobj, size(bergs%grd%stored_ice, 3))
+  call close_file(fileobj)
 end subroutine write_restart
 
 !> Find the last berg in a linked list.
@@ -610,10 +667,9 @@ type(time_type), intent(in) :: Time !< Model time
 integer :: k, siz(4), nbergs_in_file, nbergs_read
 logical :: lres, found_restart, found, replace_iceberg_num
 logical :: explain
-logical :: multiPErestart  ! Not needed with new restart read; currently kept for compatibility
 real :: lon0, lon1, lat0, lat1
 real :: pos_is_good, pos_is_good_all_pe
-character(len=53) :: filename, filename_base
+character(len=53) :: filename
 type(icebergs_gridded), pointer :: grd
 type(iceberg) :: localberg ! NOT a pointer but an actual local variable
 integer :: stderrunit, i, j, cnt, ij
@@ -656,6 +712,9 @@ integer, allocatable, dimension(:) :: ine,        &
                                       id_ij,      &
                                       start_year
 
+type(FmsNetcdfDomainFile_t) :: fileobj !< Fms2_io fileobj
+character(len=1), dimension(1) :: dim_names_1d
+
 !integer, allocatable, dimension(:,:) :: iceberg_counter_grd
 
   ! Get the stderr unit number
@@ -667,16 +726,15 @@ integer, allocatable, dimension(:) :: ine,        &
   ! Zero out nbergs_in_file
   nbergs_in_file = 0
 
-  filename_base=trim(restart_input_dir)//'icebergs.res.nc'
+  filename=trim(restart_input_dir)//'icebergs.res.nc'
 
-  found_restart = find_restart_file(filename_base, filename, multiPErestart, io_tile_id(1))
+  found_restart = open_file(fileobj, filename, "read", bergs%grd%domain, is_restart=.true.)
 
   if (found_restart) then
-     filename = filename_base
-     call get_field_size(filename,'i',siz, field_found=found, domain=bergs%grd%domain)
+     call get_dimension_size(fileobj, 'i', siz(1))
      nbergs_in_file = siz(1)
 
-     replace_iceberg_num = field_exist(filename, 'iceberg_num') ! True if using 32-bit iceberg_num in restart file
+     replace_iceberg_num = variable_exists(fileobj, 'iceberg_num') ! True if using 32-bit iceberg_num in restart file
      allocate(lon(nbergs_in_file))
      allocate(lat(nbergs_in_file))
      allocate(uvel(nbergs_in_file))
@@ -703,6 +761,19 @@ integer, allocatable, dimension(:) :: ine,        &
      allocate(ine(nbergs_in_file))
      allocate(jne(nbergs_in_file))
      allocate(start_year(nbergs_in_file))
+
+     !Set initial values to zero if argument is_optional is .true.
+     axn = 0
+     ayn = 0
+     bxn = 0
+     byn = 0
+     fl_k = 0
+     mass_of_bits = 0
+     mass_of_fl_bits = 0
+     mass_of_fl_bergy_bits = 0
+     heat_density = 0
+     static_berg = 0
+
      if (replace_iceberg_num) then
        call error_mesg('read_restart_bergs', "Calculating new iceberg ID's", WARNING)
        allocate(iceberg_num(nbergs_in_file))
@@ -738,51 +809,56 @@ integer, allocatable, dimension(:) :: ine,        &
        allocate(rot(nbergs_in_file))
      endif
 
-     call read_unlimited_axis(filename,'lon',lon,domain=grd%domain)
-     call read_unlimited_axis(filename,'lat',lat,domain=grd%domain)
-     call read_unlimited_axis(filename,'uvel',uvel,domain=grd%domain)
-     call read_unlimited_axis(filename,'vvel',vvel,domain=grd%domain)
-     call read_unlimited_axis(filename,'mass',mass,domain=grd%domain)
-     call read_real_vector(filename,'axn',axn,grd%domain,value_if_not_in_file=0.)
-     call read_real_vector(filename,'ayn',ayn,grd%domain,value_if_not_in_file=0.)
-     call read_real_vector(filename,'bxn',bxn,grd%domain,value_if_not_in_file=0.)
-     call read_real_vector(filename,'byn',byn,grd%domain,value_if_not_in_file=0.)
-     call read_unlimited_axis(filename,'thickness',thickness,domain=grd%domain)
-     call read_unlimited_axis(filename,'width',width,domain=grd%domain)
-     call read_unlimited_axis(filename,'length',length,domain=grd%domain)
-     call read_real_vector(filename,'fl_k',fl_k,grd%domain,value_if_not_in_file=0.)
-     call read_unlimited_axis(filename,'start_lon',start_lon,domain=grd%domain)
-     call read_unlimited_axis(filename,'start_lat',start_lat,domain=grd%domain)
-     call read_unlimited_axis(filename,'start_day',start_day,domain=grd%domain)
-     call read_unlimited_axis(filename,'start_mass',start_mass,domain=grd%domain)
-     call read_unlimited_axis(filename,'mass_scaling',mass_scaling,domain=grd%domain)
-     call read_real_vector(filename,'mass_of_bits',mass_of_bits,domain=grd%domain,value_if_not_in_file=0.)
-     call read_real_vector(filename,'mass_of_fl_bits',mass_of_fl_bits,domain=grd%domain,value_if_not_in_file=0.)
-     call read_real_vector(filename,'mass_of_fl_bergy_bits',mass_of_fl_bergy_bits,domain=grd%domain,value_if_not_in_file=0.)
-     call read_real_vector(filename,'heat_density',heat_density,domain=grd%domain,value_if_not_in_file=0.)
-     call read_unlimited_axis(filename,'ine',ine,domain=grd%domain)
-     call read_unlimited_axis(filename,'jne',jne,domain=grd%domain)
-     call read_unlimited_axis(filename,'start_year',start_year,domain=grd%domain)
+     call register_restart_field(fileobj,'lon',lon,dim_names_1d)
+     call register_restart_field(fileobj,'lat',lat,dim_names_1d)
+     call register_restart_field(fileobj,'uvel',uvel,dim_names_1d)
+     call register_restart_field(fileobj,'vvel',vvel,dim_names_1d)
+     call register_restart_field(fileobj,'mass',mass,dim_names_1d)
+     call register_restart_field(fileobj,'axn',axn,dim_names_1d,is_optional=.true.)
+     call register_restart_field(fileobj,'ayn',ayn,dim_names_1d,is_optional=.true.)
+     call register_restart_field(fileobj,'bxn',bxn,dim_names_1d,is_optional=.true.)
+     call register_restart_field(fileobj,'byn',byn,dim_names_1d,is_optional=.true.)
+     call register_restart_field(fileobj,'thickness',thickness,dim_names_1d)
+     call register_restart_field(fileobj,'width',width,dim_names_1d)
+     call register_restart_field(fileobj,'length',length,dim_names_1d)
+     call register_restart_field(fileobj,'fl_k',fl_k,dim_names_1d,is_optional=.true.)
+     call register_restart_field(fileobj,'start_lon',start_lon,dim_names_1d)
+     call register_restart_field(fileobj,'start_lat',start_lat,dim_names_1d)
+     call register_restart_field(fileobj,'start_day',start_day,dim_names_1d)
+     call register_restart_field(fileobj,'start_mass',start_mass,dim_names_1d)
+     call register_restart_field(fileobj,'mass_scaling',mass_scaling,dim_names_1d)
+     call register_restart_field(fileobj,'mass_of_bits',mass_of_bits,dim_names_1d,is_optional=.true.)
+     call register_restart_field(fileobj,'mass_of_fl_bits',mass_of_fl_bits,dim_names_1d,is_optional=.true.)
+     call register_restart_field(fileobj,'mass_of_fl_bergy_bits',mass_of_fl_bergy_bits,dim_names_1d,is_optional=.true.)
+     call register_restart_field(fileobj,'heat_density',heat_density,dim_names_1d,is_optional=.true.)
+     call register_restart_field(fileobj,'ine',ine,dim_names_1d)
+     call register_restart_field(fileobj,'jne',jne,dim_names_1d)
+     call register_restart_field(fileobj,'start_year',start_year,dim_names_1d)
      if (replace_iceberg_num) then
-       call read_int_vector(filename,'iceberg_num',iceberg_num,grd%domain,value_if_not_in_file=-1)
+       iceberg_num = -1
+       call register_restart_field(fileobj,'iceberg_num',iceberg_num,dim_names_1d,is_optional=.true.)
      else
-       call read_int_vector(filename,'id_cnt',id_cnt,grd%domain)
-       call read_int_vector(filename,'id_ij',id_ij,grd%domain)
+       call register_restart_field(fileobj,'id_cnt',id_cnt,dim_names_1d)
+       call register_restart_field(fileobj,'id_ij',id_ij,dim_names_1d)
      endif
-     call read_real_vector(filename,'static_berg',static_berg,grd%domain,value_if_not_in_file=0.)
+     call register_restart_field(fileobj,'static_berg',static_berg,dim_names_1d,is_optional=.true.)
 
      if (mts) then
-       call read_real_vector(filename,'axn_fast',axn_fast,grd%domain,value_if_not_in_file=0.)
-       call read_real_vector(filename,'ayn_fast',ayn_fast,grd%domain,value_if_not_in_file=0.)
-       call read_real_vector(filename,'bxn_fast',bxn_fast,grd%domain,value_if_not_in_file=0.)
-       call read_real_vector(filename,'byn_fast',byn_fast,grd%domain,value_if_not_in_file=0.)
+       axn_fast = 0; ayn_fast = 0; bxn_fast = 0; byn_fast = 0;
+       call register_restart_field(fileobj,'axn_fast',axn_fast,dim_names_1d,is_optional=.true.)
+       call register_restart_field(fileobj,'ayn_fast',ayn_fast,dim_names_1d,is_optional=.true.)
+       call register_restart_field(fileobj,'bxn_fast',bxn_fast,dim_names_1d,is_optional=.true.)
+       call register_restart_field(fileobj,'byn_fast',byn_fast,dim_names_1d,is_optional=.true.)
      endif
 
      if (dem) then
-       call read_real_vector(filename,'ang_vel'  ,ang_vel  ,grd%domain,value_if_not_in_file=0.)
-       call read_real_vector(filename,'ang_accel',ang_accel,grd%domain,value_if_not_in_file=0.)
-       call read_real_vector(filename,'rot'      ,rot      ,grd%domain,value_if_not_in_file=0.)
+       ang_vel = 0; ang_accel = 0; rot = 0;
+       call register_restart_field(fileobj,'ang_vel'  ,ang_vel  ,dim_names_1d,is_optional=.true.)
+       call register_restart_field(fileobj,'ang_accel',ang_accel,dim_names_1d,is_optional=.true.)
+       call register_restart_field(fileobj,'rot'      ,rot      ,dim_names_1d,is_optional=.true.)
      endif
+      call read_restart(fileobj)
+      call close_file(fileobj)
   elseif (bergs%require_restart) then
      stop 'read_restart_bergs, RESTART NOT FOUND!'
   endif
@@ -880,8 +956,6 @@ integer, allocatable, dimension(:) :: ine,        &
        endif
 
       if (really_debug) call print_berg(stderrunit, bergs%list(localberg%ine,localberg%jne)%first, 'read_restart_bergs, add_new_berg_to_list')
-    elseif (multiPErestart .and. io_tile_id(1) .lt. 0) then
-      call error_mesg('KID, read_restart_bergs', 'berg in PE file was not on PE!', FATAL)
     endif
   enddo
 
@@ -972,36 +1046,6 @@ integer, allocatable, dimension(:) :: ine,        &
   if (mpp_pe().eq.mpp_root_pe().and.verbose) write(*,'(a)') 'KID, read_restart_bergs: completed'
 
 end subroutine read_restart_bergs
-
-!> Read a vector of reals from file and use a default value if variable is missing
-subroutine read_real_vector(filename, varname, values, domain, value_if_not_in_file)
-  character(len=*), intent(in)  :: filename !< Name of file to read from
-  character(len=*), intent(in)  :: varname !< Name of variable to read
-  real,             intent(out) :: values(:) !< Returned vector of reals
-  type(domain2D),   intent(in)  :: domain !< Parallel decomposition
-  real, optional,   intent(in)  :: value_if_not_in_file !< Value to use if variable is not in file
-
-  if (present(value_if_not_in_file).and..not.field_exist(filename, varname)) then
-    values(:)=value_if_not_in_file
-  else
-    call read_unlimited_axis(filename,varname,values,domain=domain)
-  endif
-end subroutine read_real_vector
-
-!> Read a vector of integers from file and use a default value if variable is missing
-subroutine read_int_vector(filename, varname, values, domain, value_if_not_in_file)
-  character(len=*),  intent(in)  :: filename !< Name of file to read from
-  character(len=*),  intent(in)  :: varname !< Name of variable to read
-  integer,           intent(out) :: values(:) !< Returned vector of integers
-  type(domain2D),    intent(in)  :: domain !< Parallel decomposition
-  integer, optional, intent(in)  :: value_if_not_in_file !< Value to use if variable is not in file
-
-  if (present(value_if_not_in_file).and..not.field_exist(filename, varname)) then
-    values(:)=value_if_not_in_file
-  else
-    call read_unlimited_axis(filename,varname,values,domain=domain)
-  endif
-end subroutine read_int_vector
 
 !> Generate bergs for the purpose of debugging
 subroutine generate_bergs(bergs,Time)
@@ -1150,7 +1194,6 @@ type(time_type), intent(in) :: Time !< Model time
 integer :: k, siz(4), nbonds_in_file
 logical :: lres, found_restart, found
 logical :: first_berg_found, second_berg_found
-logical :: multiPErestart  ! Not needed with new restart read; currently kept for compatibility
 real :: lon0, lon1, lat0, lat1
 character(len=53) :: filename, filename_base
 type(icebergs_gridded), pointer :: grd
@@ -1182,6 +1225,8 @@ real, allocatable, dimension(:) ::    tangd1,           &
                                       rel_rotation
 integer(kind=8), allocatable, dimension(:) :: first_id,   &
                                               other_id
+type(FmsNetcdfDomainFile_t) :: fileobj !< Fms2_io fileobj
+character(len=1) :: dim_names_1d(1)
 !integer, allocatable, dimension(:,:) :: iceberg_counter_grd
 
   ! Get the stderr unit number
@@ -1194,14 +1239,15 @@ integer(kind=8), allocatable, dimension(:) :: first_id,   &
   nbonds_in_file = 0
   all_pe_number_perfect_bonds=0
 
-  filename_base=trim(restart_input_dir)//'bonds_iceberg.res.nc'
+  filename=trim(restart_input_dir)//'bonds_iceberg.res.nc'
 
-  found_restart = find_restart_file(filename_base, filename, multiPErestart, io_tile_id(1))
+  found_restart = open_file(fileobj, filename, "read", bergs%grd%domain, is_restart=.true.)
   call error_mesg('read_restart_bonds_bergs_new', 'Using icebergs bond restart read', NOTE)
 
-  filename = filename_base
-  call get_field_size(filename,'i',siz, field_found=found, domain=bergs%grd%domain)
-  nbonds_in_file = siz(1)
+  if (found_restart) then
+   call get_dimension_size(fileobj,'i',siz(1))
+   nbonds_in_file = siz(1)
+  endif
 
     if (mpp_pe() .eq. mpp_root_pe()) then
       write(stderrunit,*)  'KID, bond read restart : ','Number of bonds in file',  nbonds_in_file
@@ -1226,32 +1272,35 @@ integer(kind=8), allocatable, dimension(:) :: first_id,   &
       allocate(rel_rotation(nbonds_in_file))
       allocate(broken(nbonds_in_file))
     endif
-
-    call read_unlimited_axis(filename,'first_id_cnt',id_cnt,domain=grd%domain)
-    call read_unlimited_axis(filename,'first_id_ij',id_ij,domain=grd%domain)
+    dim_names_1d = "i"
+    call register_restart_field(fileobj,'first_id_cnt',id_cnt,dim_names_1d)
+    call register_restart_field(fileobj,'first_id_ij',id_ij,dim_names_1d)
     do k=1, nbonds_in_file
       first_id(k) = id_from_2_ints( id_cnt(k), id_ij(k) )
     enddo
-    call read_unlimited_axis(filename,'other_id_cnt',id_cnt,domain=grd%domain)
-    call read_unlimited_axis(filename,'other_id_ij',id_ij,domain=grd%domain)
+    call register_restart_field(fileobj,'other_id_cnt',id_cnt,dim_names_1d)
+    call register_restart_field(fileobj,'other_id_ij',id_ij,dim_names_1d)
     do k=1, nbonds_in_file
       other_id(k) = id_from_2_ints( id_cnt(k), id_ij(k) )
     enddo
     deallocate(id_cnt, id_ij)
-    call read_unlimited_axis(filename,'first_berg_jne',first_berg_jne,domain=grd%domain)
-    call read_unlimited_axis(filename,'first_berg_ine',first_berg_ine,domain=grd%domain)
-    call read_unlimited_axis(filename,'other_berg_jne',other_berg_jne,domain=grd%domain)
-    call read_unlimited_axis(filename,'other_berg_ine',other_berg_ine,domain=grd%domain)
+    call register_restart_field(fileobj,'first_berg_jne',first_berg_jne,dim_names_1d)
+    call register_restart_field(fileobj,'first_berg_ine',first_berg_ine,dim_names_1d)
+    call register_restart_field(fileobj,'other_berg_jne',other_berg_jne,dim_names_1d)
+    call register_restart_field(fileobj,'other_berg_ine',other_berg_ine,dim_names_1d)
 
     if (dem) then
-      call read_real_vector(filename,'tangd1',tangd1,grd%domain,value_if_not_in_file=0.)
-      call read_real_vector(filename,'tangd2',tangd2,grd%domain,value_if_not_in_file=0.)
-      call read_real_vector(filename,'nstress',nstress,grd%domain,value_if_not_in_file=0.)
-      call read_real_vector(filename,'sstress',sstress,grd%domain,value_if_not_in_file=0.)
-      call read_real_vector(filename,'rel_rotation',rel_rotation,grd%domain,value_if_not_in_file=0.)
-      call read_int_vector(filename,'broken',broken,grd%domain,value_if_not_in_file=0)
+      tangd1 = 0; tangd2 = 0; nstress = 0; sstress = 0; rel_rotation = 0; broken = 0;
+      call register_restart_field(fileobj,'tangd1',tangd1,dim_names_1d,is_optional=.true.)
+      call register_restart_field(fileobj,'tangd2',tangd2,dim_names_1d,is_optional=.true.)
+      call register_restart_field(fileobj,'nstress',nstress,dim_names_1d,is_optional=.true.)
+      call register_restart_field(fileobj,'sstress',sstress,dim_names_1d,is_optional=.true.)
+      call register_restart_field(fileobj,'rel_rotation',rel_rotation,dim_names_1d,is_optional=.true.)
+      call register_restart_field(fileobj,'broken',broken,dim_names_1d,is_optional=.true.)
     endif
 
+    call read_restart(fileobj)
+    call close_file(fileobj)
     number_first_bonds_matched=0
     number_second_bonds_matched=0
     number_perfect_bonds=0
@@ -1441,53 +1490,56 @@ character(len=37) :: filename, actual_filename
 type(icebergs_gridded), pointer :: grd
 real, allocatable, dimension(:,:) :: randnum
 type(randomNumberStream) :: rns
+type(FmsNetcdfDomainFile_t) :: fileobj !< Fms2_io fileobj
 
   ! For convenience
   grd=>bergs%grd
 
   ! Read stored ice
   filename=trim(restart_input_dir)//'calving.res.nc'
-  if (file_exist(filename)) then
+  if (open_file(fileobj, filename, "read", grd%domain)) then
+    call register_axis_wrapper(fileobj)
     if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') &
      'KID, read_restart_calving: reading ',filename
-    call read_data(filename, 'stored_ice', grd%stored_ice, grd%domain)
-    if (field_exist(filename, 'stored_heat')) then
+    call read_data(fileobj, 'stored_ice', grd%stored_ice)
+    if (variable_exists(fileobj, 'stored_heat')) then
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
        'KID, read_restart_calving: reading stored_heat from restart file.'
-      call read_data(filename, 'stored_heat', grd%stored_heat, grd%domain)
+      call read_data(fileobj, 'stored_heat', grd%stored_heat)
     else
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
      'KID, read_restart_calving: stored_heat WAS NOT FOUND in the file. Setting to 0.'
       grd%stored_heat(:,:)=0.
     endif
-    if (field_exist(filename, 'rmean_calving')) then
+    if (variable_exists(fileobj,'rmean_calving')) then
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
        'KID, read_restart_calving: reading rmean_calving from restart file.'
-      call read_data(filename, 'rmean_calving', grd%rmean_calving, grd%domain)
+      call read_data(fileobj, 'rmean_calving', grd%rmean_calving)
       grd%rmean_calving_initialized=.true.
     else
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
      'KID, read_restart_calving: rmean_calving WAS NOT FOUND in the file. Setting to 0.'
     endif
-    if (field_exist(filename, 'rmean_calving_hflx')) then
+    if (variable_exists(fileobj, 'rmean_calving_hflx')) then
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
        'KID, read_restart_calving: reading rmean_calving_hflx from restart file.'
-      call read_data(filename, 'rmean_calving_hflx', grd%rmean_calving_hflx, grd%domain)
+      call read_data(fileobj, 'rmean_calving_hflx', grd%rmean_calving_hflx)
       grd%rmean_calving_hflx_initialized=.true.
     else
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
      'KID, read_restart_calving: rmean_calving_hflx WAS NOT FOUND in the file. Setting to 0.'
     endif
-    if (field_exist(filename, 'iceberg_counter_grd')) then
+    if (variable_exists(fileobj, 'iceberg_counter_grd')) then
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
        'KID, read_restart_calving: reading iceberg_counter_grd from restart file.'
-      call read_data(filename, 'iceberg_counter_grd', grd%iceberg_counter_grd, grd%domain)
+      call read_data(fileobj, 'iceberg_counter_grd', grd%iceberg_counter_grd)
     else
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
      'KID, read_restart_calving: iceberg_counter_grd WAS NOT FOUND in the file. Setting to 0.'
       grd%iceberg_counter_grd(:,:) = 0
     endif
     bergs%restarted=.true.
+    call close_file(fileobj)
   else
     if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
      'KID, read_restart_calving: initializing stored ice to random numbers'
@@ -1547,21 +1599,23 @@ subroutine read_ocean_depth(grd)
 type(icebergs_gridded), pointer :: grd !< Container for gridded fields
 ! Local variables
 character(len=37) :: filename
-
+type(FmsNetcdfDomainFile_t) :: fileobj !< Fms2_io fileobj
   ! Read stored ice
   filename=trim(restart_input_dir)//'topog.nc'
-  if (file_exist(filename)) then
+  if (open_file(fileobj, filename, "read", grd%domain)) then
     if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') &
      'KID, read_ocean_depth: reading ',filename
-    if (field_exist(filename, 'depth')) then
+    call register_axis_wrapper(fileobj)
+    if (variable_exists(fileobj, "depth")) then
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
        'KID, read_ocean_depth: reading depth from topog file.'
-      call read_data(filename, 'depth', grd%ocean_depth, grd%domain)
+      call read_data(fileobj, 'depth', grd%ocean_depth)
     else
       if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
      'KID, read_ocean_depth: depth WAS NOT FOUND in the file. Setting to 0.'
       !grd%ocean_depth(:,:)=0.
     endif
+    call close_file(fileobj)
   else
     if (mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
      'KID, read_ocean_depth: Ocean depth file (topog.nc) not present)'
@@ -2451,46 +2505,262 @@ integer :: stderrunit
 
 end subroutine put_int
 
-!> True is a restart file can be found
-logical function find_restart_file(filename, actual_file, multiPErestart, tile_id)
-  character(len=*), intent(in) :: filename !< Base-name of restart file
-  character(len=*), intent(out) :: actual_file !< Actual name of file, if found
-  logical, intent(out) :: multiPErestart !< True if found, false otherwise
-  integer, intent(in) :: tile_id !< Parallel tile number of file
+!> Wrapper for fms_io register_restart_field
+subroutine register_restart_field_wrap_1d(fileobj, varname, vdata, dimensions, &
+                                          longname, units, is_domain_decomposed)
+  type(FmsNetcdfDomainFile_t), intent(inout) :: fileobj              !< Fms2_io fileobj
+  character(len=*),            intent(in)    :: varname              !< Name of the variable
+  class(*),                    intent(in)    :: vdata(:)             !< Variable data
+  character(len=*),            intent(in)    :: dimensions(:)        !< Names of variable dimensions
+  character(len=*),            intent(in)    :: longname             !< Longname of the variable
+  character(len=*),            intent(in)    :: units                !< Units of the variable
+  logical, optional,           intent(in)    :: is_domain_decomposed !< .True. if the variable is
+                                                                     !! domain decomposed
 
-  character(len=6) :: pe_name
+  integer(8)           :: chksum_val !< Calculated checksum
+  integer, allocatable :: all_pe(:)  !< List of pes in the current pelist
+  character(len=32)    :: chksum     !< Checksum as a character
+  logical              :: do_chksum  !< .True. if it is needed to write checksums
 
-  find_restart_file = .false.
+  call register_restart_field(fileobj, varname, vdata, dimensions)
 
-  ! If running as ensemble, add the ensemble id string to the filename
-  call get_instance_filename(filename, actual_file)
+  do_chksum = .true.
+  if (present(is_domain_decomposed)) then
+    do_chksum = .not. is_domain_decomposed
+  endif
 
-  ! Prefer combined restart files.
-  inquire(file=actual_file,exist=find_restart_file)
-  if (find_restart_file) return
+  !! The checksum for domain decomposed variables is calculated inside the `write_restart` call
+  if (do_chksum) then
+    allocate(all_pe(mpp_npes()))
+    call mpp_get_current_pelist(all_pe)
 
-  ! Uncombined restart
-  if(tile_id .ge. 0) then
-    write(actual_file,'(A,".",I4.4)') trim(actual_file), tile_id
+    select type (vdata)
+    type is (real)
+      chksum_val = mpp_chksum(vdata, all_pe)
+    type is (integer)
+      chksum_val = mpp_chksum(vdata, all_pe)
+      call register_variable_attribute(fileobj, varname, "packing", int(0))
+    end select
+
+    chksum = ""
+    write(chksum, "(Z16)") chksum_val
+
+    call add_variable_metadata(fileobj, varname, longname, units, chksum=chksum)
   else
-  if (mpp_npes()>10000) then
-     write(pe_name,'(a,i6.6)' )'.', mpp_pe()
+    call add_variable_metadata(fileobj, varname, longname, units)
+  endif
+
+end subroutine register_restart_field_wrap_1d
+
+!> Wrapper for fms_io register_restart_field
+subroutine register_restart_field_wrap_2d(fileobj, varname, vdata, dimensions, &
+                                          longname, units, is_domain_decomposed)
+  type(FmsNetcdfDomainFile_t), intent(inout) :: fileobj              !< Fms2_io fileobj
+  character(len=*),            intent(in)    :: varname              !< Name of the variable
+  class(*),                    intent(in)    :: vdata(:,:)           !< Variable data
+  character(len=*),            intent(in)    :: dimensions(:)        !< Names of variable dimensions
+  character(len=*),            intent(in)    :: longname             !< Longname of the variable
+  character(len=*),            intent(in)    :: units                !< Units of the variable
+  logical, optional,           intent(in)    :: is_domain_decomposed !< .True. if the variable is
+                                                                     !! domain decomposed
+
+  integer(8)           :: chksum_val !< Calculated checksum
+  integer, allocatable :: all_pe(:)  !< List of pes in the current pelist
+  character(len=32)    :: chksum     !< Checksum as a character
+  logical              :: do_chksum  !< .True. if it is needed to write checksums
+
+  call register_restart_field(fileobj, varname, vdata, dimensions)
+
+  do_chksum = .true.
+  if (present(is_domain_decomposed)) then
+    do_chksum = .not. is_domain_decomposed
+  endif
+
+  !! The checksum for domain decomposed variables is calculated inside the `write_restart` call
+  if (do_chksum) then
+    allocate(all_pe(mpp_npes()))
+    call mpp_get_current_pelist(all_pe)
+
+    select type (vdata)
+    type is (real)
+      chksum_val = mpp_chksum(vdata, all_pe)
+    type is (integer)
+      chksum_val = mpp_chksum(vdata, all_pe)
+      call register_variable_attribute(fileobj, varname, "packing", int(0))
+    end select
+
+    chksum = ""
+    write(chksum, "(Z16)") chksum_val
+
+    call add_variable_metadata(fileobj, varname, longname, units, chksum=chksum)
   else
-     write(pe_name,'(a,i4.4)' )'.', mpp_pe()
-  endif
-  actual_file=trim(actual_file)//trim(pe_name)
-  endif
-  inquire(file=actual_file,exist=find_restart_file)
-  if (find_restart_file) then
-     multiPErestart=.true.
-     return
+    call add_variable_metadata(fileobj, varname, longname, units)
   endif
 
-  ! No file found, Reset all return parameters
-  find_restart_file=.false.
-  actual_file = ''
-  multiPErestart=.false.
+end subroutine register_restart_field_wrap_2d
 
-end function find_restart_file
+!> Wrapper for fms_io register_restart_field
+subroutine register_restart_field_wrap_3d(fileobj, varname, vdata, dimensions, &
+                                          longname, units, is_domain_decomposed)
+  type(FmsNetcdfDomainFile_t), intent(inout) :: fileobj              !< Fms2_io fileobj
+  character(len=*),            intent(in)    :: varname              !< Name of the variable
+  class(*),                    intent(in)    :: vdata(:,:,:)         !< Variable data
+  character(len=*),            intent(in)    :: dimensions(:)        !< Names of variable dimensions
+  character(len=*),            intent(in)    :: longname             !< Longname of the variable
+  character(len=*),            intent(in)    :: units                !< Units of the variable
+  logical, optional,           intent(in)    :: is_domain_decomposed !< .True. if the variable is
+                                                                     !! domain decomposed
+
+  integer(8)           :: chksum_val !< Calculated checksum
+  integer, allocatable :: all_pe(:)  !< List of pes in the current pelist
+  character(len=32)    :: chksum     !< Checksum as a character
+  logical              :: do_chksum  !< .True. if it is needed to write checksums
+
+  call register_restart_field(fileobj, varname, vdata, dimensions)
+
+  do_chksum = .true.
+  if (present(is_domain_decomposed)) then
+    do_chksum = .not. is_domain_decomposed
+  endif
+
+  !! The checksum for domain decomposed variables is calculated inside the `write_restart` call
+  if (do_chksum) then
+    allocate(all_pe(mpp_npes()))
+    call mpp_get_current_pelist(all_pe)
+
+    select type (vdata)
+    type is (real)
+      chksum_val = mpp_chksum(vdata, all_pe)
+    type is (integer)
+      chksum_val = mpp_chksum(vdata, all_pe)
+      call register_variable_attribute(fileobj, varname, "packing", int(0))
+    end select
+
+    chksum = ""
+    write(chksum, "(Z16)") chksum_val
+
+    call add_variable_metadata(fileobj, varname, longname, units, chksum=chksum)
+  else
+    call add_variable_metadata(fileobj, varname, longname, units)
+  endif
+end subroutine register_restart_field_wrap_3d
+
+!> Writes out some variable meta_data
+subroutine add_variable_metadata(fileobj, varname, longname, units, chksum)
+  type(FmsNetcdfDomainFile_t), intent(inout)          :: fileobj   !< Fms2_io fileobj
+  character(len=*),            intent(in)             :: varname   !< Name of the variable
+  character(len=*),            intent(in)             :: longname  !< Longname of the variable
+  character(len=*),            intent(in)             :: units     !< Units of the variable
+  character(len=*),            intent(in),  optional  :: chksum    !< Checksum as a character
+
+  call register_variable_attribute(fileobj, varname, "long_name", trim(longname), &
+                                   str_len=len_trim(longname))
+  call register_variable_attribute(fileobj, varname, "units", trim(units), &
+                                   str_len=len_trim(units))
+  if (present(chksum)) then
+    call register_variable_attribute(fileobj, varname, "checksum", chksum, str_len=32)
+  endif
+end subroutine add_variable_metadata
+
+!> Writes out the dummy axis_data
+subroutine write_axis_data(fileobj, z_size)
+  type(FmsNetcdfDomainFile_t), intent(inout)          :: fileobj   !< Fms2_io fileobj
+  integer,                     intent(in)             :: z_size    !< Size of the z dimension
+
+  integer, dimension(:), allocatable :: buffer !< Buffer with axis data
+  integer :: is, ie !< Starting and Ending indices for data
+  integer :: i !< For do loops
+
+  call get_global_io_domain_indices(fileobj, "xaxis_1", is, ie, indices=buffer)
+  call write_data(fileobj, "xaxis_1", buffer)
+  deallocate(buffer)
+
+  call get_global_io_domain_indices(fileobj, "yaxis_1", is, ie, indices=buffer)
+  call write_data(fileobj, "yaxis_1", buffer)
+  deallocate(buffer)
+
+  allocate(buffer(z_size))
+  buffer = (/ (i, i=1,z_size)/)
+  call write_data(fileobj, "zaxis_1", buffer)
+
+  call write_data(fileobj, "Time", 1)
+
+end subroutine write_axis_data
+
+!> Writes out the dummy axis_metadata
+subroutine write_axis_metadata(fileobj)
+  type(FmsNetcdfDomainFile_t), intent(inout)          :: fileobj   !< Fms2_io fileobj
+
+  !< Register the dimensions as variables too
+  call register_field(fileobj, "xaxis_1", "double", (/"xaxis_1"/))
+  call register_field(fileobj, "yaxis_1", "double", (/"yaxis_1"/))
+  call register_field(fileobj, "zaxis_1", "double", (/"zaxis_1"/))
+  call register_field(fileobj, "Time", "double", (/"Time"/))
+
+  call register_variable_attribute(fileobj, "xaxis_1", "long_name", "xaxis_1", str_len=7)
+  call register_variable_attribute(fileobj, "xaxis_1", "cartesian_axis", "X", str_len=1)
+  call register_variable_attribute(fileobj, "xaxis_1", "units", "none", str_len=4)
+
+  call register_variable_attribute(fileobj, "yaxis_1", "long_name", "yaxis_1", str_len=7)
+  call register_variable_attribute(fileobj, "yaxis_1", "cartesian_axis", "Y", str_len=1)
+  call register_variable_attribute(fileobj, "yaxis_1", "units", "none", str_len=4)
+
+  call register_variable_attribute(fileobj, "zaxis_1", "long_name", "zaxis_1", str_len=7)
+  call register_variable_attribute(fileobj, "zaxis_1", "cartesian_axis", "Z", str_len=1)
+  call register_variable_attribute(fileobj, "zaxis_1", "units", "none", str_len=4)
+
+  call register_variable_attribute(fileobj, "Time", "long_name", "Time", str_len=4)
+  call register_variable_attribute(fileobj, "Time", "cartesian_axis", "T", str_len=1)
+  call register_variable_attribute(fileobj, "Time", "units", "time level", str_len=10)
+
+end subroutine
+
+!> Wrapper for fms2_io register_axis calls when reading domain decomposed files
+subroutine register_axis_wrapper(fileobj)
+  type(FmsNetcdfDomainFile_t), intent(inout)          :: fileobj   !< Fms2_io fileobj
+
+    character(len=20), dimension(:), allocatable :: file_dim_names !< Array of dimension names
+    integer :: i                    !< For do loops
+    integer :: dim_size             !< Size of the dimension
+    integer :: ndims                !< Number of dimensions in the file
+    logical :: is_domain_decomposed !< Flag indication if domain decomposed
+    character(len=1) :: buffer      !< string buffer
+
+    ndims = get_num_dimensions(fileobj)
+    allocate(file_dim_names(ndims))
+
+    call get_dimension_names(fileobj, file_dim_names)
+
+    !< When reading fms2_io requires that the domain decomposed dimensions ("x" and "y") are
+    !! registered so that fms2_io knows that they are domain decomposed
+    do i = 1, ndims
+       is_domain_decomposed = .false.
+
+       !< Check if the dimension is also a variable
+       if (variable_exists(fileobj, file_dim_names(i))) then
+
+          !< If the variable exists look for the "cartesian_axis" or "axis" variable attribute
+          if (variable_att_exists(fileobj, file_dim_names(i), "axis")) then
+              call get_variable_attribute(fileobj, file_dim_names(i), "axis", buffer)
+
+              !< If the attribute exists and it is "x" or "y" register it as a domain decomposed dimension
+              if (lowercase(buffer) .eq. "x" .or. lowercase(buffer) .eq. "y" ) then
+                  is_domain_decomposed = .true.
+                  call register_axis(fileobj, file_dim_names(i), buffer)
+              endif
+
+          else if (variable_att_exists(fileobj, file_dim_names(i), "cartesian_axis")) then
+              call get_variable_attribute(fileobj, file_dim_names(i), "cartesian_axis", buffer)
+
+              !< If the attribute exists and it "x" or "y" register it as a domain decomposed dimension
+              if (lowercase(buffer) .eq. "x" .or. lowercase(buffer) .eq. "y" ) then
+                  is_domain_decomposed = .true.
+                  call register_axis(fileobj, file_dim_names(i), buffer)
+              endif
+
+          endif !< If variable attribute exists
+       endif !< If variable exists
+   enddo
+end subroutine register_axis_wrapper
 
 end module
