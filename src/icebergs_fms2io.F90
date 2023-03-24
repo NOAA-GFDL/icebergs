@@ -2691,7 +2691,7 @@ end subroutine write_axis_data
 subroutine write_axis_metadata(fileobj)
   type(FmsNetcdfDomainFile_t), intent(inout)          :: fileobj   !< Fms2_io fileobj
 
-  !< Register the dimensions as variables too
+  ! Register the dimensions as variables too
   call register_field(fileobj, "xaxis_1", "double", (/"xaxis_1"/))
   call register_field(fileobj, "yaxis_1", "double", (/"yaxis_1"/))
   call register_field(fileobj, "zaxis_1", "double", (/"zaxis_1"/))
