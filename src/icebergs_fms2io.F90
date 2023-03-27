@@ -1497,7 +1497,9 @@ type(FmsNetcdfDomainFile_t) :: fileobj !< Fms2_io fileobj
 
   ! Read stored ice
   filename=trim(restart_input_dir)//'calving.res.nc'
-  if (open_file(fileobj, filename, "read", grd%domain)) then
+  ! The call to get_instance_filename is required because this is not read in as a restart file
+  call get_instance_filename(filename, actual_filename)
+  if (open_file(fileobj, actual_filename, "read", grd%domain)) then
     call register_axis_wrapper(fileobj)
     if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') &
      'KID, read_restart_calving: reading ',filename
