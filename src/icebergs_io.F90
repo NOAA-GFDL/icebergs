@@ -2,7 +2,7 @@
 module ice_bergs_io
 ! This file is part of NOAA-GFDL/icebergs. See LICENSE.md for the license.
 
-#ifdef use_depreciated_io
+#ifndef USE_FMS2_IO
   use ice_bergs_fmsio
 #else
   use ice_bergs_fms2io

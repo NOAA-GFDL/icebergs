@@ -1,6 +1,7 @@
 !> Handles reading/writing of restart files and trajectory-based diagnostic files
 module ice_bergs_fmsio
-#ifdef use_depreciated_io
+#ifndef USE_FMS2_IO
+
 ! This file is part of NOAA-GFDL/icebergs. See LICENSE.md for the license.
 
 use mpp_domains_mod, only: domain2D
@@ -2492,5 +2493,6 @@ logical function find_restart_file(filename, actual_file, multiPErestart, tile_i
   multiPErestart=.false.
 
 end function find_restart_file
+
 #endif
 end module
