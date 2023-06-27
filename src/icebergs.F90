@@ -4,11 +4,7 @@ module ice_bergs
 ! This file is part of NOAA-GFDL/icebergs. See LICENSE.md for the license.
 
 use constants_mod, only: pi, omega, HLF
-use fms_mod, only: open_namelist_file, check_nml_error, close_file
-use fms_mod, only: field_exist, get_global_att_value
 use fms_mod, only: stdlog, stderr, error_mesg, FATAL, WARNING
-use fms_mod, only: write_version_number, read_data, write_data, file_exist
-use mosaic_mod, only: get_mosaic_ntiles, get_mosaic_ncontacts
 use mpp_mod, only: mpp_npes, mpp_pe, mpp_root_pe, mpp_sum, mpp_min, mpp_max, NULL_PE
 use mpp_mod, only: mpp_send, mpp_recv, mpp_sync_self, mpp_chksum, mpp_sync
 use mpp_mod, only: mpp_clock_begin, mpp_clock_end, mpp_clock_id
@@ -17,7 +13,6 @@ use random_numbers_mod, only: initializeRandomNumberStream, getRandomNumbers, ra
 use random_numbers_mod, only: constructSeed
 use mpp_mod, only: mpp_gather
 use fms_mod, only: clock_flag_default
-use fms_io_mod, only: get_instance_filename
 use mpp_domains_mod, only: domain2D, mpp_update_domains, mpp_define_domains
 use mpp_parameter_mod, only: CGRID_NE, BGRID_NE, CORNER, AGRID
 use mpp_domains_mod, only: mpp_get_compute_domain, mpp_get_data_domain

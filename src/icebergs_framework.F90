@@ -653,7 +653,7 @@ use mpp_domains_mod, only: mpp_define_io_domain
 use mpp_mod, only: mpp_clock_begin, mpp_clock_end, mpp_clock_id, input_nml_file
 use mpp_mod, only: CLOCK_COMPONENT, CLOCK_SUBCOMPONENT, CLOCK_LOOP
 
-use fms_mod, only: open_namelist_file, check_nml_error, close_file
+use fms_mod, only: check_nml_error
 use fms_mod, only: clock_flag_default
 
 use diag_manager_mod, only: register_diag_field, register_static_field, send_data
@@ -876,13 +876,7 @@ real :: dx,dy,dx_dlon,dy_dlat,lat_ref2,lon_ref
 
 ! Read namelist parameters
  !write(stderrunit,*) 'KID: reading namelist'
-#ifdef INTERNAL_FILE_NML
   read (input_nml_file, nml=icebergs_nml, iostat=ierr)
-#else
-  iunit = open_namelist_file()
-  read  (iunit, icebergs_nml,iostat=ierr)
-  call close_file (iunit)
-#endif
   ierr = check_nml_error(ierr,'icebergs_nml')
 
   if (really_debug) debug=.true. ! One implies the other...
