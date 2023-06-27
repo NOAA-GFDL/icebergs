@@ -440,9 +440,9 @@ if (mpp_pe()==0) then
   write(*,*) 'Simulation finished in ', (time_finish - time_begin)/60., 'minutes'
 end if
 
-call mpp_exit()
-
 !Deallocate all memory and disassociated pointer
 call icebergs_end(bergs)
+
+call mpp_exit()
 
 end program icebergs_driver
