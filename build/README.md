@@ -1,23 +1,12 @@
-To create list of files to compile:
-
-
-#rm -f path_names
-
+To create a `Makefile` (for FMS2):
 ```
-../../mkmf/bin/list_paths ../../FMS/{mpp,diag_manager,time_manager,include,memutils,constants,platform,fms,random_numbers,mosaic,exchange} ../src/ ../driver/
+source mkmkf_fms2
 ```
-To create a `Makefile`:
+Or for FMS1:
 ```
-../../mkmf/bin/mkmf -t ../../mkmf/templates/ncrc-gnu.mk -c "-Duse_libMPI -Duse_netCDF" -p bergs.x path_names
-
-
-##../../mkmf/bin/mkmf -t ../../mkmf/templates/ncrc-intel.mk -c "-Duse_libMPI -Duse_netCDF" -p bergs.x path_names
+mkmkf
 ```
-To compile a "debug" executable:
+Then, to compile a "debug" executable:
 ```
-make DEBUG=1 -j
-#or
 source mkcmd
-#source mkcmd runs the following:
-#make NETCDF=3 DEBUG=1 bergs.x -j
 ```

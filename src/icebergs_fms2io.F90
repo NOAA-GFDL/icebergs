@@ -1,5 +1,6 @@
 !> Handles reading/writing of restart files and trajectory-based diagnostic files
 module ice_bergs_fms2io
+#ifdef USE_FMS2_IO
 
 ! This file is part of NOAA-GFDL/icebergs. See LICENSE.md for the license.
 
@@ -2765,4 +2766,5 @@ subroutine register_axis_wrapper(fileobj)
    enddo
 end subroutine register_axis_wrapper
 
+#endif
 end module
