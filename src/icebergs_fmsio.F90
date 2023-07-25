@@ -54,7 +54,7 @@ implicit none ; private
 include 'netcdf.inc'
 
 public ice_bergs_io_init
-public read_restart_bergs, write_restart, write_trajectory, write_bond_trajectory
+public read_restart_bergs, write_restart_bergs, write_trajectory, write_bond_trajectory
 public read_restart_calving, read_restart_bonds
 public read_ocean_depth
 
@@ -112,7 +112,7 @@ integer :: stdlogunit, stderrunit
 end subroutine ice_bergs_io_init
 
 !> Write an iceberg restart file
-subroutine write_restart(bergs, time_stamp)
+subroutine write_restart_bergs(bergs, time_stamp)
 ! Arguments
 type(icebergs), pointer :: bergs !< Icebergs container
 character(len=*), intent(in), optional :: time_stamp !< Timestamp for restart file
@@ -552,7 +552,7 @@ integer :: grdi, grdj
 
   ! Write stored ice
   filename='calving.res.nc'
-  if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stderrunit,'(2a)') 'KID, write_restart: writing ',filename
+  if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(stderrunit,'(2a)') 'KID, write_restart_bergs: writing ',filename
   call grd_chksum3(bergs%grd, bergs%grd%stored_ice, 'write stored_ice')
   call grd_chksum2(bergs%grd, bergs%grd%stored_heat, 'write stored_heat')
   if (bergs%tau_calving>0.) then
@@ -572,7 +572,7 @@ integer :: grdi, grdj
   call save_restart(calving_restart, time_stamp)
   call free_restart_type(calving_restart)
 
-end subroutine write_restart
+end subroutine write_restart_bergs
 
 !> Find the last berg in a linked list.
 function last_berg(berg)
