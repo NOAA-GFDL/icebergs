@@ -2727,7 +2727,7 @@ subroutine register_axis_wrapper(fileobj)
     integer :: dim_size             !< Size of the dimension
     integer :: ndims                !< Number of dimensions in the file
     logical :: is_domain_decomposed !< Flag indication if domain decomposed
-    character(len=1) :: buffer      !< string buffer
+    character(len=1) :: cbuffer      !< string buffer
 
     ndims = get_num_dimensions(fileobj)
     allocate(file_dim_names(ndims))
@@ -2744,21 +2744,21 @@ subroutine register_axis_wrapper(fileobj)
 
           !< If the variable exists look for the "cartesian_axis" or "axis" variable attribute
           if (variable_att_exists(fileobj, file_dim_names(i), "axis")) then
-              call get_variable_attribute(fileobj, file_dim_names(i), "axis", buffer)
+              call get_variable_attribute(fileobj, file_dim_names(i), "axis", cbuffer)
 
               !< If the attribute exists and it is "x" or "y" register it as a domain decomposed dimension
-              if (lowercase(buffer) .eq. "x" .or. lowercase(buffer) .eq. "y" ) then
+              if (lowercase(cbuffer) .eq. "x" .or. lowercase(cbuffer) .eq. "y" ) then
                   is_domain_decomposed = .true.
-                  call register_axis(fileobj, file_dim_names(i), buffer)
+                  call register_axis(fileobj, file_dim_names(i), cbuffer)
               endif
 
           else if (variable_att_exists(fileobj, file_dim_names(i), "cartesian_axis")) then
-              call get_variable_attribute(fileobj, file_dim_names(i), "cartesian_axis", buffer)
+              call get_variable_attribute(fileobj, file_dim_names(i), "cartesian_axis", cbuffer)
 
               !< If the attribute exists and it "x" or "y" register it as a domain decomposed dimension
-              if (lowercase(buffer) .eq. "x" .or. lowercase(buffer) .eq. "y" ) then
+              if (lowercase(cbuffer) .eq. "x" .or. lowercase(cbuffer) .eq. "y" ) then
                   is_domain_decomposed = .true.
-                  call register_axis(fileobj, file_dim_names(i), buffer)
+                  call register_axis(fileobj, file_dim_names(i), cbuffer)
               endif
 
           endif !< If variable attribute exists
