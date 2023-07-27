@@ -55,7 +55,7 @@ use ice_bergs_framework, only: set_constant_interaction_length_and_width, skip_f
 use ice_bergs_framework, only: break_bonds_on_sub_steps
 use ice_bergs_framework, only: short_step_mts_grounding, radius_based_drag
 
-use ice_bergs_io,        only: ice_bergs_io_init, write_restart, write_trajectory, write_bond_trajectory
+use ice_bergs_io,        only: ice_bergs_io_init, write_restart_bergs, write_trajectory, write_bond_trajectory
 use ice_bergs_io,        only: read_restart_bergs, read_restart_calving
 use ice_bergs_io,        only: read_restart_bonds
 use ice_bergs_io,        only: read_ocean_depth
@@ -8142,7 +8142,7 @@ subroutine icebergs_save_restart(bergs, time_stamp)
 
   call mpp_clock_begin(bergs%clock_iow)
   call bergs_chksum(bergs, 'write_restart bergs')
-  call write_restart(bergs, time_stamp)
+  call write_restart_bergs(bergs, time_stamp)
   call mpp_clock_end(bergs%clock_iow)
 
 end subroutine icebergs_save_restart

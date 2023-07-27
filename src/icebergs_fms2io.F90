@@ -16,7 +16,7 @@ use mpp_mod, only: mpp_get_current_pelist
 use fms_mod, only: stdlog, stderr, error_mesg, FATAL, WARNING, NOTE, lowercase
 
 use fms2_io_mod, only: get_instance_filename
-use fms2_io_mod, only: FmsNetcdfDomainFile_t, open_file, close_file, read_restart, fms2_io_write_restart => write_restart
+use fms2_io_mod, only: FmsNetcdfDomainFile_t, open_file, close_file, read_restart, write_restart
 use fms2_io_mod, only: variable_exists, get_dimension_size, get_num_dimensions, get_dimension_names
 use fms2_io_mod, only: get_variable_attribute, variable_att_exists, write_data, read_data
 use fms2_io_mod, only: register_unlimited_compressed_axis, register_axis, register_restart_field, register_variable_attribute
@@ -57,7 +57,7 @@ implicit none ; private
 include 'netcdf.inc'
 
 public ice_bergs_io_init
-public read_restart_bergs, write_restart, write_trajectory, write_bond_trajectory
+public read_restart_bergs, write_restart_bergs, write_trajectory, write_bond_trajectory
 public read_restart_calving, read_restart_bonds
 public read_ocean_depth
 
@@ -121,7 +121,7 @@ integer :: stdlogunit, stderrunit
 end subroutine ice_bergs_io_init
 
 !> Write an iceberg restart file
-subroutine write_restart(bergs, time_stamp)
+subroutine write_restart_bergs(bergs, time_stamp)
 ! Arguments
 type(icebergs), pointer :: bergs !< Icebergs container
 character(len=*), intent(in), optional :: time_stamp !< Timestamp for restart file
@@ -408,7 +408,7 @@ character(len=1), dimension(1) :: dim_names_1d
                                      dim_names_1d,longname='static_berg',units='dimensionless')
 
   call register_field(fileobj, "i", "int")
-  call fms2_io_write_restart(fileobj)
+  call write_restart(fileobj)
 
   call get_dimension_size(fileobj, "i", global_nbergs)
   call write_data(fileobj, "i", global_nbergs)
@@ -562,7 +562,7 @@ character(len=1), dimension(1) :: dim_names_1d
                                      dim_names_1d,longname='broken status',units='none')
   endif
 
-  call fms2_io_write_restart(fileobj)
+  call write_restart(fileobj)
   call close_file(fileobj)
 
   deallocate(first_id_cnt,          &
@@ -626,10 +626,10 @@ character(len=1), dimension(1) :: dim_names_1d
   endif
 
   call write_axis_metadata(fileobj)
-  call fms2_io_write_restart(fileobj)
+  call write_restart(fileobj)
   call write_axis_data(fileobj, size(bergs%grd%stored_ice, 3))
   call close_file(fileobj)
-end subroutine write_restart
+end subroutine write_restart_bergs
 
 !> Find the last berg in a linked list.
 function last_berg(berg)
@@ -2727,7 +2727,7 @@ subroutine register_axis_wrapper(fileobj)
     integer :: dim_size             !< Size of the dimension
     integer :: ndims                !< Number of dimensions in the file
     logical :: is_domain_decomposed !< Flag indication if domain decomposed
-    character(len=1) :: buffer      !< string buffer
+    character(len=1) :: cbuffer      !< string buffer
 
     ndims = get_num_dimensions(fileobj)
     allocate(file_dim_names(ndims))
@@ -2744,21 +2744,21 @@ subroutine register_axis_wrapper(fileobj)
 
           !< If the variable exists look for the "cartesian_axis" or "axis" variable attribute
           if (variable_att_exists(fileobj, file_dim_names(i), "axis")) then
-              call get_variable_attribute(fileobj, file_dim_names(i), "axis", buffer)
+              call get_variable_attribute(fileobj, file_dim_names(i), "axis", cbuffer)
 
               !< If the attribute exists and it is "x" or "y" register it as a domain decomposed dimension
-              if (lowercase(buffer) .eq. "x" .or. lowercase(buffer) .eq. "y" ) then
+              if (lowercase(cbuffer) .eq. "x" .or. lowercase(cbuffer) .eq. "y" ) then
                   is_domain_decomposed = .true.
-                  call register_axis(fileobj, file_dim_names(i), buffer)
+                  call register_axis(fileobj, file_dim_names(i), cbuffer)
               endif
 
           else if (variable_att_exists(fileobj, file_dim_names(i), "cartesian_axis")) then
-              call get_variable_attribute(fileobj, file_dim_names(i), "cartesian_axis", buffer)
+              call get_variable_attribute(fileobj, file_dim_names(i), "cartesian_axis", cbuffer)
 
               !< If the attribute exists and it "x" or "y" register it as a domain decomposed dimension
-              if (lowercase(buffer) .eq. "x" .or. lowercase(buffer) .eq. "y" ) then
+              if (lowercase(cbuffer) .eq. "x" .or. lowercase(cbuffer) .eq. "y" ) then
                   is_domain_decomposed = .true.
-                  call register_axis(fileobj, file_dim_names(i), buffer)
+                  call register_axis(fileobj, file_dim_names(i), cbuffer)
               endif
 
           endif !< If variable attribute exists
