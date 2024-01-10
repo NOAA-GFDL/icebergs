@@ -5076,7 +5076,7 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
   ! Arguments
   type(icebergs), pointer :: bergs !< Container for all types and memory
   type(time_type), intent(in) :: time !< Model time
-  real, dimension(:,:), intent(inout) :: calving !< Calving (kg/s). This field is updated with melt by bergs.
+  real, dimension(:,:), intent(inout) :: calving !< Calving (kg m-2 s-1). This field is updated with melt by bergs.
   real, dimension(:,:), intent(inout) :: calving_hflx !< Calving heat flux (W/m2)
   real, dimension(:,:), intent(in) :: uo !< Ocean zonal velocity (m/s)
   real, dimension(:,:), intent(in) :: vo !< Ocean meridional velocity (m/s)
