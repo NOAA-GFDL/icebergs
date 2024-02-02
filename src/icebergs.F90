@@ -5337,7 +5337,7 @@ subroutine icebergs_run(bergs, time, calving, uo, vo, ui, vi, tauxa, tauya, ssh,
   endif
 
   call mpp_update_domains(grd%ssh, grd%domain)
-  max_SST = maxval(sst(:,:))
+  max_SST = maxval(sst(:,:) * grd%msk(grd%isc:grd%iec,grd%jsc:grd%jec))
   if (max_SST > 120.0) then ! The input sst is in degrees Kelvin, otherwise the water would be boiling.
     grd%sst(grd%isc:grd%iec,grd%jsc:grd%jec) = sst(:,:)-273.15 ! Note convert from Kelvin to Celsius
   else  ! The input sst is already in degrees Celsius.
