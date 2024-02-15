@@ -3974,7 +3974,8 @@ subroutine unpack_bond_traj_from_buffer2(first, buff, n)
   integer :: counter ! Position in stack
   integer :: cnt1, ij1, cnt2, ij2
 
-  if (dem) allocate(bond_traj%tangd1,bond_traj%tangd2,bond_traj%nstress,bond_traj%sstress,bond_traj%rel_rotation)
+  if (dem) allocate(bond_traj%tangd1,bond_traj%tangd2,bond_traj%nstress,&
+                    bond_traj%sstress,bond_traj%rel_rotation,bond_traj%broken)
 
   counter = 0
   call pull_buffer_value(buff%data(:,n),counter,bond_traj%lon)
@@ -5355,7 +5356,8 @@ endif
 
   if (dem) allocate(posn%ang_vel,posn%ang_accel,posn%rot)
 
-  if (save_bond_traj .and. dem) allocate(bond_posn%tangd1,bond_posn%tangd2,bond_posn%nstress,bond_posn%sstress,bond_posn%rel_rotation)
+  if (save_bond_traj .and. dem) allocate(bond_posn%tangd1,bond_posn%tangd2,bond_posn%nstress,&
+                                         bond_posn%sstress,bond_posn%rel_rotation,bond_posn%broken)
 
   area_thres=bergs%traj_area_thres*1.e6 ! convert from km^2 to m^2
   area_thres2=bergs%traj_area_thres_sntbc*1.e6
@@ -5479,6 +5481,7 @@ endif
                 bond_posn%nstress=current_bond%nstress
                 bond_posn%sstress=current_bond%sstress
                 bond_posn%rel_rotation=current_bond%rel_rotation
+                bond_posn%broken=current_bond%broken
               endif
 
               call push_bond_posn(current_bond%bond_trajectory, bond_posn)
@@ -5530,7 +5533,8 @@ type(bond_xyt), pointer :: new_bond_posn
 
   allocate(new_bond_posn)
 
-  if (dem) allocate(new_bond_posn%tangd1,new_bond_posn%tangd2,new_bond_posn%nstress,new_bond_posn%sstress,new_bond_posn%rel_rotation)
+  if (dem) allocate(new_bond_posn%tangd1,new_bond_posn%tangd2,new_bond_posn%nstress,&
+                    new_bond_posn%sstress,new_bond_posn%rel_rotation,new_bond_posn%broken)
 
   new_bond_posn=bond_posn_vals
   new_bond_posn%next=>bond_trajectory
@@ -5585,7 +5589,8 @@ type(bond_xyt), pointer :: new_bond_posn,next,last
 
   allocate(new_bond_posn)
 
-  if (dem) allocate(new_bond_posn%tangd1,new_bond_posn%tangd2,new_bond_posn%nstress,new_bond_posn%sstress,new_bond_posn%rel_rotation)
+  if (dem) allocate(new_bond_posn%tangd1,new_bond_posn%tangd2,new_bond_posn%nstress,&
+                    new_bond_posn%sstress,new_bond_posn%rel_rotation,new_bond_posn%broken)
 
   new_bond_posn=bond_posn_vals
   new_bond_posn%next=>null()

@@ -4,7 +4,7 @@
 &icebergs_driver_nml
   a68_test=.true.
   !specify your data dir (ocean currents, winds, etc)
-  data_dir='/lustre/f2/dev/gfdl/Alexander.Huth/MOM6-examples/src/icebergs/tests/a68_test/data/'
+  data_dir='./data/'
   Rearth=<re>
   ibdt=1800.0 !seconds
   ibuo=0.0 !ocean x velocity
@@ -148,8 +148,8 @@
 
     verbose=.false. !(F) Be verbose to stderr
     verbose_hrs=1! (24) Period between verbose messages
-    traj_sample_hrs=0!1 !(24) sampling period for trajectory storage
-    traj_write_hrs=0!6 !(480) Period for writing sampled trajectories to disk
+    traj_sample_hrs=1 !(24) sampling period for trajectory storage
+    traj_write_hrs=6 !(480) Period for writing sampled trajectories to disk
     save_bond_traj=.false. !(F) If T, saves bond trajectories in a separate file
     budget=.false. !(T) Calculate budgets
     debug=.false. !(F) Turn on debugging

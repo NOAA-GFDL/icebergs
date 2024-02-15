@@ -3,8 +3,7 @@ program icebergs_driver
 use constants_mod, only: pi
 use fms_mod, only : fms_init
 use fms_mod, only : fms_end
-use fms_mod, only : open_namelist_file
-use fms_mod, only : close_file
+use fms_mod, only : check_nml_error
 use fms_mod, only : error_mesg
 use fms_mod, only : FATAL
 use mpp_domains_mod, only : mpp_define_layout
@@ -19,6 +18,7 @@ use mpp_mod, only : mpp_pe
 use mpp_mod, only : mpp_root_pe
 use mpp_mod, only: mpp_sync
 use mpp_mod, only: mpp_exit
+use mpp_mod, only: input_nml_file
 use time_manager_mod, only : time_type
 use time_manager_mod, only : set_date
 use time_manager_mod, only : set_calendar_type
@@ -76,6 +76,7 @@ real :: gridres=1.e3
 real :: bump_depth=0
 real :: sst=-2
 real :: REarth=6.378e6
+integer :: ierr
 integer :: ibhrs=2
 integer :: nmax = 2000000000 !<max number of iteration
 integer :: write_time_inc=1
@@ -138,9 +139,8 @@ real :: mid
 call fms_init()
 
 ! Read run-time parameters
-nmunit = open_namelist_file(file='input.nml')
-read(nmunit, nml=icebergs_driver_nml)
-call close_file(nmunit)
+read(input_nml_file, nml=icebergs_driver_nml, iostat=ierr)
+ierr = check_nml_error(ierr,'icebergs_driver_nml')
 
 if (a68_test) then
   call a68_dims(data_dir,ni,nj)
