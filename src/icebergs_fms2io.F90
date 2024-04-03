@@ -520,7 +520,7 @@ character(len=1), dimension(1) :: dim_names_1d
   enddo; enddo !End of loop over grid
 
   filename = "RESTART/"//trim("bonds_iceberg.res.nc")
-  if (open_file(fileobj, filename, "overwrite", bergs%grd%domain, is_restart=.true.)) &
+  if (.not. open_file(fileobj, filename, "overwrite", bergs%grd%domain, is_restart=.true.)) &
     call error_mesg('write_icebegrs_restart', "Error opening the bonds icebergs restart file to write", FATAL)
 
   call register_unlimited_compressed_axis(fileobj,'i',nbonds)
