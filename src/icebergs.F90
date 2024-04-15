@@ -6156,6 +6156,7 @@ subroutine accumulate_calving(bergs)
   ! Local variables
   type(icebergs_gridded), pointer :: grd
   real :: remaining_dist_s, remaining_dist_n, net_calving_used
+  real, dimension(bergs%grd%isd:bergs%grd%ied,bergs%grd%jsd:bergs%grd%jed) :: remaining_dist
   integer :: k, i, j
   logical, save :: first_call=.true.
   integer :: stderrunit
@@ -6203,20 +6204,20 @@ subroutine accumulate_calving(bergs)
     call error_mesg('KID, accumulate_calving', 'calving is OVER distributed!', WARNING)
   endif
   where (grd%lat<0.)
-    grd%tmp=remaining_dist_s
+    remaining_dist=remaining_dist_s
   elsewhere
-    grd%tmp=remaining_dist_n
+    remaining_dist=remaining_dist_n
   end where
-  net_calving_used=sum( grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec) *(1.-grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec)))
+  net_calving_used=sum( grd%calving(grd%isc:grd%iec,grd%jsc:grd%jec)*(1.-remaining_dist(grd%isc:grd%iec,grd%jsc:grd%jec)) )
   bergs%net_calving_used=bergs%net_calving_used+net_calving_used*bergs%dt
   ! Remove the calving accounted for by accumulation
-  grd%calving(:,:)=grd%calving(:,:)*grd%tmp(:,:)
+  grd%calving(:,:)=grd%calving(:,:)*remaining_dist(:,:)
 
   ! Do the same for heat (no separate classes needed)
-  grd%calving_hflx(:,:)=grd%calving_hflx(:,:)*grd%tmp(:,:)
-  grd%tmp(:,:)=bergs%dt*grd%calving_hflx(:,:)*grd%area(:,:)*(1.-grd%tmp(:,:))
+  grd%tmp(:,:)=bergs%dt*grd%calving_hflx(:,:)*grd%area(:,:)*(1.-remaining_dist(:,:))
   bergs%net_incoming_calving_heat_used=bergs%net_incoming_calving_heat_used+sum( grd%tmp(grd%isc:grd%iec,grd%jsc:grd%jec) )
-  grd%stored_heat(:,:)=grd%stored_heat(:,:)+grd%tmp(:,:) ! +=bergs%dt*grd%calving_hflx(:,:)*grd%area(:,:)*(1.-remaining_dist)
+  grd%stored_heat(:,:)=grd%stored_heat(:,:)+grd%tmp(:,:) ! +=bergs%dt*grd%calving_hflx(:,:)*grd%area(:,:)*(1.-remaining_dist(:,:))
+  grd%calving_hflx(:,:)=grd%calving_hflx(:,:)*remaining_dist(:,:)
 
 end subroutine accumulate_calving
 
