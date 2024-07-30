@@ -1,0 +1,7 @@
+# rm -f path_names
+# ../../mkmf/bin/list_paths ../../FMS/{mpp,diag_manager,time_manager,include,memutils,constants,platform,fms,random_numbers,mosaic,exchange} ../src/ ../driver/
+# ../../mkmf/bin/mkmf -t ../../mkmf/templates/ncrc-intel.mk -c "-Duse_libMPI -Duse_netCDF" -p bergs.x path_names
+
+rm -f path_names
+../../mkmf/bin/list_paths -l ../src/ ../driver/
+../../mkmf/bin/mkmf -t ../../mkmf/templates/ncrc-intel.mk -o "-I../../../build/fms" -p bergs.x -l '-L../../../build/fms -lfms' -c "-Duse_libMPI -Duse_netCDF -I../../../build/fms" path_names

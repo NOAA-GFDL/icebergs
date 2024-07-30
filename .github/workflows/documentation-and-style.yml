@@ -1,0 +1,26 @@
+name: Doxygen completeness
+
+on: [push, pull_request]
+
+jobs:
+  doxygen:
+
+    runs-on: ubuntu-20.04
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install packages used when generating documentation
+      run: |
+        sudo apt-get update
+        sudo apt-get install doxygen graphviz
+
+    - name: Build doxygen HTML
+      run: |
+        cd docs
+        doxygen
+
+    - name: Report doxygen errors
+      run: |
+        cat docs/doxygen.log
+        test ! -s docs/doxygen.log
