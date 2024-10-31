@@ -41,12 +41,12 @@ use ice_bergs_framework, only: ignore_ij_restart, use_slow_find,generate_test_ic
 use ice_bergs_framework, only: force_all_pes_traj
 use ice_bergs_framework, only: check_for_duplicates_in_parallel
 use ice_bergs_framework, only: split_id, id_from_2_ints, generate_id
-! for MTS/DEM/fracture/footloose:
+! for MTS/DEM/fracture/footloose/basins:
 use ice_bergs_framework, only: mts,save_bond_traj
 use ice_bergs_framework, only: push_bond_posn, append_bond_posn
 use ice_bergs_framework, only: pack_bond_traj_into_buffer2,unpack_bond_traj_from_buffer2
 use ice_bergs_framework, only: dem, iceberg_bonds_on
-use ice_bergs_framework, only: footloose
+use ice_bergs_framework, only: footloose, use_berg_origin_basins
 
 
 implicit none ; private
@@ -56,7 +56,7 @@ include 'netcdf.inc'
 public ice_bergs_io_init
 public read_restart_bergs, write_restart_bergs, write_trajectory, write_bond_trajectory
 public read_restart_calving, read_restart_bonds
-public read_ocean_depth
+public read_ocean_depth, read_ice_sheet_basins
 
 !Local Vars
 integer, parameter :: file_format_major_version=0
@@ -181,7 +181,8 @@ integer, allocatable, dimension(:) :: ine,              &
                                       first_berg_ine,         &
                                       other_berg_jne,         &
                                       other_berg_ine,         &
-                                      broken
+                                      broken,           &
+                                      basin
 
 
 integer :: grdi, grdj
@@ -247,6 +248,7 @@ integer :: grdi, grdj
      allocate(ang_accel(nbergs))
      allocate(rot(nbergs))
    endif
+   if (use_berg_origin_basins) allocate(basin(nbergs))
 
   filename = trim("icebergs.res.nc")
   call set_domain(bergs%grd%domain)
@@ -322,6 +324,10 @@ integer :: grdi, grdj
     id = register_restart_field(bergs_restart,filename,'rot',rot,&
       longname='dem accumulated rotation',units='rad')
   endif
+  if (use_berg_origin_basins) then
+    id = register_restart_field(bergs_restart,filename,'basin',basin,&
+      longname='ice-sheet basin of origin',units='none')
+  endif
 
   !Checking if any icebergs are static in order to decide whether to save static_berg
   n_static_bergs = 0
@@ -376,6 +382,7 @@ integer :: grdi, grdj
         ang_accel(i) = this%ang_accel
         rot(i) = this%rot
       endif
+      if (use_berg_origin_basins) basin(i) = this%basin
       this=>this%next
     enddo
   enddo ; enddo
@@ -425,6 +432,8 @@ integer :: grdi, grdj
              ang_accel,    &
              rot)
   endif
+
+  if (use_berg_origin_basins) deallocate(basin)
 
   deallocate(           &
              ine,       &
@@ -655,7 +664,8 @@ integer, allocatable, dimension(:) :: ine,        &
                                       iceberg_num,&
                                       id_cnt,     &
                                       id_ij,      &
-                                      start_year
+                                      start_year, &
+                                      basin
 
 !integer, allocatable, dimension(:,:) :: iceberg_counter_grd
 
@@ -738,6 +748,10 @@ integer, allocatable, dimension(:) :: ine,        &
        allocate(ang_accel(nbergs_in_file))
        allocate(rot(nbergs_in_file))
      endif
+     if (use_berg_origin_basins) then
+       allocate(localberg%basin)
+       allocate(basin(nbergs_in_file))
+     endif
 
      call read_unlimited_axis(filename,'lon',lon,domain=grd%domain)
      call read_unlimited_axis(filename,'lat',lat,domain=grd%domain)
@@ -784,6 +798,11 @@ integer, allocatable, dimension(:) :: ine,        &
        call read_real_vector(filename,'ang_accel',ang_accel,grd%domain,value_if_not_in_file=0.)
        call read_real_vector(filename,'rot'      ,rot      ,grd%domain,value_if_not_in_file=0.)
      endif
+
+     if (use_berg_origin_basins) then
+       call read_int_vector(filename,'basin',basin,grd%domain,value_if_not_in_file=0)
+     endif
+
   elseif (bergs%require_restart) then
      stop 'read_restart_bergs, RESTART NOT FOUND!'
   endif
@@ -867,6 +886,10 @@ integer, allocatable, dimension(:) :: ine,        &
        localberg%rot      =rot(k)
      endif
 
+     if (use_berg_origin_basins) then
+       localberg%basin    =basin(k)
+     endif
+
       if (really_debug) lres=is_point_in_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, explain=.true.)
       lres=pos_within_cell(grd, localberg%lon, localberg%lat, localberg%ine, localberg%jne, localberg%xi, localberg%yj)
       !call add_new_berg_to_list(bergs%first, localberg)
@@ -927,6 +950,7 @@ integer, allocatable, dimension(:) :: ine,        &
                ang_accel,    &
                rot)
     endif
+    if (use_berg_origin_basins) deallocate(basin)
 
     if (replace_iceberg_num) then
       deallocate(iceberg_num)
@@ -1032,6 +1056,7 @@ logical :: lres
     allocate(localberg%ang_accel)
     allocate(localberg%rot)
   endif
+  if (use_berg_origin_basins) allocate(localberg%basin)
 
   do j=grd%jsc,grd%jec; do i=grd%isc,grd%iec
     if (grd%msk(i,j)>0. .and. abs(grd%latc(i,j))>80.0) then
@@ -1080,6 +1105,9 @@ logical :: lres
         localberg%ang_vel=0.
         localberg%ang_accel=0.
         localberg%rot=0.
+      endif
+      if (use_berg_origin_basins) then
+        localberg%basin=0
       endif
 
       !Berg A
@@ -1549,7 +1577,7 @@ type(icebergs_gridded), pointer :: grd !< Container for gridded fields
 ! Local variables
 character(len=37) :: filename
 
-  ! Read stored ice
+  ! Read depth
   filename=trim(restart_input_dir)//'topog.nc'
   if (file_exist(filename)) then
     if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') &
@@ -1571,6 +1599,33 @@ character(len=37) :: filename
   !call grd_chksum2(bergs%grd, bergs%grd%ocean_depth, 'read_ocean_depth, ocean_depth')
 end subroutine read_ocean_depth
 
+!> Read ice-sheet basins from file
+subroutine read_ice_sheet_basins(grd)
+! Arguments
+type(icebergs_gridded), pointer :: grd !< Container for gridded fields
+! Local variables
+character(len=37) :: filename
+
+  ! Read sub_basin
+  filename=trim(restart_input_dir)//'ice_sheet_basins.nc'
+  if (file_exist(filename)) then
+    if (mpp_pe().eq.mpp_root_pe()) write(*,'(2a)') &
+     'KID, read_ice_sheet_basins: reading ',filename
+    if (field_exist(filename, 'sub_basin')) then
+      if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
+       'KID, read_ice_sheet_basins: reading sub_basins from ice-shelf basins file.'
+      call read_data(filename, 'sub_basin', grd%ice_sheet_basins, grd%domain)
+    else
+      if (verbose.and.mpp_pe().eq.mpp_root_pe()) write(*,'(a)') &
+     'KID, read_ice_sheet_basins: sub_basin WAS NOT FOUND in the file. Setting to 0.'
+      ! grd%ice_sheet_basins(:,:)=0.
+    endif
+  else
+    call error_mesg('KID, read_ice_sheet_basins', 'ice_sheet_basins.nc not found!', FATAL)
+  endif
+end subroutine read_ice_sheet_basins
+
+
 !> Write a trajectory-based diagnostics file
 subroutine write_trajectory(trajectory, save_short_traj, save_fl_traj, traj_name)
 ! Arguments
@@ -1586,7 +1641,7 @@ integer :: uoid, void, uiid, viid, uaid, vaid, sshxid, sshyid, sstid, sssid
 integer :: cnid, hiid, hsid
 integer :: mid, smid, did, wid, lid, mbid, mflbid, mflbbid, hdid, nbid, odid, flkid
 integer :: axnid,aynid,bxnid,bynid,axnfid,aynfid,bxnfid,bynfid, msid
-integer :: avid, aaid, rid
+integer :: avid, aaid, rid, baid
 character(len=70) :: filename
 character(len=7) :: pe_name
 type(xyt), pointer :: this, next
@@ -1763,6 +1818,9 @@ integer :: ntrajs_sent_io,ntrajs_rcvd_io
           rid  = inq_varid(ncid, 'rot')
         endif
 
+        if (use_berg_origin_basins) then
+          baid = inq_varid(ncid, 'basin')
+        endif
       endif
     else
       ! Dimensions
@@ -1832,6 +1890,10 @@ integer :: ntrajs_sent_io,ntrajs_rcvd_io
           avid = def_var(ncid, 'ang_vel', NF_DOUBLE, i_dim)
           aaid = def_var(ncid, 'ang_accel', NF_DOUBLE, i_dim)
           rid  = def_var(ncid, 'rot', NF_DOUBLE, i_dim)
+        endif
+
+        if (use_berg_origin_basins) then
+          baid = def_var(ncid, 'basin', NF_INT, i_dim)
         endif
       endif
 
@@ -1950,6 +2012,10 @@ integer :: ntrajs_sent_io,ntrajs_rcvd_io
           call put_att(ncid, rid, 'long_name', 'accumulated rotation')
           call put_att(ncid, rid, 'units', 'rad')
         endif
+        if (use_berg_origin_basins) then
+          call put_att(ncid, baid, 'long_name', 'ice-sheet basin of origin')
+          call put_att(ncid, baid, 'units', 'none')
+        endif
       endif
     endif
 
@@ -2031,6 +2097,9 @@ integer :: ntrajs_sent_io,ntrajs_rcvd_io
           call put_double(ncid, rid,  i, this%rot)
         endif
 
+        if (use_berg_origin_basins) then
+          call put_int(ncid, baid, i, this%basin)
+        endif
       endif
       next=>this%next
       deallocate(this)
