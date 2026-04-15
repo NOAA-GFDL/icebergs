@@ -3754,14 +3754,14 @@ subroutine find_basal_melt(bergs, dvo, lat, salt, temp, Use_three_equation_model
       if (abs(dS_it) < 1e-4*(0.5*(salt + Sbdry + 1.e-10))) exit
 
       if (dS_it < 0.0) then ! Sbdry is now the upper bound.
-        if (Sb_max_set .and. (Sbdry > Sb_max)) then
+        if (Sb_max_set) then ; if (Sbdry > Sb_max) then
           if (debug) then
             call error_mesg('KID,Find basal melt', 'shelf_calc_flux: Irregular iteration for Sbdry (max).' ,WARNING)
             print *, 'Sbdry error: id,dvo,temp,salt,lat,thickness :',id,dvo,temp,salt,lat,thickness
           endif
           out_of_bounds=.true.
           exit
-        endif
+        endif; endif
         Sb_max = Sbdry ; dS_max = dS_it ; Sb_max_set = .true.
       else ! Sbdry is now the lower bound.
         if (Sb_min_set .and. (Sbdry < Sb_min)) then
